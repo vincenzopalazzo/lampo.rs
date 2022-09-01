@@ -24,7 +24,8 @@ impl FromStr for LogLevel {
     }
 }
 
-struct LampoLogger {}
+#[derive(Clone)]
+pub struct LampoLogger;
 
 impl LampoLogger {
     /// Create a new instance of the lampo logger with the
