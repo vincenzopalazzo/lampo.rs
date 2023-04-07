@@ -6,13 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { version = "0.0.110", features = ["max_level_trace"] }
-lightning-block-sync = { version = "0.0.110", features = [ "rpc-client" ] }
-lightning-invoice = { version = "0.18.0" }
-lightning-net-tokio = { version = "0.0.110" }
-lightning-persister = { version = "0.0.110" }
-lightning-background-processor = { version = "0.0.110" }
-lightning-rapid-gossip-sync = { version = "0.0.110" }
+lightning = { version = "0.0.114", features = ["max_level_trace"] }
+lightning-block-sync = { version = "0.0.114", features = [ "rpc-client" ] }
+lightning-invoice = { version = "0.22" }
+lightning-persister = { version = "0.0.114" }
+lightning-background-processor = { version = "0.0.114" }
 log = "0.4.17"
 time = "0.3.13"
-bitcoin = "0.28.1"
+bitcoin = "0.29.0"
