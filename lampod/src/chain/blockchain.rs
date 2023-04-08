@@ -1,20 +1,17 @@
 use std::sync::Arc;
 
 use bitcoin::Transaction;
-
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
-use lightning::chain::keysinterface::KeysManager;
 use lightning::chain::Filter;
+use lightning::routing::utxo::UtxoLookup;
 
 use crate::backend::Backend;
 use crate::keys::keys::LampoKeys;
-use crate::persistence::LampoPersistence;
 
 /// Lampo FeeEstimator implementation
 #[derive(Clone)]
 pub struct LampoChainManager {
     pub backend: Arc<dyn Backend>,
-    persister: Option<Arc<LampoPersistence>>,
     pub keymanager: Arc<LampoKeys>,
 }
 
@@ -22,12 +19,15 @@ pub struct LampoChainManager {
 impl LampoChainManager {
     /// Create a new instance of LampoFeeEstimator with the specified
     /// Backend.
-    fn new<'c>(client: Arc<dyn Backend>, keys: Arc<LampoKeys>) -> Self {
+    pub fn new(client: Arc<dyn Backend>, keys: Arc<LampoKeys>) -> Self {
         LampoChainManager {
             backend: client,
-            persister: None,
             keymanager: keys,
         }
+    }
+
+    pub fn is_lightway(&self) -> bool {
+        self.backend.is_lightway()
     }
 }
 
@@ -51,9 +51,13 @@ impl BroadcasterInterface for LampoChainManager {
 
 // FIXME: todo implement it.
 impl Filter for LampoChainManager {
-    fn register_output(&self, output: lightning::chain::WatchedOutput) {}
+    fn register_output(&self, output: lightning::chain::WatchedOutput) {
+        self.backend.register_output(output);
+    }
 
-    fn register_tx(&self, txid: &bitcoin::Txid, script_pubkey: &bitcoin::Script) {}
+    fn register_tx(&self, txid: &bitcoin::Txid, script_pubkey: &bitcoin::Script) {
+        self.backend.watch_utxo(txid, script_pubkey)
+    }
 }
 
 impl lightning_block_sync::BlockSource for LampoChainManager {
@@ -76,7 +80,18 @@ impl lightning_block_sync::BlockSource for LampoChainManager {
         height_hint: Option<u32>,
     ) -> lightning_block_sync::AsyncBlockSourceResult<'a, lightning_block_sync::BlockHeaderData>
     {
-        self.get_header(header_hash, height_hint)
+        self.backend.get_header(header_hash, height_hint)
+    }
+}
+
+// FIXME: implement this
+impl UtxoLookup for LampoChainManager {
+    fn get_utxo(
+        &self,
+        genesis_hash: &bitcoin::BlockHash,
+        short_channel_id: u64,
+    ) -> lightning::routing::utxo::UtxoResult {
+        unimplemented!()
     }
 }
 

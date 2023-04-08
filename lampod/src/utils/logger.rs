@@ -1,7 +1,6 @@
 use lightning::util::logger::{Logger, Record};
-use log::{debug, error, info, trace, warn};
-use std::sync::Arc;
-use std::{ops::Deref, str::FromStr};
+use log::{debug, error, info, warn};
+use std::str::FromStr;
 
 enum LogLevel {
     Info,

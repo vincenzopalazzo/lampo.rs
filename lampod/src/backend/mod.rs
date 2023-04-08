@@ -1,5 +1,5 @@
 //! Beckend implementation
-use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
+use bitcoin::{BlockHash, Script, Transaction, Txid};
 use lightning::chain::WatchedOutput;
 use lightning_block_sync::{AsyncBlockSourceResult, BlockData, BlockHeaderData};
 

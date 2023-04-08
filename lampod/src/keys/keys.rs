@@ -1,8 +1,5 @@
 use lightning::chain::keysinterface::KeysManager;
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{sync::Arc, time::SystemTime};
 
 /// Lampo keys implementations
 pub struct LampoKeys {
@@ -12,7 +9,7 @@ pub struct LampoKeys {
 impl LampoKeys {
     fn new() -> LampoKeys {
         // FIXME: use some standard derivation to make the wallet recoverable
-        let mut random_32_bytes = [0; 32];
+        let random_32_bytes = [0; 32];
         // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.
         let start_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)

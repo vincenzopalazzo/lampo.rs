@@ -6,4 +6,5 @@ pub struct LampoConf {
     pub path: String,
     pub network: Network,
     pub ldk_conf: UserConfig,
+    pub port: u64,
 }
