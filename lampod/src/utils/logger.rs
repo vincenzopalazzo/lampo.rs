@@ -1,6 +1,7 @@
 use lightning::util::logger::{Logger, Record};
 use log::{debug, error, info, trace, warn};
-use std::str::FromStr;
+use std::sync::Arc;
+use std::{ops::Deref, str::FromStr};
 
 enum LogLevel {
     Info,
@@ -36,31 +37,11 @@ impl LampoLogger {
 
     fn log(&self, log_level: LogLevel, msg: &str) {
         match log_level {
-            LogLevel::Debug => self.debug(msg),
-            LogLevel::Info => self.info(msg),
-            LogLevel::Warn => self.warn(msg),
-            LogLevel::Error => self.error(msg),
+            LogLevel::Debug => debug!("{msg}"),
+            LogLevel::Info => info!("{msg}"),
+            LogLevel::Warn => warn!("{msg}"),
+            LogLevel::Error => error!("{msg}"),
         }
-    }
-
-    fn debug(&self, msg: &str) {
-        debug!("{}", msg);
-    }
-
-    fn trace(&self, msg: &str) {
-        trace!("{}", msg);
-    }
-
-    fn info(&self, msg: &str) {
-        info!("{}", msg);
-    }
-
-    fn warn(&self, msg: &str) {
-        warn!("{}", msg);
-    }
-
-    fn error(&self, msg: &str) {
-        error!("{}", msg);
     }
 }
 

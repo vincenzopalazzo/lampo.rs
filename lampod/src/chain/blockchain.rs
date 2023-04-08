@@ -3,32 +3,19 @@ use std::sync::Arc;
 use bitcoin::Transaction;
 
 use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
-use lightning::chain::chainmonitor::ChainMonitor;
-use lightning::chain::channelmonitor::ChannelMonitor;
-use lightning::chain::keysinterface::InMemorySigner;
+use lightning::chain::keysinterface::KeysManager;
 use lightning::chain::Filter;
-use lightning_persister::FilesystemPersister;
 
 use crate::backend::Backend;
 use crate::keys::keys::LampoKeys;
 use crate::persistence::LampoPersistence;
-use crate::utils::logger::LampoLogger;
 
-type LampoChannelMonitor = ChainMonitor<
-    InMemorySigner,
-    Arc<dyn Filter + Send + Sync>,
-    Arc<LampoChainManager>,
-    Arc<LampoChainManager>,
-    Arc<LampoLogger>,
-    Arc<FilesystemPersister>,
->;
-
-#[derive(Clone)]
 /// Lampo FeeEstimator implementation
-struct LampoChainManager {
-    backend: Arc<dyn Backend>,
+#[derive(Clone)]
+pub struct LampoChainManager {
+    pub backend: Arc<dyn Backend>,
     persister: Option<Arc<LampoPersistence>>,
-    keymanager: Arc<LampoKeys>,
+    pub keymanager: Arc<LampoKeys>,
 }
 
 /// Personal Lampo implementation
@@ -41,39 +28,6 @@ impl LampoChainManager {
             persister: None,
             keymanager: keys,
         }
-    }
-
-    fn build(
-        &mut self,
-        logger: &LampoLogger,
-        filter: Arc<dyn Filter + Send + Sync>,
-        persister: LampoPersistence,
-    ) -> Arc<LampoChannelMonitor> {
-        let per = persister.clone().persister;
-        self.persister = Some(Arc::new(persister));
-        Arc::new(ChainMonitor::new(
-            Some(filter),
-            Arc::new(self.clone()),
-            Arc::new(logger.clone()),
-            Arc::new(self.clone()),
-            Arc::new(per),
-        ))
-    }
-
-    fn reload(&self) -> Vec<(bitcoin::BlockHash, ChannelMonitor<InMemorySigner>)> {
-        let channel_monitors = self
-            .persister
-            .clone()
-            .unwrap()
-            .persister
-            .read_channelmonitors(&self.keymanager.keys_manager, &self.keymanager.keys_manager)
-            .unwrap();
-        if self.backend.is_lightway() {
-            for (_, channel_monitor) in channel_monitors.iter() {
-                channel_monitor.load_outputs_to_watch(&self);
-            }
-        }
-        channel_monitors
     }
 }
 
@@ -101,3 +55,31 @@ impl Filter for LampoChainManager {
 
     fn register_tx(&self, txid: &bitcoin::Txid, script_pubkey: &bitcoin::Script) {}
 }
+
+impl lightning_block_sync::BlockSource for LampoChainManager {
+    fn get_best_block<'a>(
+        &'a self,
+    ) -> lightning_block_sync::AsyncBlockSourceResult<(bitcoin::BlockHash, Option<u32>)> {
+        self.backend.get_best_block()
+    }
+
+    fn get_block<'a>(
+        &'a self,
+        header_hash: &'a bitcoin::BlockHash,
+    ) -> lightning_block_sync::AsyncBlockSourceResult<'a, lightning_block_sync::BlockData> {
+        self.backend.get_block(header_hash)
+    }
+
+    fn get_header<'a>(
+        &'a self,
+        header_hash: &'a bitcoin::BlockHash,
+        height_hint: Option<u32>,
+    ) -> lightning_block_sync::AsyncBlockSourceResult<'a, lightning_block_sync::BlockHeaderData>
+    {
+        self.get_header(header_hash, height_hint)
+    }
+}
+
+// FIXME: fix this
+unsafe impl Send for LampoChainManager {}
+unsafe impl Sync for LampoChainManager {}

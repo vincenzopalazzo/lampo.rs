@@ -1,9 +1,12 @@
 use lightning::chain::keysinterface::KeysManager;
-use std::time::SystemTime;
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 /// Lampo keys implementations
 pub struct LampoKeys {
-    pub(crate) keys_manager: KeysManager,
+    pub(crate) keys_manager: Arc<KeysManager>,
 }
 
 impl LampoKeys {
@@ -17,11 +20,15 @@ impl LampoKeys {
 
         LampoKeys {
             // FIXME: store this seeds somewhere!
-            keys_manager: KeysManager::new(
+            keys_manager: Arc::new(KeysManager::new(
                 &random_32_bytes,
                 start_time.as_secs(),
                 start_time.subsec_nanos(),
-            ),
+            )),
         }
+    }
+
+    pub fn inner(&self) -> Arc<KeysManager> {
+        self.keys_manager.clone()
     }
 }
