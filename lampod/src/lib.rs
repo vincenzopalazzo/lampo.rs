@@ -9,6 +9,7 @@ pub mod utils;
 
 use std::sync::Arc;
 
+use bitcoin::locktime::Height;
 use lightning::{routing::gossip::P2PGossipSync, util::events::Event};
 use lightning_background_processor::BackgroundProcessor;
 
@@ -57,13 +58,23 @@ impl LampoDeamon {
         manager.clone()
     }
 
-    pub fn init_channeld(&mut self) -> Result<(), ()> {
-        let manager = LampoChannelManager::new(
+    pub async fn init_channeld(&mut self) -> Result<(), ()> {
+        let mut manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
             self.onchain_manager(),
             self.persister.clone(),
         );
+        let (block_hash, Some(height)) = self
+            .onchain_manager()
+            .backend
+            .get_best_block()
+            .await
+            .unwrap() else { unreachable!() };
+        manager
+            .start(block_hash, Height::from_consensus(height).unwrap())
+            .await
+            .unwrap();
         self.channel_manager = Some(Arc::new(manager));
         Ok(())
     }
@@ -74,7 +85,7 @@ impl LampoDeamon {
     }
 
     pub fn init_peer_manager(&mut self) -> Result<(), ()> {
-        let peer_manager = LampoPeerManager::new(&self.conf);
+        let mut peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone());
         peer_manager.init(&self.onchain_manager(), &self.channel_manager())?;
         self.peer_manager = Some(Arc::new(peer_manager));
         Ok(())
@@ -85,15 +96,17 @@ impl LampoDeamon {
         manager.clone()
     }
 
-    pub fn init(&mut self, client: &Arc<dyn Backend>, keys: &Arc<LampoKeys>) -> Result<(), ()> {
+    pub async fn init(&mut self, client: Arc<dyn Backend>, keys: Arc<LampoKeys>) -> Result<(), ()> {
         self.init_onchaind(client.clone(), keys.clone())?;
-        self.init_channeld()?;
+        self.init_channeld().await?;
         self.init_peer_manager()?;
         Ok(())
     }
 
     pub async fn listen(&self) -> Result<(), ()> {
-        let event_handler = move |_: Event| {};
+        let event_handler = move |event: Event| {
+            log::info!("ldk event {:?}", event);
+        };
 
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),

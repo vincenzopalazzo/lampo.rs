@@ -1,6 +1,9 @@
 use std::{sync::Arc, time::SystemTime};
 
-use lightning::ln::peer_handler::SimpleArcPeerManager;
+use lightning::ln::peer_handler::MessageHandler;
+use lightning::ln::peer_handler::{IgnoringMessageHandler, PeerManager, SimpleArcPeerManager};
+use lightning::onion_message::OnionMessenger;
+use lightning::routing::gossip::P2PGossipSync;
 use lightning_net_tokio;
 use lightning_net_tokio::SocketDescriptor;
 
@@ -20,13 +23,15 @@ type InnerLampoPeerManager = SimpleArcPeerManager<
 pub struct LampoPeerManager {
     peer_manager: Option<Arc<InnerLampoPeerManager>>,
     conf: LampoConf,
+    logger: Arc<LampoLogger>,
 }
 
 impl LampoPeerManager {
-    pub fn new(conf: &LampoConf) -> LampoPeerManager {
+    pub fn new(conf: &LampoConf, logger: Arc<LampoLogger>) -> LampoPeerManager {
         LampoPeerManager {
             peer_manager: None,
             conf: conf.to_owned(),
+            logger,
         }
     }
 
@@ -36,30 +41,45 @@ impl LampoPeerManager {
     }
 
     pub fn init(
-        &self,
+        &mut self,
         onchain_manager: &Arc<LampoChainManager>,
         channel_manager: &Arc<LampoChannelManager>,
     ) -> Result<(), ()> {
-        let mut ephemeral_bytes = [0; 32];
+        let ephemeral_bytes = [0; 32];
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        /*FIXME: implement this
+
+        let onion_messenger = Arc::new(OnionMessenger::new(
+            onchain_manager.keymanager.inner(),
+            onchain_manager.keymanager.inner(),
+            self.logger.clone(),
+            IgnoringMessageHandler {},
+        ));
+
+        let gossip_sync = Arc::new(P2PGossipSync::new(
+            channel_manager.graph(),
+            Some(onchain_manager.clone()),
+            self.logger.clone(),
+        ));
+
         let lightning_msg_handler = MessageHandler {
-            chan_handler: &channel_manager.channeld.unwrap(),
+            chan_handler: channel_manager.channeld.clone().unwrap(),
+            onion_message_handler: onion_messenger,
+            route_handler: gossip_sync.clone(),
         };
         let ignoring_custom_msg_handler = IgnoringMessageHandler {};
+
         let peer_manager = PeerManager::new(
             lightning_msg_handler,
             current_time.try_into().unwrap(),
             &ephemeral_bytes,
-            &channel_manager.logger.as_ref().clone(),
-            &ignoring_custom_msg_handler,
+            channel_manager.logger.clone(),
+            ignoring_custom_msg_handler,
             onchain_manager.keymanager.inner(),
         );
-        self.peer_manager = Some(peer_manager);
-        */
+        self.peer_manager = Some(Arc::new(peer_manager));
         Ok(())
     }
 

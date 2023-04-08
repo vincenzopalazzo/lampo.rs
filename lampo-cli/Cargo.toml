@@ -6,6 +6,10 @@ edition = "2021"
 
 [dependencies]
 lampod = { path = "../lampod" }
+lampo-nakamoto = { path = "../lampo-nakamoto" }
 tokio = { version = "1.22.0", features = ["rt"] }
 clap = { version = "4.0.26", features = ["derive"] }
 clightningrpc-conf = "0.0.1"
+log = { version = "0.4", features = ["std"] }
+chrono = { version = "0.4", features = ["std"], default-features = false }
+colored = "1.9"

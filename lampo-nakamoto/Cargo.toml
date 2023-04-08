@@ -1,0 +1,12 @@
+[package]
+name = "lampo-nakamoto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lampod = { path = "../lampod" }
+nakamoto-client = { git = "https://github.com/vincenzopalazzo/nakamoto", branch = "macros/client_model-fixes"  }
+nakamoto-net-poll = { git = "https://github.com/vincenzopalazzo/nakamoto", branch = "macros/client_model-fixes"  }
+nakamoto-p2p = { git = "https://github.com/vincenzopalazzo/nakamoto", branch = "macros/client_model-fixes"  }
+nakamoto-common = { git = "https://github.com/vincenzopalazzo/nakamoto", branch = "macros/client_model-fixes"  }
+log = { version = "0.4", features = ["std"] }

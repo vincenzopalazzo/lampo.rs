@@ -7,7 +7,7 @@ pub struct LampoKeys {
 }
 
 impl LampoKeys {
-    fn new() -> LampoKeys {
+    pub fn new() -> LampoKeys {
         // FIXME: use some standard derivation to make the wallet recoverable
         let random_32_bytes = [0; 32];
         // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.

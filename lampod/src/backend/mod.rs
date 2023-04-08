@@ -1,7 +1,7 @@
 //! Beckend implementation
-use bitcoin::{BlockHash, Script, Transaction, Txid};
-use lightning::chain::WatchedOutput;
-use lightning_block_sync::{AsyncBlockSourceResult, BlockData, BlockHeaderData};
+pub use bitcoin::{BlockHash, Script, Transaction, Txid};
+pub use lightning::chain::WatchedOutput;
+pub use lightning_block_sync::{AsyncBlockSourceResult, BlockData, BlockHeaderData};
 
 /// Bakend Trait specification
 pub trait Backend {

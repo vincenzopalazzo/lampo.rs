@@ -1,6 +1,7 @@
+use std::str::FromStr;
+
 use lightning::util::logger::{Logger, Record};
 use log::{debug, error, info, warn};
-use std::str::FromStr;
 
 enum LogLevel {
     Info,
@@ -14,11 +15,14 @@ impl FromStr for LogLevel {
 
     // FIXME: check on the rust lightning docs the level sent to the app level
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.to_lowercase();
+        let s = s.as_str();
         match s {
             "debug" => Ok(LogLevel::Debug),
             "info" => Ok(LogLevel::Info),
-            "warn" => Ok(LogLevel::Warn),
-            "err" => Ok(LogLevel::Error),
+            "warning" => Ok(LogLevel::Warn),
+            "error" => Ok(LogLevel::Error),
+            "trace" => Ok(LogLevel::Debug),
             _ => Err(format!("Unknown {} level", s)),
         }
     }
