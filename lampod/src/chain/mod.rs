@@ -2,4 +2,6 @@
 
 mod blockchain;
 
+pub use bitcoin::Network;
+
 pub use blockchain::LampoChainManager;

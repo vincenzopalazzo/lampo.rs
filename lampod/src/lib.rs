@@ -16,7 +16,7 @@ use backend::Backend;
 use chain::LampoChainManager;
 use conf::LampoConf;
 use keys::keys::LampoKeys;
-use ln::{peer_manager::LampoPeerManager, LampoChannelManager, LampoGraph};
+use ln::{peer_manager::LampoPeerManager, LampoChannelManager};
 use persistence::LampoPersistence;
 use utils::logger::LampoLogger;
 

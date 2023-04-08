@@ -1,5 +1,5 @@
 use bitcoin::Network;
-use lightning::util::config::UserConfig;
+pub use lightning::util::config::UserConfig;
 
 #[derive(Clone)]
 pub struct LampoConf {
