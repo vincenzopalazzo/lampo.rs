@@ -44,7 +44,7 @@ impl LampoPeerManager {
         &mut self,
         onchain_manager: &Arc<LampoChainManager>,
         channel_manager: &Arc<LampoChannelManager>,
-    ) -> Result<(), ()> {
+    ) -> anyhow::Result<()> {
         let ephemeral_bytes = [0; 32];
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -83,18 +83,16 @@ impl LampoPeerManager {
         Ok(())
     }
 
-    pub async fn run(self) -> Result<(), ()> {
+    pub async fn run(self) -> anyhow::Result<()> {
         let listen_port = self.conf.port;
         let Some(peer_manager) = self.peer_manager else {
-            return Err(())
+            anyhow::bail!("peer manager is None, at this point this should be not None");
         };
         let peer_manager = peer_manager.clone();
-        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", listen_port))
-            .await
-            .unwrap();
+        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", listen_port)).await?;
         loop {
             let peer_manager = peer_manager.clone();
-            let tcp_stream = listener.accept().await.unwrap().0;
+            let tcp_stream = listener.accept().await?.0;
             tokio::spawn(async move {
                 // Use LDK's supplied networking battery to facilitate inbound
                 // connections.

@@ -4,8 +4,10 @@ mod logger;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use anyhow;
 use clap::Parser;
 use clightningrpc_conf::SyncCLNConf;
+
 use lampo_nakamoto::{Config, Nakamoto, Network};
 use lampod::conf::{LampoConf, UserConfig};
 use lampod::keys::keys::LampoKeys;
@@ -14,24 +16,24 @@ use lampod::LampoDeamon;
 use crate::args::LampoCliArgs;
 
 #[tokio::main]
-async fn main() -> Result<(), ()> {
+async fn main() -> anyhow::Result<()> {
     logger::init(log::Level::Debug).expect("initializing logger for the first time");
     let args = LampoCliArgs::parse();
     run(args).await?;
     Ok(())
 }
 
-async fn run(args: LampoCliArgs) -> Result<(), ()> {
+async fn run(args: LampoCliArgs) -> anyhow::Result<()> {
     let Ok(conf) = clightningrpc_conf::CLNConf::new(args.conf.clone().unwrap(), false)
         .parse() else {
-            return Err(());
+            anyhow::bail!("Fails to parse the conf file at path {:?}", args.conf);
         };
 
     let network_str = args.network.unwrap();
     let network = match network_str.as_str() {
         "bitcoin" => Network::Mainnet,
         "testnet" => Network::Testnet,
-        _ => panic!("unsupported network {network_str}"),
+        _ => anyhow::bail!("unsupported network {network_str}"),
     };
 
     let lampo_conf = LampoConf {
@@ -48,7 +50,7 @@ async fn run(args: LampoCliArgs) -> Result<(), ()> {
             conf.network = network;
             Arc::new(Nakamoto::new(conf).unwrap())
         }
-        _ => panic!("client {:?} not supported", args.client),
+        _ => anyhow::bail!("client {:?} not supported", args.client),
     };
     lampod.init(client, keys).await?;
     lampod.listen().await?;

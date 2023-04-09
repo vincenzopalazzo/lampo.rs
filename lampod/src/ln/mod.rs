@@ -90,7 +90,7 @@ impl LampoChannelManager {
         channeld
     }
 
-    pub fn load_channel_monitors(&self, watch: bool) -> Result<(), ()> {
+    pub fn load_channel_monitors(&self, watch: bool) -> anyhow::Result<()> {
         let keys = self.onchain.keymanager.inner();
         let mut monitors = self
             .persister
@@ -173,9 +173,9 @@ impl LampoChannelManager {
         unimplemented!()
     }
 
-    pub async fn start(&mut self, block: BlockHash, height: Height) -> Result<(), String> {
+    pub async fn start(&mut self, block: BlockHash, height: Height) -> anyhow::Result<()> {
         let chain_params = ChainParameters {
-            network: self.conf.network, // substitute this with your network
+            network: self.conf.network,
             best_block: BestBlock::new(block, height.to_consensus_u32()),
         };
 

@@ -47,7 +47,7 @@ impl LampoDeamon {
         &mut self,
         client: Arc<dyn Backend>,
         keys: Arc<LampoKeys>,
-    ) -> Result<(), ()> {
+    ) -> anyhow::Result<()> {
         let onchain_manager = LampoChainManager::new(client, keys);
         self.onchain_manager = Some(Arc::new(onchain_manager));
         Ok(())
@@ -58,7 +58,7 @@ impl LampoDeamon {
         manager.clone()
     }
 
-    pub async fn init_channeld(&mut self) -> Result<(), ()> {
+    pub async fn init_channeld(&mut self) -> anyhow::Result<()> {
         let mut manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
@@ -69,12 +69,13 @@ impl LampoDeamon {
             .onchain_manager()
             .backend
             .get_best_block()
-            .await
-            .unwrap() else { unreachable!() };
-        manager
+            .await.unwrap() else { anyhow::bail!("wrong result with from the `get_best_block` call") };
+        if let Err(err) = manager
             .start(block_hash, Height::from_consensus(height).unwrap())
             .await
-            .unwrap();
+        {
+            anyhow::bail!("{err}");
+        }
         self.channel_manager = Some(Arc::new(manager));
         Ok(())
     }
@@ -84,7 +85,7 @@ impl LampoDeamon {
         manager.clone()
     }
 
-    pub fn init_peer_manager(&mut self) -> Result<(), ()> {
+    pub fn init_peer_manager(&mut self) -> anyhow::Result<()> {
         let mut peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone());
         peer_manager.init(&self.onchain_manager(), &self.channel_manager())?;
         self.peer_manager = Some(Arc::new(peer_manager));
@@ -96,14 +97,18 @@ impl LampoDeamon {
         manager.clone()
     }
 
-    pub async fn init(&mut self, client: Arc<dyn Backend>, keys: Arc<LampoKeys>) -> Result<(), ()> {
+    pub async fn init(
+        &mut self,
+        client: Arc<dyn Backend>,
+        keys: Arc<LampoKeys>,
+    ) -> anyhow::Result<()> {
         self.init_onchaind(client.clone(), keys.clone())?;
         self.init_channeld().await?;
         self.init_peer_manager()?;
         Ok(())
     }
 
-    pub async fn listen(&self) -> Result<(), ()> {
+    pub async fn listen(&self) -> anyhow::Result<()> {
         let event_handler = move |event: Event| {
             log::info!("ldk event {:?}", event);
         };

@@ -17,3 +17,4 @@ lightning-rapid-gossip-sync = { version = "0.0.114" }
 log = "0.4.17"
 time = "0.3.13"
 bitcoin = "0.29.0"
+anyhow = "1.0.70"
