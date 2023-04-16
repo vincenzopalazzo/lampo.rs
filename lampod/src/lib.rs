@@ -32,7 +32,7 @@ pub struct LampoDeamon {
 
 impl LampoDeamon {
     pub fn new(config: LampoConf) -> Self {
-        let root_path = config.path.clone();
+        let root_path = config.path();
         LampoDeamon {
             conf: config,
             logger: Arc::new(LampoLogger {}),

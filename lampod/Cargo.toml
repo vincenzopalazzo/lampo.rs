@@ -18,3 +18,4 @@ log = "0.4.17"
 time = "0.3.13"
 bitcoin = "0.29.0"
 anyhow = "1.0.70"
+clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "macros/conf" }

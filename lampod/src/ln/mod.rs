@@ -127,10 +127,10 @@ impl LampoChannelManager {
         &mut self,
     ) -> Arc<DefaultRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<Mutex<LampoScorer>>>> {
         // Step 9: Initialize routing ProbabilisticScorer
-        let network_graph_path = format!("{}/network_graph", self.conf.path);
+        let network_graph_path = format!("{}/network_graph", self.conf.path());
         let network_graph = self.read_network(Path::new(&network_graph_path));
 
-        let scorer_path = format!("{}/scorer", self.conf.path);
+        let scorer_path = format!("{}/scorer", self.conf.path());
         let scorer = Arc::new(Mutex::new(
             self.read_scorer(Path::new(&scorer_path), &network_graph),
         ));
