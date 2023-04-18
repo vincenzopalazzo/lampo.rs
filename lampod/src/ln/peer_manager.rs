@@ -9,7 +9,11 @@ use lightning::routing::gossip::P2PGossipSync;
 use lightning_net_tokio;
 use lightning_net_tokio::SocketDescriptor;
 
-use crate::{chain::LampoChainManager, conf::LampoConf, utils::logger::LampoLogger};
+use lampo_common::conf::LampoConf;
+use lampo_common::error;
+
+use crate::chain::LampoChainManager;
+use crate::utils::logger::LampoLogger;
 
 use super::events::PeerEvents;
 use super::{LampoChainMonitor, LampoChannelManager};
@@ -47,7 +51,7 @@ impl LampoPeerManager {
         &mut self,
         onchain_manager: &Arc<LampoChainManager>,
         channel_manager: &Arc<LampoChannelManager>,
-    ) -> anyhow::Result<()> {
+    ) -> error::Result<()> {
         let ephemeral_bytes = [0; 32];
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -86,10 +90,10 @@ impl LampoPeerManager {
         Ok(())
     }
 
-    pub async fn run(self) -> anyhow::Result<()> {
+    pub async fn run(self) -> error::Result<()> {
         let listen_port = self.conf.port;
         let Some(peer_manager) = self.peer_manager else {
-            anyhow::bail!("peer manager is None, at this point this should be not None");
+            error::bail!("peer manager is None, at this point this should be not None");
         };
         let peer_manager = peer_manager.clone();
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", listen_port)).await?;
@@ -110,13 +114,9 @@ impl LampoPeerManager {
 }
 
 impl PeerEvents for LampoPeerManager {
-    async fn connect(
-        &self,
-        node_id: super::events::NodeId,
-        host: SocketAddr,
-    ) -> anyhow::Result<()> {
+    async fn connect(&self, node_id: super::events::NodeId, host: SocketAddr) -> error::Result<()> {
         let Some(close_callback) = lightning_net_tokio::connect_outbound(self.manager(), node_id, host).await else {
-          anyhow::bail!("impossible connect with the peer `{node_id}`");
+          error::bail!("impossible connect with the peer `{node_id}`");
         };
         let mut connection_closed_future = Box::pin(close_callback);
         let manager = self.manager();
@@ -140,13 +140,13 @@ impl PeerEvents for LampoPeerManager {
         }
     }
 
-    async fn disconnect(&self, node_id: super::events::NodeId) -> anyhow::Result<()> {
+    async fn disconnect(&self, node_id: super::events::NodeId) -> error::Result<()> {
         //check for open channels with peer
 
         //check the pubkey matches a valid connected peer
         let peers = self.manager().get_peer_node_ids();
         if !peers.iter().any(|(pk, _)| &node_id == pk) {
-            anyhow::bail!("Error: Could not find peer `{node_id}`");
+            error::bail!("Error: Could not find peer `{node_id}`");
         }
 
         self.manager().disconnect_by_node_id(node_id);

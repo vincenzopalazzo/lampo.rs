@@ -8,11 +8,11 @@ use nakamoto_common::block::Height;
 use nakamoto_net_poll::Reactor;
 use nakamoto_net_poll::Waker;
 
-use lampod::backend::AsyncBlockSourceResult;
-use lampod::backend::Backend;
-use lampod::backend::BlockData;
-use lampod::backend::BlockHeaderData;
-use lampod::backend::WatchedOutput;
+use lampo_common::backend::AsyncBlockSourceResult;
+use lampo_common::backend::Backend;
+use lampo_common::backend::BlockData;
+use lampo_common::backend::BlockHeaderData;
+use lampo_common::backend::WatchedOutput;
 
 #[derive(Clone)]
 pub struct Nakamoto {

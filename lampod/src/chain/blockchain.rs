@@ -5,7 +5,8 @@ use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget,
 use lightning::chain::Filter;
 use lightning::routing::utxo::UtxoLookup;
 
-use crate::backend::Backend;
+use lampo_common::backend::Backend;
+
 use crate::keys::keys::LampoKeys;
 
 /// Lampo FeeEstimator implementation

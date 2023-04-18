@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use lightning::util::events::Event;
 
+use lampo_common::error;
+
 use crate::ln::{
     events::{ChangeStateChannelEvent, ChannelEvents, OpenChannelEvent},
     LampoChannelManager,
@@ -23,7 +25,7 @@ impl LampoHandler {
 }
 
 impl Handler for LampoHandler {
-    fn handle(&self, event: lightning::util::events::Event) -> anyhow::Result<()> {
+    fn handle(&self, event: lightning::util::events::Event) -> error::Result<()> {
         match event {
             Event::OpenChannelRequest {
                 temporary_channel_id,

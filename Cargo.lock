@@ -437,35 +437,33 @@ checksum = "453ad9f582a441959e5f0d088b02ce04cfe8d51a8eaf077f12ac6d3e94164ca6"
 name = "lampo-cli"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "bitcoin",
- "chrono",
  "clap",
- "clightningrpc-conf",
- "colored",
- "futures",
+ "lampo-common",
  "lampo-nakamoto",
  "lampod",
- "lightning",
- "lightning-background-processor",
- "lightning-block-sync",
- "lightning-invoice",
- "lightning-net-tokio",
- "lightning-persister",
- "lightning-rapid-gossip-sync",
  "log",
- "time",
  "tokio",
 ]
 
 [[package]]
 name = "lampo-common"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "chrono",
+ "clightningrpc-conf",
+ "colored",
+ "lightning",
+ "lightning-block-sync",
+ "log",
+]
 
 [[package]]
 name = "lampo-nakamoto"
 version = "0.1.0"
 dependencies = [
+ "lampo-common",
  "lampod",
  "log",
  "nakamoto-client",
@@ -478,10 +476,10 @@ dependencies = [
 name = "lampod"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "bitcoin",
  "clightningrpc-conf",
  "futures",
+ "lampo-common",
  "lampo-nakamoto",
  "lightning",
  "lightning-background-processor",

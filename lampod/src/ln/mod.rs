@@ -21,8 +21,10 @@ use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringParam
 use lightning::util::ser::ReadableArgs;
 use lightning_persister::FilesystemPersister;
 
+use lampo_common::conf::LampoConf;
+use lampo_common::error;
+
 use crate::chain::LampoChainManager;
-use crate::conf::LampoConf;
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
@@ -93,7 +95,7 @@ impl LampoChannelManager {
         channeld
     }
 
-    pub fn load_channel_monitors(&self, watch: bool) -> anyhow::Result<()> {
+    pub fn load_channel_monitors(&self, watch: bool) -> error::Result<()> {
         let keys = self.onchain.keymanager.inner();
         let mut monitors = self
             .persister
@@ -176,7 +178,7 @@ impl LampoChannelManager {
         unimplemented!()
     }
 
-    pub async fn start(&mut self, block: BlockHash, height: Height) -> anyhow::Result<()> {
+    pub async fn start(&mut self, block: BlockHash, height: Height) -> error::Result<()> {
         let chain_params = ChainParameters {
             network: self.conf.network,
             best_block: BestBlock::new(block, height.to_consensus_u32()),
@@ -202,7 +204,7 @@ impl LampoChannelManager {
 }
 
 impl ChannelEvents for LampoChannelManager {
-    fn open_channel(&self, open_channel: OpenChannelEvent) -> anyhow::Result<()> {
+    fn open_channel(&self, open_channel: OpenChannelEvent) -> error::Result<()> {
         self.manager()
             .create_channel(
                 open_channel.node_id,
@@ -212,15 +214,15 @@ impl ChannelEvents for LampoChannelManager {
                 0,
                 open_channel.config,
             )
-            .map_err(|err| anyhow::anyhow!("{:?}", err))?;
+            .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(())
     }
 
-    fn close_channel(&self) -> anyhow::Result<()> {
+    fn close_channel(&self) -> error::Result<()> {
         unimplemented!()
     }
 
-    fn change_state_channel(&self, event: ChangeStateChannelEvent) -> anyhow::Result<()> {
+    fn change_state_channel(&self, event: ChangeStateChannelEvent) -> error::Result<()> {
         unimplemented!()
     }
 }

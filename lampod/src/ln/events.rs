@@ -7,6 +7,8 @@ use lightning::{
     util::{config::UserConfig, events::Event},
 };
 
+use lampo_common::error;
+
 pub type NodeId = PublicKey;
 pub type ChannelId = [u8; 32];
 
@@ -37,16 +39,16 @@ pub struct ChangeStateChannelEvent {
 /// Lightning Network Channels events
 pub trait ChannelEvents {
     /// Open a Channel
-    fn open_channel(&self, open_channel: OpenChannelEvent) -> anyhow::Result<()>;
+    fn open_channel(&self, open_channel: OpenChannelEvent) -> error::Result<()>;
 
     /// Close a channel
-    fn close_channel(&self) -> anyhow::Result<()>;
+    fn close_channel(&self) -> error::Result<()>;
 
-    fn change_state_channel(&self, event: ChangeStateChannelEvent) -> anyhow::Result<()>;
+    fn change_state_channel(&self, event: ChangeStateChannelEvent) -> error::Result<()>;
 }
 
 pub trait PeerEvents {
-    async fn connect(&self, node_id: NodeId, host: SocketAddr) -> anyhow::Result<()>;
+    async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()>;
 
-    async fn disconnect(&self, node_id: NodeId) -> anyhow::Result<()>;
+    async fn disconnect(&self, node_id: NodeId) -> error::Result<()>;
 }
