@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+use std::time::Duration;
 use std::{sync::Arc, time::SystemTime};
 
 use lightning::ln::peer_handler::MessageHandler;
@@ -9,6 +11,7 @@ use lightning_net_tokio::SocketDescriptor;
 
 use crate::{chain::LampoChainManager, conf::LampoConf, utils::logger::LampoLogger};
 
+use super::events::PeerEvents;
 use super::{LampoChainMonitor, LampoChannelManager};
 
 type InnerLampoPeerManager = SimpleArcPeerManager<
@@ -103,5 +106,50 @@ impl LampoPeerManager {
                 .await;
             });
         }
+    }
+}
+
+impl PeerEvents for LampoPeerManager {
+    async fn connect(
+        &self,
+        node_id: super::events::NodeId,
+        host: SocketAddr,
+    ) -> anyhow::Result<()> {
+        let Some(close_callback) = lightning_net_tokio::connect_outbound(self.manager(), node_id, host).await else {
+          anyhow::bail!("impossible connect with the peer `{node_id}`");
+        };
+        let mut connection_closed_future = Box::pin(close_callback);
+        let manager = self.manager();
+        loop {
+            match futures::poll!(&mut connection_closed_future) {
+                std::task::Poll::Ready(_) => {
+                    log::info!("node `{node_id}` disconnected");
+                    return Ok(());
+                }
+                std::task::Poll::Pending => {}
+            }
+            // Avoid blocking the tokio context by sleeping a bit
+            match manager
+                .get_peer_node_ids()
+                .iter()
+                .find(|(id, _)| *id == node_id)
+            {
+                Some(_) => return Ok(()),
+                None => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        }
+    }
+
+    async fn disconnect(&self, node_id: super::events::NodeId) -> anyhow::Result<()> {
+        //check for open channels with peer
+
+        //check the pubkey matches a valid connected peer
+        let peers = self.manager().get_peer_node_ids();
+        if !peers.iter().any(|(pk, _)| &node_id == pk) {
+            anyhow::bail!("Error: Could not find peer `{node_id}`");
+        }
+
+        self.manager().disconnect_by_node_id(node_id);
+        Ok(())
     }
 }

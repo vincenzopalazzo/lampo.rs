@@ -13,3 +13,18 @@ log = { version = "0.4", features = ["std"] }
 chrono = { version = "0.4", features = ["std"], default-features = false }
 colored = "1.9"
 anyhow = "1.0.70"
+
+[dev-dependencies]
+lightning = { version = "0.0.114", features = ["max_level_trace"] }
+lightning-block-sync = { version = "0.0.114", features = [ "rpc-client" ] }
+lightning-invoice = { version = "0.22" }
+lightning-persister = { version = "0.0.114" }
+lightning-background-processor = { version = "0.0.114" }
+lightning-net-tokio = { version = "0.0.114" }
+lightning-rapid-gossip-sync = { version = "0.0.114" }
+log = "0.4.17"
+time = "0.3.13"
+bitcoin = "0.29.0"
+anyhow = "1.0.70"
+clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "macros/sync" }
+futures = "0.3.28"

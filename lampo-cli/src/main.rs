@@ -46,3 +46,49 @@ async fn run(args: LampoCliArgs) -> anyhow::Result<()> {
     lampod.listen().await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::{net::SocketAddr, str::FromStr};
+
+    use clightningrpc_conf::CLNConf;
+    use lightning::util::config::UserConfig;
+
+    use lampo_nakamoto::{Config, Network};
+    use lampod::{
+        conf::LampoConf,
+        keys::keys::LampoKeys,
+        ln::events::{NodeId, PeerEvents},
+        LampoDeamon,
+    };
+
+    use crate::logger;
+
+    #[tokio::test]
+    async fn simple_node_connection() {
+        logger::init(log::Level::Debug).expect("initializing logger for the first time");
+        let conf = LampoConf {
+            ldk_conf: UserConfig::default(),
+            network: bitcoin::Network::Testnet,
+            port: 19753,
+            path: "/tmp".to_string(),
+            inner: CLNConf::new("/tmp/".to_owned(), true),
+        };
+        let mut lampo = LampoDeamon::new(conf);
+
+        let mut conf = Config::default();
+        conf.network = Network::Testnet;
+        let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
+
+        let result = lampo.init(client, Arc::new(LampoKeys::new())).await;
+        assert!(result.is_ok());
+
+        let node_id =
+            NodeId::from_str("02049b60c296ffead3e7c8b124c5730153403a8314c1116c2d1b43cf9ac0de2d9d")
+                .unwrap();
+        let addr = SocketAddr::from_str("78.46.220.4:19735").unwrap();
+        let result = lampo.peer_manager().connect(node_id, addr).await;
+        assert!(result.is_ok(), "{:?}", result);
+    }
+}

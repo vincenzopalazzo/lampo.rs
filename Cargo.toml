@@ -1,5 +1,6 @@
 [workspace]
 members = [
+        "lampo-common",
         "lampod",
         "lampo-cli",
         "lampo-nakamoto",

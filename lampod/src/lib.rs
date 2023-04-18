@@ -1,4 +1,6 @@
 //! Lampo deamon implementation.
+#![feature(async_fn_in_trait)]
+pub mod actions;
 pub mod backend;
 pub mod chain;
 pub mod conf;
@@ -13,6 +15,7 @@ use bitcoin::locktime::Height;
 use lightning::{routing::gossip::P2PGossipSync, util::events::Event};
 use lightning_background_processor::BackgroundProcessor;
 
+use actions::handler::LampoHandler;
 use backend::Backend;
 use chain::LampoChainManager;
 use conf::LampoConf;
@@ -21,6 +24,8 @@ use ln::{peer_manager::LampoPeerManager, LampoChannelManager};
 use persistence::LampoPersistence;
 use utils::logger::LampoLogger;
 
+use crate::actions::Handler;
+
 pub struct LampoDeamon {
     conf: LampoConf,
     peer_manager: Option<Arc<LampoPeerManager>>,
@@ -28,9 +33,10 @@ pub struct LampoDeamon {
     channel_manager: Option<Arc<LampoChannelManager>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
+    handler: Option<Arc<LampoHandler>>,
 }
 
-impl LampoDeamon {
+impl<'ctx: 'static> LampoDeamon {
     pub fn new(config: LampoConf) -> Self {
         let root_path = config.path();
         LampoDeamon {
@@ -40,6 +46,7 @@ impl LampoDeamon {
             peer_manager: None,
             onchain_manager: None,
             channel_manager: None,
+            handler: None,
         }
     }
 
@@ -97,6 +104,14 @@ impl LampoDeamon {
         manager.clone()
     }
 
+    pub fn init_event_handler(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn handler(&self) -> Arc<LampoHandler> {
+        self.handler.clone().unwrap()
+    }
+
     pub async fn init(
         &mut self,
         client: Arc<dyn Backend>,
@@ -108,16 +123,20 @@ impl LampoDeamon {
         Ok(())
     }
 
-    pub async fn listen(&self) -> anyhow::Result<()> {
-        let event_handler = move |event: Event| {
-            log::info!("ldk event {:?}", event);
-        };
-
+    pub async fn listen(self) -> anyhow::Result<()> {
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<LampoChainManager>>,
             self.logger.clone(),
         ));
+
+        let handler = self.handler();
+        let event_handler = move |event: Event| {
+            log::info!("ldk event {:?}", event);
+            if let Err(err) = handler.handle(event) {
+                log::error!("{err}");
+            }
+        };
 
         let background_processor = BackgroundProcessor::start(
             self.persister.clone(),

@@ -10,7 +10,7 @@ fmt:
 	$(CC) fmt --all
 
 check:
-	$(CC) test --all
+	$(CC) test --all -- --show-output
 
 clean:
 	$(CC) clean

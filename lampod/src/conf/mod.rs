@@ -6,7 +6,7 @@ pub use lightning::util::config::UserConfig;
 
 #[derive(Clone)]
 pub struct LampoConf {
-    inner: CLNConf,
+    pub inner: CLNConf,
     pub network: Network,
     pub ldk_conf: UserConfig,
     pub port: u64,

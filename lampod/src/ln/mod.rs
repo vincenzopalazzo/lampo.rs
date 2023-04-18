@@ -1,4 +1,5 @@
 //! Lampo Channel Manager
+pub mod events;
 pub mod peer_manager;
 
 use std::fs::File;
@@ -24,6 +25,8 @@ use crate::chain::LampoChainManager;
 use crate::conf::LampoConf;
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
+
+use self::events::{ChangeStateChannelEvent, ChannelEvents, OpenChannelEvent, OpenChannelResult};
 
 type LampoChainMonitor = ChainMonitor<
     InMemorySigner,
@@ -195,5 +198,29 @@ impl LampoChannelManager {
             chain_params,
         )));
         Ok(())
+    }
+}
+
+impl ChannelEvents for LampoChannelManager {
+    fn open_channel(&self, open_channel: OpenChannelEvent) -> anyhow::Result<()> {
+        self.manager()
+            .create_channel(
+                open_channel.node_id,
+                open_channel.amount,
+                open_channel.push_msat,
+                // FIXME: what is this value?
+                0,
+                open_channel.config,
+            )
+            .map_err(|err| anyhow::anyhow!("{:?}", err))?;
+        Ok(())
+    }
+
+    fn close_channel(&self) -> anyhow::Result<()> {
+        unimplemented!()
+    }
+
+    fn change_state_channel(&self, event: ChangeStateChannelEvent) -> anyhow::Result<()> {
+        unimplemented!()
     }
 }
