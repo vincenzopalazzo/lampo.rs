@@ -1,21 +1,12 @@
 //! Lightning Events handler implementation
-use std::{future::Future, net::SocketAddr};
+use std::net::SocketAddr;
 
-use bitcoin::secp256k1::PublicKey;
-use lightning::{
-    ln::{features::ChannelTypeFeatures, msgs::NetAddress},
-    util::{config::UserConfig, events::Event},
-};
+use lightning::{ln::features::ChannelTypeFeatures, util::config::UserConfig};
 
 use lampo_common::error;
+use lampo_common::types::{ChannelId, ChannelState, NodeId};
 
-pub type NodeId = PublicKey;
-pub type ChannelId = [u8; 32];
-
-pub enum ChannelState {
-    Opening,
-    Ready,
-}
+use super::peer_event;
 
 pub struct OpenChannelEvent {
     pub node_id: NodeId,
@@ -48,6 +39,8 @@ pub trait ChannelEvents {
 }
 
 pub trait PeerEvents {
+    async fn handle(&self, event: peer_event::PeerEvent) -> error::Result<()>;
+
     async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()>;
 
     async fn disconnect(&self, node_id: NodeId) -> error::Result<()>;

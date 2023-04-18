@@ -1,5 +1,6 @@
 //! Lampo Channel Manager
 pub mod events;
+pub mod peer_event;
 pub mod peer_manager;
 
 use std::fs::File;
@@ -28,7 +29,7 @@ use crate::chain::LampoChainManager;
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
-use self::events::{ChangeStateChannelEvent, ChannelEvents, OpenChannelEvent, OpenChannelResult};
+use self::events::{ChangeStateChannelEvent, ChannelEvents, OpenChannelEvent};
 
 type LampoChainMonitor = ChainMonitor<
     InMemorySigner,

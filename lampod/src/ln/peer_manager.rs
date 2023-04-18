@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use std::{sync::Arc, time::SystemTime};
 
+use lampo_common::types::NodeId;
 use lightning::ln::peer_handler::MessageHandler;
 use lightning::ln::peer_handler::{IgnoringMessageHandler, PeerManager, SimpleArcPeerManager};
 use lightning::onion_message::OnionMessenger;
@@ -16,7 +17,7 @@ use crate::chain::LampoChainManager;
 use crate::utils::logger::LampoLogger;
 
 use super::events::PeerEvents;
-use super::{LampoChainMonitor, LampoChannelManager};
+use super::{peer_event, LampoChainMonitor, LampoChannelManager};
 
 type InnerLampoPeerManager = SimpleArcPeerManager<
     SocketDescriptor,
@@ -114,7 +115,14 @@ impl LampoPeerManager {
 }
 
 impl PeerEvents for LampoPeerManager {
-    async fn connect(&self, node_id: super::events::NodeId, host: SocketAddr) -> error::Result<()> {
+    async fn handle(&self, event: super::peer_event::PeerEvent) -> error::Result<()> {
+        match event {
+            peer_event::PeerEvent::Connect(node_id, addr) => self.connect(node_id, addr).await?,
+        };
+        Ok(())
+    }
+
+    async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
         let Some(close_callback) = lightning_net_tokio::connect_outbound(self.manager(), node_id, host).await else {
           error::bail!("impossible connect with the peer `{node_id}`");
         };
@@ -140,7 +148,7 @@ impl PeerEvents for LampoPeerManager {
         }
     }
 
-    async fn disconnect(&self, node_id: super::events::NodeId) -> error::Result<()> {
+    async fn disconnect(&self, node_id: NodeId) -> error::Result<()> {
         //check for open channels with peer
 
         //check the pubkey matches a valid connected peer

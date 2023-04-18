@@ -2,6 +2,7 @@
 #![feature(async_fn_in_trait)]
 pub mod actions;
 pub mod chain;
+pub mod events;
 pub mod keys;
 pub mod ln;
 pub mod persistence;
@@ -106,13 +107,17 @@ impl<'ctx: 'static> LampoDeamon {
     }
 
     pub fn init_event_handler(&mut self) -> error::Result<()> {
-        let handler = LampoHandler::new(&self.channel_manager());
+        let handler = LampoHandler::new(&self.channel_manager(), &self.peer_manager());
         self.handler = Some(Arc::new(handler));
         Ok(())
     }
 
     pub fn handler(&self) -> Arc<LampoHandler> {
         self.handler.clone().unwrap()
+    }
+
+    pub fn init_reactor(&mut self) -> error::Result<()> {
+        Ok(())
     }
 
     pub async fn init(

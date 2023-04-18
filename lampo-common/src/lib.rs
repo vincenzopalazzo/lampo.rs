@@ -2,6 +2,7 @@ pub mod backend;
 pub mod conf;
 pub mod logger;
 pub mod model;
+pub mod types;
 
 pub mod error {
     pub use anyhow::*;
