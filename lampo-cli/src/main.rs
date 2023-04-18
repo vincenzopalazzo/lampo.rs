@@ -8,6 +8,7 @@ use log;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::json;
 use lampo_common::logger;
 use lampo_nakamoto::{Config, Nakamoto, Network};
 use lampod::keys::keys::LampoKeys;
@@ -44,6 +45,8 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", args.client),
     };
     lampod.init(client, keys).await?;
+    let info = lampod.get_info()?;
+    log::info!("node info: {}", json::to_string_pretty(&info)?);
     lampod.listen().await?;
     Ok(())
 }

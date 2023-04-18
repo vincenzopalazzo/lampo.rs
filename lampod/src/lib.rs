@@ -16,6 +16,7 @@ use lightning_background_processor::BackgroundProcessor;
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::model::GetInfo;
 
 use actions::handler::LampoHandler;
 use chain::LampoChainManager;
@@ -105,6 +106,8 @@ impl<'ctx: 'static> LampoDeamon {
     }
 
     pub fn init_event_handler(&mut self) -> error::Result<()> {
+        let handler = LampoHandler::new(&self.channel_manager());
+        self.handler = Some(Arc::new(handler));
         Ok(())
     }
 
@@ -120,6 +123,7 @@ impl<'ctx: 'static> LampoDeamon {
         self.init_onchaind(client.clone(), keys.clone())?;
         self.init_channeld().await?;
         self.init_peer_manager()?;
+        self.init_event_handler()?;
         Ok(())
     }
 
@@ -150,6 +154,19 @@ impl<'ctx: 'static> LampoDeamon {
         );
         let _ = background_processor.join();
         Ok(())
+    }
+
+    // FIXME: move this in a event queue
+    pub fn get_info(&self) -> error::Result<GetInfo> {
+        Ok(GetInfo {
+            node_id: self
+                .channel_manager()
+                .manager()
+                .get_our_node_id()
+                .to_string(),
+            peers: self.peer_manager().manager().get_peer_node_ids().len(),
+            channels: 0,
+        })
     }
 }
 

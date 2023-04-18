@@ -457,6 +457,8 @@ dependencies = [
  "lightning",
  "lightning-block-sync",
  "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -464,7 +466,6 @@ name = "lampo-nakamoto"
 version = "0.1.0"
 dependencies = [
  "lampo-common",
- "lampod",
  "log",
  "nakamoto-client",
  "nakamoto-common",

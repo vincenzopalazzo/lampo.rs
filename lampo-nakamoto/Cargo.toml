@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 nakamoto-client = { git = "https://github.com/vincenzopalazzo/nakamoto", branch = "macros/client_model-fixes"  }
 nakamoto-net-poll = { git = "https://github.com/vincenzopalazzo/nakamoto", branch = "macros/client_model-fixes"  }
