@@ -527,6 +527,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lampo-jsonrpc"
+version = "0.1.0"
+dependencies = [
+ "lampo-common",
+ "log",
+ "popol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lampo-nakamoto"
 version = "0.1.0"
 dependencies = [
@@ -979,6 +990,7 @@ version = "1.0.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "057d394a50403bcac12672b2b18fb387ab6d289d957dab67dd201875391e52f1"
 dependencies = [
+ "indexmap",
  "itoa",
  "ryu",
  "serde",
