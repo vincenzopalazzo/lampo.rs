@@ -45,6 +45,7 @@ mod tests {
     use crate::UnixClient;
 
     #[test]
+    #[ignore = "we need to run a node"]
     fn get_info_call() {
         let client = UnixClient::new("/home/vincent/.lampo/testnet/lampod.socket").unwrap();
         let input: HashMap<String, Value> = HashMap::new();
@@ -54,6 +55,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "we need to run a node"]
     fn connect_call() {
         logger::init(log::Level::Debug).unwrap();
         let client = UnixClient::new("/home/vincent/.lampo/testnet/lampod.socket").unwrap();
