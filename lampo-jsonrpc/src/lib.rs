@@ -178,13 +178,12 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                         }
 
                         if event.is_invalid() {
-                            log::trace!("event invalid, unregister event from the tracking one");
+                            log::info!("event invalid, unregister event from the tracking one");
                             self.sources.unregister(&event.key);
                             break;
                         }
 
                         if event.is_readable() {
-                            log::info!("event for reading");
                             let Some(mut stream) = self.conn.get(addr) else {
                                 log::error!("connection not found `{addr}`");
                                 continue;
@@ -194,10 +193,14 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                 if err.kind() != ErrorKind::WouldBlock {
                                     return Err(err);
                                 }
-                                log::info!("blocking!");
+                                log::info!("blocking with err {:?}!", err);
+                            }
+                            if buff.is_empty() {
+                                log::warn!("bufefe is empty");
+                                break;
                             }
                             let buff = buff.trim();
-
+                            log::info!("buffer read {buff}");
                             let requ: Request<Value> = serde_json::from_str(&buff).unwrap();
                             log::trace!("request {:?}", requ);
                             let Some(callback) = self.rpc_method.get(&requ.method) else {

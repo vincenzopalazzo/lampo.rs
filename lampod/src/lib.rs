@@ -168,7 +168,7 @@ impl<'ctx: 'static> LampoDeamon {
             self.logger.clone(),
             Some(self.channel_manager().scorer()),
         );
-        self.process.lock().await.set(Some(background_processor));
+        let _ = background_processor.join();
         Ok(())
     }
 

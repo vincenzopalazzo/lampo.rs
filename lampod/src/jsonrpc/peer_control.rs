@@ -2,16 +2,16 @@
 
 use lampo_common::json;
 use lampo_common::model::Connect;
-use tokio::runtime::Handle;
+use tokio::runtime::Runtime;
 
 use crate::{ln::events::PeerEvents, LampoDeamon};
 
 pub fn json_connect(ctx: &LampoDeamon, request: &json::Value) -> json::Value {
+    log::info!("call for `connect` with request `{:?}`", request);
     let input: Connect = json::from_value(request.clone()).unwrap();
 
-    let handler = Handle::current();
-    let _ = handler.enter();
-    let result = futures::executor::block_on(async {
+    let rt = Runtime::new().unwrap();
+    let result = rt.block_on(async {
         ctx.peer_manager()
             .connect(input.node_id(), input.addr())
             .await

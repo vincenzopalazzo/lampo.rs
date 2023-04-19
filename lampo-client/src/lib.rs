@@ -27,7 +27,7 @@ impl UnixClient {
             .inner
             .send_request(method, input)
             .and_then(|res| res.into_result())
-            .unwrap();
+            .map_err(error::Error::from)?;
         Ok(res)
     }
 }
@@ -64,6 +64,6 @@ mod tests {
         };
         log::debug!("input method: `{:?}`", input);
         let resp: HashMap<String, Value> = client.call("connect", input).unwrap();
-        log::info!("get info response: `{:?}`", resp)
+        log::info!("`connect` response: `{:?}`", resp)
     }
 }
