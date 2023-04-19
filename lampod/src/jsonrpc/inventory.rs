@@ -1,11 +1,11 @@
 //! Inventory method implementation
-
 use lampo_common::{json, model::GetInfo};
 use lampo_jsonrpc::command::Context;
 
 use crate::LampoDeamon;
 
-pub fn get_info(ctx: &mut LampoDeamon, _: &json::Value) -> json::Value {
+pub fn get_info(ctx: &LampoDeamon, request: &json::Value) -> json::Value {
+    log::info!("calling `getinfo` with request `{:?}`", request);
     let lampo = ctx.ctx();
     let getinfo = GetInfo {
         node_id: lampo

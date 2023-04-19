@@ -1,5 +1,6 @@
 //! JSON RPC 2.0 implementation
 pub mod inventory;
+pub mod peer_control;
 
 use lampo_jsonrpc::command::Context;
 
@@ -9,7 +10,7 @@ use crate::LampoDeamon;
 impl Context for LampoDeamon {
     type Ctx = LampoDeamon;
 
-    fn ctx(&mut self) -> &mut Self::Ctx {
+    fn ctx(&self) -> &Self::Ctx {
         self
     }
 }

@@ -10,16 +10,19 @@ pub mod ln;
 pub mod persistence;
 pub mod utils;
 
-use std::sync::Arc;
+use std::{
+    cell::{Cell, RefCell},
+    sync::Arc,
+};
 
 use bitcoin::locktime::Height;
+use futures::lock::Mutex;
 use lightning::{routing::gossip::P2PGossipSync, util::events::Event};
 use lightning_background_processor::BackgroundProcessor;
 
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::model::GetInfo;
 
 use actions::handler::LampoHandler;
 use chain::LampoChainManager;
@@ -38,6 +41,7 @@ pub struct LampoDeamon {
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
+    process: Mutex<Cell<Option<BackgroundProcessor>>>,
 }
 
 impl<'ctx: 'static> LampoDeamon {
@@ -51,6 +55,7 @@ impl<'ctx: 'static> LampoDeamon {
             onchain_manager: None,
             channel_manager: None,
             handler: None,
+            process: Mutex::new(Cell::new(None)),
         }
     }
 
@@ -163,7 +168,14 @@ impl<'ctx: 'static> LampoDeamon {
             self.logger.clone(),
             Some(self.channel_manager().scorer()),
         );
-        let _ = background_processor.join();
+        self.process.lock().await.set(Some(background_processor));
+        Ok(())
+    }
+
+    pub async fn stop(self) -> error::Result<()> {
+        if let Some(process) = self.process.lock().await.take() {
+            process.stop()?;
+        }
         Ok(())
     }
 }

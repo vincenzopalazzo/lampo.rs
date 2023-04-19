@@ -29,12 +29,12 @@ pub enum RPCEvent {
 pub struct JSONRPCv2<T: Send + Sync + 'static> {
     socket_path: String,
     sources: Sources<RPCEvent>,
-    rpc_method: HashMap<String, Arc<dyn Fn(&mut T, &Value) -> Value + Sync + Send>>,
+    rpc_method: HashMap<String, Arc<dyn Fn(&T, &Value) -> Value + Sync + Send>>,
     socket: UnixListener,
     handler: Arc<Handler>,
     pub(crate) conn: HashMap<String, UnixStream>,
     conn_queue: Mutex<Cell<HashMap<String, VecDeque<Response<Value>>>>>,
-    ctx: Option<Arc<Mutex<dyn Context<Ctx = T>>>>,
+    ctx: Option<Arc<dyn Context<Ctx = T>>>,
 }
 
 pub struct Handler {
@@ -74,7 +74,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
 
     pub fn add_rpc<F>(&mut self, name: &str, callback: F) -> Result<(), ()>
     where
-        F: Fn(&mut T, &Value) -> Value + Sync + Send + 'static,
+        F: Fn(&T, &Value) -> Value + Sync + Send + 'static,
     {
         if self.rpc_method.contains_key(name) {
             return Err(());
@@ -126,18 +126,18 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         resp
     }
 
-    pub fn with_ctx<Ctx>(&mut self, ctx: Arc<Mutex<Ctx>>)
+    pub fn with_ctx<Ctx>(&mut self, ctx: Arc<Ctx>)
     where
         Ctx: Context<Ctx = T> + 'static,
     {
         self.ctx = Some(ctx)
     }
 
-    fn ctx(&self) -> Arc<Mutex<dyn Context<Ctx = T>>> {
+    fn ctx(&self) -> &T {
         let Some(ref ctx) = self.ctx else {
             panic!("need to set t contex");
         };
-        ctx.clone()
+        ctx.ctx()
     }
 
     pub fn listen(mut self) -> io::Result<()> {
@@ -145,7 +145,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         self.sources
             .register(RPCEvent::Listening, &self.socket, popol::interest::READ);
 
-        log::debug!("starting server");
+        log::info!("starting server on {}", self.socket_path);
         let mut events = vec![];
         while !self.handler.stop.get() {
             // Blocking while we are waiting new events!
@@ -165,6 +165,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                             log::error!("fail to accept the connection: {:?}", conn);
                             continue;
                         };
+                        log::trace!("new connection to unix rpc socket");
                         self.add_connection(&addr, stream);
                     }
                     RPCEvent::Connect(addr) => {
@@ -177,11 +178,13 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                         }
 
                         if event.is_invalid() {
+                            log::trace!("event invalid, unregister event from the tracking one");
                             self.sources.unregister(&event.key);
                             break;
                         }
 
                         if event.is_readable() {
+                            log::info!("event for reading");
                             let Some(mut stream) = self.conn.get(addr) else {
                                 log::error!("connection not found `{addr}`");
                                 continue;
@@ -191,19 +194,25 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                 if err.kind() != ErrorKind::WouldBlock {
                                     return Err(err);
                                 }
+                                log::info!("blocking!");
                             }
                             let buff = buff.trim();
 
                             let requ: Request<Value> = serde_json::from_str(&buff).unwrap();
-                            let callback = self.rpc_method.get(&requ.method).unwrap();
-
-                            let resp = callback(self.ctx().lock().unwrap().ctx(), &requ.params);
+                            log::trace!("request {:?}", requ);
+                            let Some(callback) = self.rpc_method.get(&requ.method) else {
+                                log::error!("`{}` not found!", requ.method);
+                                break;
+                            };
+                            let resp = callback(self.ctx(), &requ.params);
                             let resp = Response {
                                 id: requ.id.clone().unwrap(),
                                 jsonrpc: Some(requ.jsonrpc.clone()),
                                 result: Some(resp),
                                 error: None,
                             };
+
+                            log::trace!("send response: `{:?}`", resp);
                             self.send_resp(addr.to_string(), resp);
                         }
 
@@ -224,7 +233,6 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                     return Err(err);
                                 }
                             }
-                            log::debug!("Response send `{buff}`");
                             match stream.flush() {
                                 // In this case, we've written all the data, we
                                 // are no longer interested in writing to this
@@ -239,7 +247,6 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                     if [io::ErrorKind::WouldBlock, io::ErrorKind::WriteZero]
                                         .contains(&err.kind()) =>
                                 {
-                                    log::error!("blocking while flushing");
                                     event.source.set(popol::interest::WRITE);
                                 }
                                 Err(err) => {
@@ -289,10 +296,10 @@ mod tests {
     struct DummyCtx;
 
     impl Context for DummyCtx {
-        type Ctx = ();
+        type Ctx = DummyCtx;
 
-        fn ctx(&self) -> Self::Ctx {
-            ()
+        fn ctx(&self) -> &Self::Ctx {
+            self
         }
     }
 
@@ -302,12 +309,8 @@ mod tests {
         logger::init(log::Level::Debug).unwrap();
         let mut server = JSONRPCv2::new("/tmp/tmp.sock").unwrap();
         server.with_ctx(Arc::new(DummyCtx));
-        let _ = server.add_rpc("foo", |_: &dyn Context<Ctx = ()>, request| {
-            serde_json::json!(request)
-        });
-        let res = server.add_rpc("secon", |_: &dyn Context<Ctx = ()>, request| {
-            serde_json::json!(request)
-        });
+        let _ = server.add_rpc("foo", |_: &DummyCtx, request| serde_json::json!(request));
+        let res = server.add_rpc("secon", |_: &DummyCtx, request| serde_json::json!(request));
         assert!(res.is_ok(), "{:?}", res);
 
         let handler = server.handler();

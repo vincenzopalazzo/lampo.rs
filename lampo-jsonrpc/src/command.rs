@@ -2,5 +2,5 @@
 pub trait Context: Send + Sync {
     type Ctx;
 
-    fn ctx(&mut self) -> &mut Self::Ctx;
+    fn ctx(&self) -> &Self::Ctx;
 }
