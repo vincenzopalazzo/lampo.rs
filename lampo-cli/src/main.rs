@@ -1,14 +1,19 @@
 mod args;
 
+use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::thread::JoinHandle;
 
 use clap::Parser;
+use lampo_jsonrpc::command::Context;
+use lampo_jsonrpc::JSONRPCv2;
+use lampod::jsonrpc::inventory::get_info;
 use log;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::json;
 use lampo_common::logger;
 use lampo_nakamoto::{Config, Nakamoto, Network};
 use lampod::keys::keys::LampoKeys;
@@ -45,8 +50,17 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", args.client),
     };
     lampod.init(client, keys).await?;
-    let info = lampod.get_info()?;
-    log::info!("node info: {}", json::to_string_pretty(&info)?);
-    lampod.listen().await?;
+    let lampod = Arc::new(Mutex::new(lampod));
+    let jsorpc_worker = run_jsonrpc(lampod.clone()).unwrap();
+    lampod.lock().unwrap().listen().await?;
+    let _ = jsorpc_worker.join().unwrap();
     Ok(())
+}
+
+fn run_jsonrpc(lampod: Arc<Mutex<LampoDeamon>>) -> error::Result<JoinHandle<io::Result<()>>> {
+    let socket_path = format!("{}/lampod.socket", lampod.lock().unwrap().root_path());
+    let mut server = JSONRPCv2::new(&socket_path)?;
+    server.with_ctx(lampod);
+    server.add_rpc("getinfo", get_info).unwrap();
+    Ok(server.spawn())
 }

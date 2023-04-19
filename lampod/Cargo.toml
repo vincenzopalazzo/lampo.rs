@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1.22.0", features = ["full"] }
 lampo-common = { path = "../lampo-common" }
+lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lightning = { version = "0.0.114", features = ["max_level_trace"] }
 lightning-block-sync = { version = "0.0.114", features = [ "rpc-client" ] }
 lightning-invoice = { version = "0.22" }

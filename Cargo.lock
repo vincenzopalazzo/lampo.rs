@@ -504,6 +504,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "lampo-common",
+ "lampo-jsonrpc",
  "lampo-nakamoto",
  "lampod",
  "log",
@@ -560,6 +561,7 @@ dependencies = [
  "futures",
  "io-reactor",
  "lampo-common",
+ "lampo-jsonrpc",
  "lampo-nakamoto",
  "lightning",
  "lightning-background-processor",

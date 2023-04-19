@@ -4,6 +4,7 @@
 pub mod actions;
 pub mod chain;
 pub mod events;
+pub mod jsonrpc;
 pub mod keys;
 pub mod ln;
 pub mod persistence;
@@ -51,6 +52,10 @@ impl<'ctx: 'static> LampoDeamon {
             channel_manager: None,
             handler: None,
         }
+    }
+
+    pub fn root_path(&self) -> String {
+        self.conf.path()
     }
 
     pub fn init_onchaind(
@@ -133,7 +138,7 @@ impl<'ctx: 'static> LampoDeamon {
         Ok(())
     }
 
-    pub async fn listen(self) -> error::Result<()> {
+    pub async fn listen(&self) -> error::Result<()> {
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<LampoChainManager>>,
@@ -160,19 +165,6 @@ impl<'ctx: 'static> LampoDeamon {
         );
         let _ = background_processor.join();
         Ok(())
-    }
-
-    // FIXME: move this in a event queue
-    pub fn get_info(&self) -> error::Result<GetInfo> {
-        Ok(GetInfo {
-            node_id: self
-                .channel_manager()
-                .manager()
-                .get_our_node_id()
-                .to_string(),
-            peers: self.peer_manager().manager().get_peer_node_ids().len(),
-            channels: 0,
-        })
     }
 }
 

@@ -4,14 +4,14 @@ pub mod command;
 mod errors;
 mod json_rpc2;
 
-use std::any::Any;
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
-use std::io::{ErrorKind, Read, Write};
+use std::io::{self, ErrorKind};
+use std::io::{Read, Write};
+use std::os::unix::net::UnixListener;
 use std::os::unix::net::{SocketAddr, UnixStream};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::{io, os::unix::net::UnixListener};
 
 use command::Context;
 use popol::{Sources, Timeout};
@@ -26,17 +26,15 @@ pub enum RPCEvent {
     Connect(String),
 }
 
-type Callback<T> = fn(&dyn Context<Ctx = T>, &Value) -> Value;
-
 pub struct JSONRPCv2<T: Send + Sync + 'static> {
     socket_path: String,
     sources: Sources<RPCEvent>,
-    rpc_method: HashMap<String, Box<Callback<T>>>,
+    rpc_method: HashMap<String, Arc<dyn Fn(&mut T, &Value) -> Value + Sync + Send>>,
     socket: UnixListener,
     handler: Arc<Handler>,
     pub(crate) conn: HashMap<String, UnixStream>,
     conn_queue: Mutex<Cell<HashMap<String, VecDeque<Response<Value>>>>>,
-    ctx: Option<Arc<dyn Context<Ctx = T>>>,
+    ctx: Option<Arc<Mutex<dyn Context<Ctx = T>>>>,
 }
 
 pub struct Handler {
@@ -74,11 +72,14 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         })
     }
 
-    pub fn add_rpc(&mut self, name: &str, callback: Callback<T>) -> Result<(), ()> {
+    pub fn add_rpc<F>(&mut self, name: &str, callback: F) -> Result<(), ()>
+    where
+        F: Fn(&mut T, &Value) -> Value + Sync + Send + 'static,
+    {
         if self.rpc_method.contains_key(name) {
             return Err(());
         }
-        self.rpc_method.insert(name.to_owned(), Box::new(callback));
+        self.rpc_method.insert(name.to_owned(), Arc::new(callback));
         Ok(())
     }
 
@@ -125,12 +126,18 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         resp
     }
 
-    pub fn with_ctx(&mut self, ctx: Arc<dyn Context<Ctx = T>>) {
+    pub fn with_ctx<Ctx>(&mut self, ctx: Arc<Mutex<Ctx>>)
+    where
+        Ctx: Context<Ctx = T> + 'static,
+    {
         self.ctx = Some(ctx)
     }
 
-    fn ctx(&self) -> Arc<dyn Context<Ctx = T>> {
-        self.ctx.clone().unwrap()
+    fn ctx(&self) -> Arc<Mutex<dyn Context<Ctx = T>>> {
+        let Some(ref ctx) = self.ctx else {
+            panic!("need to set t contex");
+        };
+        ctx.clone()
     }
 
     pub fn listen(mut self) -> io::Result<()> {
@@ -190,7 +197,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                             let requ: Request<Value> = serde_json::from_str(&buff).unwrap();
                             let callback = self.rpc_method.get(&requ.method).unwrap();
 
-                            let resp = callback(self.ctx().as_ref(), &requ.params);
+                            let resp = callback(self.ctx().lock().unwrap().ctx(), &requ.params);
                             let resp = Response {
                                 id: requ.id.clone().unwrap(),
                                 jsonrpc: Some(requ.jsonrpc.clone()),
