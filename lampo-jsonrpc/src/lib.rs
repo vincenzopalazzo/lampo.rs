@@ -1,21 +1,23 @@
 //! Full feature JSON RPC 2.0 Server/client with a
 //! minimal dependencies footprint.
+pub mod command;
 mod errors;
 mod json_rpc2;
 
+use std::any::Any;
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
-use std::io::{BufRead, BufReader, BufWriter, ErrorKind, LineWriter, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::os::unix::net::{SocketAddr, UnixStream};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{io, os::unix::net::UnixListener};
 
+use command::Context;
 use popol::{Sources, Timeout};
-
-use errors::Error;
 use serde_json::Value;
 
+use crate::errors::Error;
 use crate::json_rpc2::{Request, Response};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,16 +26,17 @@ pub enum RPCEvent {
     Connect(String),
 }
 
-type Callback = fn(&Value) -> Value;
+type Callback<T> = fn(&dyn Context<Ctx = T>, &Value) -> Value;
 
-pub struct JSONRPCv2 {
+pub struct JSONRPCv2<T: Send + Sync + 'static> {
     socket_path: String,
     sources: Sources<RPCEvent>,
-    rpc_method: HashMap<String, Box<Callback>>,
+    rpc_method: HashMap<String, Box<Callback<T>>>,
     socket: UnixListener,
     handler: Arc<Handler>,
     pub(crate) conn: HashMap<String, UnixStream>,
     conn_queue: Mutex<Cell<HashMap<String, VecDeque<Response<Value>>>>>,
+    ctx: Option<Arc<dyn Context<Ctx = T>>>,
 }
 
 pub struct Handler {
@@ -55,7 +58,7 @@ impl Handler {
 unsafe impl Send for Handler {}
 unsafe impl Sync for Handler {}
 
-impl JSONRPCv2 {
+impl<T: Send + Sync + 'static> JSONRPCv2<T> {
     pub fn new(path: &str) -> Result<Self, Error> {
         let listnet = UnixListener::bind(path)?;
         let sources = Sources::<RPCEvent>::new();
@@ -67,10 +70,11 @@ impl JSONRPCv2 {
             socket_path: path.to_owned(),
             conn: HashMap::new(),
             conn_queue: Mutex::new(Cell::new(HashMap::new())),
+            ctx: None,
         })
     }
 
-    pub fn add_rpc(&mut self, name: &str, callback: Callback) -> Result<(), ()> {
+    pub fn add_rpc(&mut self, name: &str, callback: Callback<T>) -> Result<(), ()> {
         if self.rpc_method.contains_key(name) {
             return Err(());
         }
@@ -119,6 +123,14 @@ impl JSONRPCv2 {
         let resp = q.pop_front();
         self.conn_queue.lock().unwrap().set(queue);
         resp
+    }
+
+    pub fn with_ctx(&mut self, ctx: Arc<dyn Context<Ctx = T>>) {
+        self.ctx = Some(ctx)
+    }
+
+    fn ctx(&self) -> Arc<dyn Context<Ctx = T>> {
+        self.ctx.clone().unwrap()
     }
 
     pub fn listen(mut self) -> io::Result<()> {
@@ -178,7 +190,7 @@ impl JSONRPCv2 {
                             let requ: Request<Value> = serde_json::from_str(&buff).unwrap();
                             let callback = self.rpc_method.get(&requ.method).unwrap();
 
-                            let resp = callback(&requ.params);
+                            let resp = callback(self.ctx().as_ref(), &requ.params);
                             let resp = Response {
                                 id: requ.id.clone().unwrap(),
                                 jsonrpc: Some(requ.jsonrpc.clone()),
@@ -245,7 +257,7 @@ impl JSONRPCv2 {
     }
 }
 
-impl Drop for JSONRPCv2 {
+impl<T: Send + Sync + 'static> Drop for JSONRPCv2<T> {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.socket_path).unwrap();
     }
@@ -253,24 +265,42 @@ impl Drop for JSONRPCv2 {
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Write, os::unix::net::UnixStream, path::Path, str::FromStr, time::Duration};
+    use std::{
+        io::Write, os::unix::net::UnixStream, path::Path, str::FromStr, sync::Arc, time::Duration,
+    };
 
     use lampo_common::logger;
     use ntest::timeout;
     use serde_json::Value;
 
     use crate::{
+        command::Context,
         json_rpc2::{Id, Request, Response},
         JSONRPCv2,
     };
+
+    struct DummyCtx;
+
+    impl Context for DummyCtx {
+        type Ctx = ();
+
+        fn ctx(&self) -> Self::Ctx {
+            ()
+        }
+    }
 
     #[test]
     #[timeout(9000)]
     fn register_rpc() {
         logger::init(log::Level::Debug).unwrap();
         let mut server = JSONRPCv2::new("/tmp/tmp.sock").unwrap();
-        let _ = server.add_rpc("foo", |request| serde_json::json!(request));
-        let res = server.add_rpc("secon", |request| serde_json::json!(request));
+        server.with_ctx(Arc::new(DummyCtx));
+        let _ = server.add_rpc("foo", |_: &dyn Context<Ctx = ()>, request| {
+            serde_json::json!(request)
+        });
+        let res = server.add_rpc("secon", |_: &dyn Context<Ctx = ()>, request| {
+            serde_json::json!(request)
+        });
         assert!(res.is_ok(), "{:?}", res);
 
         let handler = server.handler();
