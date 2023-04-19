@@ -11,3 +11,4 @@ log = "0.4.17"
 
 [dev-dependencies]
 lampo-common = { path = "../lampo-common" }
+ntest = "*"
