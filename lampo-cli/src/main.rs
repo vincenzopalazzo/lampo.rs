@@ -1,9 +1,9 @@
+#[allow(dead_code)]
 mod args;
 
 use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::thread::JoinHandle;
 
 use clap::Parser;
@@ -13,7 +13,6 @@ use log;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::json;
 use lampo_common::logger;
 use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;

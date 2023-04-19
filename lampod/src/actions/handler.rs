@@ -4,7 +4,7 @@ use std::sync::Arc;
 use lightning::util::events::Event;
 
 use lampo_common::error;
-use lampo_common::types::{ChannelId, ChannelState};
+use lampo_common::types::ChannelState;
 
 use crate::events::LampoEvent;
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents, PeerEvents};
@@ -30,6 +30,7 @@ impl LampoHandler {
     }
 }
 
+#[allow(unused_variables)]
 impl Handler for LampoHandler {
     async fn react(&self, event: crate::events::LampoEvent) -> error::Result<()> {
         match event {

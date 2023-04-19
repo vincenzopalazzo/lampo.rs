@@ -34,7 +34,8 @@ pub struct LampoLogger;
 impl LampoLogger {
     /// Create a new instance of the lampo logger with the
     /// information that are provided.
-    fn new() -> Self {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
         LampoLogger {}
     }
 

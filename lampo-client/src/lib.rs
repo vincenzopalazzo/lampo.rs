@@ -5,6 +5,7 @@ use serde::Serialize;
 use lampo_common::error;
 
 pub struct UnixClient {
+    #[allow(dead_code)]
     socket_path: String,
     inner: client::Client,
 }

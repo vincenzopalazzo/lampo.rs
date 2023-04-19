@@ -10,10 +10,7 @@ pub mod ln;
 pub mod persistence;
 pub mod utils;
 
-use std::{
-    cell::{Cell, RefCell},
-    sync::Arc,
-};
+use std::{cell::Cell, sync::Arc};
 
 use bitcoin::locktime::Height;
 use futures::lock::Mutex;
