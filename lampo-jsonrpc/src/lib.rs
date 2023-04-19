@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, BufWriter, ErrorKind, LineWriter, Read, Write};
 use std::os::unix::net::{SocketAddr, UnixStream};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{io, os::unix::net::UnixListener};
 
@@ -31,10 +31,29 @@ pub struct JSONRPCv2 {
     sources: Sources<RPCEvent>,
     rpc_method: HashMap<String, Box<Callback>>,
     socket: UnixListener,
-    stop: bool,
+    handler: Arc<Handler>,
     pub(crate) conn: HashMap<String, UnixStream>,
     conn_queue: Mutex<Cell<HashMap<String, VecDeque<Response<Value>>>>>,
 }
+
+pub struct Handler {
+    stop: Cell<bool>,
+}
+
+impl Handler {
+    pub fn new() -> Self {
+        Handler {
+            stop: Cell::new(false),
+        }
+    }
+
+    pub fn stop(&self) {
+        self.stop.set(true);
+    }
+}
+
+unsafe impl Send for Handler {}
+unsafe impl Sync for Handler {}
 
 impl JSONRPCv2 {
     pub fn new(path: &str) -> Result<Self, Error> {
@@ -43,7 +62,7 @@ impl JSONRPCv2 {
         Ok(Self {
             sources,
             socket: listnet,
-            stop: false,
+            handler: Arc::new(Handler::new()),
             rpc_method: HashMap::new(),
             socket_path: path.to_owned(),
             conn: HashMap::new(),
@@ -109,7 +128,7 @@ impl JSONRPCv2 {
 
         log::debug!("starting server");
         let mut events = vec![];
-        while !self.stop {
+        while !self.handler.stop.get() {
             // Blocking while we are waiting new events!
             self.sources.poll(&mut events, Timeout::Never)?;
 
@@ -217,8 +236,8 @@ impl JSONRPCv2 {
         Ok(())
     }
 
-    pub fn stop(&mut self) {
-        self.stop = true;
+    pub fn handler(&self) -> Arc<Handler> {
+        self.handler.clone()
     }
 
     pub fn spawn(self) -> JoinHandle<io::Result<()>> {
@@ -241,7 +260,7 @@ mod tests {
     use serde_json::Value;
 
     use crate::{
-        json_rpc2::{Request, Response, Id},
+        json_rpc2::{Id, Request, Response},
         JSONRPCv2,
     };
 
@@ -254,6 +273,7 @@ mod tests {
         let res = server.add_rpc("secon", |request| serde_json::json!(request));
         assert!(res.is_ok(), "{:?}", res);
 
+        let handler = server.handler();
         let worker = server.spawn();
         let request = Request::<Value> {
             id: Some(0.into()),
@@ -307,6 +327,7 @@ mod tests {
         assert_eq!(Id::Str("0".to_owned()), resp.id);
         let resp = client_worker2.join().unwrap();
         assert_eq!(Id::Str("1".to_owned()), resp.id);
+        handler.stop();
 
         let _ = worker.join();
     }
