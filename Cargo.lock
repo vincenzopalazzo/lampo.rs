@@ -239,6 +239,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a2dd5a6fe8c6e3502f568a6353e5273bbb15193ad9a89e457b9970798efbea1"
 
 [[package]]
+name = "clightningrpc-common"
+version = "0.3.0-beta.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d9821ddb8b5eee8f922fea6871f8684cf3eb74a1cb54f6a6782df70fe28b37"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "clightningrpc-conf"
 version = "0.0.2"
 source = "git+https://github.com/laanwj/cln4rust.git?branch=master#8823c6193e2313615dcaa21149a3400c947b4faf"
@@ -504,10 +514,22 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "lampo-common",
+ "lampo-jsonrpc",
  "lampo-nakamoto",
  "lampod",
  "log",
  "tokio",
+]
+
+[[package]]
+name = "lampo-client"
+version = "0.1.0"
+dependencies = [
+ "clightningrpc-common",
+ "lampo-common",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -560,6 +582,7 @@ dependencies = [
  "futures",
  "io-reactor",
  "lampo-common",
+ "lampo-jsonrpc",
  "lampo-nakamoto",
  "lightning",
  "lightning-background-processor",

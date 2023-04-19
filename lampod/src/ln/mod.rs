@@ -223,7 +223,7 @@ impl ChannelEvents for LampoChannelManager {
         unimplemented!()
     }
 
-    fn change_state_channel(&self, event: ChangeStateChannelEvent) -> error::Result<()> {
+    fn change_state_channel(&self, _: ChangeStateChannelEvent) -> error::Result<()> {
         unimplemented!()
     }
 }

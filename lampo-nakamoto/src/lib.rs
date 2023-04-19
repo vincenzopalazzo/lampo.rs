@@ -41,6 +41,7 @@ macro_rules! sync {
     };
 }
 
+#[allow(unused_variables)]
 impl Backend for Nakamoto {
     fn get_block<'a>(
         &'a self,
@@ -54,18 +55,14 @@ impl Backend for Nakamoto {
         sync! { Ok(BlockData::HeaderOnly(block.1)) }
     }
 
-    fn watch_utxo(
-        &self,
-        txid: &nakamoto_common::bitcoin::Txid,
-        script: &nakamoto_common::bitcoin::Script,
-    ) {
+    fn watch_utxo(&self, _: &nakamoto_common::bitcoin::Txid, _: &nakamoto_common::bitcoin::Script) {
         todo!()
     }
 
     fn get_header<'a>(
         &'a self,
-        header_hash: &'a nakamoto_common::block::BlockHash,
-        height_hint: Option<u32>,
+        _: &'a nakamoto_common::block::BlockHash,
+        _: Option<u32>,
     ) -> AsyncBlockSourceResult<'a, BlockHeaderData> {
         todo!()
     }
@@ -87,7 +84,7 @@ impl Backend for Nakamoto {
 
     fn register_output(
         &self,
-        output: WatchedOutput,
+        _: WatchedOutput,
     ) -> Option<(usize, nakamoto_common::block::Transaction)> {
         todo!()
     }

@@ -4,21 +4,22 @@
 pub mod actions;
 pub mod chain;
 pub mod events;
+pub mod jsonrpc;
 pub mod keys;
 pub mod ln;
 pub mod persistence;
 pub mod utils;
 
-use std::sync::Arc;
+use std::{cell::Cell, sync::Arc};
 
 use bitcoin::locktime::Height;
+use futures::lock::Mutex;
 use lightning::{routing::gossip::P2PGossipSync, util::events::Event};
 use lightning_background_processor::BackgroundProcessor;
 
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::model::GetInfo;
 
 use actions::handler::LampoHandler;
 use chain::LampoChainManager;
@@ -37,6 +38,7 @@ pub struct LampoDeamon {
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
+    process: Mutex<Cell<Option<BackgroundProcessor>>>,
 }
 
 impl<'ctx: 'static> LampoDeamon {
@@ -50,7 +52,12 @@ impl<'ctx: 'static> LampoDeamon {
             onchain_manager: None,
             channel_manager: None,
             handler: None,
+            process: Mutex::new(Cell::new(None)),
         }
+    }
+
+    pub fn root_path(&self) -> String {
+        self.conf.path()
     }
 
     pub fn init_onchaind(
@@ -133,7 +140,7 @@ impl<'ctx: 'static> LampoDeamon {
         Ok(())
     }
 
-    pub async fn listen(self) -> error::Result<()> {
+    pub async fn listen(&self) -> error::Result<()> {
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<LampoChainManager>>,
@@ -162,17 +169,11 @@ impl<'ctx: 'static> LampoDeamon {
         Ok(())
     }
 
-    // FIXME: move this in a event queue
-    pub fn get_info(&self) -> error::Result<GetInfo> {
-        Ok(GetInfo {
-            node_id: self
-                .channel_manager()
-                .manager()
-                .get_our_node_id()
-                .to_string(),
-            peers: self.peer_manager().manager().get_peer_node_ids().len(),
-            channels: 0,
-        })
+    pub async fn stop(self) -> error::Result<()> {
+        if let Some(process) = self.process.lock().await.take() {
+            process.stop()?;
+        }
+        Ok(())
     }
 }
 
