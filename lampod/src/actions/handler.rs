@@ -1,7 +1,7 @@
 //! Handler module implementation that
 use std::sync::Arc;
 
-use lightning::util::events::Event;
+use lightning::events::Event;
 
 use lampo_common::error;
 use lampo_common::types::ChannelState;
@@ -42,7 +42,7 @@ impl Handler for LampoHandler {
     }
 
     /// method used to handle the incoming event from ldk
-    fn handle(&self, event: lightning::util::events::Event) -> error::Result<()> {
+    fn handle(&self, event: lightning::events::Event) -> error::Result<()> {
         match event {
             Event::OpenChannelRequest {
                 temporary_channel_id,

@@ -14,7 +14,7 @@ use std::{cell::Cell, sync::Arc};
 
 use bitcoin::locktime::Height;
 use futures::lock::Mutex;
-use lightning::{routing::gossip::P2PGossipSync, util::events::Event};
+use lightning::{events::Event, routing::gossip::P2PGossipSync};
 use lightning_background_processor::BackgroundProcessor;
 
 use lampo_common::backend::Backend;

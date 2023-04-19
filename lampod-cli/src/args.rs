@@ -1,11 +1,15 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[clap(name = "lampo-cli")]
+#[clap(name = "lampod")]
 #[clap(about = "An experimental lightning implementation", long_about = None)]
 pub struct LampoCliArgs {
     #[clap(short, long, value_parser)]
-    pub socket: String,
+    pub conf: Option<String>,
+    #[clap(short, long, value_parser)]
+    pub network: Option<String>,
+    #[clap(long, value_parser)]
+    pub client: Option<String>,
     #[clap(subcommand)]
     pub method: LampoCommands,
 }
@@ -18,6 +22,6 @@ pub enum LampoCommands {
         addr: String,
         port: u64,
     },
-    #[clap(name = "getinfo")]
+    #[clap(arg_required_else_help = true)]
     GetInfo,
 }
