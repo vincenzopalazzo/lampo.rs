@@ -1,7 +1,7 @@
 //! Actions crate implementation
 pub mod handler;
 
-use lightning::util::events::Event;
+use lightning::events::Event;
 
 use lampo_common::error;
 

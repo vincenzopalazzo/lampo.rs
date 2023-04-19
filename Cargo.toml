@@ -2,6 +2,7 @@
 members = [
         "lampo-common",
         "lampod",
+        "lampod-cli",
         "lampo-cli",
         "lampo-nakamoto",
         "lampo-jsonrpc",

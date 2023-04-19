@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { version = "0.0.114", features = ["max_level_trace"] }
-lightning-block-sync = { version = "0.0.114", features = [ "rpc-client" ] }
+lightning = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = ["max_level_trace"] }
+lightning-block-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = [ "rpc-client" ] }
 clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
 bitcoin = "0.29.0"
 anyhow = "1.0.70"

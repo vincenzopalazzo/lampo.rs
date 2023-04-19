@@ -14,3 +14,7 @@ check:
 
 clean:
 	$(CC) clean
+
+install:
+	$(CC) install --path ./lampo-cli
+	$(CC) install --path ./lampod-cli
