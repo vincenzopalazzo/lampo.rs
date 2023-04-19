@@ -4,5 +4,6 @@ members = [
         "lampod",
         "lampo-cli",
         "lampo-nakamoto",
+        "lampo-jsonrpc",
 ]
 resolver = "2"

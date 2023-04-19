@@ -1,0 +1,14 @@
+[package]
+name = "lampo-jsonrpc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+popol = "2.2.0 "
+log = "0.4.17"
+
+[dev-dependencies]
+lampo-common = { path = "../lampo-common" }
+ntest = "*"

@@ -1,5 +1,6 @@
 //! Lampo deamon implementation.
 #![feature(async_fn_in_trait)]
+#![allow(incomplete_features)]
 pub mod actions;
 pub mod chain;
 pub mod events;
@@ -185,13 +186,10 @@ mod tests {
 
     use lampo_common::conf::LampoConf;
     use lampo_common::logger;
+    use lampo_common::types::NodeId;
     use lampo_nakamoto::{Config, Network};
 
-    use crate::{
-        keys::keys::LampoKeys,
-        ln::events::{NodeId, PeerEvents},
-        LampoDeamon,
-    };
+    use crate::{keys::keys::LampoKeys, ln::events::PeerEvents, LampoDeamon};
 
     #[tokio::test]
     async fn simple_node_connection() {
