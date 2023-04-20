@@ -4,17 +4,17 @@ FMT=fmt
 OPTIONS=
 
 default: fmt
-	$(CC) build
+	rustup run nightly $(CC) build
 
 fmt:
-	$(CC) fmt --all
+	rustup run nightly $(CC) fmt --all
 
 check:
-	$(CC) test --all -- --show-output
+	rustup run nightly $(CC) test --all -- --show-output
 
 clean:
-	$(CC) clean
+	rustup run nightly $(CC) clean
 
 install:
 	$(CC) install --path ./lampo-cli
-	$(CC) install --path ./lampod-cli
+	rustup run nightly $(CC) install --path ./lampod-cli
