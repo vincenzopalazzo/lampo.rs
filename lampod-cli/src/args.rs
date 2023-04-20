@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
 #[derive(Debug, Parser)]
 #[clap(name = "lampod")]
@@ -10,18 +10,4 @@ pub struct LampoCliArgs {
     pub network: Option<String>,
     #[clap(long, value_parser)]
     pub client: Option<String>,
-    #[clap(subcommand)]
-    pub method: LampoCommands,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum LampoCommands {
-    #[clap(arg_required_else_help = true)]
-    Connect {
-        node_id: String,
-        addr: String,
-        port: u64,
-    },
-    #[clap(arg_required_else_help = true)]
-    GetInfo,
 }
