@@ -38,6 +38,7 @@ pub trait ChannelEvents {
     fn change_state_channel(&self, event: ChangeStateChannelEvent) -> error::Result<()>;
 }
 
+// FIXME: remove the async because we are using channels
 pub trait PeerEvents {
     async fn handle(&self, event: peer_event::PeerEvent) -> error::Result<()>;
 

@@ -1,9 +1,11 @@
 //! Implementation of all the peers events
 use std::net::SocketAddr;
 
-use lampo_common::types::NodeId;
+use crossbeam_channel as chan;
 
-#[derive(Clone, PartialEq, Eq)]
+use lampo_common::{model::Connect, types::NodeId};
+
+#[derive(Debug, Clone)]
 pub enum PeerEvent {
-    Connect(NodeId, SocketAddr),
+    Connect(NodeId, SocketAddr, chan::Sender<Connect>),
 }

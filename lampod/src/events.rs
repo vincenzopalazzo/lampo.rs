@@ -7,7 +7,7 @@ use crate::ln::peer_event::PeerEvent;
 ///
 /// This is the top level event enum, when it is possible
 /// find the Lightning Node Events and the OnChainEvents.
-#[derive(PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub enum LampoEvent {
     LNEvent(),
     OnChainEvent(),
@@ -15,7 +15,7 @@ pub enum LampoEvent {
     InventoryEvent(InventoryEvent),
 }
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub enum InventoryEvent {
     GetNodeInfo,
 }

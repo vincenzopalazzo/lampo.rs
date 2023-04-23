@@ -10,20 +10,25 @@ pub mod ln;
 pub mod persistence;
 pub mod utils;
 
+use std::net::SocketAddr;
+use std::str::FromStr;
 use std::{cell::Cell, sync::Arc};
 
 use bitcoin::locktime::Height;
+use crossbeam_channel as chan;
 use futures::lock::Mutex;
+use lampo_common::model::Connect;
 use lightning::{events::Event, routing::gossip::P2PGossipSync};
 use lightning_background_processor::BackgroundProcessor;
 
-use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::{backend::Backend, types::NodeId};
 
 use actions::handler::LampoHandler;
 use chain::LampoChainManager;
 use keys::keys::LampoKeys;
+use ln::peer_event::PeerEvent;
 use ln::{peer_manager::LampoPeerManager, LampoChannelManager};
 use persistence::LampoPersistence;
 use utils::logger::LampoLogger;
@@ -167,6 +172,23 @@ impl<'ctx: 'static> LampoDeamon {
         );
         let _ = background_processor.join();
         Ok(())
+    }
+
+    // FIXME: remove the async method
+    pub async fn connect(&self, node_id: &str, addr: &str, port: u16) -> error::Result<Connect> {
+        let (sender, receiver) = chan::bounded::<Connect>(1);
+        let Some(ref handler) = self.handler else {
+            error::bail!("at this point the handler must be known");
+        };
+        let nid = NodeId::from_str(node_id)?;
+        let addr = format!("{addr}:{port}");
+        let addr = SocketAddr::from_str(&addr)?;
+        handler
+            .react(events::LampoEvent::PeerEvent(PeerEvent::Connect(
+                nid, addr, sender,
+            )))
+            .await?;
+        Ok(receiver.recv()?)
     }
 
     pub async fn stop(self) -> error::Result<()> {
