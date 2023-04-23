@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use std::{sync::Arc, time::SystemTime};
 
+use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
 use lightning::ln::peer_handler::MessageHandler;
 use lightning::ln::peer_handler::{IgnoringMessageHandler, PeerManager, SimpleArcPeerManager};
@@ -117,7 +118,15 @@ impl LampoPeerManager {
 impl PeerEvents for LampoPeerManager {
     async fn handle(&self, event: super::peer_event::PeerEvent) -> error::Result<()> {
         match event {
-            peer_event::PeerEvent::Connect(node_id, addr) => self.connect(node_id, addr).await?,
+            peer_event::PeerEvent::Connect(node_id, addr, chan) => {
+                let connect = Connect {
+                    node_id: node_id.to_string(),
+                    addr: addr.ip().to_string(),
+                    port: addr.port() as u64,
+                };
+                self.connect(node_id, addr).await?;
+                chan.send(connect)?;
+            }
         };
         Ok(())
     }
