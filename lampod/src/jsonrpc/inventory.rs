@@ -1,20 +1,16 @@
 //! Inventory method implementation
-use lampo_common::{json, model::GetInfo};
-use lampo_jsonrpc::command::Context;
+use tokio::runtime::Runtime;
+
+use lampo_common::json;
 
 use crate::LampoDeamon;
 
 pub fn get_info(ctx: &LampoDeamon, request: &json::Value) -> json::Value {
     log::info!("calling `getinfo` with request `{:?}`", request);
-    let lampo = ctx.ctx();
-    let getinfo = GetInfo {
-        node_id: lampo
-            .channel_manager()
-            .manager()
-            .get_our_node_id()
-            .to_string(),
-        peers: lampo.peer_manager().manager().get_peer_node_ids().len(),
-        channels: 0,
+    let rt = Runtime::new().unwrap();
+    let result = rt.block_on(ctx.call("getinfo", request.clone()));
+    let Ok(result) = result else {
+        panic!("we must implement the rpc with error");
     };
-    json::to_value(getinfo).unwrap()
+    result
 }

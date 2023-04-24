@@ -15,10 +15,12 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 
 use crate::chain::LampoChainManager;
+use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
+use super::channe_manager::LampoChainMonitor;
 use super::events::PeerEvents;
-use super::{peer_event, LampoChainMonitor, LampoChannelManager};
+use super::peer_event;
 
 type InnerLampoPeerManager = SimpleArcPeerManager<
     SocketDescriptor,
@@ -31,6 +33,7 @@ type InnerLampoPeerManager = SimpleArcPeerManager<
 
 pub struct LampoPeerManager {
     peer_manager: Option<Arc<InnerLampoPeerManager>>,
+    channel_manager: Option<Arc<LampoChannelManager>>,
     conf: LampoConf,
     logger: Arc<LampoLogger>,
 }
@@ -41,6 +44,7 @@ impl LampoPeerManager {
             peer_manager: None,
             conf: conf.to_owned(),
             logger,
+            channel_manager: None,
         }
     }
 
@@ -89,6 +93,7 @@ impl LampoPeerManager {
             onchain_manager.keymanager.inner(),
         );
         self.peer_manager = Some(Arc::new(peer_manager));
+        self.channel_manager = Some(channel_manager.clone());
         Ok(())
     }
 

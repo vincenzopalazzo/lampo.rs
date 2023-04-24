@@ -14,6 +14,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::{cell::Cell, sync::Arc};
 
+use actions::InventoryHandler;
 use bitcoin::locktime::Height;
 use crossbeam_channel as chan;
 use events::LampoEvent;
@@ -32,12 +33,13 @@ use actions::handler::LampoHandler;
 use chain::LampoChainManager;
 use keys::keys::LampoKeys;
 use ln::peer_event::PeerEvent;
-use ln::{peer_manager::LampoPeerManager, LampoChannelManager};
+use ln::{LampoChannelManager, LampoPeerManager};
 use persistence::LampoPersistence;
 use utils::logger::LampoLogger;
 
 use crate::actions::Handler;
 
+#[derive(Clone)]
 pub struct LampoDeamon {
     conf: LampoConf,
     peer_manager: Option<Arc<LampoPeerManager>>,
@@ -46,7 +48,7 @@ pub struct LampoDeamon {
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
-    process: Mutex<Cell<Option<BackgroundProcessor>>>,
+    process: Arc<Mutex<Cell<Option<BackgroundProcessor>>>>,
 }
 
 impl LampoDeamon {
@@ -60,7 +62,7 @@ impl LampoDeamon {
             onchain_manager: None,
             channel_manager: None,
             handler: None,
-            process: Mutex::new(Cell::new(None)),
+            process: Arc::new(Mutex::new(Cell::new(None))),
         }
     }
 
@@ -123,7 +125,7 @@ impl LampoDeamon {
     }
 
     pub fn init_event_handler(&mut self) -> error::Result<()> {
-        let handler = LampoHandler::new(&self.channel_manager(), &self.peer_manager());
+        let handler = LampoHandler::new(Arc::from(self.clone()));
         self.handler = Some(Arc::new(handler));
         Ok(())
     }
@@ -213,12 +215,37 @@ impl LampoDeamon {
     }
 }
 
+impl InventoryHandler for LampoDeamon {
+    fn handle(&self, event: events::InventoryEvent) -> error::Result<()> {
+        use events::InventoryEvent;
+        use lampo_common::model::GetInfo;
+
+        match event {
+            InventoryEvent::GetNodeInfo(chan) => {
+                let getinfo = GetInfo {
+                    node_id: self
+                        .channel_manager()
+                        .manager()
+                        .get_our_node_id()
+                        .to_string(),
+                    peers: self.peer_manager().manager().get_peer_node_ids().len(),
+                    channels: 0,
+                };
+                let getinfo = json::to_value(getinfo)?;
+                chan.send(getinfo)?;
+                Ok(())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::{net::SocketAddr, str::FromStr};
 
     use clightningrpc_conf::CLNConf;
+    use lampo_common::json;
     use lightning::util::config::UserConfig;
 
     use lampo_common::conf::LampoConf;
@@ -252,6 +279,28 @@ mod tests {
                 .unwrap();
         let addr = SocketAddr::from_str("78.46.220.4:19735").unwrap();
         let result = lampo.peer_manager().connect(node_id, addr).await;
+        assert!(result.is_ok(), "{:?}", result);
+    }
+
+    #[tokio::test]
+    async fn simple_get_info() {
+        let conf = LampoConf {
+            ldk_conf: UserConfig::default(),
+            network: bitcoin::Network::Testnet,
+            port: 19753,
+            path: "/tmp".to_string(),
+            inner: CLNConf::new("/tmp/".to_owned(), true),
+        };
+        let mut lampo = LampoDeamon::new(conf);
+
+        let mut conf = Config::default();
+        conf.network = Network::Testnet;
+        let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
+
+        let result = lampo.init(client, Arc::new(LampoKeys::new())).await;
+        assert!(result.is_ok());
+        let payload = json::json!({});
+        let result = lampo.call("getinfo", payload).await;
         assert!(result.is_ok(), "{:?}", result);
     }
 }
