@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use clap::Parser;
-use lampod::jsonrpc::CommandHandler;
 use log;
+use tokio::runtime::Runtime;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
@@ -19,9 +19,9 @@ use lampo_jsonrpc::JSONRPCv2;
 use lampo_nakamoto::{Config, Nakamoto, Network};
 use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::peer_control::json_connect;
+use lampod::jsonrpc::CommandHandler;
 use lampod::keys::keys::LampoKeys;
 use lampod::LampoDeamon;
-use tokio::runtime::Runtime;
 
 use crate::args::LampoCliArgs;
 
@@ -79,9 +79,10 @@ fn run_jsonrpc(
         .add_rpc("hello", |ctx, req| {
             log::info!("calling the hello rpc call");
             let rt = Runtime::new().unwrap();
+            // the rpc error should be better thant this
             let result = rt.block_on(ctx.call("getinfo", req.clone())).unwrap();
             log::debug!("return the value {:?}", result);
-            result
+            Ok(result)
         })
         .unwrap();
 
