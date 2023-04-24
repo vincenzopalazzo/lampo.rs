@@ -8,24 +8,23 @@ use lampo_common::types::ChannelState;
 
 use crate::events::LampoEvent;
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents, PeerEvents};
-use crate::ln::peer_manager::LampoPeerManager;
-use crate::ln::LampoChannelManager;
+use crate::ln::{LampoChannelManager, LampoPeerManager};
+use crate::LampoDeamon;
 
-use super::Handler;
+use super::{Handler, InventoryHandler};
 
 pub struct LampoHandler {
+    lampod: Arc<LampoDeamon>,
     channel_manager: Arc<LampoChannelManager>,
     peer_manager: Arc<LampoPeerManager>,
 }
 
 impl LampoHandler {
-    pub fn new(
-        channel_manager: &Arc<LampoChannelManager>,
-        peer_manager: &Arc<LampoPeerManager>,
-    ) -> Self {
+    pub fn new(lampod: Arc<LampoDeamon>) -> Self {
         Self {
-            channel_manager: channel_manager.clone(),
-            peer_manager: peer_manager.clone(),
+            lampod: lampod.to_owned(),
+            channel_manager: lampod.channel_manager(),
+            peer_manager: lampod.peer_manager(),
         }
     }
 }
@@ -37,7 +36,10 @@ impl Handler for LampoHandler {
             LampoEvent::LNEvent() => unimplemented!(),
             LampoEvent::OnChainEvent() => unimplemented!(),
             LampoEvent::PeerEvent(event) => self.peer_manager.handle(event).await,
-            LampoEvent::InventoryEvent(_) => unimplemented!(),
+            LampoEvent::InventoryEvent(event) => {
+                self.lampod.handle(event)?;
+                Ok(())
+            }
         }
     }
 
