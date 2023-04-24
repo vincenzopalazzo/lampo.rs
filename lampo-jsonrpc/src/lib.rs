@@ -38,7 +38,8 @@ pub struct JSONRPCv2<T: Send + Sync + 'static> {
 
 pub struct Handler<T: Send + Sync + 'static> {
     stop: Cell<bool>,
-    rpc_method: RefCell<HashMap<String, Arc<dyn Fn(&T, &Value) -> Value + Sync + Send>>>,
+    rpc_method:
+        RefCell<HashMap<String, Arc<dyn Fn(&T, &Value) -> Result<Value, errors::Error> + 'static>>>,
 }
 
 unsafe impl<T: Send + Sync> Sync for Handler<T> {}
@@ -54,20 +55,24 @@ impl<T: Send + Sync + 'static> Handler<T> {
 
     pub fn add_method<F>(&self, method: &str, callback: F)
     where
-        F: Fn(&T, &Value) -> Value + Sync + Send + 'static,
+        F: Fn(&T, &Value) -> Result<Value, errors::Error> + 'static,
     {
         self.rpc_method
             .borrow_mut()
             .insert(method.to_owned(), Arc::new(callback));
     }
 
-    pub fn run_callback(&self, ctx: &T, req: &Request<Value>) -> Option<Result<Value, ()>> {
+    pub fn run_callback(
+        &self,
+        ctx: &T,
+        req: &Request<Value>,
+    ) -> Option<Result<Value, errors::Error>> {
         let binding = self.rpc_method.borrow();
         let Some(callback) = binding.get(&req.method) else {
             return None;
         };
         let resp = callback(ctx, &req.params);
-        Some(Ok(resp))
+        Some(resp)
     }
 
     pub fn has_rpc(&self, method: &str) -> bool {
@@ -96,7 +101,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
 
     pub fn add_rpc<F>(&self, name: &str, callback: F) -> Result<(), ()>
     where
-        F: Fn(&T, &Value) -> Value + Sync + Send + 'static,
+        F: Fn(&T, &Value) -> Result<Value, errors::Error> + 'static,
     {
         if self.handler.has_rpc(name) {
             return Err(());
@@ -335,8 +340,12 @@ mod tests {
         logger::init(log::Level::Debug).unwrap();
         let mut server = JSONRPCv2::new("/tmp/tmp.sock").unwrap();
         server.with_ctx(Arc::new(DummyCtx));
-        let _ = server.add_rpc("foo", |_: &DummyCtx, request| serde_json::json!(request));
-        let res = server.add_rpc("secon", |_: &DummyCtx, request| serde_json::json!(request));
+        let _ = server.add_rpc("foo", |_: &DummyCtx, request| {
+            Ok(serde_json::json!(request))
+        });
+        let res = server.add_rpc("secon", |_: &DummyCtx, request| {
+            Ok(serde_json::json!(request))
+        });
         assert!(res.is_ok(), "{:?}", res);
 
         let handler = server.handler();
