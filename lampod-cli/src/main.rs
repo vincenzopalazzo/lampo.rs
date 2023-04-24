@@ -68,7 +68,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 
 fn run_jsonrpc(
     lampod: Arc<LampoDeamon>,
-) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler>)> {
+) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler<LampoDeamon>>)> {
     let socket_path = format!("{}/lampod.socket", lampod.root_path());
     env::set_var("LAMPO_UNIX", socket_path.clone());
     let mut server = JSONRPCv2::new(&socket_path)?;
