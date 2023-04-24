@@ -36,6 +36,17 @@ pub struct Request<T: Serialize> {
     pub jsonrpc: String,
 }
 
+impl<T: Serialize> Request<T> {
+    pub fn new(method: &str, args: T) -> Self {
+        Request {
+            method: method.to_owned(),
+            params: args,
+            id: Some("lampo/jsonrpc/1".into()),
+            jsonrpc: "2.0".to_owned(),
+        }
+    }
+}
+
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 /// A standard JSONRPC response object

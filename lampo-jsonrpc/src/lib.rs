@@ -1,8 +1,8 @@
 //! Full feature JSON RPC 2.0 Server/client with a
 //! minimal dependencies footprint.
 pub mod command;
-mod errors;
-mod json_rpc2;
+pub mod errors;
+pub mod json_rpc2;
 
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
