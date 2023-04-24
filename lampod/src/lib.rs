@@ -16,6 +16,7 @@ use std::{cell::Cell, sync::Arc};
 
 use bitcoin::locktime::Height;
 use crossbeam_channel as chan;
+use events::LampoEvent;
 use futures::lock::Mutex;
 use lampo_common::model::Connect;
 use lightning::{events::Event, routing::gossip::P2PGossipSync};
@@ -23,7 +24,9 @@ use lightning_background_processor::BackgroundProcessor;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::json;
 use lampo_common::{backend::Backend, types::NodeId};
+use lampo_jsonrpc::json_rpc2::Request;
 
 use actions::handler::LampoHandler;
 use chain::LampoChainManager;
@@ -46,7 +49,7 @@ pub struct LampoDeamon {
     process: Mutex<Cell<Option<BackgroundProcessor>>>,
 }
 
-impl<'ctx: 'static> LampoDeamon {
+impl LampoDeamon {
     pub fn new(config: LampoConf) -> Self {
         let root_path = config.path();
         LampoDeamon {
@@ -188,6 +191,17 @@ impl<'ctx: 'static> LampoDeamon {
                 nid, addr, sender,
             )))
             .await?;
+        Ok(receiver.recv()?)
+    }
+
+    pub async fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
+        let request = Request::new(method, args);
+        let (sender, receiver) = chan::bounded::<json::Value>(1);
+        let command = LampoEvent::from_req(&request, &sender)?;
+        let Some(ref handler) = self.handler else {
+            error::bail!("at this point the handler should be not None");
+        };
+        handler.react(command).await?;
         Ok(receiver.recv()?)
     }
 
