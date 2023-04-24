@@ -1,12 +1,14 @@
 #[allow(dead_code)]
 mod args;
 
+use std::env;
 use std::io;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use clap::Parser;
+use lampod::jsonrpc::CommandHandler;
 use log;
 
 use lampo_common::conf::LampoConf;
@@ -19,6 +21,7 @@ use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::peer_control::json_connect;
 use lampod::keys::keys::LampoKeys;
 use lampod::LampoDeamon;
+use tokio::runtime::Runtime;
 
 use crate::args::LampoCliArgs;
 
@@ -51,6 +54,10 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", args.client),
     };
     lampod.init(client, keys).await?;
+
+    let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
+    lampod.add_external_handler(rpc_handler.clone())?;
+
     let lampod = Arc::new(lampod);
     let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
     lampod.listen().await?;
@@ -63,10 +70,21 @@ fn run_jsonrpc(
     lampod: Arc<LampoDeamon>,
 ) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler>)> {
     let socket_path = format!("{}/lampod.socket", lampod.root_path());
+    env::set_var("LAMPO_UNIX", socket_path.clone());
     let mut server = JSONRPCv2::new(&socket_path)?;
     server.with_ctx(lampod);
     server.add_rpc("getinfo", get_info).unwrap();
     server.add_rpc("connect", json_connect).unwrap();
+    server
+        .add_rpc("hello", |ctx, req| {
+            log::info!("calling the hello rpc call");
+            let rt = Runtime::new().unwrap();
+            let result = rt.block_on(ctx.call("getinfo", req.clone())).unwrap();
+            log::debug!("return the value {:?}", result);
+            result
+        })
+        .unwrap();
+
     let handler = server.handler();
     Ok((server.spawn(), handler))
 }

@@ -41,5 +41,9 @@ fn run(args: LampoCliArgs) -> error::Result<json::Value> {
             let resp: json::Value = client.call("getinfo", json::json!({})).unwrap();
             Ok(resp)
         }
+        LampoCommands::Hello => {
+            let resp = client.call("hello", json::json!({})).unwrap();
+            Ok(resp)
+        }
     }
 }

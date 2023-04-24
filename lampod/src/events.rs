@@ -18,6 +18,16 @@ pub enum LampoEvent {
     OnChainEvent(),
     PeerEvent(PeerEvent),
     InventoryEvent(InventoryEvent),
+    /// External Event is done to be able to
+    /// handle.
+    ///
+    /// An external handler can be any kind of method
+    /// that lampod do not know nothing about.
+    ///
+    /// Core Lightning Plugins works this way and we want
+    /// keep this freedom, but we do not want people
+    /// that are couple with our design choice.
+    ExternalEvent(Request<json::Value>, chan::Sender<json::Value>),
 }
 
 impl LampoEvent {
@@ -30,7 +40,7 @@ impl LampoEvent {
                 let inner = InventoryEvent::from_req(req, chan)?;
                 Ok(Self::InventoryEvent(inner))
             }
-            _ => error::bail!("command {} not found", req.method),
+            _ => Ok(LampoEvent::ExternalEvent(req.clone(), chan.clone())),
         }
     }
 }

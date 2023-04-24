@@ -9,6 +9,7 @@ edition = "2021"
 tokio = { version = "1.22.0", features = ["full"] }
 lampo-common = { path = "../lampo-common" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
+lampo-client = { path = "../lampo-client" }
 lightning = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = ["max_level_trace"] }
 lightning-block-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = [ "rpc-client" ] }
 lightning-invoice = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
@@ -23,6 +24,7 @@ futures = "0.3.28"
 io-reactor = "0.1.2"
 popol = { version = "2.2.0" }
 crossbeam-channel = "0.5.8"
+once_cell = "1.17.1"
 
 [dev-dependencies]
 lampo-nakamoto = { path = "../lampo-nakamoto" }
