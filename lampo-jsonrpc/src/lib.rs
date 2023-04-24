@@ -4,7 +4,7 @@ pub mod command;
 pub mod errors;
 pub mod json_rpc2;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, ErrorKind};
 use std::io::{Read, Write};
@@ -29,32 +29,55 @@ pub enum RPCEvent {
 pub struct JSONRPCv2<T: Send + Sync + 'static> {
     socket_path: String,
     sources: Sources<RPCEvent>,
-    rpc_method: HashMap<String, Arc<dyn Fn(&T, &Value) -> Value + Sync + Send>>,
     socket: UnixListener,
-    handler: Arc<Handler>,
+    handler: Arc<Handler<T>>,
     pub(crate) conn: HashMap<String, UnixStream>,
     conn_queue: Mutex<Cell<HashMap<String, VecDeque<Response<Value>>>>>,
     ctx: Option<Arc<dyn Context<Ctx = T>>>,
 }
 
-pub struct Handler {
+pub struct Handler<T: Send + Sync + 'static> {
     stop: Cell<bool>,
+    rpc_method: RefCell<HashMap<String, Arc<dyn Fn(&T, &Value) -> Value + Sync + Send>>>,
 }
 
-impl Handler {
+unsafe impl<T: Send + Sync> Sync for Handler<T> {}
+unsafe impl<T: Send + Sync> Send for Handler<T> {}
+
+impl<T: Send + Sync + 'static> Handler<T> {
     pub fn new() -> Self {
-        Handler {
+        Handler::<T> {
             stop: Cell::new(false),
+            rpc_method: RefCell::new(HashMap::new()),
         }
+    }
+
+    pub fn add_method<F>(&self, method: &str, callback: F)
+    where
+        F: Fn(&T, &Value) -> Value + Sync + Send + 'static,
+    {
+        self.rpc_method
+            .borrow_mut()
+            .insert(method.to_owned(), Arc::new(callback));
+    }
+
+    pub fn run_callback(&self, ctx: &T, req: &Request<Value>) -> Option<Result<Value, ()>> {
+        let binding = self.rpc_method.borrow();
+        let Some(callback) = binding.get(&req.method) else {
+            return None;
+        };
+        let resp = callback(ctx, &req.params);
+        Some(Ok(resp))
+    }
+
+    pub fn has_rpc(&self, method: &str) -> bool {
+        self.rpc_method.borrow().contains_key(method)
     }
 
     pub fn stop(&self) {
         self.stop.set(true);
     }
 }
-
-unsafe impl Send for Handler {}
-unsafe impl Sync for Handler {}
 
 impl<T: Send + Sync + 'static> JSONRPCv2<T> {
     pub fn new(path: &str) -> Result<Self, Error> {
@@ -64,7 +87,6 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
             sources,
             socket: listnet,
             handler: Arc::new(Handler::new()),
-            rpc_method: HashMap::new(),
             socket_path: path.to_owned(),
             conn: HashMap::new(),
             conn_queue: Mutex::new(Cell::new(HashMap::new())),
@@ -72,14 +94,14 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         })
     }
 
-    pub fn add_rpc<F>(&mut self, name: &str, callback: F) -> Result<(), ()>
+    pub fn add_rpc<F>(&self, name: &str, callback: F) -> Result<(), ()>
     where
         F: Fn(&T, &Value) -> Value + Sync + Send + 'static,
     {
-        if self.rpc_method.contains_key(name) {
+        if self.handler.has_rpc(name) {
             return Err(());
         }
-        self.rpc_method.insert(name.to_owned(), Arc::new(callback));
+        self.handler.add_method(name, callback);
         Ok(())
     }
 
@@ -203,15 +225,16 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                             log::info!("buffer read {buff}");
                             let requ: Request<Value> = serde_json::from_str(&buff).unwrap();
                             log::trace!("request {:?}", requ);
-                            let Some(callback) = self.rpc_method.get(&requ.method) else {
+                            let Some(resp) = self.handler.run_callback(self.ctx(), &requ) else {
                                 log::error!("`{}` not found!", requ.method);
                                 break;
                             };
-                            let resp = callback(self.ctx(), &requ.params);
+
+                            // FIXME unwrap the error return by the rpc!
                             let resp = Response {
                                 id: requ.id.clone().unwrap(),
                                 jsonrpc: Some(requ.jsonrpc.clone()),
-                                result: Some(resp),
+                                result: Some(resp.unwrap()),
                                 error: None,
                             };
 
@@ -265,7 +288,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         Ok(())
     }
 
-    pub fn handler(&self) -> Arc<Handler> {
+    pub fn handler(&self) -> Arc<Handler<T>> {
         self.handler.clone()
     }
 
