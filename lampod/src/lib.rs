@@ -4,6 +4,7 @@
 pub mod actions;
 pub mod chain;
 pub mod events;
+pub mod handler;
 pub mod jsonrpc;
 pub mod keys;
 pub mod ln;
@@ -14,11 +15,11 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::{cell::Cell, sync::Arc};
 
-use actions::InventoryHandler;
 use bitcoin::locktime::Height;
 use crossbeam_channel as chan;
 use events::LampoEvent;
 use futures::lock::Mutex;
+use handler::external_handler::ExternalHandler;
 use lampo_common::model::Connect;
 use lightning::{events::Event, routing::gossip::P2PGossipSync};
 use lightning_background_processor::BackgroundProcessor;
@@ -33,23 +34,26 @@ use actions::handler::LampoHandler;
 use chain::LampoChainManager;
 use keys::keys::LampoKeys;
 use ln::peer_event::PeerEvent;
-use ln::{LampoChannelManager, LampoPeerManager};
+use ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use persistence::LampoPersistence;
 use utils::logger::LampoLogger;
 
 use crate::actions::Handler;
 
-#[derive(Clone)]
 pub struct LampoDeamon {
     conf: LampoConf,
     peer_manager: Option<Arc<LampoPeerManager>>,
     onchain_manager: Option<Arc<LampoChainManager>>,
     channel_manager: Option<Arc<LampoChannelManager>>,
+    inventory_manager: Option<Arc<LampoInventoryManager>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Arc<Mutex<Cell<Option<BackgroundProcessor>>>>,
 }
+
+unsafe impl Send for LampoDeamon {}
+unsafe impl Sync for LampoDeamon {}
 
 impl LampoDeamon {
     pub fn new(config: LampoConf) -> Self {
@@ -61,6 +65,7 @@ impl LampoDeamon {
             peer_manager: None,
             onchain_manager: None,
             channel_manager: None,
+            inventory_manager: None,
             handler: None,
             process: Arc::new(Mutex::new(Cell::new(None))),
         }
@@ -124,8 +129,21 @@ impl LampoDeamon {
         manager.clone()
     }
 
+    fn init_inventory_manager(&mut self) -> error::Result<()> {
+        let manager = LampoInventoryManager::new(self.peer_manager(), self.channel_manager());
+        self.inventory_manager = Some(Arc::new(manager));
+        Ok(())
+    }
+
+    pub fn inventory_manager(&self) -> Arc<LampoInventoryManager> {
+        let Some(ref manager) = self.inventory_manager else {
+            panic!("inventory menager need to be initialized");
+        };
+        manager.clone()
+    }
+
     pub fn init_event_handler(&mut self) -> error::Result<()> {
-        let handler = LampoHandler::new(Arc::from(self.clone()));
+        let handler = LampoHandler::new(&self);
         self.handler = Some(Arc::new(handler));
         Ok(())
     }
@@ -146,7 +164,16 @@ impl LampoDeamon {
         self.init_onchaind(client.clone(), keys.clone())?;
         self.init_channeld().await?;
         self.init_peer_manager()?;
+        self.init_inventory_manager()?;
         self.init_event_handler()?;
+        Ok(())
+    }
+
+    pub fn add_external_handler(&self, ext_handler: Arc<dyn ExternalHandler>) -> error::Result<()> {
+        let Some(ref handler) = self.handler else {
+            error::bail!("Initial handler is None");
+        };
+        handler.add_external_handler(ext_handler)?;
         Ok(())
     }
 
@@ -212,30 +239,6 @@ impl LampoDeamon {
             process.stop()?;
         }
         Ok(())
-    }
-}
-
-impl InventoryHandler for LampoDeamon {
-    fn handle(&self, event: events::InventoryEvent) -> error::Result<()> {
-        use events::InventoryEvent;
-        use lampo_common::model::GetInfo;
-
-        match event {
-            InventoryEvent::GetNodeInfo(chan) => {
-                let getinfo = GetInfo {
-                    node_id: self
-                        .channel_manager()
-                        .manager()
-                        .get_our_node_id()
-                        .to_string(),
-                    peers: self.peer_manager().manager().get_peer_node_ids().len(),
-                    channels: 0,
-                };
-                let getinfo = json::to_value(getinfo)?;
-                chan.send(getinfo)?;
-                Ok(())
-            }
-        }
     }
 }
 

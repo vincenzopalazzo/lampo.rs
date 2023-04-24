@@ -20,4 +20,5 @@ pub enum LampoCommands {
     },
     #[clap(name = "getinfo")]
     GetInfo,
+    Hello,
 }
