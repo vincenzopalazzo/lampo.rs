@@ -1,8 +1,10 @@
+pub use clightningrpc_common::errors;
+
 use clightningrpc_common::client;
+use clightningrpc_common::errors::Error;
+use lampo_common::error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-
-use lampo_common::error;
 
 pub struct UnixClient {
     #[allow(dead_code)]
@@ -23,12 +25,11 @@ impl UnixClient {
         &self,
         method: &str,
         input: T,
-    ) -> error::Result<U> {
+    ) -> Result<U, Error> {
         let res = self
             .inner
             .send_request(method, input)
-            .and_then(|res| res.into_result())
-            .map_err(error::Error::from)?;
+            .and_then(|res| res.into_result())?;
         Ok(res)
     }
 }

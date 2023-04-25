@@ -75,10 +75,13 @@ pub struct RpcError {
 
 impl From<Error> for RpcError {
     fn from(value: Error) -> Self {
-        RpcError {
-            code: -1,
-            message: format!("{value}"),
-            data: None,
+        match value {
+            Error::Rpc(rpc) => return rpc.clone(),
+            _ => RpcError {
+                code: -1,
+                message: format!("{value}"),
+                data: None,
+            },
         }
     }
 }
