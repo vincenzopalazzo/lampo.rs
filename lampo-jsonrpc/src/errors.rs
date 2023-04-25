@@ -72,3 +72,13 @@ pub struct RpcError {
     /// Additional data specific to the error
     pub data: Option<serde_json::Value>,
 }
+
+impl From<Error> for RpcError {
+    fn from(value: Error) -> Self {
+        RpcError {
+            code: -1,
+            message: format!("{value}"),
+            data: None,
+        }
+    }
+}

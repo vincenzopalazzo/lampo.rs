@@ -66,7 +66,11 @@ impl<T: Send + Sync + 'static> Handler<T> {
     pub fn run_callback(&self, req: &Request<Value>) -> Option<Result<Value, errors::Error>> {
         let binding = self.rpc_method.borrow();
         let Some(callback) = binding.get(&req.method) else {
-            return None;
+            return Some(Err(errors::RpcError{
+                message: format!("method `{}` not found", req.method),
+                code: -1,
+                data: None,
+            }.into()));
         };
         let resp = callback(self.ctx(), &req.params);
         Some(resp)
@@ -225,17 +229,22 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                 log::error!("`{}` not found!", requ.method);
                                 break;
                             };
-
-                            // FIXME unwrap the error return by the rpc!
-                            let resp = Response {
-                                id: requ.id.clone().unwrap(),
-                                jsonrpc: Some(requ.jsonrpc.clone()),
-                                result: Some(resp.unwrap()),
-                                error: None,
+                            let response = match resp {
+                                Ok(result) => Response {
+                                    id: requ.id.clone().unwrap(),
+                                    jsonrpc: requ.jsonrpc.to_owned(),
+                                    result: Some(result),
+                                    error: None,
+                                },
+                                Err(err) => Response {
+                                    result: None,
+                                    error: Some(err.into()),
+                                    id: requ.id.unwrap().clone(),
+                                    jsonrpc: requ.jsonrpc.clone(),
+                                },
                             };
-
-                            log::trace!("send response: `{:?}`", resp);
-                            self.send_resp(addr.to_string(), resp);
+                            log::trace!("send response: `{:?}`", response);
+                            self.send_resp(addr.to_string(), response);
                         }
 
                         if event.is_writable() {
