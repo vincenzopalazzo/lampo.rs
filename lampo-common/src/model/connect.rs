@@ -9,7 +9,7 @@ use crate::types::NodeId;
 pub struct Connect {
     pub node_id: String,
     pub addr: String,
-    pub port: u64,
+    pub port: String,
 }
 
 impl Connect {
