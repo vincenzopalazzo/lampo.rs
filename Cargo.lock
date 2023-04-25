@@ -570,6 +570,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lampo-plugin-manager"
+version = "0.1.0"
+dependencies = [
+ "lampo-jsonrpc",
+ "log",
+ "popol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lampod"
 version = "0.1.0"
 dependencies = [
