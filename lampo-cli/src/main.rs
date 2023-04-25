@@ -1,49 +1,33 @@
 mod args;
 
-use args::LampoCommands;
-use clap::Parser;
-use lampo_client::UnixClient;
-use log;
+use std::process::exit;
 
-use lampo_common::{
-    json::{self, error},
-    logger,
-    model::Connect,
-};
+use log;
+use radicle_term as term;
+
+use lampo_client::UnixClient;
+use lampo_common::error;
+use lampo_common::json;
+use lampo_common::logger;
 
 use crate::args::LampoCliArgs;
 
 fn main() -> error::Result<()> {
     logger::init(log::Level::Info).unwrap();
-    let args = LampoCliArgs::parse();
+    let args = match args::parse_args() {
+        Ok(args) => args,
+        Err(err) => {
+            term::error(format!("{err}"));
+            exit(1);
+        }
+    };
     let resp = run(args)?;
-    println!("{}", json::to_string_pretty(&resp)?);
+    println!("{}", term::format::bold(json::to_string_pretty(&resp)?));
     Ok(())
 }
 
 fn run(args: LampoCliArgs) -> error::Result<json::Value> {
     let client = UnixClient::new(&args.socket).unwrap();
-    match args.method {
-        LampoCommands::Connect {
-            node_id,
-            addr,
-            port,
-        } => {
-            let input = Connect {
-                node_id,
-                addr,
-                port,
-            };
-            let resp: json::Value = client.call("connect", input).unwrap();
-            Ok(resp)
-        }
-        LampoCommands::GetInfo => {
-            let resp: json::Value = client.call("getinfo", json::json!({})).unwrap();
-            Ok(resp)
-        }
-        LampoCommands::Hello => {
-            let resp = client.call("hello", json::json!({})).unwrap();
-            Ok(resp)
-        }
-    }
+    let resp = client.call(&args.method, args.args);
+    Ok(resp.map_err(|err| error::anyhow!("{:?}", err))?)
 }

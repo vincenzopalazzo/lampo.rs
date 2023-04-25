@@ -127,7 +127,7 @@ impl PeerEvents for LampoPeerManager {
                 let connect = Connect {
                     node_id: node_id.to_string(),
                     addr: addr.ip().to_string(),
-                    port: addr.port() as u64,
+                    port: addr.port().to_string(),
                 };
                 self.connect(node_id, addr).await?;
                 chan.send(connect)?;
