@@ -33,23 +33,24 @@ pub struct JSONRPCv2<T: Send + Sync + 'static> {
     handler: Arc<Handler<T>>,
     pub(crate) conn: HashMap<String, UnixStream>,
     conn_queue: Mutex<Cell<HashMap<String, VecDeque<Response<Value>>>>>,
-    ctx: Option<Arc<dyn Context<Ctx = T>>>,
 }
 
 pub struct Handler<T: Send + Sync + 'static> {
     stop: Cell<bool>,
     rpc_method:
         RefCell<HashMap<String, Arc<dyn Fn(&T, &Value) -> Result<Value, errors::Error> + 'static>>>,
+    ctx: Arc<dyn Context<Ctx = T>>,
 }
 
 unsafe impl<T: Send + Sync> Sync for Handler<T> {}
 unsafe impl<T: Send + Sync> Send for Handler<T> {}
 
 impl<T: Send + Sync + 'static> Handler<T> {
-    pub fn new() -> Self {
+    pub fn new(ctx: Arc<dyn Context<Ctx = T>>) -> Self {
         Handler::<T> {
             stop: Cell::new(false),
             rpc_method: RefCell::new(HashMap::new()),
+            ctx,
         }
     }
 
@@ -62,21 +63,21 @@ impl<T: Send + Sync + 'static> Handler<T> {
             .insert(method.to_owned(), Arc::new(callback));
     }
 
-    pub fn run_callback(
-        &self,
-        ctx: &T,
-        req: &Request<Value>,
-    ) -> Option<Result<Value, errors::Error>> {
+    pub fn run_callback(&self, req: &Request<Value>) -> Option<Result<Value, errors::Error>> {
         let binding = self.rpc_method.borrow();
         let Some(callback) = binding.get(&req.method) else {
             return None;
         };
-        let resp = callback(ctx, &req.params);
+        let resp = callback(self.ctx(), &req.params);
         Some(resp)
     }
 
     pub fn has_rpc(&self, method: &str) -> bool {
         self.rpc_method.borrow().contains_key(method)
+    }
+
+    fn ctx(&self) -> &T {
+        self.ctx.ctx()
     }
 
     pub fn stop(&self) {
@@ -85,17 +86,16 @@ impl<T: Send + Sync + 'static> Handler<T> {
 }
 
 impl<T: Send + Sync + 'static> JSONRPCv2<T> {
-    pub fn new(path: &str) -> Result<Self, Error> {
+    pub fn new(ctx: Arc<dyn Context<Ctx = T>>, path: &str) -> Result<Self, Error> {
         let listnet = UnixListener::bind(path)?;
         let sources = Sources::<RPCEvent>::new();
         Ok(Self {
             sources,
             socket: listnet,
-            handler: Arc::new(Handler::new()),
+            handler: Arc::new(Handler::new(ctx)),
             socket_path: path.to_owned(),
             conn: HashMap::new(),
             conn_queue: Mutex::new(Cell::new(HashMap::new())),
-            ctx: None,
         })
     }
 
@@ -153,18 +153,9 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         resp
     }
 
-    pub fn with_ctx<Ctx>(&mut self, ctx: Arc<Ctx>)
-    where
-        Ctx: Context<Ctx = T> + 'static,
-    {
-        self.ctx = Some(ctx)
-    }
-
+    #[allow(dead_code)]
     fn ctx(&self) -> &T {
-        let Some(ref ctx) = self.ctx else {
-            panic!("need to set t contex");
-        };
-        ctx.ctx()
+        self.handler.ctx()
     }
 
     pub fn listen(mut self) -> io::Result<()> {
@@ -230,7 +221,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                             log::info!("buffer read {buff}");
                             let requ: Request<Value> = serde_json::from_str(&buff).unwrap();
                             log::trace!("request {:?}", requ);
-                            let Some(resp) = self.handler.run_callback(self.ctx(), &requ) else {
+                            let Some(resp) = self.handler.run_callback(&requ) else {
                                 log::error!("`{}` not found!", requ.method);
                                 break;
                             };
@@ -338,8 +329,7 @@ mod tests {
     #[timeout(9000)]
     fn register_rpc() {
         logger::init(log::Level::Debug).unwrap();
-        let mut server = JSONRPCv2::new("/tmp/tmp.sock").unwrap();
-        server.with_ctx(Arc::new(DummyCtx));
+        let server = JSONRPCv2::new(Arc::new(DummyCtx), "/tmp/tmp.sock").unwrap();
         let _ = server.add_rpc("foo", |_: &DummyCtx, request| {
             Ok(serde_json::json!(request))
         });
