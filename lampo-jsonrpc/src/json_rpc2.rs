@@ -58,7 +58,7 @@ pub struct Response<T> {
     /// Identifier for this Request, which should match that of the request
     pub id: Id,
     /// jsonrpc field, MUST be "2.0"
-    pub jsonrpc: Option<String>,
+    pub jsonrpc: String,
 }
 
 impl<T> Response<T> {
