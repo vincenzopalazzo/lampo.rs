@@ -48,7 +48,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         }
         _ => error::bail!("client {:?} not supported", args.client),
     };
-    lampod.init(client, keys).await?;
+    lampod.init(client, keys)?;
 
     let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
     lampod.add_external_handler(rpc_handler.clone())?;

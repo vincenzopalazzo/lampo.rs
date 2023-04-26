@@ -11,7 +11,7 @@ use crate::events::LampoEvent;
 use crate::handler::external_handler::ExternalHandler;
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents, PeerEvents};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::LampoDeamon;
+use crate::{async_run, LampoDeamon};
 
 use super::{Handler, InventoryHandler};
 
@@ -44,11 +44,13 @@ impl LampoHandler {
 
 #[allow(unused_variables)]
 impl Handler for LampoHandler {
-    async fn react(&self, event: crate::events::LampoEvent) -> error::Result<()> {
+    fn react(&self, event: crate::events::LampoEvent) -> error::Result<()> {
         match event {
             LampoEvent::LNEvent() => unimplemented!(),
             LampoEvent::OnChainEvent() => unimplemented!(),
-            LampoEvent::PeerEvent(event) => self.peer_manager.handle(event).await,
+            LampoEvent::PeerEvent(event) => {
+                async_run!(self.peer_manager.handle(event))
+            }
             LampoEvent::InventoryEvent(event) => {
                 self.inventory_manager.handle(event)?;
                 Ok(())

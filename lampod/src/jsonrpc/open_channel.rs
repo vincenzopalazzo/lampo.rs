@@ -1,6 +1,4 @@
 //! Open Channel RPC Method implementation
-use tokio::runtime::Runtime;
-
 use lampo_common::json;
 use lampo_common::model::request;
 use lampo_jsonrpc::errors::{Error, RpcError};
@@ -24,8 +22,8 @@ pub fn json_open_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<jso
             })
         })?;
         let conn = json::to_value(conn)?;
-        let handler = Runtime::new()?;
-        handler.block_on(ctx.call("connect", conn)).map_err(|err| {
+        let _ = ctx.rt.enter();
+        ctx.call("connect", conn).map_err(|err| {
             Error::Rpc(RpcError {
                 code: -1,
                 message: format!("connect fails with: {err}"),

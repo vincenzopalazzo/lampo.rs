@@ -548,8 +548,8 @@ checksum = "6a987beff54b60ffa6d51982e1aa1146bc42f19bd26be28b0586f252fccf5317"
 
 [[package]]
 name = "lightning"
-version = "0.0.114"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#7a07049c7a194b323686a26fd1fc04f2fd4a7204"
+version = "0.0.115"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#c1825672ed27839e95bb42bf8e75c9068da585d8"
 dependencies = [
  "bitcoin",
  "musig2",
@@ -557,8 +557,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-background-processor"
-version = "0.0.114"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#7a07049c7a194b323686a26fd1fc04f2fd4a7204"
+version = "0.0.115"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#c1825672ed27839e95bb42bf8e75c9068da585d8"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -567,8 +567,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-block-sync"
-version = "0.0.114"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#7a07049c7a194b323686a26fd1fc04f2fd4a7204"
+version = "0.0.115"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#c1825672ed27839e95bb42bf8e75c9068da585d8"
 dependencies = [
  "bitcoin",
  "chunked_transfer",
@@ -578,8 +578,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-invoice"
-version = "0.22.0"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#7a07049c7a194b323686a26fd1fc04f2fd4a7204"
+version = "0.23.0"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#c1825672ed27839e95bb42bf8e75c9068da585d8"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -591,8 +591,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-net-tokio"
-version = "0.0.114"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#7a07049c7a194b323686a26fd1fc04f2fd4a7204"
+version = "0.0.115"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#c1825672ed27839e95bb42bf8e75c9068da585d8"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -601,8 +601,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-persister"
-version = "0.0.114"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#7a07049c7a194b323686a26fd1fc04f2fd4a7204"
+version = "0.0.115"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#c1825672ed27839e95bb42bf8e75c9068da585d8"
 dependencies = [
  "bitcoin",
  "libc",
@@ -612,8 +612,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-rapid-gossip-sync"
-version = "0.0.114"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#7a07049c7a194b323686a26fd1fc04f2fd4a7204"
+version = "0.0.115"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#c1825672ed27839e95bb42bf8e75c9068da585d8"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -621,9 +621,9 @@ dependencies = [
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b085a4f2cde5781fc4b1717f2e86c62f5cda49de7ba99a7c2eae02b61c9064c"
+checksum = "36eb31c1778188ae1e64398743890d0877fef36d11521ac60406b42016e8c2cf"
 
 [[package]]
 name = "lock_api"
@@ -693,7 +693,7 @@ dependencies = [
 [[package]]
 name = "nakamoto-chain"
 version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#8744d435f901defd405a6e22f861c7bd45830917"
+source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
 dependencies = [
  "log",
  "nakamoto-common",
@@ -703,7 +703,7 @@ dependencies = [
 [[package]]
 name = "nakamoto-client"
 version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#8744d435f901defd405a6e22f861c7bd45830917"
+source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
 dependencies = [
  "crossbeam-channel",
  "fastrand",
@@ -719,7 +719,7 @@ dependencies = [
 [[package]]
 name = "nakamoto-common"
 version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#8744d435f901defd405a6e22f861c7bd45830917"
+source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
 dependencies = [
  "bitcoin",
  "bitcoin_hashes",
@@ -734,7 +734,7 @@ dependencies = [
 [[package]]
 name = "nakamoto-net"
 version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#8744d435f901defd405a6e22f861c7bd45830917"
+source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
 dependencies = [
  "crossbeam-channel",
  "fastrand",
@@ -745,7 +745,7 @@ dependencies = [
 [[package]]
 name = "nakamoto-net-poll"
 version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#8744d435f901defd405a6e22f861c7bd45830917"
+source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -758,7 +758,7 @@ dependencies = [
 [[package]]
 name = "nakamoto-p2p"
 version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#8744d435f901defd405a6e22f861c7bd45830917"
+source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
 dependencies = [
  "crossbeam-channel",
  "fastrand",
@@ -933,7 +933,7 @@ dependencies = [
 [[package]]
 name = "radicle-term"
 version = "0.1.0"
-source = "git+https://github.com/radicle-dev/heartwood.git#5a4d0fff3fe3107441b93a7812ccfbffe11ed445"
+source = "git+https://github.com/radicle-dev/heartwood.git#3b20d45d80e6dbcc1649f9628d32270586530122"
 dependencies = [
  "anyhow",
  "concolor",
@@ -974,9 +974,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.37.13"
+version = "0.37.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f79bef90eb6d984c72722595b5b1348ab39275a5e5123faca6863bf07d75a4e0"
+checksum = "a0661814f891c57c930a610266415528da53c4933e6dea5fb350cbfe048a9ece"
 dependencies = [
  "bitflags",
  "errno",
@@ -1180,9 +1180,9 @@ checksum = "2e153e1f1acaef8acc537e68b44906d2db6436e2b35ac2c6b42640fff91f00fd"
 
 [[package]]
 name = "tokio"
-version = "1.27.0"
+version = "1.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0de47a4eecbe11f498978a9b29d792f0d2692d1dd003650c24c76510e3bc001"
+checksum = "c3c786bf8134e5a3a166db9b29ab8f48134739014a3eca7bc6bfa95d673b136f"
 dependencies = [
  "autocfg",
  "bytes",
@@ -1194,14 +1194,14 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
- "windows-sys 0.45.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
 name = "tokio-macros"
-version = "2.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61a573bdc87985e9d6ddeed1b3d864e8a302c847e40d647746df2f1de209d1ce"
+checksum = "630bdcf245f78637c13ec01ffae6187cca34625e8c63150d424b59e55af2675e"
 dependencies = [
  "proc-macro2",
  "quote",

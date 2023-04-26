@@ -64,7 +64,7 @@ mod tests {
             node_id: "02049b60c296ffead3e7c8b124c5730153403a8314c1116c2d1b43cf9ac0de2d9d"
                 .to_string(),
             addr: "78.46.220.4".to_string(),
-            port: "19735".to_owned(),
+            port: 19735,
         };
         log::debug!("input method: `{:?}`", input);
         let resp: HashMap<String, Value> = client.call("connect", input).unwrap();

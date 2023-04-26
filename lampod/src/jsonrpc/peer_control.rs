@@ -10,13 +10,8 @@ pub fn json_connect(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Va
     log::info!("call for `connect` with request `{:?}`", request);
     let input: Connect = json::from_value(request.clone())?;
 
-    let _ = ctx
-        .rt
-        .block_on(async {
-            ctx.peer_manager()
-                .connect(input.node_id(), input.addr())
-                .await
-        })
+    ctx.rt
+        .block_on(ctx.peer_manager().connect(input.node_id(), input.addr()))
         .map_err(|err| RpcError {
             code: -1,
             message: format!("{err}"),

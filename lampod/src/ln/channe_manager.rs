@@ -179,7 +179,7 @@ impl LampoChannelManager {
         unimplemented!()
     }
 
-    pub async fn start(&mut self, block: BlockHash, height: Height) -> error::Result<()> {
+    pub fn start(&mut self, block: BlockHash, height: Height) -> error::Result<()> {
         let chain_params = ChainParameters {
             network: self.conf.network,
             best_block: BestBlock::new(block, height.to_consensus_u32()),

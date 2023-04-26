@@ -2,6 +2,7 @@
 #![feature(async_fn_in_trait)]
 #![allow(incomplete_features)]
 pub mod actions;
+mod builtin;
 pub mod chain;
 pub mod events;
 pub mod handler;
@@ -89,22 +90,18 @@ impl LampoDeamon {
         manager.clone()
     }
 
-    pub async fn init_channeld(&mut self) -> error::Result<()> {
+    pub fn init_channeld(&mut self) -> error::Result<()> {
         let mut manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
             self.onchain_manager(),
             self.persister.clone(),
         );
-        let (block_hash, Some(height)) = self
+        let (block_hash, Some(height)) = async_run!(self.rt, self
             .onchain_manager()
             .backend
-            .get_best_block()
-            .await.unwrap() else { error::bail!("wrong result with from the `get_best_block` call") };
-        if let Err(err) = manager
-            .start(block_hash, Height::from_consensus(height).unwrap())
-            .await
-        {
+                                                    .get_best_block()).unwrap() else { error::bail!("wrong result with from the `get_best_block` call") };
+        if let Err(err) = manager.start(block_hash, Height::from_consensus(height)?) {
             error::bail!("{err}");
         }
         self.channel_manager = Some(Arc::new(manager));
@@ -155,13 +152,9 @@ impl LampoDeamon {
         Ok(())
     }
 
-    pub async fn init(
-        &mut self,
-        client: Arc<dyn Backend>,
-        keys: Arc<LampoKeys>,
-    ) -> error::Result<()> {
+    pub fn init(&mut self, client: Arc<dyn Backend>, keys: Arc<LampoKeys>) -> error::Result<()> {
         self.init_onchaind(client.clone(), keys.clone())?;
-        self.init_channeld().await?;
+        self.init_channeld()?;
         self.init_peer_manager()?;
         self.init_inventory_manager()?;
         self.init_event_handler()?;
@@ -205,7 +198,7 @@ impl LampoDeamon {
         Ok(())
     }
 
-    pub async fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
+    pub fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
         let request = Request::new(method, args);
         let (sender, receiver) = chan::bounded::<json::Value>(1);
         let command = LampoEvent::from_req(&request, &sender)?;
@@ -213,7 +206,7 @@ impl LampoDeamon {
         let Some(ref handler) = self.handler else {
             error::bail!("at this point the handler should be not None");
         };
-        handler.react(command).await?;
+        handler.react(command)?;
         Ok(receiver.recv()?)
     }
 
@@ -228,21 +221,20 @@ impl LampoDeamon {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::{net::SocketAddr, str::FromStr};
 
     use clightningrpc_conf::CLNConf;
     use lampo_common::json;
+    use lampo_common::model::request;
     use lightning::util::config::UserConfig;
 
     use lampo_common::conf::LampoConf;
     use lampo_common::logger;
-    use lampo_common::types::NodeId;
     use lampo_nakamoto::{Config, Network};
 
-    use crate::{keys::keys::LampoKeys, ln::events::PeerEvents, LampoDeamon};
+    use crate::{async_run, keys::keys::LampoKeys, ln::events::PeerEvents, LampoDeamon};
 
-    #[tokio::test]
-    async fn simple_node_connection() {
+    #[test]
+    fn simple_node_connection() {
         logger::init(log::Level::Debug).expect("initializing logger for the first time");
         let conf = LampoConf {
             ldk_conf: UserConfig::default(),
@@ -257,19 +249,26 @@ mod tests {
         conf.network = Network::Testnet;
         let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
 
-        let result = lampo.init(client, Arc::new(LampoKeys::new())).await;
+        let result = lampo.init(client, Arc::new(LampoKeys::new()));
         assert!(result.is_ok());
 
-        let node_id =
-            NodeId::from_str("02049b60c296ffead3e7c8b124c5730153403a8314c1116c2d1b43cf9ac0de2d9d")
-                .unwrap();
-        let addr = SocketAddr::from_str("78.46.220.4:19735").unwrap();
-        let result = lampo.peer_manager().connect(node_id, addr).await;
+        let connect = request::Connect {
+            node_id: "02049b60c296ffead3e7c8b124c5730153403a8314c1116c2d1b43cf9ac0de2d9d"
+                .to_owned(),
+            addr: "78.46.220.4".to_owned(),
+            port: 19735,
+        };
+        let result = async_run!(
+            lampo.rt,
+            lampo
+                .peer_manager()
+                .connect(connect.node_id(), connect.addr())
+        );
         assert!(result.is_ok(), "{:?}", result);
     }
 
-    #[tokio::test]
-    async fn simple_get_info() {
+    #[test]
+    fn simple_get_info() {
         let conf = LampoConf {
             ldk_conf: UserConfig::default(),
             network: bitcoin::Network::Testnet,
@@ -283,10 +282,10 @@ mod tests {
         conf.network = Network::Testnet;
         let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
 
-        let result = lampo.init(client, Arc::new(LampoKeys::new())).await;
+        let result = lampo.init(client, Arc::new(LampoKeys::new()));
         assert!(result.is_ok());
         let payload = json::json!({});
-        let result = lampo.call("getinfo", payload).await;
+        let result = lampo.call("getinfo", payload);
         assert!(result.is_ok(), "{:?}", result);
     }
 }

@@ -72,7 +72,6 @@ impl Backend for Nakamoto {
         if let Err(err) = result {
             log::error!("brodcast tx fails: {err}");
         };
-        log::info!("transaction brodcasted with success");
     }
 
     fn is_lightway(&self) -> bool {

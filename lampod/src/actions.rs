@@ -10,7 +10,7 @@ use crate::events::{InventoryEvent, LampoEvent};
 pub trait Handler {
     fn handle(&self, event: Event) -> error::Result<()>;
 
-    async fn react(&self, event: LampoEvent) -> error::Result<()>;
+    fn react(&self, event: LampoEvent) -> error::Result<()>;
 }
 
 /// The Handler that need to implement for handle
