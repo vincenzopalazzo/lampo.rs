@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use radicle_term as term;
 
 use lampo_common::error;
+use lampo_common::json;
 
 #[derive(Debug)]
 pub struct LampoCliArgs {
     pub socket: String,
     pub method: String,
-    pub args: HashMap<String, String>,
+    pub args: HashMap<String, json::Value>,
 }
 
 struct Help {
@@ -39,7 +40,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
 
     let mut socket: Option<String> = None;
     let mut method: Option<String> = None;
-    let mut args = HashMap::<String, String>::new();
+    let mut args = HashMap::<String, json::Value>::new();
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -62,8 +63,17 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
                 match arg {
                     Long(val) => {
                         let key = val.to_string();
-                        let val = parser.value()?.parse()?;
-                        args.insert(key, val);
+                        let val: String = parser.value()?.parse()?;
+                        if let Ok(val) = val.parse::<u64>() {
+                            let val = json::json!(val);
+                            args.insert(key.clone(), val);
+                        } else if let Ok(val) = val.parse::<bool>() {
+                            let val = json::json!(val);
+                            args.insert(key.clone(), val);
+                        } else {
+                            let val = json::json!(val);
+                            args.insert(key, val);
+                        }
                     }
                     _ => return Err(arg.unexpected()),
                 }
