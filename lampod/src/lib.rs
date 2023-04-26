@@ -11,8 +11,6 @@ pub mod ln;
 pub mod persistence;
 pub mod utils;
 
-use std::net::SocketAddr;
-use std::str::FromStr;
 use std::{cell::Cell, sync::Arc};
 
 use bitcoin::locktime::Height;
@@ -20,22 +18,21 @@ use crossbeam_channel as chan;
 use events::LampoEvent;
 use futures::lock::Mutex;
 use handler::external_handler::ExternalHandler;
-use lampo_common::model::Connect;
 use lightning::{events::Event, routing::gossip::P2PGossipSync};
 use lightning_background_processor::BackgroundProcessor;
 
+use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
-use lampo_common::{backend::Backend, types::NodeId};
 use lampo_jsonrpc::json_rpc2::Request;
 
 use actions::handler::LampoHandler;
 use chain::LampoChainManager;
 use keys::keys::LampoKeys;
-use ln::peer_event::PeerEvent;
 use ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use persistence::LampoPersistence;
+use tokio::runtime::Runtime;
 use utils::logger::LampoLogger;
 
 use crate::actions::Handler;
@@ -50,6 +47,7 @@ pub struct LampoDeamon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Arc<Mutex<Cell<Option<BackgroundProcessor>>>>,
+    rt: Runtime,
 }
 
 unsafe impl Send for LampoDeamon {}
@@ -68,6 +66,7 @@ impl LampoDeamon {
             inventory_manager: None,
             handler: None,
             process: Arc::new(Mutex::new(Cell::new(None))),
+            rt: Runtime::new().unwrap(),
         }
     }
 
@@ -206,27 +205,11 @@ impl LampoDeamon {
         Ok(())
     }
 
-    // FIXME: remove the async method
-    pub async fn connect(&self, node_id: &str, addr: &str, port: u16) -> error::Result<Connect> {
-        let (sender, receiver) = chan::bounded::<Connect>(1);
-        let Some(ref handler) = self.handler else {
-            error::bail!("at this point the handler must be known");
-        };
-        let nid = NodeId::from_str(node_id)?;
-        let addr = format!("{addr}:{port}");
-        let addr = SocketAddr::from_str(&addr)?;
-        handler
-            .react(events::LampoEvent::PeerEvent(PeerEvent::Connect(
-                nid, addr, sender,
-            )))
-            .await?;
-        Ok(receiver.recv()?)
-    }
-
     pub async fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
         let request = Request::new(method, args);
         let (sender, receiver) = chan::bounded::<json::Value>(1);
         let command = LampoEvent::from_req(&request, &sender)?;
+        log::info!("received {:?}", command);
         let Some(ref handler) = self.handler else {
             error::bail!("at this point the handler should be not None");
         };

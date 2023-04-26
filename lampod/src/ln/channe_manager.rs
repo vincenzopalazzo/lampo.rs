@@ -16,14 +16,17 @@ use lightning::ln::channelmanager::{ChainParameters, SimpleArcChannelManager};
 use lightning::routing::gossip::NetworkGraph;
 use lightning::routing::router::DefaultRouter;
 use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringParameters};
+use lightning::util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits};
 use lightning::util::ser::ReadableArgs;
 use lightning_persister::FilesystemPersister;
 
-use lampo_common::conf::LampoConf;
+use lampo_common::conf::{LampoConf, UserConfig};
 use lampo_common::error;
+use lampo_common::model::request;
+use lampo_common::model::response;
 
 use crate::chain::LampoChainManager;
-use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents, OpenChannelEvent};
+use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
@@ -202,18 +205,39 @@ impl LampoChannelManager {
 }
 
 impl ChannelEvents for LampoChannelManager {
-    fn open_channel(&self, open_channel: OpenChannelEvent) -> error::Result<()> {
+    fn open_channel(
+        &self,
+        open_channel: request::OpenChannel,
+    ) -> error::Result<response::OpenChannel> {
+        let config = UserConfig {
+            channel_handshake_limits: ChannelHandshakeLimits {
+                // lnd's max to_self_delay is 2016, so we want to be compatible.
+                their_to_self_delay: 2016,
+                ..Default::default()
+            },
+            channel_handshake_config: ChannelHandshakeConfig {
+                announced_channel: open_channel.public,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         self.manager()
             .create_channel(
-                open_channel.node_id,
+                open_channel.node_id()?,
                 open_channel.amount,
-                open_channel.push_msat,
-                // FIXME: what is this value?
                 0,
-                open_channel.config,
+                0,
+                Some(config),
+                // FIXME: LDK should return a better error struct here
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
-        Ok(())
+        Ok(response::OpenChannel {
+            node_id: open_channel.node_id,
+            amount: open_channel.amount,
+            public: open_channel.public,
+            push_mst: 0,
+            to_self_delay: 2016,
+        })
     }
 
     fn close_channel(&self) -> error::Result<()> {

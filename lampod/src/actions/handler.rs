@@ -54,6 +54,10 @@ impl Handler for LampoHandler {
                 Ok(())
             }
             LampoEvent::ExternalEvent(req, chan) => {
+                log::info!(
+                    "external handler size {}",
+                    self.external_handlers.borrow().len()
+                );
                 for handler in self.external_handlers.borrow().iter() {
                     if let Some(resp) = handler.handle(&req)? {
                         chan.send(resp)?;

@@ -118,6 +118,18 @@ impl LampoPeerManager {
             });
         }
     }
+
+    pub fn is_connected_with(&self, peer_id: NodeId) -> bool {
+        let Some(ref manager) = self.peer_manager else {
+            panic!("at this point the peer manager should be known");
+        };
+        for (node_id, _) in manager.get_peer_node_ids() {
+            if node_id == peer_id {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl PeerEvents for LampoPeerManager {
@@ -127,7 +139,7 @@ impl PeerEvents for LampoPeerManager {
                 let connect = Connect {
                     node_id: node_id.to_string(),
                     addr: addr.ip().to_string(),
-                    port: addr.port().to_string(),
+                    port: addr.port() as u64,
                 };
                 self.connect(node_id, addr).await?;
                 chan.send(connect)?;

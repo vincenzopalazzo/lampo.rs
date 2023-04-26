@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use log;
-use tokio::runtime::Runtime;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
@@ -17,6 +16,7 @@ use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
 use lampo_nakamoto::{Config, Nakamoto, Network};
 use lampod::jsonrpc::inventory::get_info;
+use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
 use lampod::jsonrpc::CommandHandler;
 use lampod::keys::keys::LampoKeys;
@@ -55,6 +55,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 
     let lampod = Arc::new(lampod);
     let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
+    rpc_handler.set_handler(handler.clone());
     lampod.listen().await?;
     handler.stop();
     let _ = jsorpc_worker.join().unwrap();
@@ -69,17 +70,7 @@ fn run_jsonrpc(
     let server = JSONRPCv2::new(lampod, &socket_path)?;
     server.add_rpc("getinfo", get_info).unwrap();
     server.add_rpc("connect", json_connect).unwrap();
-    server
-        .add_rpc("hello", |ctx, req| {
-            log::info!("calling the hello rpc call");
-            let rt = Runtime::new().unwrap();
-            // the rpc error should be better thant this
-            let result = rt.block_on(ctx.call("getinfo", req.clone())).unwrap();
-            log::debug!("return the value {:?}", result);
-            Ok(result)
-        })
-        .unwrap();
-
+    server.add_rpc("fundchannel", json_open_channel).unwrap();
     let handler = server.handler();
     Ok((server.spawn(), handler))
 }

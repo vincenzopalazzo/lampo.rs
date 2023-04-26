@@ -1,20 +1,14 @@
 //! Lightning Events handler implementation
 use std::net::SocketAddr;
 
-use lightning::{ln::features::ChannelTypeFeatures, util::config::UserConfig};
+use lightning::ln::features::ChannelTypeFeatures;
 
 use lampo_common::error;
+use lampo_common::model::request;
+use lampo_common::model::response;
 use lampo_common::types::{ChannelId, ChannelState, NodeId};
 
 use super::peer_event;
-
-pub struct OpenChannelEvent {
-    pub node_id: NodeId,
-    pub amount: u64,
-    pub push_msat: u64,
-    pub channel_id: ChannelId,
-    pub config: Option<UserConfig>,
-}
 
 pub struct OpenChannelResult {
     pub tmp_channel_id: String,
@@ -30,7 +24,10 @@ pub struct ChangeStateChannelEvent {
 /// Lightning Network Channels events
 pub trait ChannelEvents {
     /// Open a Channel
-    fn open_channel(&self, open_channel: OpenChannelEvent) -> error::Result<()>;
+    fn open_channel(
+        &self,
+        open_channel: request::OpenChannel,
+    ) -> error::Result<response::OpenChannel>;
 
     /// Close a channel
     fn close_channel(&self) -> error::Result<()>;
