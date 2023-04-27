@@ -7,5 +7,6 @@ members = [
         "lampo-nakamoto",
         "lampo-jsonrpc",
         "lampo-client",
+        "lampo-c-ffi",
 ]
 resolver = "2"
