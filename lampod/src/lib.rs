@@ -75,6 +75,10 @@ impl LampoDeamon {
         self.conf.path()
     }
 
+    pub fn conf(&self) -> &LampoConf {
+        &self.conf
+    }
+
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         let onchain_manager = LampoChainManager::new(client, self.wallet_manager.clone());
         self.onchain_manager = Some(Arc::new(onchain_manager));
