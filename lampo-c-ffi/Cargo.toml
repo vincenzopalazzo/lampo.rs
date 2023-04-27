@@ -1,0 +1,14 @@
+[package]
+name = "lampo-c-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "lampo_lib"
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "*"
+lampod = { path = "../lampod" }
+lampo-common = { path = "../lampo-common" }
+lampo-jsonrpc = { path = "../lampo-jsonrpc" }
