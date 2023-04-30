@@ -20,8 +20,8 @@ macro_rules! from_cstr {
         use std::ffi::CStr;
         let c_str = unsafe { CStr::from_ptr($x) };
         let Ok(c_str) = c_str.to_str() else {
-                                                                        return null!()
-                                                                    };
+                                                                                    return null!()
+                                                                                };
         c_str
     }};
 }
@@ -31,8 +31,8 @@ macro_rules! json_buffer {
     ($x:expr) => {{
         use lampo_common::json;
         let Ok(buff) = json::to_string_pretty($x) else {
-                                                                        return null!();
-                                                                    };
+                                                                                    return null!();
+                                                                                };
         buff.as_ptr()
     }};
 }
