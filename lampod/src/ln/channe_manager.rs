@@ -25,7 +25,7 @@ use lampo_common::error;
 use lampo_common::model::request;
 use lampo_common::model::response;
 
-use crate::chain::LampoChainManager;
+use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
@@ -49,6 +49,7 @@ pub struct LampoChannelManager {
     conf: LampoConf,
     monitor: Option<Arc<LampoChainMonitor>>,
     onchain: Arc<LampoChainManager>,
+    wallet_manager: Arc<dyn WalletManager>,
     persister: Arc<LampoPersistence>,
     graph: Option<Arc<LampoGraph>>,
     score: Option<Arc<Mutex<LampoScorer>>>,
@@ -62,6 +63,7 @@ impl LampoChannelManager {
         conf: &LampoConf,
         logger: Arc<LampoLogger>,
         onchain: Arc<LampoChainManager>,
+        wallet_manager: Arc<dyn WalletManager>,
         persister: Arc<LampoPersistence>,
     ) -> Self {
         LampoChannelManager {
@@ -69,6 +71,7 @@ impl LampoChannelManager {
             monitor: None,
             onchain,
             channeld: None,
+            wallet_manager,
             logger,
             persister,
             graph: None,
@@ -97,7 +100,7 @@ impl LampoChannelManager {
     }
 
     pub fn load_channel_monitors(&self, watch: bool) -> error::Result<()> {
-        let keys = self.onchain.keymanager.inner();
+        let keys = self.wallet_manager.ldk_keys().inner();
         let mut monitors = self
             .persister
             .read_channelmonitors(keys.clone(), keys)
@@ -146,7 +149,10 @@ impl LampoChannelManager {
         Arc::new(DefaultRouter::new(
             network_graph.clone(),
             self.logger.clone(),
-            self.onchain.keymanager.inner().get_secure_random_bytes(),
+            self.wallet_manager
+                .ldk_keys()
+                .keys_manager
+                .get_secure_random_bytes(),
             scorer.clone(),
         ))
     }
@@ -186,7 +192,7 @@ impl LampoChannelManager {
         };
 
         let monitor = self.build_channel_monitor();
-        let keymanagers = self.onchain.keymanager.inner();
+        let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
         self.monitor = Some(Arc::new(monitor));
         self.channeld = Some(Arc::new(SimpleArcChannelManager::new(
             self.onchain.clone(),

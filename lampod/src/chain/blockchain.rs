@@ -7,23 +7,23 @@ use lightning::routing::utxo::UtxoLookup;
 
 use lampo_common::backend::Backend;
 
-use crate::keys::keys::LampoKeys;
+use super::WalletManager;
 
 /// Lampo FeeEstimator implementation
 #[derive(Clone)]
 pub struct LampoChainManager {
     pub backend: Arc<dyn Backend>,
-    pub keymanager: Arc<LampoKeys>,
+    pub wallet_manager: Arc<dyn WalletManager>,
 }
 
 /// Personal Lampo implementation
 impl LampoChainManager {
     /// Create a new instance of LampoFeeEstimator with the specified
     /// Backend.
-    pub fn new(client: Arc<dyn Backend>, keys: Arc<LampoKeys>) -> Self {
+    pub fn new(client: Arc<dyn Backend>, wallet_manager: Arc<dyn WalletManager>) -> Self {
         LampoChainManager {
             backend: client,
-            keymanager: keys,
+            wallet_manager,
         }
     }
 

@@ -2,8 +2,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use std::{sync::Arc, time::SystemTime};
 
-use lampo_common::model::Connect;
-use lampo_common::types::NodeId;
+use async_trait::async_trait;
 use lightning::ln::peer_handler::MessageHandler;
 use lightning::ln::peer_handler::{IgnoringMessageHandler, PeerManager, SimpleArcPeerManager};
 use lightning::onion_message::OnionMessenger;
@@ -13,8 +12,10 @@ use lightning_net_tokio::SocketDescriptor;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::model::Connect;
+use lampo_common::types::NodeId;
 
-use crate::chain::LampoChainManager;
+use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
@@ -55,8 +56,9 @@ impl LampoPeerManager {
 
     pub fn init(
         &mut self,
-        onchain_manager: &Arc<LampoChainManager>,
-        channel_manager: &Arc<LampoChannelManager>,
+        onchain_manager: Arc<LampoChainManager>,
+        wallet_manager: Arc<dyn WalletManager>,
+        channel_manager: Arc<LampoChannelManager>,
     ) -> error::Result<()> {
         let ephemeral_bytes = [0; 32];
         let current_time = SystemTime::now()
@@ -65,8 +67,8 @@ impl LampoPeerManager {
             .as_secs();
 
         let onion_messenger = Arc::new(OnionMessenger::new(
-            onchain_manager.keymanager.inner(),
-            onchain_manager.keymanager.inner(),
+            wallet_manager.ldk_keys().keys_manager.clone(),
+            wallet_manager.ldk_keys().keys_manager.clone(),
             self.logger.clone(),
             IgnoringMessageHandler {},
         ));
@@ -90,7 +92,7 @@ impl LampoPeerManager {
             &ephemeral_bytes,
             channel_manager.logger.clone(),
             ignoring_custom_msg_handler,
-            onchain_manager.keymanager.inner(),
+            wallet_manager.ldk_keys().keys_manager.clone(),
         );
         self.peer_manager = Some(Arc::new(peer_manager));
         self.channel_manager = Some(channel_manager.clone());
@@ -132,6 +134,7 @@ impl LampoPeerManager {
     }
 }
 
+#[async_trait]
 impl PeerEvents for LampoPeerManager {
     async fn handle(&self, event: super::peer_event::PeerEvent) -> error::Result<()> {
         match event {

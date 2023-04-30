@@ -1,6 +1,4 @@
 //! Lampo deamon implementation.
-#![feature(async_fn_in_trait)]
-#![allow(incomplete_features)]
 pub mod actions;
 mod builtin;
 pub mod chain;
@@ -15,6 +13,7 @@ pub mod utils;
 use std::{cell::Cell, sync::Arc};
 
 use bitcoin::locktime::Height;
+use chain::WalletManager;
 use crossbeam_channel as chan;
 use events::LampoEvent;
 use futures::lock::Mutex;
@@ -30,7 +29,6 @@ use lampo_jsonrpc::json_rpc2::Request;
 
 use actions::handler::LampoHandler;
 use chain::LampoChainManager;
-use keys::keys::LampoKeys;
 use ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use persistence::LampoPersistence;
 use tokio::runtime::Runtime;
@@ -44,6 +42,7 @@ pub struct LampoDeamon {
     onchain_manager: Option<Arc<LampoChainManager>>,
     channel_manager: Option<Arc<LampoChannelManager>>,
     inventory_manager: Option<Arc<LampoInventoryManager>>,
+    wallet_manager: Arc<dyn WalletManager>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
@@ -55,7 +54,7 @@ unsafe impl Send for LampoDeamon {}
 unsafe impl Sync for LampoDeamon {}
 
 impl LampoDeamon {
-    pub fn new(config: LampoConf) -> Self {
+    pub fn new(config: LampoConf, wallet_manager: Arc<dyn WalletManager>) -> Self {
         let root_path = config.path();
         LampoDeamon {
             conf: config,
@@ -65,6 +64,7 @@ impl LampoDeamon {
             onchain_manager: None,
             channel_manager: None,
             inventory_manager: None,
+            wallet_manager,
             handler: None,
             process: Arc::new(Mutex::new(Cell::new(None))),
             rt: Runtime::new().unwrap(),
@@ -75,12 +75,8 @@ impl LampoDeamon {
         self.conf.path()
     }
 
-    pub fn init_onchaind(
-        &mut self,
-        client: Arc<dyn Backend>,
-        keys: Arc<LampoKeys>,
-    ) -> error::Result<()> {
-        let onchain_manager = LampoChainManager::new(client, keys);
+    pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
+        let onchain_manager = LampoChainManager::new(client, self.wallet_manager.clone());
         self.onchain_manager = Some(Arc::new(onchain_manager));
         Ok(())
     }
@@ -94,7 +90,8 @@ impl LampoDeamon {
         let mut manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
-            self.onchain_manager(),
+            self.onchain_manager().clone(),
+            self.wallet_manager.clone(),
             self.persister.clone(),
         );
         let (block_hash, Some(height)) = async_run!(self.rt, self
@@ -115,7 +112,11 @@ impl LampoDeamon {
 
     pub fn init_peer_manager(&mut self) -> error::Result<()> {
         let mut peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone());
-        peer_manager.init(&self.onchain_manager(), &self.channel_manager())?;
+        peer_manager.init(
+            self.onchain_manager(),
+            self.wallet_manager.clone(),
+            self.channel_manager(),
+        )?;
         self.peer_manager = Some(Arc::new(peer_manager));
         Ok(())
     }
@@ -152,8 +153,8 @@ impl LampoDeamon {
         Ok(())
     }
 
-    pub fn init(&mut self, client: Arc<dyn Backend>, keys: Arc<LampoKeys>) -> error::Result<()> {
-        self.init_onchaind(client.clone(), keys.clone())?;
+    pub fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
+        self.init_onchaind(client.clone())?;
         self.init_channeld()?;
         self.init_peer_manager()?;
         self.init_inventory_manager()?;
@@ -223,15 +224,17 @@ mod tests {
     use std::sync::Arc;
 
     use clightningrpc_conf::CLNConf;
-    use lampo_common::json;
-    use lampo_common::model::request;
     use lightning::util::config::UserConfig;
 
     use lampo_common::conf::LampoConf;
+    use lampo_common::json;
     use lampo_common::logger;
+    use lampo_common::model::request;
     use lampo_nakamoto::{Config, Network};
 
-    use crate::{async_run, keys::keys::LampoKeys, ln::events::PeerEvents, LampoDeamon};
+    use crate::chain::WalletManager;
+
+    use crate::{async_run, chain::LampoWalletManager, ln::events::PeerEvents, LampoDeamon};
 
     #[test]
     fn simple_node_connection() {
@@ -243,13 +246,14 @@ mod tests {
             path: "/tmp".to_string(),
             inner: CLNConf::new("/tmp/".to_owned(), true),
         };
-        let mut lampo = LampoDeamon::new(conf);
+        let wallet = LampoWalletManager::new(conf.network).unwrap();
+        let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 
         let mut conf = Config::default();
         conf.network = Network::Testnet;
         let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
 
-        let result = lampo.init(client, Arc::new(LampoKeys::new()));
+        let result = lampo.init(client);
         assert!(result.is_ok());
 
         let connect = request::Connect {
@@ -276,13 +280,14 @@ mod tests {
             path: "/tmp".to_string(),
             inner: CLNConf::new("/tmp/".to_owned(), true),
         };
-        let mut lampo = LampoDeamon::new(conf);
+        let wallet = LampoWalletManager::new(conf.network).unwrap();
+        let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 
         let mut conf = Config::default();
         conf.network = Network::Testnet;
         let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
 
-        let result = lampo.init(client, Arc::new(LampoKeys::new()));
+        let result = lampo.init(client);
         assert!(result.is_ok());
         let payload = json::json!({});
         let result = lampo.call("getinfo", payload);

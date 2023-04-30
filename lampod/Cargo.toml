@@ -17,6 +17,7 @@ lightning-persister = { git = "https://github.com/lightningdevkit/rust-lightning
 lightning-background-processor = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
 lightning-net-tokio = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
 lightning-rapid-gossip-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
+bdk = { version = "^0.28.0", default-feature = false, features = ["all-keys", "key-value-db", "keys-bip39", "compact_filters"] }
 log = "0.4.17"
 time = "0.3.13"
 bitcoin = "0.29.0"
@@ -25,6 +26,7 @@ io-reactor = "0.1.2"
 popol = { version = "2.2.0" }
 crossbeam-channel = "0.5.8"
 once_cell = "1.17.1"
+async-trait = "0.1.68"
 
 [dev-dependencies]
 lampo-nakamoto = { path = "../lampo-nakamoto" }

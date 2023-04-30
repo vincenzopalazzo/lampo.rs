@@ -7,6 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use lampod::chain::{LampoWalletManager, WalletManager};
 use log;
 
 use lampo_common::conf::LampoConf;
@@ -19,7 +20,6 @@ use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
 use lampod::jsonrpc::CommandHandler;
-use lampod::keys::keys::LampoKeys;
 use lampod::LampoDeamon;
 
 use crate::args::LampoCliArgs;
@@ -38,8 +38,8 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 
     lampo_conf.set_network(&args.network)?;
 
-    let mut lampod = LampoDeamon::new(lampo_conf.clone());
-    let keys = Arc::new(LampoKeys::new());
+    let wallet = LampoWalletManager::new(lampo_conf.network)?;
+    let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
     let client = match args.client.clone().as_str() {
         "nakamoto" => {
             let mut conf = Config::default();
@@ -48,7 +48,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         }
         _ => error::bail!("client {:?} not supported", args.client),
     };
-    lampod.init(client, keys)?;
+    lampod.init(client)?;
 
     let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
     lampod.add_external_handler(rpc_handler.clone())?;

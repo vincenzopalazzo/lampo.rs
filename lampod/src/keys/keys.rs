@@ -7,18 +7,15 @@ pub struct LampoKeys {
 }
 
 impl LampoKeys {
-    pub fn new() -> LampoKeys {
-        // FIXME: use some standard derivation to make the wallet recoverable
-        let random_32_bytes = [0; 32];
+    pub fn new(seed: [u8; 32]) -> Self {
         // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.
         let start_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap();
 
         LampoKeys {
-            // FIXME: store this seeds somewhere!
             keys_manager: Arc::new(KeysManager::new(
-                &random_32_bytes,
+                &seed,
                 start_time.as_secs(),
                 start_time.subsec_nanos(),
             )),
