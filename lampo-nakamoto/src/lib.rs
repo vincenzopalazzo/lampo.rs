@@ -11,7 +11,9 @@ use nakamoto_net_poll::Waker;
 use lampo_common::backend::AsyncBlockSourceResult;
 use lampo_common::backend::Backend;
 use lampo_common::backend::BlockData;
+use lampo_common::backend::BlockHash;
 use lampo_common::backend::BlockHeaderData;
+use lampo_common::backend::UtxoResult;
 use lampo_common::backend::WatchedOutput;
 
 #[derive(Clone)]
@@ -113,5 +115,9 @@ impl Backend for Nakamoto {
             return 0;
         };
         feerate.median as u32
+    }
+
+    fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult {
+        unimplemented!()
     }
 }

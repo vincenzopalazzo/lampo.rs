@@ -2,8 +2,8 @@
 //! Beckend implementation
 pub use bitcoin::{BlockHash, Script, Transaction, Txid};
 pub use lightning::chain::WatchedOutput;
+pub use lightning::routing::utxo::UtxoResult;
 pub use lightning_block_sync::{AsyncBlockSourceResult, BlockData, BlockHeaderData};
-
 /// Bakend Trait specification
 pub trait Backend {
     /// Fetch feerate give a number of blocks
@@ -33,4 +33,6 @@ pub trait Backend {
         -> AsyncBlockSourceResult<'a, BlockData>;
 
     fn get_best_block<'a>(&'a self) -> AsyncBlockSourceResult<(BlockHash, Option<u32>)>;
+
+    fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
 }

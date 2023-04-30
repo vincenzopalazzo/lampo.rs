@@ -87,8 +87,12 @@ impl lightning_block_sync::BlockSource for LampoChainManager {
 
 // FIXME: implement this
 impl UtxoLookup for LampoChainManager {
-    fn get_utxo(&self, _: &bitcoin::BlockHash, _: u64) -> lightning::routing::utxo::UtxoResult {
-        unimplemented!()
+    fn get_utxo(
+        &self,
+        hash: &bitcoin::BlockHash,
+        idx: u64,
+    ) -> lightning::routing::utxo::UtxoResult {
+        self.backend.get_utxo(hash, idx)
     }
 }
 
