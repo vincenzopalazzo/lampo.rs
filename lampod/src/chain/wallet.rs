@@ -1,5 +1,4 @@
 //! Wallet Manager implementation with BDK
-
 use std::sync::Arc;
 
 use bdk::database::MemoryDatabase;
@@ -11,8 +10,10 @@ use bdk::keys::{
 use bdk::miniscript::miniscript;
 use bdk::template::Bip84;
 use bdk::{KeychainKind, Wallet};
+use lampo_common::model::response::NewAddress;
 use tokio::sync::Mutex;
 
+use crate::async_run;
 use crate::keys::keys::LampoKeys;
 
 /// Wallet manager trait that define a generic interface
@@ -31,9 +32,13 @@ pub trait WalletManager: Send + Sync {
 
     /// Return the keys for ldk.
     fn ldk_keys(&self) -> Arc<LampoKeys>;
+
+    /// return an on chain address
+    fn get_onchain_address(&self) -> Result<NewAddress, bdk::Error>;
 }
 
 pub struct LampoWalletManager {
+    // FIXME: remove the mutex here to be sync I used the tokio mutex but this is wrong!
     pub wallet: Mutex<Wallet<MemoryDatabase>>,
     pub keymanager: Arc<LampoKeys>,
 }
@@ -92,5 +97,12 @@ impl WalletManager for LampoWalletManager {
 
     fn ldk_keys(&self) -> Arc<LampoKeys> {
         self.keymanager.clone()
+    }
+
+    fn get_onchain_address(&self) -> Result<NewAddress, bdk::Error> {
+        let address = async_run!(self.wallet.lock()).get_address(bdk::wallet::AddressIndex::New)?;
+        Ok(NewAddress {
+            address: address.address.to_string(),
+        })
     }
 }

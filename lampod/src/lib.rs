@@ -139,6 +139,10 @@ impl LampoDeamon {
         manager.clone()
     }
 
+    pub fn wallet_manager(&self) -> Arc<dyn WalletManager> {
+        self.wallet_manager.clone()
+    }
+
     pub fn init_event_handler(&mut self) -> error::Result<()> {
         let handler = LampoHandler::new(&self);
         self.handler = Some(Arc::new(handler));
