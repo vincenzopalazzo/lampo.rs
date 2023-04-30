@@ -50,7 +50,6 @@ impl BroadcasterInterface for LampoChainManager {
     }
 }
 
-// FIXME: todo implement it.
 impl Filter for LampoChainManager {
     fn register_output(&self, output: lightning::chain::WatchedOutput) {
         self.backend.register_output(output);
@@ -85,7 +84,6 @@ impl lightning_block_sync::BlockSource for LampoChainManager {
     }
 }
 
-// FIXME: implement this
 impl UtxoLookup for LampoChainManager {
     fn get_utxo(
         &self,

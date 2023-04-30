@@ -18,6 +18,7 @@ use crossbeam_channel as chan;
 use events::LampoEvent;
 use futures::lock::Mutex;
 use handler::external_handler::ExternalHandler;
+use lightning::routing::utxo::UtxoLookup;
 use lightning::{events::Event, routing::gossip::P2PGossipSync};
 use lightning_background_processor::BackgroundProcessor;
 
@@ -181,7 +182,7 @@ impl LampoDeamon {
     pub fn listen(&self) -> error::Result<()> {
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
-            None::<Arc<LampoChainManager>>,
+            None::<Arc<dyn UtxoLookup + Send + Sync>>,
             self.logger.clone(),
         ));
 

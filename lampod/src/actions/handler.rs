@@ -97,6 +97,11 @@ impl Handler for LampoHandler {
                 };
                 self.channel_manager.change_state_channel(event)
             }
+            Event::ChannelClosed {
+                channel_id,
+                user_channel_id,
+                reason,
+            } => unreachable!(),
             _ => unreachable!(),
         }
     }

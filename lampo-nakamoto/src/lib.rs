@@ -118,6 +118,6 @@ impl Backend for Nakamoto {
     }
 
     fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult {
-        unimplemented!()
+        todo!()
     }
 }
