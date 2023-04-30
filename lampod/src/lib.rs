@@ -170,7 +170,7 @@ impl LampoDeamon {
         Ok(())
     }
 
-    pub async fn listen(&self) -> error::Result<()> {
+    pub fn listen(&self) -> error::Result<()> {
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<LampoChainManager>>,

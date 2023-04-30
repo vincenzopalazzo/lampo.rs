@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: [nightly]
+        node: [stable, beta, nightly]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2

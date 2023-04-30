@@ -24,15 +24,14 @@ use lampod::LampoDeamon;
 
 use crate::args::LampoCliArgs;
 
-#[tokio::main]
-async fn main() -> error::Result<()> {
+fn main() -> error::Result<()> {
     logger::init(log::Level::Info).expect("initializing logger for the first time");
     let args = args::parse_args()?;
-    run(args).await?;
+    run(args)?;
     Ok(())
 }
 
-async fn run(args: LampoCliArgs) -> error::Result<()> {
+fn run(args: LampoCliArgs) -> error::Result<()> {
     let path = args.conf;
     let mut lampo_conf = LampoConf::try_from(path)?;
 
@@ -56,7 +55,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let lampod = Arc::new(lampod);
     let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
     rpc_handler.set_handler(handler.clone());
-    lampod.listen().await?;
+    lampod.listen()?;
     handler.stop();
     let _ = jsorpc_worker.join().unwrap();
     Ok(())
