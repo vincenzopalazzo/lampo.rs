@@ -1,4 +1,15 @@
-//! Lampo deamon implementation.
+//! Lampo daemon implementation.
+//!
+//! Welcome to the Lampo daemon codebase.
+//! This is the core part of the code responsible for interacting
+//! with the Lampo Lightning node.
+//!
+//! This codebase also contains documentation with numerous
+//! design pattern references that we have used to design
+//! the Lampo node. We hope that this documentation will
+//! help you understand our design philosophy better.
+//!
+//! Have fun exploring the code!
 pub mod actions;
 mod builtin;
 pub mod chain;
@@ -37,6 +48,15 @@ use utils::logger::LampoLogger;
 
 use crate::actions::Handler;
 
+/// LampoDaemon is the main data structure that uses the facade
+/// pattern to hide the complexity of the LDK library. You can interact
+/// with the LampoDaemon's components through access
+/// methods (similar to get methods in modern procedural languages).
+///
+/// Another way to view the LampoDaemon is as
+/// a microkernel pattern, especially for developers
+/// who are interested in building their own node on
+/// top of the LampoDaemon.
 pub struct LampoDeamon {
     conf: LampoConf,
     peer_manager: Option<Arc<LampoPeerManager>>,
@@ -101,8 +121,10 @@ impl LampoDeamon {
         );
         let (block_hash, Some(height)) = async_run!(self.rt, self
             .onchain_manager()
-            .backend
-                                                    .get_best_block()).unwrap() else { error::bail!("wrong result with from the `get_best_block` call") };
+            .backend.get_best_block())
+            .unwrap() else {
+                error::bail!("wrong result with from the `get_best_block` call")
+        };
         if let Err(err) = manager.start(block_hash, Height::from_consensus(height)?) {
             error::bail!("{err}");
         }
@@ -171,6 +193,12 @@ impl LampoDeamon {
         Ok(())
     }
 
+    /// Registers an external handler to handle incoming requests from external sources.
+    /// These requests are passed to the handler via the `call` method.
+    ///
+    /// Additionally, the registered handler serves as the entry point for
+    /// the Chain of Responsibility pattern that handles all unsupported commands that the Lampod daemon
+    /// may receive from external sources (assuming the user has defined a handler for them).
     pub fn add_external_handler(&self, ext_handler: Arc<dyn ExternalHandler>) -> error::Result<()> {
         let Some(ref handler) = self.handler else {
             error::bail!("Initial handler is None");
@@ -208,6 +236,13 @@ impl LampoDeamon {
         Ok(())
     }
 
+    /// Call any method supported by the lampod configuration. This includes
+    /// a lot of handler code. This function serves as a broker pattern in some ways,
+    /// but it may also function as a chain of responsibility pattern in certain cases.
+    ///
+    /// Welcome to the third design pattern in under 300 lines of code. The code will clarify the
+    /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
+    /// at some point.
     pub fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
         let request = Request::new(method, args);
         let (sender, receiver) = chan::bounded::<json::Value>(1);
