@@ -55,7 +55,7 @@ class LampoDeamon:
 
     def call(self, method: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """ " Perform a call to the lightning node"""
-        result = lampod.lampod_call(self.__inner, bytes(method), b"{}")
+        result = lampod.lampod_call(self.__inner, bytes(method, "utf-8"), b"{}")
         logging.debug(f"raw data {result}")
         result = ffi.string(result).decode("utf-8")
         assert result is not None
