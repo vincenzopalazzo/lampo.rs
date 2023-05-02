@@ -8,11 +8,16 @@ for ldk implementation.
 Autor: Vincenzo Palazzo <vincenzopalazzodev@gmail.com>
 """
 import shutil
+import tempfile
+import logging
+
 from typing import Any, Union, Optional, Sequence, List
 
 from lnprototest import KeySet
 from lnprototest.runner import Runner
 from lnprototest.event import Event, MustNotMsg, ExpectMsg
+
+from lampo_py import LampoDeamon
 
 
 class Conn(object):
@@ -48,7 +53,21 @@ class LampoRunner(Runner):
 
     def __init__(self, config: Any) -> None:
         super().__init__(config)
+        self.directory = tempfile.mkdtemp(prefix="lnpt-lampo-")
         self.config = config
+        self.__lampod_config_file()
+        self.node = LampoDeamon(str.encode(self.directory))
+        # FIXME: move this to the runner interface
+        self.conns: Dict[str, Conn] = {}
+        self.last_conn = None
+        
+    def __lampod_config_file(self) -> None:
+        f = open(f"{self.directory}/lampo.conf", "w")
+        f.write("network=testnet\nport=19735")
+        f.close()
+
+    def listen(self) -> None:
+        self.node.listen()
 
     def check_error(self, event: Event, conn: Conn) -> Optional[str]:
         conn.expected_error = True
@@ -61,7 +80,14 @@ class LampoRunner(Runner):
         pass
 
     def connect(self, event: Event, connprivkey: str) -> None:
-        pass
+        self.conns[conn.name] = conn
+        self.last_conn = conn
+
+    def disconnect(self, event: Event, conn: Conn) -> None:
+        if conn is None:
+            raise SpecFileError(event, "Unknown conn")
+        del self.conns[conn.name]
+        self.check_final_error(event, conn, conn.expected_error, conn.must_not_events)
 
     def check_final_error(
         self,
