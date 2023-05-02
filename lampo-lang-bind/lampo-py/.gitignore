@@ -1,0 +1,3 @@
+*.pytest**
+**/__py**
+dist

@@ -5,7 +5,7 @@ use std::{io, time::SystemTime};
 
 use chrono::prelude::*;
 use colored::*;
-use log::{Level, Log, Metadata, Record, SetLoggerError};
+pub use log::{Level, Log, Metadata, Record, SetLoggerError};
 
 struct Logger {
     level: Level,

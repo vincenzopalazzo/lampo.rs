@@ -57,6 +57,7 @@ use crate::actions::Handler;
 /// a microkernel pattern, especially for developers
 /// who are interested in building their own node on
 /// top of the LampoDaemon.
+#[repr(C)]
 pub struct LampoDeamon {
     conf: LampoConf,
     peer_manager: Option<Arc<LampoPeerManager>>,
