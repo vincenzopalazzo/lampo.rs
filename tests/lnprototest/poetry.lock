@@ -673,14 +673,14 @@ format-nongpl = ["fqdn", "idna", "isoduration", "jsonpointer (>1.13)", "rfc3339-
 
 [[package]]
 name = "lampo-py"
-version = "0.0.1a2"
+version = "0.0.1a3"
 description = ""
 category = "main"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "lampo_py-0.0.1a2-py3-none-any.whl", hash = "sha256:5934b15cb37138cb1286c4627765bc3ce5afadd86eae1ee1cae09d67b143d7b6"},
-    {file = "lampo_py-0.0.1a2.tar.gz", hash = "sha256:05b7a2596fe2a0897e957aa33972d1e1563c42c1c9a9a5993c63936f4ea71bdb"},
+    {file = "lampo_py-0.0.1a3-py3-none-any.whl", hash = "sha256:678c5be18828db51fc8a887f366619cae4fbba4d2562c5f44f4f688d1b5a3047"},
+    {file = "lampo_py-0.0.1a3.tar.gz", hash = "sha256:0b2b883d1d7afe2846b24c3c21ce6446352832f0002f1fb8ea7766e6696d15eb"},
 ]
 
 [package.dependencies]
@@ -1365,4 +1365,4 @@ testing = ["big-O", "flake8 (<5)", "jaraco.functools", "jaraco.itertools", "more
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.8"
-content-hash = "9509f8ef2c929995b04dc64acd4212c3090676131d0bf0528065fc4a679e9af1"
+content-hash = "128bdfabd086b9497457d3c8fefdb2b028d594654106f1fe79318974ffcf0257"

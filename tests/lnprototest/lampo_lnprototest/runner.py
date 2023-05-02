@@ -10,38 +10,30 @@ Autor: Vincenzo Palazzo <vincenzopalazzodev@gmail.com>
 import shutil
 import tempfile
 import logging
+import socket
+
+import pyln
 
 from typing import Any, Union, Optional, Sequence, List
+from contextlib import closing
 
-from lnprototest import KeySet
+from lnprototest import KeySet, Conn
 from lnprototest.runner import Runner
 from lnprototest.event import Event, MustNotMsg, ExpectMsg
 
 from lampo_py import LampoDeamon
 
 
-class Conn(object):
-    """Class for connections.  Details filled in by the particular runner.
-
-    But overall this is for manging the connectiong between the runner -> node implementation
-    in fact this will init the connection when you will expect that lnprototest
-    is calling a real connect method.
-
-    In reality we simulate the init workflow with the pyln packages that implement a
-    modular python implementation for the lightning network building blocks.
-    """
-
-    def __init__(self, connprivkey: str):
-        """Create a connection from a node with the given hex privkey: we use
-        trivial values for private keys, so we simply left-pad with zeroes"""
-        self.name = connprivkey
-        self.connprivkey = privkey_expand(connprivkey)
-        self.pubkey = coincurve.PublicKey.from_secret(self.connprivkey.secret)
-        self.expected_error = False
-        self.must_not_events: List[MustNotMsg] = []
-
-    def __str__(self) -> str:
-        return self.name
+class LampoConn(Conn):
+    def __init__(self, connprivkey: str, public_key: str, port: int):
+        super().__init__(connprivkey)
+        # FIXME: pyln.proto.wire should just use coincurve PrivateKey!
+        self.connection = pyln.proto.wire.connect(
+            pyln.proto.wire.PrivateKey(bytes.fromhex(self.connprivkey.to_hex())),
+            pyln.proto.wire.PublicKey(bytes.fromhex(public_key)),
+            "127.0.0.1",
+            port,
+        )
 
 
 class LampoRunner(Runner):
@@ -55,16 +47,32 @@ class LampoRunner(Runner):
         super().__init__(config)
         self.directory = tempfile.mkdtemp(prefix="lnpt-lampo-")
         self.config = config
+        self.lightning_port = self.reserve_port()
         self.__lampod_config_file()
         self.node = LampoDeamon(str.encode(self.directory))
         # FIXME: move this to the runner interface
         self.conns: Dict[str, Conn] = {}
         self.last_conn = None
-        
+        self.public_key = None
+
     def __lampod_config_file(self) -> None:
         f = open(f"{self.directory}/lampo.conf", "w")
-        f.write("network=testnet\nport=19735")
+        f.write(f"network=testnet\nport={self.lightning_port}")
         f.close()
+
+    # FIXME: move this in lnprototest runner API
+    def reserve_port(self) -> int:
+        """
+        When python asks for a free port from the os, it is possible that
+        with concurrent access, the port that is picked is a port that is not free
+        anymore when we go to bind the daemon like bitcoind port.
+
+        Source: https://stackoverflow.com/questions/1365265/on-localhost-how-do-i-pick-a-free-port-number
+        """
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+            s.bind(("", 0))
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            return s.getsockname()[1]
 
     def listen(self) -> None:
         self.node.listen()
@@ -80,8 +88,7 @@ class LampoRunner(Runner):
         pass
 
     def connect(self, event: Event, connprivkey: str) -> None:
-        self.conns[conn.name] = conn
-        self.last_conn = conn
+        self.add_conn(LampoConn(connprivkey, self.public_key, self.lightning_port))
 
     def disconnect(self, event: Event, conn: Conn) -> None:
         if conn is None:
@@ -99,7 +106,7 @@ class LampoRunner(Runner):
         pass
 
     def start(self) -> None:
-        pass
+        self.public_key = self.node.call("getinfo", {})["node_id"]
 
     def stop(self, print_logs: bool = False) -> None:
         """

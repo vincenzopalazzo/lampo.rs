@@ -19,9 +19,9 @@ def runner(pytestconfig: Any) -> Any:
     thread = Thread(target=runner.listen)
     thread.daemon = True
     thread.start()
-    
+
     yield runner
-    
+
     runner.teardown()
     thread.join(1)
 
