@@ -69,11 +69,9 @@ macro_rules! as_rust {
 #[no_mangle]
 pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon {
     use lampo_common::conf::LampoConf;
-    use lampo_common::logger;
     use lampo_nakamoto::{Config, Nakamoto, Network};
     use lampod::chain::{LampoWalletManager, WalletManager};
     use std::str::FromStr;
-    logger::init(logger::Level::Debug).expect("failt to init the logger");
 
     let conf_path_t = from_cstr!(conf_path);
     let conf = match LampoConf::try_from(conf_path_t.to_owned()) {
