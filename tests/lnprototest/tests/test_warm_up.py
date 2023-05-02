@@ -1,14 +1,20 @@
 import pytest
 import logging
+import traceback
 
-from typing import (Any, Union, Sequence, List)
+from typing import Any, Union, Sequence, List
 
 from pyln.spec import bolt1
 from lnprototest import SpecFileError, TryAll
 from lnprototest.runner import Runner
-from lnprototest.event import (Msg, Disconnect, Connect, Event, ExpectMsg)
+from lnprototest.event import Msg, Disconnect, Connect, Event, ExpectMsg
 
 # FIXME: move this in a util module of lnprototest
+def get_traceback(e: Exception) -> str:
+    lines = traceback.format_exception(type(e), e, e.__traceback__)
+    return "".join(lines)
+
+
 def run_runner(runner: Runner, test: Union[Sequence, List[Event], Event]) -> None:
     """
     The pytest using the assertion as safe failure, and the exception it is only
@@ -33,9 +39,10 @@ def test_namespace_override(runner: Runner, namespaceoverride: Any) -> None:
     with pytest.raises(SpecFileError, match=r"Unknown msgtype open_channel"):
         Msg("open_channel")
 
+
 def test_on_simple_init(runner: Runner, namespaceoverride: Any) -> None:
-    """" 
-    Send from the runner to ldk a fist `init` connection 
+    """ "
+    Send from the runner to ldk a fist `init` connection
     as specified in the BOL1
     """
     namespaceoverride(bolt1.namespace)
@@ -49,6 +56,6 @@ def test_on_simple_init(runner: Runner, namespaceoverride: Any) -> None:
         # You should always handle us echoing your own features back!
         ExpectMsg("init"),
         Msg("init", globalfeatures="", features=""),
-    ] 
-    
+    ]
+
     run_runner(runner, test)
