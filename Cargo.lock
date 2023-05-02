@@ -642,6 +642,7 @@ version = "0.1.0"
 dependencies = [
  "lampo-common",
  "lampo-jsonrpc",
+ "lampo-nakamoto",
  "lampod",
  "libc",
 ]

@@ -31,6 +31,7 @@ pub struct JSONRPCv2<T: Send + Sync + 'static> {
     sources: Sources<RPCEvent>,
     socket: UnixListener,
     handler: Arc<Handler<T>>,
+    // FIXME: should be not the name but the fd int as key?
     pub(crate) conn: HashMap<String, UnixStream>,
     conn_queue: Mutex<Cell<HashMap<String, VecDeque<Response<Value>>>>>,
 }

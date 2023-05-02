@@ -17,4 +17,5 @@ clean:
 
 install:
 	$(CC) install --path ./lampo-cli
-	rustup run nightly $(CC) install --path ./lampod-cli
+	$(CC) install --path ./lampod-cli
+	sudo cp target/debug/liblampo_lib.so /usr/local/lib

@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use libc;
 
-use lampo_common::conf::LampoConf;
-use lampod::LampoDeamon;
+pub use lampod::LampoDeamon;
 
 #[macro_export]
 macro_rules! null {
@@ -27,13 +26,22 @@ macro_rules! from_cstr {
 }
 
 #[macro_export]
+macro_rules! to_cstr {
+    ($x:expr) => {{
+        use std::ffi::CString;
+        let Ok(c_str) = CString::new($x) else {
+                                                                                    return null!()
+                                                                                };
+        c_str.into_raw()
+    }};
+}
+
+#[macro_export]
 macro_rules! json_buffer {
     ($x:expr) => {{
         use lampo_common::json;
-        let Ok(buff) = json::to_string_pretty($x) else {
-                                                                                    return null!();
-                                                                                };
-        buff.as_ptr()
+        let Ok(buff) = json::to_string_pretty($x) else { return null!() };
+        to_cstr!(buff)
     }};
 }
 
@@ -58,8 +66,15 @@ macro_rules! as_rust {
 }
 
 /// Allow to create a lampo deamon from a configuration patch!
+#[no_mangle]
 pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon {
+    use lampo_common::conf::LampoConf;
+    use lampo_common::logger;
+    use lampo_nakamoto::{Config, Nakamoto, Network};
     use lampod::chain::{LampoWalletManager, WalletManager};
+    use std::str::FromStr;
+    logger::init(logger::Level::Debug).expect("failt to init the logger");
+
     let conf_path_t = from_cstr!(conf_path);
     let conf = match LampoConf::try_from(conf_path_t.to_owned()) {
         Ok(conf) => conf,
@@ -69,12 +84,19 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     let Ok(wallet) = LampoWalletManager::new(conf.network) else {
         return null!();
     };
-    let lampod = Box::new(LampoDeamon::new(conf, Arc::new(wallet)));
+
+    let mut nakamtot_conf = Config::default();
+    nakamtot_conf.network = Network::from_str(&conf.network.to_string()).unwrap();
+    let client = Arc::new(Nakamoto::new(nakamtot_conf).unwrap());
+    let mut lampod = LampoDeamon::new(conf, Arc::new(wallet));
+    let _ = lampod.init(client).unwrap();
+    let lampod = Box::new(lampod);
     Box::into_raw(lampod)
 }
 
 /// Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
 /// < 0 is an error happens, or 0 is all goes well.
+#[no_mangle]
 pub extern "C" fn add_jsonrpc_on_unixsocket(lampod: *mut LampoDeamon) -> i64 {
     use lampo_jsonrpc::JSONRPCv2;
     use lampod::jsonrpc::inventory::get_info;
@@ -108,11 +130,12 @@ pub extern "C" fn add_jsonrpc_on_unixsocket(lampod: *mut LampoDeamon) -> i64 {
     0
 }
 
+#[no_mangle]
 pub extern "C" fn lampod_call(
     lampod: *mut LampoDeamon,
     method: *const libc::c_char,
     buffer: *const libc::c_char,
-) -> *const u8 {
+) -> *const libc::c_char {
     use lampo_common::json;
 
     let Some(lampod) = as_rust!(lampod) else {
@@ -132,6 +155,16 @@ pub extern "C" fn lampod_call(
 }
 
 /// Allow to create a lampo deamon from a configuration patch!
+#[no_mangle]
+pub extern "C" fn lampo_listen(lampod: *mut LampoDeamon) {
+    let Some(lampod) = as_rust!(lampod) else {
+        panic!("errro during the convertion");
+    };
+    let _ = lampod.listen().map_err(|err| panic!("{err}"));
+}
+
+/// Allow to create a lampo deamon from a configuration patch!
+#[no_mangle]
 pub extern "C" fn free_lampod(lampod: *mut LampoDeamon) {
     c_free!(lampod);
 }

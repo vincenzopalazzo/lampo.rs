@@ -12,3 +12,4 @@ libc = "*"
 lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
+lampo-nakamoto = { path = "../lampo-nakamoto" }
