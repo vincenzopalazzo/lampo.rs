@@ -1,6 +1,6 @@
 name: lampo_dart
 description: Dart binding for the Lightning Network node Lampo.
-version: 0.0.1-alpha.1
+version: 0.0.1-alpha.2
 repository: https://github.com/dart-lightning/lampo.r
 
 environment:
