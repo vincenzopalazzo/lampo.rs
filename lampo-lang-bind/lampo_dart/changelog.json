@@ -1,6 +1,6 @@
 {
   "package_name": "dart-bindings",
-  "version": "v0.0.1-alpha.1",
+  "version": "v0.0.1-alpha.2",
   "api": {
     "name": "github",
     "repository": "https://github.com/dart-lightning/lampo.rs",

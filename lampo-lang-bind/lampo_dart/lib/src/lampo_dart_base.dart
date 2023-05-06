@@ -1,11 +1,24 @@
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
 import 'package:lampo_dart/src/ffi/generated_bindings.dart';
 
-final ffi = LampoFFI(DynamicLibrary.open("/usr/local/lib/liblampo.so"));
+final ffi = loadLibrary();
+
+LampoFFI loadLibrary() {
+  String? path;
+  if (Platform.isAndroid) {
+    path = "liblampo.so";
+  } else if (Platform.isLinux) {
+    path = "/usr/local/lib/liblampo.so";
+  } else {
+    throw Exception("platform not supported");
+  }
+  return LampoFFI(DynamicLibrary.open(path));
+}
 
 /// Lampo Class Implementation
 class Lampo {
@@ -24,9 +37,14 @@ class Lampo {
     ffi.free_lampod(inner);
   }
 
-  Future<Map<String, dynamic>> _call({required String method, Map<String, dynamic> payload = const {}}) async {
+  Future<Map<String, dynamic>> _call(
+      {required String method, Map<String, dynamic> payload = const {}}) async {
     var jsonStr = json.encode(payload);
-    var response = ffi.lampod_call(inner, method.toNativeUtf8().cast(), jsonStr.toNativeUtf8().cast()).cast<Utf8>().toDartString();
+    var response = ffi
+        .lampod_call(
+            inner, method.toNativeUtf8().cast(), jsonStr.toNativeUtf8().cast())
+        .cast<Utf8>()
+        .toDartString();
     return json.decode(response);
   }
 
@@ -36,7 +54,8 @@ class Lampo {
   ///
   /// In case you are running the application as command line, so there is no
   /// problem, and this will be has only benefits (maybe, if too many isolate are spawn?).
-  Future<Map<String, dynamic>> call({required String method, Map<String, dynamic> payload = const {}}) async {
+  Future<Map<String, dynamic>> call(
+      {required String method, Map<String, dynamic> payload = const {}}) async {
     return await _call(method: method, payload: payload);
   }
 }
