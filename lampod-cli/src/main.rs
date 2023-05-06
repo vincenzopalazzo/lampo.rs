@@ -56,7 +56,8 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let lampod = Arc::new(lampod);
     let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
     rpc_handler.set_handler(handler.clone());
-    lampod.listen()?;
+    let workder = lampod.listen().unwrap();
+    let _ = workder.join();
     handler.stop();
     let _ = jsorpc_worker.join().unwrap();
     Ok(())

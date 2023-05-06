@@ -9,7 +9,7 @@ void main() {
 
       test("init lampo node and call the `getinfo`", () async {
           var lampo = Lampo(homePath: "/home/vincent/.lampo/testnet/");
-          assert(false);
+          await lampo.spawn();
           var info = await lampo.call(method: "getinfo");
           print(info);
           lampo.stop();
