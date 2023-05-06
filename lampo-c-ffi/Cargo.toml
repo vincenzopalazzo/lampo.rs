@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "lampo_lib"
-crate-type = ["cdylib"]
+name = "lampo"
+crate-type = ["staticlib"]
 
 [dependencies]
 libc = "*"

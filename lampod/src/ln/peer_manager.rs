@@ -83,15 +83,14 @@ impl LampoPeerManager {
             chan_handler: channel_manager.channeld.clone().unwrap(),
             onion_message_handler: onion_messenger,
             route_handler: gossip_sync.clone(),
+            custom_message_handler: IgnoringMessageHandler {},
         };
-        let ignoring_custom_msg_handler = IgnoringMessageHandler {};
 
         let peer_manager = PeerManager::new(
             lightning_msg_handler,
             current_time.try_into().unwrap(),
             &ephemeral_bytes,
             channel_manager.logger.clone(),
-            ignoring_custom_msg_handler,
             wallet_manager.ldk_keys().keys_manager.clone(),
         );
         self.peer_manager = Some(Arc::new(peer_manager));
