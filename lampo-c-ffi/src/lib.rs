@@ -1,6 +1,7 @@
 //! Exposing C FFI for interact with Lampo API
 //! and build easly a node.
 use std::sync::Arc;
+use std::sync::Once;
 
 use libc;
 
@@ -65,6 +66,16 @@ macro_rules! as_rust {
     }};
 }
 
+static INIT: Once = Once::new();
+
+fn init_logger() {
+    // ignore error
+    INIT.call_once(|| {
+        use lampo_common::logger;
+        logger::init(logger::Level::Debug).expect("Unable to init the logger");
+    });
+}
+
 /// Allow to create a lampo deamon from a configuration patch!
 #[no_mangle]
 pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon {
@@ -73,6 +84,7 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     use lampod::chain::{LampoWalletManager, WalletManager};
     use std::str::FromStr;
 
+    init_logger();
     let conf_path_t = from_cstr!(conf_path);
     let conf = match LampoConf::try_from(conf_path_t.to_owned()) {
         Ok(conf) => conf,
