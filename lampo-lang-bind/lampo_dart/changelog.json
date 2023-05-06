@@ -1,0 +1,16 @@
+{
+  "package_name": "dart-bindings",
+  "version": "v0.0.1-alpha.1",
+  "api": {
+    "name": "github",
+    "repository": "https://github.com/dart-lightning/lampo.rs",
+    "branch": "main"
+  },
+  "generation_method": {
+    "name": "semverv2",
+    "header_filter": true
+  },
+  "serialization_method": {
+    "name": "md"
+  }
+}
