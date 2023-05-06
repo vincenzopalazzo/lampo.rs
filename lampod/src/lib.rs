@@ -21,17 +21,17 @@ pub mod ln;
 pub mod persistence;
 pub mod utils;
 
+use std::thread::JoinHandle;
 use std::{cell::Cell, sync::Arc};
 
 use bitcoin::locktime::Height;
 use chain::WalletManager;
 use crossbeam_channel as chan;
-use events::LampoEvent;
-use futures::lock::Mutex;
 use handler::external_handler::ExternalHandler;
 use lightning::routing::utxo::UtxoLookup;
 use lightning::{events::Event, routing::gossip::P2PGossipSync};
 use lightning_background_processor::BackgroundProcessor;
+use tokio::runtime::Runtime;
 
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
@@ -39,14 +39,13 @@ use lampo_common::error;
 use lampo_common::json;
 use lampo_jsonrpc::json_rpc2::Request;
 
-use actions::handler::LampoHandler;
-use chain::LampoChainManager;
-use ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use persistence::LampoPersistence;
-use tokio::runtime::Runtime;
-use utils::logger::LampoLogger;
-
+use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
+use crate::chain::LampoChainManager;
+use crate::events::LampoEvent;
+use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::persistence::LampoPersistence;
+use crate::utils::logger::LampoLogger;
 
 /// LampoDaemon is the main data structure that uses the facade
 /// pattern to hide the complexity of the LDK library. You can interact
@@ -68,7 +67,7 @@ pub struct LampoDeamon {
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
-    process: Arc<Mutex<Cell<Option<BackgroundProcessor>>>>,
+    process: Cell<Option<BackgroundProcessor>>,
     rt: Runtime,
 }
 
@@ -88,7 +87,7 @@ impl LampoDeamon {
             inventory_manager: None,
             wallet_manager,
             handler: None,
-            process: Arc::new(Mutex::new(Cell::new(None))),
+            process: Cell::new(None),
             rt: Runtime::new().unwrap(),
         }
     }
@@ -208,7 +207,7 @@ impl LampoDeamon {
         Ok(())
     }
 
-    pub fn listen(&self) -> error::Result<()> {
+    pub fn listen(&self) -> error::Result<JoinHandle<std::io::Result<()>>> {
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<dyn UtxoLookup + Send + Sync>>,
@@ -233,8 +232,7 @@ impl LampoDeamon {
             self.logger.clone(),
             Some(self.channel_manager().scorer()),
         );
-        let _ = background_processor.join();
-        Ok(())
+        Ok(std::thread::spawn(|| background_processor.join()))
     }
 
     /// Call any method supported by the lampod configuration. This includes
@@ -254,13 +252,6 @@ impl LampoDeamon {
         };
         handler.react(command)?;
         Ok(receiver.recv()?)
-    }
-
-    pub async fn stop(self) -> error::Result<()> {
-        if let Some(process) = self.process.lock().await.take() {
-            process.stop()?;
-        }
-        Ok(())
     }
 }
 

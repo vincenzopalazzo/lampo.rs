@@ -170,7 +170,9 @@ pub extern "C" fn lampo_listen(lampod: *mut LampoDeamon) {
     let Some(lampod) = as_rust!(lampod) else {
         panic!("errro during the convertion");
     };
-    let _ = lampod.listen().map_err(|err| panic!("{err}"));
+    // this will start the lampod in background, without
+    // impact on the binding language
+    std::thread::spawn(move || lampod.listen().unwrap().join());
 }
 
 /// Allow to create a lampo deamon from a configuration patch!
