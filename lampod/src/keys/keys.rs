@@ -1,4 +1,5 @@
-use lightning::chain::keysinterface::KeysManager;
+use lightning::sign::KeysManager;
+
 use std::{sync::Arc, time::SystemTime};
 
 /// Lampo keys implementations
