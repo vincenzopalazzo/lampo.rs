@@ -1,6 +1,8 @@
 //! Exposing C FFI for interact with Lampo API
 //! and build easly a node.
+use std::cell::Cell;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::Once;
 
 use libc;
@@ -68,6 +70,8 @@ macro_rules! as_rust {
 
 static INIT: Once = Once::new();
 
+static LAST_ERR: Mutex<Cell<Option<String>>> = Mutex::new(Cell::new(None));
+
 fn init_logger() {
     // ignore error
     INIT.call_once(|| {
@@ -78,6 +82,8 @@ fn init_logger() {
 
 /// Allow to create a lampo deamon from a configuration patch!
 #[no_mangle]
+#[allow(unused_variables)]
+#[allow(unused_assignments)]
 pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon {
     use lampo_common::conf::LampoConf;
     use lampo_nakamoto::{Config, Nakamoto, Network};
@@ -85,13 +91,21 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     use std::str::FromStr;
 
     init_logger();
+
     let conf_path_t = from_cstr!(conf_path);
     let conf = match LampoConf::try_from(conf_path_t.to_owned()) {
         Ok(conf) => conf,
         // FIXME: log the error!
-        Err(_) => return null!(),
+        Err(err) => {
+            LAST_ERR
+                .lock()
+                .unwrap()
+                .set(Some(format!("error reading conf {:?}", err)));
+            return null!();
+        }
     };
     let Ok(wallet) = LampoWalletManager::new(conf.network) else {
+        LAST_ERR.lock().unwrap().set(Some(format!("error init wallet")));
         return null!();
     };
 
@@ -99,11 +113,27 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     nakamtot_conf.network = Network::from_str(&conf.network.to_string()).unwrap();
     let client = Arc::new(Nakamoto::new(nakamtot_conf).unwrap());
     let mut lampod = LampoDeamon::new(conf, Arc::new(wallet));
-    let _ = lampod.init(client).unwrap();
+    if let Err(err) = lampod.init(client) {
+        LAST_ERR
+            .lock()
+            .unwrap()
+            .set(Some(format!("error while init the node {:?}", err)));
+        return null!();
+    }
     let lampod = Box::new(lampod);
     Box::into_raw(lampod)
 }
 
+/// Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
+/// < 0 is an error happens, or 0 is all goes well.
+#[no_mangle]
+pub extern "C" fn lampo_last_errror() -> *const libc::c_char {
+    let value = LAST_ERR.lock().unwrap().take();
+    if let Some(value) = value {
+        return to_cstr!(value);
+    }
+    null!()
+}
 /// Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
 /// < 0 is an error happens, or 0 is all goes well.
 #[no_mangle]
@@ -168,11 +198,11 @@ pub extern "C" fn lampod_call(
 #[no_mangle]
 pub extern "C" fn lampo_listen(lampod: *mut LampoDeamon) {
     let Some(lampod) = as_rust!(lampod) else {
-        panic!("errro during the convertion");
+        panic!("errr during the convertion");
     };
     // this will start the lampod in background, without
     // impact on the binding language
-    std::thread::spawn(move || lampod.listen().unwrap().join());
+    std::thread::spawn(move || lampod.listen().map(|lampod| lampod.join()));
 }
 
 /// Allow to create a lampo deamon from a configuration patch!
