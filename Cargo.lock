@@ -585,6 +585,7 @@ dependencies = [
  "lampo-nakamoto",
  "lampod",
  "libc",
+ "log",
 ]
 
 [[package]]

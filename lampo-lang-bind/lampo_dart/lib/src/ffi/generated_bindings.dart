@@ -1629,6 +1629,18 @@ class LampoFFI {
   late final _free_lampod =
       _free_lampodPtr.asFunction<void Function(ffi.Pointer<LampoDeamon>)>();
 
+  /// Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
+  /// < 0 is an error happens, or 0 is all goes well.
+  ffi.Pointer<ffi.Int8> lampo_last_errror() {
+    return _lampo_last_errror();
+  }
+
+  late final _lampo_last_errrorPtr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<ffi.Int8> Function()>>(
+          'lampo_last_errror');
+  late final _lampo_last_errror =
+      _lampo_last_errrorPtr.asFunction<ffi.Pointer<ffi.Int8> Function()>();
+
   /// Allow to create a lampo deamon from a configuration patch!
   void lampo_listen(
     ffi.Pointer<LampoDeamon> lampod,
