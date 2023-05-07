@@ -30,6 +30,12 @@ int64_t add_jsonrpc_on_unixsocket(struct LampoDeamon *lampod);
 void free_lampod(struct LampoDeamon *lampod);
 
 /**
+ * Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
+ * < 0 is an error happens, or 0 is all goes well.
+ */
+const char *lampo_last_errror(void);
+
+/**
  * Allow to create a lampo deamon from a configuration patch!
  */
 void lampo_listen(struct LampoDeamon *lampod);

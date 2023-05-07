@@ -1,6 +1,6 @@
 name: lampo_dart
 description: Dart binding for the Lightning Network node Lampo.
-version: 0.0.1-alpha.2
+version: 0.0.1-alpha.4
 repository: https://github.com/dart-lightning/lampo.r
 
 environment:
@@ -18,7 +18,7 @@ dev_dependencies:
 ffigen:
   name: 'LampoFFI'
   description: 'Lampo Deamon FFI to write a lightning node in dart'
-  output: 'lib/ffi/generated_bindings.dart'
+  output: 'lib/src/ffi/generated_bindings.dart'
   headers:
     entry-points:
-      - '../../lampo-ffi/liblampo.h'
+      - '../../lampo-c-ffi/liblampo.h'

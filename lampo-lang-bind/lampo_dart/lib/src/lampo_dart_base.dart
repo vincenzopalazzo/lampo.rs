@@ -26,6 +26,10 @@ class Lampo {
 
   Lampo({required String homePath}) {
     inner = ffi.new_lampod(homePath.toNativeUtf8().cast<Int8>());
+    if (inner.address == nullptr.address) {
+      var err = ffi.lampo_last_errror().cast<Utf8>().toDartString();
+      throw Exception(err);
+    }
   }
 
   void enableUnixSocket() {
