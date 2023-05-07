@@ -113,7 +113,13 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     nakamtot_conf.network = Network::from_str(&conf.network.to_string()).unwrap();
     let client = Arc::new(Nakamoto::new(nakamtot_conf).unwrap());
     let mut lampod = LampoDeamon::new(conf, Arc::new(wallet));
-    let _ = lampod.init(client).unwrap();
+    if let Err(err) = lampod.init(client) {
+        LAST_ERR
+            .lock()
+            .unwrap()
+            .set(Some(format!("error while init the node {:?}", err)));
+        return null!();
+    }
     let lampod = Box::new(lampod);
     Box::into_raw(lampod)
 }
