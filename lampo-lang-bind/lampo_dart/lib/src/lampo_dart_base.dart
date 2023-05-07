@@ -28,8 +28,11 @@ class Lampo {
     inner = ffi.new_lampod(homePath.toNativeUtf8().cast<Int8>());
   }
 
-  void spawn() {
+  void enableUnixSocket() {
     ffi.add_jsonrpc_on_unixsocket(inner);
+  }
+
+  void spawn() {
     ffi.lampo_listen(inner);
   }
 

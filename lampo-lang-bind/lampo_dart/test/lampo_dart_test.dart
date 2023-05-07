@@ -11,6 +11,7 @@ void main() {
 
     test("init lampo node and call the `getinfo`", () async {
       var lampo = Lampo(homePath: "/home/vincent/.lampo/testnet/");
+      lampo.enableUnixSocket();
       lampo.spawn();
       // Wait that the node wills start
       sleep(Duration(seconds: 2));
