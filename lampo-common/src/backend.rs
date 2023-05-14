@@ -1,9 +1,14 @@
 //! ...
 //! Beckend implementation
-pub use bitcoin::{BlockHash, Script, Transaction, Txid};
+
+pub use bitcoin::consensus::{deserialize, serialize};
+pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
 pub use lightning::chain::WatchedOutput;
 pub use lightning::routing::utxo::UtxoResult;
-pub use lightning_block_sync::{AsyncBlockSourceResult, BlockData, BlockHeaderData};
+pub use lightning_block_sync::{
+    AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult,
+};
+
 /// Bakend Trait specification
 pub trait Backend {
     /// Fetch feerate give a number of blocks
