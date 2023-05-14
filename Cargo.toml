@@ -4,6 +4,7 @@ members = [
         "lampod",
         "lampod-cli",
         "lampo-cli",
+        "lampo-bitcoind",
         "lampo-nakamoto",
         "lampo-jsonrpc",
         "lampo-client",
