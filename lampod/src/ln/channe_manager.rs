@@ -13,7 +13,9 @@ use lightning::chain::{BestBlock, Filter};
 use lightning::ln::channelmanager::{ChainParameters, SimpleArcChannelManager};
 use lightning::routing::gossip::NetworkGraph;
 use lightning::routing::router::DefaultRouter;
-use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringParameters};
+use lightning::routing::scoring::{
+    ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
+};
 use lightning::sign::EntropySource;
 use lightning::sign::InMemorySigner;
 use lightning::util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits};
@@ -134,7 +136,15 @@ impl LampoChannelManager {
     // FIXME: Step 11: Optional: Initialize the NetGraphMsgHandler
     pub fn network_graph(
         &mut self,
-    ) -> Arc<DefaultRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<Mutex<LampoScorer>>>> {
+    ) -> Arc<
+        DefaultRouter<
+            Arc<LampoGraph>,
+            Arc<LampoLogger>,
+            Arc<Mutex<LampoScorer>>,
+            ProbabilisticScoringFeeParameters,
+            LampoScorer,
+        >,
+    > {
         // Step 9: Initialize routing ProbabilisticScorer
         let network_graph_path = format!("{}/network_graph", self.conf.path());
         let network_graph = self.read_network(Path::new(&network_graph_path));
@@ -154,6 +164,7 @@ impl LampoChannelManager {
                 .keys_manager
                 .get_secure_random_bytes(),
             scorer.clone(),
+            ProbabilisticScoringFeeParameters::default(),
         ))
     }
 
@@ -162,7 +173,7 @@ impl LampoChannelManager {
         path: &Path,
         graph: &Arc<LampoGraph>,
     ) -> ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>> {
-        let params = ProbabilisticScoringParameters::default();
+        let params = ProbabilisticScoringDecayParameters::default();
         if let Ok(file) = File::open(path) {
             let args = (params.clone(), Arc::clone(&graph), self.logger.clone());
             if let Ok(scorer) = ProbabilisticScorer::read(&mut BufReader::new(file), args) {
