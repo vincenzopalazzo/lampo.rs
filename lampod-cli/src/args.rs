@@ -32,6 +32,9 @@ pub struct LampoCliArgs {
     pub conf: String,
     pub network: String,
     pub client: String,
+    pub bitcoind_url: Option<String>,
+    pub bitcoind_user: Option<String>,
+    pub bitcoind_pass: Option<String>,
 }
 
 pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
@@ -40,6 +43,9 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut config: Option<String> = None;
     let mut network: Option<String> = None;
     let mut client: Option<String> = None;
+    let mut bitcoind_url: Option<String> = None;
+    let mut bitcoind_user: Option<String> = None;
+    let mut bitcoind_pass: Option<String> = None;
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -56,6 +62,18 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
                 let var: String = parser.value()?.parse()?;
                 client = Some(var);
             }
+            Long("core-url") => {
+                let var: String = parser.value()?.parse()?;
+                bitcoind_url = Some(var);
+            }
+            Long("core-user") => {
+                let var: String = parser.value()?.parse()?;
+                bitcoind_user = Some(var);
+            }
+            Long("core-pass") => {
+                let var: String = parser.value()?.parse()?;
+                bitcoind_pass = Some(var);
+            }
             Long("help") => {
                 let _ = print_help();
                 std::process::exit(0);
@@ -68,6 +86,9 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         conf: config.expect("Configuration option need to be specified"),
         network: network.unwrap_or("testnet".to_owned()),
         client: client.unwrap_or("nakamoto".to_owned()),
+        bitcoind_url,
+        bitcoind_pass,
+        bitcoind_user,
     })
 }
 
