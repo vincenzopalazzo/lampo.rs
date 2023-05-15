@@ -774,6 +774,7 @@ dependencies = [
 name = "lampod-cli"
 version = "0.1.0"
 dependencies = [
+ "lampo-bitcoind",
  "lampo-common",
  "lampo-jsonrpc",
  "lampo-nakamoto",

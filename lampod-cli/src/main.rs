@@ -7,6 +7,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use lampo_bitcoind::BitcoinCore;
+use lampo_common::backend::Backend;
 use lampod::chain::{LampoWalletManager, WalletManager};
 use lampod::jsonrpc::onchain::json_new_addr;
 use log;
@@ -40,12 +42,17 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
 
     let wallet = LampoWalletManager::new(lampo_conf.network)?;
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
-    let client = match args.client.clone().as_str() {
+    let client: Arc<dyn Backend> = match args.client.clone().as_str() {
         "nakamoto" => {
             let mut conf = Config::default();
             conf.network = Network::from_str(&lampo_conf.network.to_string()).unwrap();
             Arc::new(Nakamoto::new(conf).unwrap())
         }
+        "core" => Arc::new(BitcoinCore::new(
+            &args.bitcoind_url.unwrap(),
+            &args.bitcoind_user.unwrap(),
+            &args.bitcoind_pass.unwrap(),
+        )?),
         _ => error::bail!("client {:?} not supported", args.client),
     };
     lampod.init(client)?;

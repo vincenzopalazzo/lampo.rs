@@ -17,6 +17,7 @@ pub struct BitcoinCore {
 
 impl BitcoinCore {
     pub fn new(url: &str, user: &str, pass: &str) -> Result<Self> {
+        // FIXME: the bitcoincore_rpc do not support the https protocol.
         use bitcoincore_rpc::Auth;
         Ok(Self {
             inner: Client::new(url, Auth::UserPass(user.to_owned(), pass.to_owned()))?,
