@@ -8,6 +8,7 @@ authors = ["Vincenzo Palazzo <vincenzopalazzodev@gmail.com>"]
 python = "^3.8"
 lnprototest = "^0.0.3"
 lampo-py = "0.0.1a3"
+python-bitcoinlib = "^0.11.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.3.1"

@@ -9,6 +9,7 @@ from lnprototest import SpecFileError, TryAll
 from lnprototest.runner import Runner
 from lnprototest.event import Msg, Disconnect, Connect, Event, ExpectMsg
 
+
 # FIXME: move this in a util module of lnprototest
 def get_traceback(e: Exception) -> str:
     lines = traceback.format_exception(type(e), e, e.__traceback__)

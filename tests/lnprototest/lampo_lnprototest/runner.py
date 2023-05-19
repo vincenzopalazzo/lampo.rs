@@ -7,17 +7,19 @@ for ldk implementation.
 
 Autor: Vincenzo Palazzo <vincenzopalazzodev@gmail.com>
 """
-import shutil
 import tempfile
 import logging
 import socket
+import shutil
 
 import pyln
 
-from typing import Any, Union, Optional, Sequence, List
+from typing import Any, Dict, Optional, List
+
 from contextlib import closing
 
 from lnprototest import KeySet, Conn
+from lnprototest.backend import Bitcoind
 from lnprototest.runner import Runner
 from lnprototest.event import Event, MustNotMsg, ExpectMsg
 
@@ -44,6 +46,7 @@ class LampoRunner(Runner):
     """
 
     def __init__(self, config: Any) -> None:
+        """Init the runner."""
         super().__init__(config)
         self.directory = tempfile.mkdtemp(prefix="lnpt-lampo-")
         self.config = config
@@ -54,6 +57,7 @@ class LampoRunner(Runner):
         self.conns: Dict[str, Conn] = {}
         self.last_conn = None
         self.public_key = None
+        self.bitcoind = None
 
     def __lampod_config_file(self) -> None:
         f = open(f"{self.directory}/lampo.conf", "w")
@@ -63,6 +67,8 @@ class LampoRunner(Runner):
     # FIXME: move this in lnprototest runner API
     def reserve_port(self) -> int:
         """
+        Reserve a port.
+
         When python asks for a free port from the os, it is possible that
         with concurrent access, the port that is picked is a port that is not free
         anymore when we go to bind the daemon like bitcoind port.
@@ -106,16 +112,34 @@ class LampoRunner(Runner):
         pass
 
     def start(self) -> None:
+        """Start the Runner."""
+        self.bitcoind = Bitcoind(self.directory)
+        try:
+            self.bitcoind.start()
+        except Exception as ex:
+            logging.debug(f"Exception with message {ex}")
+        logging.debug("RUN Bitcoind")
+
         self.public_key = self.node.call("getinfo", {})["node_id"]
+        self.running = True
+
+    def shutdown(self, also_bitcoind: bool = True) -> None:
+        # FIXME: stop the lightning node.
+        if also_bitcoind:
+            self.bitcoind.stop()
 
     def stop(self, print_logs: bool = False) -> None:
         """
-        Stop the runner, and print all the log that the ln
+        Stop the runner.
+
+        The function will print all the log that the ln
         implementation produced.
         Print the log is useful when we have a failure e we need
         to debug what happens during the tests.
         """
-        pass
+        self.shutdown(also_bitcoind=True)
+        self.running = False
+        shutil.rmtree(self.directory)
 
     def recv(self, event: Event, conn: Conn, outbuf: bytes) -> None:
         pass
