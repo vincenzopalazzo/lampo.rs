@@ -257,15 +257,18 @@ impl LampoDeamon {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use clightningrpc_conf::CLNConf;
     use lightning::util::config::UserConfig;
 
+    use lampo_common::bitcoin;
     use lampo_common::conf::LampoConf;
     use lampo_common::json;
     use lampo_common::logger;
     use lampo_common::model::request;
+    use lampo_common::secp256k1;
     use lampo_nakamoto::{Config, Network};
 
     use crate::chain::WalletManager;
@@ -328,5 +331,43 @@ mod tests {
         let payload = json::json!({});
         let result = lampo.call("getinfo", payload);
         assert!(result.is_ok(), "{:?}", result);
+    }
+
+    #[test]
+    fn lampod_from_privatekey() {
+        let key = secp256k1::SecretKey::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap();
+
+        let mut last_node_id: Option<String> = None;
+        for i in 0..2 {
+            let conf = LampoConf {
+                ldk_conf: UserConfig::default(),
+                network: bitcoin::Network::Testnet,
+                port: 19753,
+                path: format!("/tmp/lampo-{i}"),
+                inner: CLNConf::new("/tmp/".to_owned(), true),
+            };
+            let key = bitcoin::PrivateKey::new(key, conf.network);
+            let wallet = LampoWalletManager::try_from(key).unwrap();
+
+            let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
+
+            let mut conf = Config::default();
+            conf.network = Network::Testnet;
+            let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
+
+            let result = lampo.init(client);
+            assert!(result.is_ok());
+            let payload = json::json!({});
+            let result = lampo.call("getinfo", payload);
+            if last_node_id.is_none() {
+                last_node_id = result.unwrap().get("node_id").map(|i| i.to_string());
+            } else {
+                let node_id = result.unwrap().get("node_id").map(|i| i.to_string());
+                assert_eq!(node_id, last_node_id);
+            }
+        }
     }
 }
