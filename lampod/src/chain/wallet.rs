@@ -10,8 +10,11 @@ use bdk::keys::{
 use bdk::miniscript::miniscript;
 use bdk::template::Bip84;
 use bdk::{KeychainKind, Wallet};
-use lampo_common::model::response::NewAddress;
+use bitcoin::util::bip32::ExtendedPrivKey;
 use tokio::sync::Mutex;
+
+use lampo_common::bitcoin::PrivateKey;
+use lampo_common::model::response::NewAddress;
 
 use crate::async_run;
 use crate::keys::keys::LampoKeys;
@@ -69,6 +72,22 @@ impl LampoWalletManager {
         )?;
         Ok((wallet, ldk_kesy))
     }
+
+    fn build_from_private_key(
+        xprv: PrivateKey,
+    ) -> Result<(Wallet<MemoryDatabase>, LampoKeys), bdk::Error> {
+        let ldk_kesy = LampoKeys::new(xprv.inner.secret_bytes());
+        // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
+        let key = ExtendedPrivKey::new_master(xprv.network, &xprv.inner.secret_bytes())?;
+        let key = ExtendedKey::from(key);
+        let wallet = Wallet::new(
+            Bip84(key, KeychainKind::External),
+            None,
+            xprv.network,
+            MemoryDatabase::default(),
+        )?;
+        Ok((wallet, ldk_kesy))
+    }
 }
 
 impl WalletManager for LampoWalletManager {
@@ -104,5 +123,41 @@ impl WalletManager for LampoWalletManager {
         Ok(NewAddress {
             address: address.address.to_string(),
         })
+    }
+}
+
+impl TryFrom<PrivateKey> for LampoWalletManager {
+    type Error = bdk::Error;
+
+    fn try_from(value: PrivateKey) -> Result<Self, Self::Error> {
+        let (wallet, keymanager) = LampoWalletManager::build_from_private_key(value)?;
+        Ok(Self {
+            wallet: Mutex::new(wallet),
+            keymanager: Arc::new(keymanager),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use bitcoin::PrivateKey;
+
+    use lampo_common::secp256k1::SecretKey;
+
+    use super::{LampoWalletManager, WalletManager};
+
+    #[test]
+    fn from_private_key() {
+        let pkey = PrivateKey::new(
+            SecretKey::from_str("0000000000000000000000000000000000000000000000000000000000000001")
+                .unwrap(),
+            bitcoin::Network::Regtest,
+        );
+        let wallet = LampoWalletManager::try_from(pkey);
+        assert!(wallet.is_ok(), "{:?}", wallet.err());
+        let wallet = wallet.unwrap();
+        assert!(wallet.get_onchain_address().is_ok());
     }
 }

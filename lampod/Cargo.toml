@@ -11,7 +11,7 @@ lampo-common = { path = "../lampo-common" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-client = { path = "../lampo-client" }
 lightning = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = ["max_level_trace"] }
-lightning-block-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = [ "rpc-client" ] }
+lightning-block-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
 lightning-invoice = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
 lightning-persister = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
 lightning-background-processor = { git = "https://github.com/lightningdevkit/rust-lightning.git" }

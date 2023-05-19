@@ -11,3 +11,6 @@ pub mod error {
 pub mod json {
     pub use serde_json::*;
 }
+
+pub use bitcoin;
+pub use bitcoin::secp256k1;
