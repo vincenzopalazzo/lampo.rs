@@ -13,9 +13,11 @@ use lampod::chain::{LampoWalletManager, WalletManager};
 use lampod::jsonrpc::onchain::json_new_addr;
 use log;
 
+use lampo_common::bitcoin;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
+use lampo_common::secp256k1;
 use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
 use lampo_nakamoto::{Config, Nakamoto, Network};
@@ -40,7 +42,13 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
 
     lampo_conf.set_network(&args.network)?;
 
-    let wallet = LampoWalletManager::new(lampo_conf.network)?;
+    let wallet = if let Some(ref private_key) = lampo_conf.private_key {
+        let key = secp256k1::SecretKey::from_str(&private_key)?;
+        let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
+        LampoWalletManager::try_from(key)?
+    } else {
+        LampoWalletManager::new(lampo_conf.network)?
+    };
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
     let client: Arc<dyn Backend> = match args.client.clone().as_str() {
         "nakamoto" => {

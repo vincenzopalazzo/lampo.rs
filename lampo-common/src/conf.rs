@@ -11,6 +11,7 @@ pub struct LampoConf {
     pub ldk_conf: UserConfig,
     pub port: u64,
     pub path: String,
+    pub private_key: Option<String>,
 }
 
 impl TryFrom<String> for LampoConf {
@@ -34,12 +35,16 @@ impl TryFrom<String> for LampoConf {
         let Some(port) = port.first() else {
             anyhow::bail!("this is a bug inside the configuration parser, the vector of values is empty!");
         };
+        let private_key = conf
+            .get_conf("dev-private-key")
+            .map(|confs| confs.first().cloned().unwrap());
         Ok(Self {
             inner: conf,
             path: value,
             network: Network::from_str(network)?,
             ldk_conf: UserConfig::default(),
             port: u64::from_str(port)?,
+            private_key,
         })
     }
 }

@@ -85,7 +85,9 @@ fn init_logger() {
 #[allow(unused_variables)]
 #[allow(unused_assignments)]
 pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon {
+    use lampo_common::bitcoin;
     use lampo_common::conf::LampoConf;
+    use lampo_common::secp256k1;
     use lampo_nakamoto::{Config, Nakamoto, Network};
     use lampod::chain::{LampoWalletManager, WalletManager};
     use std::str::FromStr;
@@ -104,9 +106,24 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
             return null!();
         }
     };
-    let Ok(wallet) = LampoWalletManager::new(conf.network) else {
-        LAST_ERR.lock().unwrap().set(Some(format!("error init wallet")));
-        return null!();
+
+    let wallet = if let Some(ref priv_key) = conf.private_key {
+        let Ok(key) = secp256k1::SecretKey::from_str(&priv_key) else {
+            LAST_ERR.lock().unwrap().set(Some(format!("invalid private key `{priv_key}`")));
+            return null!();
+        };
+        let key = bitcoin::PrivateKey::new(key, conf.network);
+        let Ok(wallet) = LampoWalletManager::try_from(key) else {
+            LAST_ERR.lock().unwrap().set(Some(format!("error init wallet")));
+            return null!();
+        };
+        wallet
+    } else {
+        let Ok(wallet) = LampoWalletManager::new(conf.network) else {
+            LAST_ERR.lock().unwrap().set(Some(format!("error init wallet")));
+            return null!();
+        };
+        wallet
     };
 
     let mut nakamtot_conf = Config::default();
