@@ -45,8 +45,9 @@ impl FeeEstimator for LampoChainManager {
 
 /// Brodcaster Interface implementation for Lampo.
 impl BroadcasterInterface for LampoChainManager {
-    fn broadcast_transaction(&self, tx: &Transaction) {
-        self.backend.brodcast_tx(tx);
+    fn broadcast_transactions(&self, tx: &[&Transaction]) {
+        // FIXME: change the brodcasting
+        self.backend.brodcast_tx(tx.first().unwrap());
     }
 }
 

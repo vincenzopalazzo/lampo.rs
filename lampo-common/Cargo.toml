@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 lightning = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = ["max_level_trace"] }
 lightning-block-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = [ "rpc-client" ] }
-clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
+clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "macros/conf-fix" }
 bitcoin = "0.29.0"
 anyhow = "1.0.70"
 colored = "1.9"

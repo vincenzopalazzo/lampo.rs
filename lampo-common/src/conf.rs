@@ -23,27 +23,21 @@ impl TryFrom<String> for LampoConf {
         conf.parse()
             .map_err(|err| anyhow::anyhow!("{}", err.cause))?;
 
-        let Some(network) = conf.get_conf("network") else {
+        let Some(network) = conf.get_conf("network").map_err(|err| anyhow::anyhow!("{err}"))? else {
             anyhow::bail!("Network inside the configuration file missed");
         };
-        let Some(network) = network.first() else {
-            anyhow::bail!("this is a bug inside the configuration parser, the vector of values is empty!");
-        };
-        let Some(port) = conf.get_conf("port") else {
+        let Some(port) = conf.get_conf("port").map_err(|err| anyhow::anyhow!("{err}"))? else {
             anyhow::bail!("Port need to be specified inside the file");
-        };
-        let Some(port) = port.first() else {
-            anyhow::bail!("this is a bug inside the configuration parser, the vector of values is empty!");
         };
         let private_key = conf
             .get_conf("dev-private-key")
-            .map(|confs| confs.first().cloned().unwrap());
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
         Ok(Self {
             inner: conf,
             path: value,
-            network: Network::from_str(network)?,
+            network: Network::from_str(&network)?,
             ldk_conf: UserConfig::default(),
-            port: u64::from_str(port)?,
+            port: u64::from_str(&port)?,
             private_key,
         })
     }
@@ -54,18 +48,15 @@ impl LampoConf {
         self.path.clone()
     }
 
-    pub fn get_values(&self, key: &str) -> Option<Vec<String>> {
-        self.inner.get_conf(key)
+    pub fn get_values(&self, key: &str) -> Vec<String> {
+        self.inner.get_confs(key)
     }
 
-    pub fn get_value(&self, key: &str) -> Option<String> {
-        let Some(values) = self.inner.get_conf(key) else {
-            return None;
+    pub fn get_value(&self, key: &str) -> Result<Option<String>, anyhow::Error> {
+        let Some(value) = self.inner.get_conf(key).map_err(|err| anyhow::anyhow!("{err}"))? else {
+            return Ok(None);
         };
-        let Some(value) = values.first() else {
-            panic!("error inside the parse library, the vector of values is null");
-        };
-        Some(value.to_owned())
+        Ok(Some(value))
     }
 
     pub fn set_network(&mut self, network: &str) -> anyhow::Result<()> {
