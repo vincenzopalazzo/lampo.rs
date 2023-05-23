@@ -64,13 +64,18 @@ class LampoDeamon:
 
     def __init__(self, home_path: str) -> None:
         # FIXME: add the way to create the dir inside the lampod
+        home_path = ffi.new("char[]", home_path.encode('ascii'))
+        logging.info(f'home path {ffi.string(home_path)}')
         self.__inner = lampod.new_lampod(home_path)
+        if self.__inner == ffi.NULL:
+            err = ffi.string(lampod.lampo_last_errror())
+            raise Exception(err)
 
     def listen(self):
         """ ""
         Run The lightning node!
         """
-        lampod.add_jsonrpc_on_unixsocket(self.__inner)
+        #lampod.add_jsonrpc_on_unixsocket(self.__inner)
         lampod.lampo_listen(self.__inner)
 
     def call(self, method: str, payload: Dict[str, Any]) -> Dict[str, Any]:

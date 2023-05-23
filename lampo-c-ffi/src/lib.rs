@@ -21,10 +21,12 @@ macro_rules! from_cstr {
     ($x:expr) => {{
         use std::ffi::CStr;
         let c_str = unsafe { CStr::from_ptr($x) };
-        let Ok(c_str) = c_str.to_str() else {
-                                                                                    return null!()
-                                                                                };
-        c_str
+        let c_str = c_str.to_str();
+        if c_str.is_err() {
+            None
+        } else {
+            Some(c_str.unwrap())
+        }
     }};
 }
 
@@ -95,7 +97,14 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     init_logger();
 
     let conf_path_t = from_cstr!(conf_path);
-    let conf = match LampoConf::try_from(conf_path_t.to_owned()) {
+    if conf_path_t.is_none() {
+        LAST_ERR
+            .lock()
+            .unwrap()
+            .set(Some(format!("error: invalid c string `{:?}`", conf_path)));
+        return null!();
+    }
+    let conf = match LampoConf::try_from(conf_path_t.unwrap().to_owned()) {
         Ok(conf) => conf,
         // FIXME: log the error!
         Err(err) => {
@@ -200,10 +209,12 @@ pub extern "C" fn lampod_call(
     };
     let method = from_cstr!(method);
     let buffer = from_cstr!(buffer);
-    let Ok(payload) = json::from_str::<json::Value>(buffer) else {
+    // FIXME: check for error here before unwrap
+    let Ok(payload) = json::from_str::<json::Value>(buffer.unwrap()) else {
         return null!();
     };
-    let response = lampod.call(method, payload);
+    // FIXME: check for error before unwrap
+    let response = lampod.call(method.unwrap(), payload);
     // FIXME Encode this to a string
     match response {
         Ok(resp) => json_buffer!(&resp),

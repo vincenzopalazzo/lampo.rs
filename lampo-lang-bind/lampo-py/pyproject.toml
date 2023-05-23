@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "lampo-py"
-version = "0.0.1-alpha.3"
+version = "0.0.1-alpha.4"
 description = ""
 authors = ["Vincenzo Palazzo <vincenzopalazzodev@gmail.com>"]
 readme = "README.md"
