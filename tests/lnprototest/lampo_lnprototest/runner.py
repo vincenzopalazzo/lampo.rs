@@ -52,7 +52,7 @@ class LampoRunner(Runner):
         self.config = config
         self.lightning_port = self.reserve_port()
         self.__lampod_config_file()
-        self.node = LampoDeamon(str.encode(self.directory))
+        self.node = LampoDeamon(self.directory)
         # FIXME: move this to the runner interface
         self.conns: Dict[str, Conn] = {}
         self.last_conn = None
@@ -61,7 +61,11 @@ class LampoRunner(Runner):
 
     def __lampod_config_file(self) -> None:
         f = open(f"{self.directory}/lampo.conf", "w")
-        f.write(f"network=testnet\nport={self.lightning_port}")
+        f.write(f"network=testnet\nport={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001")
+        f.flush()
+        f.close()
+        f = open(f"{self.directory}/lampo.conf", "r")
+        logging.info(f"lampo config {f.read()}")
         f.close()
 
     # FIXME: move this in lnprototest runner API
@@ -122,6 +126,7 @@ class LampoRunner(Runner):
 
         self.public_key = self.node.call("getinfo", {})["node_id"]
         self.running = True
+        logging.info(f"run lampod with node id {self.public_key}")
 
     def shutdown(self, also_bitcoind: bool = True) -> None:
         # FIXME: stop the lightning node.
