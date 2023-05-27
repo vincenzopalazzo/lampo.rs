@@ -208,6 +208,10 @@ impl LampoDeamon {
     }
 
     pub fn listen(&self) -> error::Result<JoinHandle<std::io::Result<()>>> {
+        // FIXME: usually if this return an error there is already a runtime
+        // so we ignore the error.
+        let _ = tokio::runtime::Runtime::new();
+
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<dyn UtxoLookup + Send + Sync>>,
@@ -232,6 +236,8 @@ impl LampoDeamon {
             self.logger.clone(),
             Some(self.channel_manager().scorer()),
         );
+
+        self.peer_manager().run()?;
         Ok(std::thread::spawn(|| background_processor.join()))
     }
 

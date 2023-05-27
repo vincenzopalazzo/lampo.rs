@@ -15,6 +15,7 @@ use lampo_common::error;
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
 
+use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
@@ -98,26 +99,35 @@ impl LampoPeerManager {
         Ok(())
     }
 
-    pub async fn run(self) -> error::Result<()> {
+    pub fn run(&self) -> error::Result<()> {
         let listen_port = self.conf.port;
-        let Some(peer_manager) = self.peer_manager else {
+        let Some(ref peer_manager) = self.peer_manager else {
             error::bail!("peer manager is None, at this point this should be not None");
         };
         let peer_manager = peer_manager.clone();
-        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", listen_port)).await?;
-        loop {
-            let peer_manager = peer_manager.clone();
-            let tcp_stream = listener.accept().await?.0;
-            tokio::spawn(async move {
-                // Use LDK's supplied networking battery to facilitate inbound
-                // connections.
-                lightning_net_tokio::setup_inbound(
-                    peer_manager.clone(),
-                    tcp_stream.into_std().unwrap(),
-                )
-                .await;
-            });
-        }
+        async_run!(async move {
+            let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", listen_port))
+                .await
+                .unwrap();
+            log::info!(target: "lampod", "Preparing inbound connections");
+            loop {
+                let peer_manager = peer_manager.clone();
+                let addr = listener.local_addr().unwrap().to_string();
+                log::info!(target: "lampod", "preparing address {addr}");
+                let tcp_stream = listener.accept().await.unwrap().0;
+                log::info!(target: "lampod", "--------- start server on {addr} -----------");
+                tokio::spawn(async move {
+                    // Use LDK's supplied networking battery to facilitate inbound
+                    // connections.
+                    lightning_net_tokio::setup_inbound(
+                        peer_manager.clone(),
+                        tcp_stream.into_std().unwrap(),
+                    )
+                    .await;
+                });
+            }
+        });
+        Ok(())
     }
 
     pub fn is_connected_with(&self, peer_id: NodeId) -> bool {
