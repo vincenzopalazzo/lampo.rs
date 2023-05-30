@@ -7,6 +7,7 @@ for ldk implementation.
 
 Autor: Vincenzo Palazzo <vincenzopalazzodev@gmail.com>
 """
+import os
 import tempfile
 import logging
 import socket
@@ -14,16 +15,20 @@ import shutil
 
 import pyln
 
-from typing import Any, Dict, Optional, List
+from typing import Any, Optional, List, cast
 
 from contextlib import closing
+from concurrent import futures
 
 from lnprototest import KeySet, Conn
 from lnprototest.backend import Bitcoind
 from lnprototest.runner import Runner
-from lnprototest.event import Event, MustNotMsg, ExpectMsg
+from lnprototest.event import Event, MustNotMsg
 
 from lampo_py import LampoDeamon
+
+# FIXME: move this in the Runner
+TIMEOUT = int(os.getenv("TIMEOUT", "30"))
 
 
 class LampoConn(Conn):
@@ -53,19 +58,17 @@ class LampoRunner(Runner):
         self.lightning_port = self.reserve_port()
         self.__lampod_config_file()
         self.node = LampoDeamon(self.directory)
-        # FIXME: move this to the runner interface
-        self.conns: Dict[str, Conn] = {}
         self.last_conn = None
         self.public_key = None
         self.bitcoind = None
+        self.executor = futures.ThreadPoolExecutor(max_workers=20)
 
     def __lampod_config_file(self) -> None:
         f = open(f"{self.directory}/lampo.conf", "w")
-        f.write(f"network=testnet\nport={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001")
+        f.write(
+            f"network=testnet\nport={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001"
+        )
         f.flush()
-        f.close()
-        f = open(f"{self.directory}/lampo.conf", "r")
-        logging.info(f"lampo config {f.read()}")
         f.close()
 
     # FIXME: move this in lnprototest runner API
@@ -144,13 +147,25 @@ class LampoRunner(Runner):
         """
         self.shutdown(also_bitcoind=True)
         self.running = False
-        shutil.rmtree(self.directory)
+        for c in self.conns.values():
+            cast(LampoConn, c).connection.connection.close()
 
     def recv(self, event: Event, conn: Conn, outbuf: bytes) -> None:
         pass
 
-    def get_output_message(self, conn: Conn, event: ExpectMsg) -> Optional[bytes]:
-        pass
+    # FIXME: this can stay in the runner interface?
+    def get_output_message(
+        self, conn: Conn, event: Event, timeout: int = TIMEOUT
+    ) -> Optional[bytes]:
+        fut = self.executor.submit(cast(LampoConn, conn).connection.read_message)
+        try:
+            return fut.result(timeout)
+        except futures.TimeoutError as ex:
+            logging.error(f"timeout exception {ex}")
+            return None
+        except Exception as ex:
+            logging.error(f"{ex}")
+            return None
 
     def getblockheight(self) -> int:
         pass
@@ -199,10 +214,10 @@ class LampoRunner(Runner):
         pass
 
     def get_node_privkey(self) -> str:
-        pass
+        return "01"
 
     def get_node_bitcoinkey(self) -> str:
-        pass
+        return "0000000000000000000000000000000000000000000000000000000000000010"
 
     def has_option(self, optname: str) -> Optional[str]:
         pass
