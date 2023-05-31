@@ -66,7 +66,7 @@ class LampoRunner(Runner):
     def __lampod_config_file(self) -> None:
         f = open(f"{self.directory}/lampo.conf", "w")
         f.write(
-            f"network=testnet\nport={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001"
+            f"network=testnet\nport={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001\ndev-force-channel-secrets={self.get_node_bitcoinkey()}/0000000000000000000000000000000000000000000000000000000000000010/0000000000000000000000000000000000000000000000000000000000000011/0000000000000000000000000000000000000000000000000000000000000012/0000000000000000000000000000000000000000000000000000000000000013/0000000000000000000000000000000000000000000000000000000000000014/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
         )
         f.flush()
         f.close()
@@ -168,13 +168,16 @@ class LampoRunner(Runner):
             return None
 
     def getblockheight(self) -> int:
-        pass
+        return self.bitcoind.rpc.getblockcount()
 
     def trim_blocks(self, newheight: int) -> None:
-        pass
+        h = self.bitcoind.rpc.getblockhash(newheight + 1)
+        self.bitcoind.rpc.invalidateblock(h)
 
     def add_blocks(self, event: Event, txs: List[str], n: int) -> None:
-        pass
+        for tx in txs:
+            self.bitcoind.rpc.sendrawtransaction(tx)
+        self.bitcoind.rpc.generatetoaddress(n, self.bitcoind.rpc.getnewaddress())
 
     def expect_tx(self, event: Event, txid: str) -> None:
         pass
