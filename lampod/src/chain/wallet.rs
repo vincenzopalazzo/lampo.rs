@@ -73,10 +73,17 @@ impl LampoWalletManager {
         Ok((wallet, ldk_kesy))
     }
 
+    #[cfg(debug_assertions)]
     fn build_from_private_key(
         xprv: PrivateKey,
+        channel_keys: Option<String>,
     ) -> Result<(Wallet<MemoryDatabase>, LampoKeys), bdk::Error> {
-        let ldk_kesy = LampoKeys::new(xprv.inner.secret_bytes());
+        let ldk_keys = if channel_keys.is_some() {
+            LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
+        } else {
+            LampoKeys::new(xprv.inner.secret_bytes())
+        };
+
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
         let key = ExtendedPrivKey::new_master(xprv.network, &xprv.inner.secret_bytes())?;
         let key = ExtendedKey::from(key);
@@ -86,7 +93,7 @@ impl LampoWalletManager {
             xprv.network,
             MemoryDatabase::default(),
         )?;
-        Ok((wallet, ldk_kesy))
+        Ok((wallet, ldk_keys))
     }
 }
 
@@ -126,11 +133,11 @@ impl WalletManager for LampoWalletManager {
     }
 }
 
-impl TryFrom<PrivateKey> for LampoWalletManager {
+impl TryFrom<(PrivateKey, Option<String>)> for LampoWalletManager {
     type Error = bdk::Error;
 
-    fn try_from(value: PrivateKey) -> Result<Self, Self::Error> {
-        let (wallet, keymanager) = LampoWalletManager::build_from_private_key(value)?;
+    fn try_from(value: (PrivateKey, Option<String>)) -> Result<Self, Self::Error> {
+        let (wallet, keymanager) = LampoWalletManager::build_from_private_key(value.0, value.1)?;
         Ok(Self {
             wallet: Mutex::new(wallet),
             keymanager: Arc::new(keymanager),
@@ -155,7 +162,7 @@ mod tests {
                 .unwrap(),
             bitcoin::Network::Regtest,
         );
-        let wallet = LampoWalletManager::try_from(pkey);
+        let wallet = LampoWalletManager::try_from((pkey, None));
         assert!(wallet.is_ok(), "{:?}", wallet.err());
         let wallet = wallet.unwrap();
         assert!(wallet.get_onchain_address().is_ok());

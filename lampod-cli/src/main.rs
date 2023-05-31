@@ -45,7 +45,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {
         let key = secp256k1::SecretKey::from_str(&private_key)?;
         let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
-        LampoWalletManager::try_from(key)?
+        LampoWalletManager::try_from((key, None))?
     } else {
         LampoWalletManager::new(lampo_conf.network)?
     };
