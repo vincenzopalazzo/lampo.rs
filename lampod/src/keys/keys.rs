@@ -1,6 +1,6 @@
-use lightning::sign::KeysManager;
-
 use std::{sync::Arc, time::SystemTime};
+
+use lampo_common::keymanager::KeysManager;
 
 /// Lampo keys implementations
 pub struct LampoKeys {
