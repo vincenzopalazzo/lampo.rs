@@ -12,6 +12,7 @@ pub struct LampoConf {
     pub port: u64,
     pub path: String,
     pub private_key: Option<String>,
+    pub channels_keys: Option<String>,
 }
 
 impl TryFrom<String> for LampoConf {
@@ -29,9 +30,20 @@ impl TryFrom<String> for LampoConf {
         let Some(port) = conf.get_conf("port").map_err(|err| anyhow::anyhow!("{err}"))? else {
             anyhow::bail!("Port need to be specified inside the file");
         };
-        let private_key = conf
-            .get_conf("dev-private-key")
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        let private_key: Option<String>;
+        let channels_keys: Option<String>;
+
+        #[cfg(debug_assertions)]
+        {
+            private_key = conf
+                .get_conf("dev-private-key")
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+
+            channels_keys = conf
+                .get_conf("dev-force-channel-secrets")
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+        }
+
         Ok(Self {
             inner: conf,
             path: value,
@@ -39,6 +51,7 @@ impl TryFrom<String> for LampoConf {
             ldk_conf: UserConfig::default(),
             port: u64::from_str(&port)?,
             private_key,
+            channels_keys,
         })
     }
 }

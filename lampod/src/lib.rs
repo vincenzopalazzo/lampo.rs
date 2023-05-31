@@ -291,6 +291,7 @@ mod tests {
             path: "/tmp".to_string(),
             inner: CLNConf::new("/tmp/".to_owned(), true),
             private_key: None,
+            channels_keys: None,
         };
         let wallet = LampoWalletManager::new(conf.network).unwrap();
         let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
@@ -326,6 +327,7 @@ mod tests {
             path: "/tmp".to_string(),
             inner: CLNConf::new("/tmp/".to_owned(), true),
             private_key: None,
+            channels_keys: None,
         };
         let wallet = LampoWalletManager::new(conf.network).unwrap();
         let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
@@ -357,9 +359,10 @@ mod tests {
                 path: format!("/tmp/lampo-{i}"),
                 inner: CLNConf::new("/tmp/".to_owned(), true),
                 private_key: None,
+                channels_keys: None,
             };
             let key = bitcoin::PrivateKey::new(key, conf.network);
-            let wallet = LampoWalletManager::try_from(key).unwrap();
+            let wallet = LampoWalletManager::try_from((key, None)).unwrap();
 
             let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 

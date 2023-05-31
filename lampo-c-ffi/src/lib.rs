@@ -117,12 +117,16 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     };
 
     let wallet = if let Some(ref priv_key) = conf.private_key {
+        #[cfg(not(debug_assertions))]
+        compile_error!(
+            "this should not be allowed, will be not possible set custom keys in release build!"
+        );
         let Ok(key) = secp256k1::SecretKey::from_str(&priv_key) else {
             LAST_ERR.lock().unwrap().set(Some(format!("invalid private key `{priv_key}`")));
             return null!();
         };
         let key = bitcoin::PrivateKey::new(key, conf.network);
-        let Ok(wallet) = LampoWalletManager::try_from(key) else {
+        let Ok(wallet) = LampoWalletManager::try_from((key, conf.channels_keys.clone())) else {
             LAST_ERR.lock().unwrap().set(Some(format!("error init wallet")));
             return null!();
         };
