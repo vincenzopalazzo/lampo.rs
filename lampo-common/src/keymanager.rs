@@ -255,12 +255,8 @@ impl KeysManager {
         self.delayed_payment_base_secret =
             Some(SecretKey::from_str(&delayed_payment_base_secret).unwrap());
         self.htlc_base_secret = Some(SecretKey::from_str(&htlc_base_secret).unwrap());
-        self.shachain_seed = Some(
-            shachain_seed
-                .as_bytes()
-                .try_into()
-                .expect("slice with incorrect length"),
-        );
+        // FIXME: check this
+        self.shachain_seed = Some(self.get_secure_random_bytes())
     }
 
     /// Derive an old [`WriteableEcdsaChannelSigner`] containing per-channel secrets based on a key derivation parameters.
