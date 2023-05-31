@@ -4,14 +4,15 @@ use std::{sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 use lightning::ln::peer_handler::MessageHandler;
-use lightning::ln::peer_handler::{IgnoringMessageHandler, PeerManager, SimpleArcPeerManager};
+use lightning::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
 use lightning::onion_message::OnionMessenger;
-use lightning::routing::gossip::P2PGossipSync;
+use lightning::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lightning_net_tokio;
 use lightning_net_tokio::SocketDescriptor;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::keymanager::KeysManager;
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
 
@@ -20,9 +21,22 @@ use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
-use super::channe_manager::LampoChainMonitor;
+use super::channe_manager::{LampoArcChannelManager, LampoChainMonitor};
 use super::events::PeerEvents;
 use super::peer_event;
+
+pub type LampoArcOnionMessenger<L> =
+    OnionMessenger<Arc<KeysManager>, Arc<KeysManager>, Arc<L>, IgnoringMessageHandler>;
+
+pub type SimpleArcPeerManager<SD, M, T, F, C, L> = PeerManager<
+    SD,
+    Arc<LampoArcChannelManager<M, T, F, L>>,
+    Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, Arc<C>, Arc<L>>>,
+    Arc<LampoArcOnionMessenger<L>>,
+    Arc<L>,
+    IgnoringMessageHandler,
+    Arc<KeysManager>,
+>;
 
 type InnerLampoPeerManager = SimpleArcPeerManager<
     SocketDescriptor,
@@ -87,7 +101,7 @@ impl LampoPeerManager {
             custom_message_handler: IgnoringMessageHandler {},
         };
 
-        let peer_manager = PeerManager::new(
+        let peer_manager = InnerLampoPeerManager::new(
             lightning_msg_handler,
             current_time.try_into().unwrap(),
             &ephemeral_bytes,

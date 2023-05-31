@@ -10,7 +10,7 @@ use bitcoin::BlockHash;
 use lightning::chain::chainmonitor::ChainMonitor;
 use lightning::chain::Watch;
 use lightning::chain::{BestBlock, Filter};
-use lightning::ln::channelmanager::{ChainParameters, SimpleArcChannelManager};
+use lightning::ln::channelmanager::{ChainParameters, ChannelManager};
 use lightning::routing::gossip::NetworkGraph;
 use lightning::routing::router::DefaultRouter;
 use lightning::routing::scoring::{
@@ -24,6 +24,7 @@ use lightning_persister::FilesystemPersister;
 
 use lampo_common::conf::{LampoConf, UserConfig};
 use lampo_common::error;
+use lampo_common::keymanager::KeysManager;
 use lampo_common::model::request;
 use lampo_common::model::response;
 
@@ -41,8 +42,27 @@ pub type LampoChainMonitor = ChainMonitor<
     Arc<FilesystemPersister>,
 >;
 
+pub type LampoArcChannelManager<M, T, F, L> = ChannelManager<
+    Arc<M>,
+    Arc<T>,
+    Arc<KeysManager>,
+    Arc<KeysManager>,
+    Arc<KeysManager>,
+    Arc<F>,
+    Arc<
+        DefaultRouter<
+            Arc<NetworkGraph<Arc<L>>>,
+            Arc<L>,
+            Arc<Mutex<ProbabilisticScorer<Arc<NetworkGraph<Arc<L>>>, Arc<L>>>>,
+            ProbabilisticScoringFeeParameters,
+            ProbabilisticScorer<Arc<NetworkGraph<Arc<L>>>, Arc<L>>,
+        >,
+    >,
+    Arc<L>,
+>;
+
 type LampoChanneld =
-    SimpleArcChannelManager<LampoChainMonitor, LampoChainManager, LampoChainManager, LampoLogger>;
+    LampoArcChannelManager<LampoChainMonitor, LampoChainManager, LampoChainManager, LampoLogger>;
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
 pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
@@ -122,7 +142,6 @@ impl LampoChannelManager {
         }
         Ok(())
     }
-
     pub fn graph(&self) -> Arc<LampoGraph> {
         let graph = self.graph.clone().unwrap();
         graph
@@ -205,7 +224,7 @@ impl LampoChannelManager {
         let monitor = self.build_channel_monitor();
         let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
         self.monitor = Some(Arc::new(monitor));
-        self.channeld = Some(Arc::new(SimpleArcChannelManager::new(
+        self.channeld = Some(Arc::new(LampoArcChannelManager::new(
             self.onchain.clone(),
             self.monitor.clone().unwrap().clone(),
             self.onchain.clone(),
