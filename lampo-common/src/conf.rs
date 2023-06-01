@@ -11,6 +11,11 @@ pub struct LampoConf {
     pub ldk_conf: UserConfig,
     pub port: u64,
     pub path: String,
+    /// The backend implementation
+    pub node: String,
+    pub core_url: Option<String>,
+    pub core_user: Option<String>,
+    pub core_pass: Option<String>,
     pub private_key: Option<String>,
     pub channels_keys: Option<String>,
 }
@@ -30,6 +35,22 @@ impl TryFrom<String> for LampoConf {
         let Some(port) = conf.get_conf("port").map_err(|err| anyhow::anyhow!("{err}"))? else {
             anyhow::bail!("Port need to be specified inside the file");
         };
+
+        let node = conf
+            .get_conf("backend")
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+            .unwrap_or("nakamoto".to_owned());
+        let core_url = conf
+            .get_conf("core-url")
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        let core_user = conf
+            .get_conf("core-user")
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        let core_pass = conf
+            .get_conf("core-pass")
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+
+        // Dev options
         let private_key: Option<String>;
         let channels_keys: Option<String>;
 
@@ -50,6 +71,10 @@ impl TryFrom<String> for LampoConf {
             network: Network::from_str(&network)?,
             ldk_conf: UserConfig::default(),
             port: u64::from_str(&port)?,
+            node,
+            core_url,
+            core_user,
+            core_pass,
             private_key,
             channels_keys,
         })

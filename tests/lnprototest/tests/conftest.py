@@ -16,14 +16,10 @@ from pyln.proto.message import MessageNamespace
 @pytest.fixture()  # type: ignore
 def runner(pytestconfig: Any) -> Any:
     runner = LampoRunner(pytestconfig)
-    thread = Thread(target=runner.listen)
-    thread.daemon = True
-    thread.start()
 
     yield runner
 
     runner.teardown()
-    thread.join(1)
 
 
 @pytest.fixture()
