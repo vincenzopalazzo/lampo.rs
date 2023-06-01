@@ -9,45 +9,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0eb452e0d760aaeb2339812aef595b287a782b10ccb9a09ec9fefddf809f1ca"
 
 [[package]]
-name = "amplify"
-version = "4.0.0"
+name = "android-tzdata"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f26966af46e0d200e8bf2b7f16230997c1c3f2d141bc27ccc091c012ed527b58"
-dependencies = [
- "amplify_derive",
- "amplify_num",
- "ascii",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "amplify_derive"
-version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c87df0f28e6eb1f2d355f29ba6793fa9ca643967528609608d5cbd70bd68f9d1"
-dependencies = [
- "amplify_syn",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "amplify_num"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddce3bc63e807ea02065e8d8b702695f3d302ae4158baddff8b0ce5c73947251"
-
-[[package]]
-name = "amplify_syn"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7736fb8d473c0d83098b5bac44df6a561e20470375cd8bcae30516dc889fd62a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
+checksum = "e999941b234f3131b00bc13c22d06e8c5ff726d1b6318ac7eb276997bbb4fef0"
 
 [[package]]
 name = "anstyle-query"
@@ -65,12 +30,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c7d0618f0e0b7e8ff11427422b64564d5fb0be1940354bfe2e0529b18a9d9b8"
 
 [[package]]
-name = "ascii"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
-
-[[package]]
 name = "async-trait"
 version = "0.1.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -78,7 +37,7 @@ checksum = "b9ccdd8f2a161be9bd5c023df56f1b2a0bd1d83872ae53b71a84a12c9bf6e842"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.16",
+ "syn 2.0.18",
 ]
 
 [[package]]
@@ -268,19 +227,13 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chrono"
-version = "0.4.24"
+version = "0.4.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e3c5919066adf22df73762e50cffcde3a758f2a848b113b586d1f86728b673b"
+checksum = "ec837a71355b28f6556dbd569b37b3f363091c0bd4b2e735674521b4c5fd9bc5"
 dependencies = [
- "num-integer",
+ "android-tzdata",
  "num-traits",
 ]
-
-[[package]]
-name = "chunked_transfer"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cca491388666e04d7248af3f60f0c40cfb0991c72205595d7c396e3510207d1a"
 
 [[package]]
 name = "clightningrpc-common"
@@ -473,7 +426,7 @@ checksum = "89ca545a94061b6365f2c7355b4b32bd20df3ff95f02da9329b34ccc3bd6ee72"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.16",
+ "syn 2.0.18",
 ]
 
 [[package]]
@@ -600,25 +553,13 @@ dependencies = [
 
 [[package]]
 name = "io-lifetimes"
-version = "1.0.10"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c66c74d2ae7e79a5a8f7ac924adbe38ee42a859c6539ad869eb51f0b52dc220"
+checksum = "eae7b9aee968036d54dce06cebaefd919e4472e753296daccd6d344e3e2df0c2"
 dependencies = [
  "hermit-abi 0.3.1",
  "libc",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "io-reactor"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15da7fc08622494b89ea0eb29a1bf37c8707410c5c09144d573cc45e4504fc8a"
-dependencies = [
- "amplify",
- "crossbeam-channel",
- "libc",
- "popol",
 ]
 
 [[package]]
@@ -671,6 +612,7 @@ dependencies = [
 name = "lampo-c-ffi"
 version = "0.1.0"
 dependencies = [
+ "lampo-bitcoind",
  "lampo-common",
  "lampo-jsonrpc",
  "lampo-nakamoto",
@@ -751,7 +693,6 @@ dependencies = [
  "clightningrpc-conf",
  "crossbeam-channel",
  "futures",
- "io-reactor",
  "lampo-client",
  "lampo-common",
  "lampo-jsonrpc",
@@ -765,7 +706,6 @@ dependencies = [
  "lightning-rapid-gossip-sync",
  "log",
  "once_cell",
- "popol",
  "time",
  "tokio",
 ]
@@ -806,7 +746,7 @@ checksum = "2b00cc1c228a6782d0f076e7b232802e0c5689d41bb5df366f2a6b6621cfdfe1"
 [[package]]
 name = "lightning"
 version = "0.0.115"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#6775b957bc0e738afff46eb819c69f45410f1843"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git#bdac899892cb69234fc6ea264013b4bc4d77b9db"
 dependencies = [
  "bitcoin 0.29.2",
  "musig2",
@@ -815,7 +755,7 @@ dependencies = [
 [[package]]
 name = "lightning-background-processor"
 version = "0.0.115"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#6775b957bc0e738afff46eb819c69f45410f1843"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git#bdac899892cb69234fc6ea264013b4bc4d77b9db"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -825,18 +765,16 @@ dependencies = [
 [[package]]
 name = "lightning-block-sync"
 version = "0.0.115"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#6775b957bc0e738afff46eb819c69f45410f1843"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git#bdac899892cb69234fc6ea264013b4bc4d77b9db"
 dependencies = [
  "bitcoin 0.29.2",
- "chunked_transfer",
  "lightning",
- "serde_json",
 ]
 
 [[package]]
 name = "lightning-invoice"
 version = "0.23.0"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#6775b957bc0e738afff46eb819c69f45410f1843"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git#bdac899892cb69234fc6ea264013b4bc4d77b9db"
 dependencies = [
  "bech32",
  "bitcoin 0.29.2",
@@ -849,7 +787,7 @@ dependencies = [
 [[package]]
 name = "lightning-net-tokio"
 version = "0.0.115"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#6775b957bc0e738afff46eb819c69f45410f1843"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git#bdac899892cb69234fc6ea264013b4bc4d77b9db"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -859,7 +797,7 @@ dependencies = [
 [[package]]
 name = "lightning-persister"
 version = "0.0.115"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#6775b957bc0e738afff46eb819c69f45410f1843"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git#bdac899892cb69234fc6ea264013b4bc4d77b9db"
 dependencies = [
  "bitcoin 0.29.2",
  "libc",
@@ -870,7 +808,7 @@ dependencies = [
 [[package]]
 name = "lightning-rapid-gossip-sync"
 version = "0.0.115"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#6775b957bc0e738afff46eb819c69f45410f1843"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git#bdac899892cb69234fc6ea264013b4bc4d77b9db"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -894,12 +832,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.17"
+version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abb12e687cfb44aa40f41fc3978ef76448f9b6038cad6aef4259d3c095a2382e"
-dependencies = [
- "cfg-if",
-]
+checksum = "518ef76f2f87365916b142844c16d8fefd85039bc5699050210a7778ee1cd1de"
 
 [[package]]
 name = "memchr"
@@ -948,14 +883,13 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "0.8.6"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b9d9a46eff5b4ff64b45a9e316a6d1e0bc719ef429cbec4dc630684212bfdf9"
+checksum = "927a765cd3fc26206e66b296465fa9d3e5ab003e651c1b3c060e7956d96b19d2"
 dependencies = [
  "libc",
- "log",
  "wasi",
- "windows-sys 0.45.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1094,16 +1028,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-integer"
-version = "0.1.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "225d3389fb3509a24c93f5c29eb6bde2586b98d9f016636dff58d7c6f7569cd9"
-dependencies = [
- "autocfg",
- "num-traits",
-]
-
-[[package]]
 name = "num-traits"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1130,9 +1054,9 @@ checksum = "b8f8bdf33df195859076e54ab11ee78a1b208382d3a26ec40d142ffc1ecc49ef"
 
 [[package]]
 name = "once_cell"
-version = "1.17.1"
+version = "1.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7e5500299e16ebb147ae15a00a942af264cf3688f47923b8fc2cd5858f23ad3"
+checksum = "9670a07f94779e00908f3e686eab508878ebb390ba6e604d3a284c00e8d0487b"
 
 [[package]]
 name = "parking_lot"
@@ -1221,18 +1145,18 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.58"
+version = "1.0.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa1fb82fc0c281dd9671101b66b771ebbe1eaf967b96ac8740dcba4b70005ca8"
+checksum = "6aeca18b86b413c660b781aa319e4e2648a3e6f9eadc9b47e9038e6fe9f3451b"
 dependencies = [
  "unicode-ident",
 ]
 
 [[package]]
 name = "quote"
-version = "1.0.27"
+version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f4f29d145265ec1c483c7c654450edde0bfe043d3938d6972630663356d9500"
+checksum = "1b9ab9c7eadfd8df19006f1cf1a4aed13540ed5cbc047010ece5826e10825488"
 dependencies = [
  "proc-macro2",
 ]
@@ -1240,7 +1164,7 @@ dependencies = [
 [[package]]
 name = "radicle-term"
 version = "0.1.0"
-source = "git+https://github.com/radicle-dev/heartwood.git#5fa677c5fbc1a79d2d712a82117f2ece85c1e786"
+source = "git+https://github.com/radicle-dev/heartwood.git#97f122c4512fbc5ea0b04a11db01d0d2d0977527"
 dependencies = [
  "anstyle-query",
  "anyhow",
@@ -1433,7 +1357,7 @@ checksum = "8c805777e3930c8883389c602315a24224bcc738b63905ef87cd1420353ea93e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.16",
+ "syn 2.0.18",
 ]
 
 [[package]]
@@ -1517,9 +1441,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.16"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6f671d4b5ffdb8eadec19c0ae67fe2639df8684bd7bc4b83d986b8db549cf01"
+checksum = "32d41677bcbe24c20c52e7c70b0d8db04134c5d1066bf98662e2871ad200ea3e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1580,7 +1504,7 @@ checksum = "f9456a42c5b0d803c8cd86e73dd7cc9edd429499f37a3550d286d5e86720569f"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.16",
+ "syn 2.0.18",
 ]
 
 [[package]]
@@ -1616,9 +1540,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.28.1"
+version = "1.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aa32867d44e6f2ce3385e89dceb990188b8bb0fb25b0cf576647a6f98ac5105"
+checksum = "94d7b1cfd2aa4011f2de74c2c4c63665e27a71006b0a192dcd2710272e73dfa2"
 dependencies = [
  "autocfg",
  "bytes",
@@ -1641,7 +1565,7 @@ checksum = "630bdcf245f78637c13ec01ffae6187cca34625e8c63150d424b59e55af2675e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.16",
+ "syn 2.0.18",
 ]
 
 [[package]]
@@ -1663,9 +1587,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5464a87b239f13a63a501f2701565754bae92d243d4bb7eb12f6d57d2269bf4"
+checksum = "b15811caf2415fb889178633e7724bad2509101cde276048e013b9def5e51fa0"
 
 [[package]]
 name = "unicode-normalization"
@@ -1721,7 +1645,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "syn 2.0.16",
+ "syn 2.0.18",
  "wasm-bindgen-shared",
 ]
 
@@ -1743,7 +1667,7 @@ checksum = "e128beba882dd1eb6200e1dc92ae6c5dbaa4311aa7bb211ca035779e5efc39f8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.16",
+ "syn 2.0.18",
  "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]

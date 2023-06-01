@@ -11,12 +11,13 @@ import os
 import tempfile
 import logging
 import socket
-import shutil
+import time
 
 import pyln
 
 from typing import Any, Optional, List, cast
 
+from threading import Thread
 from contextlib import closing
 from concurrent import futures
 
@@ -55,18 +56,21 @@ class LampoRunner(Runner):
         super().__init__(config)
         self.directory = tempfile.mkdtemp(prefix="lnpt-lampo-")
         self.config = config
-        self.lightning_port = self.reserve_port()
-        self.__lampod_config_file()
-        self.node = LampoDeamon(self.directory)
+        self.node = None
         self.last_conn = None
         self.public_key = None
         self.bitcoind = None
         self.executor = futures.ThreadPoolExecutor(max_workers=20)
 
     def __lampod_config_file(self) -> None:
+        self.lightning_port = self.reserve_port()
         f = open(f"{self.directory}/lampo.conf", "w")
         f.write(
-            f"network=testnet\nport={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001\ndev-force-channel-secrets={self.get_node_bitcoinkey()}/0000000000000000000000000000000000000000000000000000000000000010/0000000000000000000000000000000000000000000000000000000000000011/0000000000000000000000000000000000000000000000000000000000000012/0000000000000000000000000000000000000000000000000000000000000013/0000000000000000000000000000000000000000000000000000000000000014/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+            f"port={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001\ndev-force-channel-secrets={self.get_node_bitcoinkey()}/0000000000000000000000000000000000000000000000000000000000000010/0000000000000000000000000000000000000000000000000000000000000011/0000000000000000000000000000000000000000000000000000000000000012/0000000000000000000000000000000000000000000000000000000000000013/0000000000000000000000000000000000000000000000000000000000000014/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n"
+        )
+        # configure bitcoin core
+        f.write(
+            f"backend=core\ncore-url=127.0.0.1:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest\n"
         )
         f.flush()
         f.close()
@@ -86,9 +90,6 @@ class LampoRunner(Runner):
             s.bind(("", 0))
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             return s.getsockname()[1]
-
-    def listen(self) -> None:
-        self.node.listen()
 
     def check_error(self, event: Event, conn: Conn) -> Optional[str]:
         conn.expected_error = True
@@ -125,7 +126,12 @@ class LampoRunner(Runner):
             self.bitcoind.start()
         except Exception as ex:
             logging.debug(f"Exception with message {ex}")
-        logging.debug("RUN Bitcoind")
+        logging.debug(f"running bitcoin core on port {self.bitcoind.port}")
+
+        self.__lampod_config_file()
+        self.node = LampoDeamon(self.directory)
+        self.node.listen()
+        time.sleep(10)
 
         self.public_key = self.node.call("getinfo", {})["node_id"]
         self.running = True
@@ -149,9 +155,27 @@ class LampoRunner(Runner):
         self.running = False
         for c in self.conns.values():
             cast(LampoConn, c).connection.connection.close()
+        del self.node
 
     def recv(self, event: Event, conn: Conn, outbuf: bytes) -> None:
-        pass
+        try:
+            cast(LampoConn, conn).connection.send_message(outbuf)
+        except BrokenPipeError:
+            # This happens when they've sent an error and closed; try
+            # reading it to figure out what went wrong.
+            fut = self.executor.submit(
+                cast(CLightningConn, conn).connection.read_message
+            )
+            try:
+                msg = fut.result(1)
+            except futures.TimeoutError:
+                msg = None
+            if msg:
+                raise EventError(
+                    event, "Connection closed after sending {}".format(msg.hex())
+                )
+            else:
+                raise EventError(event, "Connection closed")
 
     # FIXME: this can stay in the runner interface?
     def get_output_message(

@@ -292,6 +292,10 @@ mod tests {
             inner: CLNConf::new("/tmp/".to_owned(), true),
             private_key: None,
             channels_keys: None,
+            node: String::from("nakamoto"),
+            core_pass: None,
+            core_url: None,
+            core_user: None,
         };
         let wallet = LampoWalletManager::new(conf.network).unwrap();
         let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
@@ -328,6 +332,10 @@ mod tests {
             inner: CLNConf::new("/tmp/".to_owned(), true),
             private_key: None,
             channels_keys: None,
+            node: String::from("nakamoto"),
+            core_pass: None,
+            core_url: None,
+            core_user: None,
         };
         let wallet = LampoWalletManager::new(conf.network).unwrap();
         let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
@@ -360,6 +368,11 @@ mod tests {
                 inner: CLNConf::new("/tmp/".to_owned(), true),
                 private_key: None,
                 channels_keys: None,
+
+                node: String::from("nakamoto"),
+                core_pass: None,
+                core_url: None,
+                core_user: None,
             };
             let key = bitcoin::PrivateKey::new(key, conf.network);
             let wallet = LampoWalletManager::try_from((key, None)).unwrap();
@@ -401,6 +414,11 @@ mod tests {
                 inner: CLNConf::new("/tmp/".to_owned(), true),
                 private_key: None,
                 channels_keys: None,
+
+                node: String::from("nakamoto"),
+                core_pass: None,
+                core_url: None,
+                core_user: None,
             };
             let key = bitcoin::PrivateKey::new(key, conf.network);
             let wallet =

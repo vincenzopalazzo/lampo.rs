@@ -7,6 +7,9 @@ use std::sync::Once;
 
 use libc;
 
+use lampo_bitcoind::BitcoinCore;
+use lampo_common::backend::Backend;
+
 pub use lampod::LampoDeamon;
 
 #[macro_export]
@@ -139,9 +142,29 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
         wallet
     };
 
-    let mut nakamtot_conf = Config::default();
-    nakamtot_conf.network = Network::from_str(&conf.network.to_string()).unwrap();
-    let client = Arc::new(Nakamoto::new(nakamtot_conf).unwrap());
+    // FIXME: return an error and not just unwrap the value
+    let client: Arc<dyn Backend> = match conf.node.as_str() {
+        "core" => Arc::new(
+            BitcoinCore::new(
+                &conf.core_url.clone().unwrap(),
+                &conf.core_user.clone().unwrap(),
+                &conf.core_pass.clone().unwrap(),
+            )
+            .unwrap(),
+        ),
+        "nakamoto" => {
+            let mut nakamtot_conf = Config::default();
+            nakamtot_conf.network = Network::from_str(&conf.network.to_string()).unwrap();
+            Arc::new(Nakamoto::new(nakamtot_conf).unwrap())
+        }
+        _ => {
+            LAST_ERR
+                .lock()
+                .unwrap()
+                .set(Some(format!("backend `{}` not supported", conf.node)));
+            return null!();
+        }
+    };
     let mut lampod = LampoDeamon::new(conf, Arc::new(wallet));
     if let Err(err) = lampod.init(client) {
         LAST_ERR
