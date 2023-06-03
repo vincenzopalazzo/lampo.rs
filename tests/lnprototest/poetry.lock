@@ -684,14 +684,14 @@ cffi = ">=1.15.1,<2.0.0"
 
 [[package]]
 name = "lnprototest"
-version = "0.0.3"
+version = "0.0.4"
 description = "Spec protocol tests for lightning network implementations"
 category = "main"
 optional = false
 python-versions = ">=3.7,<4.0"
 files = [
-    {file = "lnprototest-0.0.3-py3-none-any.whl", hash = "sha256:6a09d8e560490625810ee92b638e035c307b3d9b1e101576fd66e259a3450d74"},
-    {file = "lnprototest-0.0.3.tar.gz", hash = "sha256:a9b396be6b0dd11a9ded8e3ac3695f30911ce8459633b2758f18cabb9fb49153"},
+    {file = "lnprototest-0.0.4-py3-none-any.whl", hash = "sha256:761f3ec34d9251de778f857c030fbe4ca093119df06dba8d9bcbe1666d97b593"},
+    {file = "lnprototest-0.0.4.tar.gz", hash = "sha256:06c55d36404bbdd08501f745ae0cec600e2f81cdf4ad74cd0d45b48d665ac8e8"},
 ]
 
 [package.dependencies]
@@ -1375,4 +1375,4 @@ testing = ["big-O", "flake8 (<5)", "jaraco.functools", "jaraco.itertools", "more
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.8"
-content-hash = "95c9543ec35232b93211b282d970d0d72015068388b8ff0bcb272c7bd8b6582a"
+content-hash = "86bd3211d9f8aaae567d3933549d4e20436634d170279c1cb3c010bddf786a61"
