@@ -238,7 +238,13 @@ class LampoRunner(Runner):
         pass
 
     def get_keyset(self) -> KeySet:
-        pass
+        return KeySet(
+            revocation_base_secret="0000000000000000000000000000000000000000000000000000000000000011",
+            payment_base_secret="0000000000000000000000000000000000000000000000000000000000000012",
+            delayed_payment_base_secret="0000000000000000000000000000000000000000000000000000000000000013",
+            htlc_base_secret="0000000000000000000000000000000000000000000000000000000000000014",
+            shachain_seed="FF" * 32,
+        )
 
     def get_node_privkey(self) -> str:
         return "01"
