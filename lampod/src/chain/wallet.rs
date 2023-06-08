@@ -13,7 +13,7 @@ use bdk::{KeychainKind, Wallet};
 use bitcoin::util::bip32::ExtendedPrivKey;
 use tokio::sync::Mutex;
 
-use lampo_common::bitcoin::PrivateKey;
+use lampo_common::bitcoin::{PrivateKey, Script, Transaction};
 use lampo_common::model::response::NewAddress;
 
 use crate::async_run;
@@ -38,6 +38,10 @@ pub trait WalletManager: Send + Sync {
 
     /// return an on chain address
     fn get_onchain_address(&self) -> Result<NewAddress, bdk::Error>;
+
+    /// Create the transaction from a script and return the transaction
+    /// to propagate to the network.
+    fn create_transaction(&self, script: Script, amount: u64) -> Result<Transaction, bdk::Error>;
 }
 
 pub struct LampoWalletManager {
@@ -130,6 +134,15 @@ impl WalletManager for LampoWalletManager {
         Ok(NewAddress {
             address: address.address.to_string(),
         })
+    }
+
+    fn create_transaction(&self, script: Script, amount: u64) -> Result<Transaction, bdk::Error> {
+        // FIXME: remove the unwrap here
+        let wallet = async_run!(self.wallet.lock());
+        let mut tx = wallet.build_tx();
+        tx.add_recipient(script, amount);
+        let (psbt, _) = tx.finish()?;
+        Ok(psbt.extract_tx())
     }
 }
 
