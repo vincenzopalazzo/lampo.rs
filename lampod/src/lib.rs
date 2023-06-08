@@ -214,7 +214,7 @@ impl LampoDeamon {
 
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
-            None::<Arc<dyn UtxoLookup + Send + Sync>>,
+            None::<Arc<LampoChainManager>>,
             self.logger.clone(),
         ));
 
