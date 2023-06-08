@@ -39,7 +39,6 @@ fn main() -> error::Result<()> {
 fn run(args: LampoCliArgs) -> error::Result<()> {
     let path = args.conf;
     let mut lampo_conf = LampoConf::try_from(path)?;
-
     lampo_conf.set_network(&args.network)?;
 
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {

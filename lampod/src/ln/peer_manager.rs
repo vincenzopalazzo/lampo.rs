@@ -90,7 +90,7 @@ impl LampoPeerManager {
 
         let gossip_sync = Arc::new(P2PGossipSync::new(
             channel_manager.graph(),
-            Some(onchain_manager.clone()),
+            None::<Arc<LampoChainManager>>,
             self.logger.clone(),
         ));
 

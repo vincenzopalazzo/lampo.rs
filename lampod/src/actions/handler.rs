@@ -4,13 +4,16 @@ use std::sync::Arc;
 
 use lightning::events::Event;
 
+use lampo_common::backend::Backend;
 use lampo_common::error;
 use lampo_common::types::ChannelState;
 
+use crate::chain::{LampoChainManager, LampoWalletManager, WalletManager};
 use crate::events::LampoEvent;
 use crate::handler::external_handler::ExternalHandler;
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents, PeerEvents};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::utils::logger;
 use crate::{async_run, LampoDeamon};
 
 use super::{Handler, InventoryHandler};
@@ -19,6 +22,8 @@ pub struct LampoHandler {
     channel_manager: Arc<LampoChannelManager>,
     peer_manager: Arc<LampoPeerManager>,
     inventory_manager: Arc<LampoInventoryManager>,
+    wallet_manager: Arc<dyn WalletManager>,
+    chain_manager: Arc<LampoChainManager>,
     external_handlers: RefCell<Vec<Arc<dyn ExternalHandler>>>,
 }
 
@@ -31,6 +36,8 @@ impl LampoHandler {
             channel_manager: lampod.channel_manager(),
             peer_manager: lampod.peer_manager(),
             inventory_manager: lampod.inventory_manager(),
+            wallet_manager: lampod.wallet_manager(),
+            chain_manager: lampod.onchain_manager(),
             external_handlers: RefCell::new(Vec::new()),
         }
     }
@@ -101,7 +108,25 @@ impl Handler for LampoHandler {
                 channel_id,
                 user_channel_id,
                 reason,
-            } => unreachable!(),
+            } => {
+                log::info!("channel `{user_channel_id}` closed with reason: `{reason}`");
+                Ok(())
+            }
+            Event::FundingGenerationReady {
+                temporary_channel_id,
+                counterparty_node_id,
+                channel_value_satoshis,
+                output_script,
+                ..
+            } => {
+                log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
+                let transaction = self
+                    .wallet_manager
+                    .create_transaction(output_script, channel_value_satoshis)?;
+                self.chain_manager.backend.brodcast_tx(&transaction);
+                log::info!("propagate transaction wit id `{}`", transaction.txid());
+                Ok(())
+            }
             _ => unreachable!(),
         }
     }

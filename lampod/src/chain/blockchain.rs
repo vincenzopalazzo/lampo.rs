@@ -91,7 +91,8 @@ impl UtxoLookup for LampoChainManager {
         hash: &bitcoin::BlockHash,
         idx: u64,
     ) -> lightning::routing::utxo::UtxoResult {
-        self.backend.get_utxo(hash, idx)
+        //self.backend.get_utxo(hash, idx)
+        todo!()
     }
 }
 
