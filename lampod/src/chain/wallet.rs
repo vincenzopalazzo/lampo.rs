@@ -108,7 +108,7 @@ impl LampoWalletManager {
         // FIXME: Get a tmp path
         let db = KeychainStore::new_from_path("/tmp/onchain")
             .map_err(|err| bdk::Error::Generic(format!("{err}")))?;
-        // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
+
         let key = ExtendedPrivKey::new_master(xprv.network, &xprv.inner.secret_bytes())?;
         let key = ExtendedKey::from(key);
         let wallet = Wallet::new(Bip84(key, KeychainKind::External), None, db, xprv.network)
