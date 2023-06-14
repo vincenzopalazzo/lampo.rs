@@ -293,7 +293,7 @@ mod tests {
             private_key: None,
             channels_keys: None,
         };
-        let wallet = LampoWalletManager::new(conf.network).unwrap();
+        let (wallet, _) = LampoWalletManager::new(conf.clone().into()).unwrap();
         let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 
         let mut conf = Config::default();
@@ -329,7 +329,7 @@ mod tests {
             private_key: None,
             channels_keys: None,
         };
-        let wallet = LampoWalletManager::new(conf.network).unwrap();
+        let (wallet, _) = LampoWalletManager::new(conf.clone().into()).unwrap();
         let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 
         let mut conf = Config::default();
