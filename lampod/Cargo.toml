@@ -10,14 +10,16 @@ tokio = { version = "1.22.0", features = ["full"] }
 lampo-common = { path = "../lampo-common" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-client = { path = "../lampo-client" }
-lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", features = ["max_level_trace"] }
-lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git" }
-lightning-invoice = { git = "https://github.com/vincenzopalazzo/rust-lightning.git" }
-lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning.git" }
-lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning.git" }
-lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning.git" }
-lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git" }
-bdk = { version = "^0.28.0", default-feature = false, features = ["all-keys", "keys-bip39"] }
+lightning = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = ["max_level_trace"] }
+lightning-block-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
+lightning-invoice = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
+lightning-persister = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
+lightning-background-processor = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
+lightning-net-tokio = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
+lightning-rapid-gossip-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
+bdk = { git = "https://github.com/bitcoindevkit/bdk.git", branch = "release/1.0.0-alpha", features = ["keys-bip39"] }
+bdk_chain = { git = "https://github.com/bitcoindevkit/bdk.git", branch = "release/1.0.0-alpha" }
+bdk_file_store = { git = "https://github.com/bitcoindevkit/bdk.git", branch = "release/1.0.0-alpha" }
 log = "0.4.17"
 time = "0.3.13"
 bitcoin = "0.29.0"

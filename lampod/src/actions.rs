@@ -13,6 +13,18 @@ pub trait Handler {
     fn react(&self, event: LampoEvent) -> error::Result<()>;
 }
 
+pub struct DummyHandler;
+
+impl Handler for DummyHandler {
+    fn handle(&self, event: Event) -> error::Result<()> {
+        Ok(())
+    }
+
+    fn react(&self, event: LampoEvent) -> error::Result<()> {
+        Ok(())
+    }
+}
+
 /// The Handler that need to implement for handle
 /// inventory event
 ///
