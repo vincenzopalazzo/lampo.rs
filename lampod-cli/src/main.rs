@@ -46,7 +46,19 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
         LampoWalletManager::try_from((key, None))?
     } else {
-        LampoWalletManager::new(lampo_conf.network)?
+        if args.mnemonic.is_none() {
+            let (wallet, mnemonic) = LampoWalletManager::new(Arc::new(lampo_conf.clone()))?;
+            radicle_term::success!("Wallet Generated, please store this works in a safe way");
+            radicle_term::println(
+                radicle_term::format::badge_primary("waller-keys"),
+                format!("{}", radicle_term::format::highlight(mnemonic)),
+            );
+            wallet
+        } else {
+            // SAFETY: It is safe to unwrap the mnemonic because we check it
+            // before.
+            LampoWalletManager::restore(Arc::new(lampo_conf.clone()), &args.mnemonic.unwrap())?
+        }
     };
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
     let client: Arc<dyn Backend> = match args.client.clone().as_str() {
