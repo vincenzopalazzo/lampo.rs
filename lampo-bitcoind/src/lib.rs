@@ -41,7 +41,7 @@ impl Backend for BitcoinCore {
         // FIXME: manage the error here.
         let result = self.inner.estimate_smart_fee(blocks as u16, None).unwrap();
         // FIXME: check what is the value that ldk want
-        result.fee_rate.unwrap().to_btc() as u32
+        result.fee_rate.unwrap_or_default().to_btc() as u32
     }
 
     fn get_best_block<'a>(
