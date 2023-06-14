@@ -135,7 +135,8 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
         };
         wallet
     } else {
-        let Ok(wallet) = LampoWalletManager::new(conf.network) else {
+        // FIXME: add the possibility to create it from the mnemonic
+        let Ok((wallet, _mnemonic)) = LampoWalletManager::new(Arc::new(conf.clone())) else {
             LAST_ERR.lock().unwrap().set(Some(format!("error init wallet")));
             return null!();
         };
