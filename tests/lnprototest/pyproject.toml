@@ -7,7 +7,7 @@ authors = ["Vincenzo Palazzo <vincenzopalazzodev@gmail.com>"]
 [tool.poetry.dependencies]
 python = "^3.8"
 lnprototest = "^0.0.4"
-lampo-py = "0.0.1a4"
+lampo-py = "0.0.1a7"
 python-bitcoinlib = "^0.11.2"
 
 [tool.poetry.group.dev.dependencies]

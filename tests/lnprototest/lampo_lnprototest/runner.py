@@ -61,6 +61,9 @@ class LampoRunner(Runner):
         self.public_key = None
         self.bitcoind = None
         self.executor = futures.ThreadPoolExecutor(max_workers=20)
+        self.fundchannel_future: Optional[Any] = None
+        self.cleanup_callbacks: List[Callable[[], None]] = []
+        self.is_fundchannel_kill = False
 
     def __lampod_config_file(self) -> None:
         self.lightning_port = self.reserve_port()
@@ -130,6 +133,7 @@ class LampoRunner(Runner):
 
         self.__lampod_config_file()
         self.node = LampoDeamon(self.directory)
+        self.node.register_unix_rpc()
         self.node.listen()
         time.sleep(10)
 
@@ -212,6 +216,19 @@ class LampoRunner(Runner):
     def accept_add_fund(self, event: Event) -> None:
         pass
 
+    def kill_fundchannel(self) -> None:
+        fut = self.fundchannel_future
+        self.fundchannel_future = None
+        self.is_fundchannel_kill = True
+
+        if fut:
+            try:
+                fut.result(0)
+            except (SpecFileError, futures.TimeoutError):
+                pass
+            except Exception as ex:
+                raise ex from None
+
     def fundchannel(
         self,
         event: Event,
@@ -220,7 +237,72 @@ class LampoRunner(Runner):
         feerate: int = 0,
         expect_fail: bool = False,
     ) -> None:
-        pass
+        # First, check that another fundchannel isn't already running
+        if self.fundchannel_future:
+            if not self.fundchannel_future.done():
+                raise RuntimeError(
+                    "{} called fundchannel while another channel funding (fundchannel/init_rbf) is still in process".format(
+                        event
+                    )
+                )
+            self.fundchannel_future = None
+
+        def _fundchannel(
+            runner: Runner,
+            conn: Conn,
+            amount: int,
+            feerate: int,
+            expect_fail: bool = False,
+        ) -> str:
+            peer_id = conn.pubkey.format().hex()
+            # Need to supply feerate here, since regtest cannot estimate fees
+            try:
+                logging.info(
+                    f"fund channel with peer `{peer_id}` with amount `{amount}`"
+                )
+                return (
+                    runner.node.call(
+                        "fundchannel",
+                        {
+                            "node_id": peer_id,
+                            "amount": amount,
+                            "public": True,
+                        },
+                    ),
+                    True,
+                )
+            except Exception as ex:
+                # FIXME: this should not return None
+                # but for now that we do not have any
+                # use case where returni value is needed
+                # we keep return null.
+                #
+                # The main reason to do this mess
+                # is that in lnprototest do not have
+                # any custom way to report a spec violation
+                # failure, so for this reason we have different exception
+                # at the same time (because this mess is needed to make stuff async
+                # and look at exchanged message before finish the call). So
+                # the solution is that we log the RPC exception (this may cause a spec
+                # validation failure) and we care just the lnprototest exception as
+                # real reason to abort.
+                return str(ex), False
+
+        def _done(fut: Any) -> None:
+            result, ok = fut.result()
+            if not ok and not self.is_fundchannel_kill and not expect_fail:
+                raise Exception(result)
+            logging.info(f"funding channel return `{result}`")
+            self.fundchannel_future = None
+            self.is_fundchannel_kill = False
+            self.cleanup_callbacks.remove(self.kill_fundchannel)
+
+        fut = self.executor.submit(
+            _fundchannel, self, conn, amount, feerate, expect_fail
+        )
+        fut.add_done_callback(_done)
+        self.fundchannel_future = fut
+        self.cleanup_callbacks.append(self.kill_fundchannel)
 
     def init_rbf(
         self,

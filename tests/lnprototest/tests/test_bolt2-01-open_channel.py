@@ -61,6 +61,7 @@ from lnprototest.stash import (
     funding_txid,
     funding_tx,
     funding,
+    stash_field_from_event,
 )
 
 
@@ -168,6 +169,110 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
             "channel_ready",
             channel_id=channel_id(),
             second_per_commitment_point="027eed8389cf8eb715d73111b73d94d2c2d04bf96dc43dfd5b0970d80b3617009d",
+        ),
+        # Ignore unknown odd messages
+        TryAll([], RawMsg(bytes.fromhex("270F"))),
+    ]
+    run_runner(runner, merge_events_sequences(connections_events, test_events))
+
+
+def test_open_channel_opener_side(runner: Runner) -> None:
+    from lnprototest.event import Wait
+
+    local_funding_privkey = "20"
+    local_keyset = gen_random_keyset(int(local_funding_privkey))
+    connections_events = connect_to_node_helper(
+        runner=runner, tx_spendable=tx_spendable, conn_privkey="02"
+    )
+
+    # Now we test the 'opener' side of an open_channel (node initiates)
+    test_events = [
+        Wait(2),
+        FundChannel(amount=999877),
+        # This gives a channel of 999877sat
+        ExpectMsg(
+            "open_channel",
+            chain_hash=BitcoinUtils.blockchain_hash(),
+            funding_satoshis=999877,
+            push_msat=0,
+            dust_limit_satoshis=stash_field_from_event("open_channel", dummy_val=546),
+            htlc_minimum_msat=stash_field_from_event("open_channel", dummy_val=0),
+            channel_reserve_satoshis=9998,
+            to_self_delay=stash_field_from_event("open_channel", dummy_val=6),
+            funding_pubkey=remote_funding_pubkey(),
+            revocation_basepoint=remote_revocation_basepoint(),
+            payment_basepoint=remote_payment_basepoint(),
+            delayed_payment_basepoint=remote_delayed_payment_basepoint(),
+            htlc_basepoint=remote_htlc_basepoint(),
+            first_per_commitment_point=remote_per_commitment_point(0),
+            # FIXME: Check more fields!
+            channel_flags="01",
+        ),
+        Msg(
+            "accept_channel",
+            temporary_channel_id=rcvd(),
+            dust_limit_satoshis=546,
+            max_htlc_value_in_flight_msat=4294967295,
+            channel_reserve_satoshis=9998,
+            htlc_minimum_msat=0,
+            minimum_depth=3,
+            max_accepted_htlcs=483,
+            # We use 5, because c-lightning runner uses 6, so this is different.
+            to_self_delay=5,
+            funding_pubkey=pubkey_of(local_funding_privkey),
+            revocation_basepoint=local_keyset.revocation_basepoint(),
+            payment_basepoint=local_keyset.payment_basepoint(),
+            delayed_payment_basepoint=local_keyset.delayed_payment_basepoint(),
+            htlc_basepoint=local_keyset.htlc_basepoint(),
+            first_per_commitment_point=local_keyset.per_commit_point(0),
+        ),
+        # Ignore unknown odd messages
+        TryAll([], RawMsg(bytes.fromhex("270F"))),
+        ExpectMsg("funding_created", temporary_channel_id=rcvd("temporary_channel_id")),
+        # Now we can finally stash the funding information.
+        AcceptFunding(
+            rcvd("funding_created.funding_txid"),
+            funding_output_index=rcvd("funding_created.funding_output_index", int),
+            funding_amount=rcvd("open_channel.funding_satoshis", int),
+            local_node_privkey="02",
+            local_funding_privkey=local_funding_privkey,
+            remote_node_privkey=runner.get_node_privkey(),
+            remote_funding_privkey=remote_funding_privkey(),
+        ),
+        Commit(
+            funding=funding(),
+            opener=Side.remote,
+            local_keyset=local_keyset,
+            local_to_self_delay=rcvd("open_channel.to_self_delay", int),
+            remote_to_self_delay=sent("accept_channel.to_self_delay", int),
+            local_amount=0,
+            remote_amount=msat(rcvd("open_channel.funding_satoshis", int)),
+            local_dust_limit=sent("accept_channel.dust_limit_satoshis", int),
+            remote_dust_limit=rcvd("open_channel.dust_limit_satoshis", int),
+            feerate=rcvd("open_channel.feerate_per_kw", int),
+            local_features=sent("init.features"),
+            remote_features=rcvd("init.features"),
+        ),
+        # Now we've created commit, we can check sig is valid!
+        CheckEq(rcvd("funding_created.signature"), commitsig_to_recv()),
+        Msg(
+            "funding_signed",
+            channel_id=channel_id(),
+            signature=commitsig_to_send(),
+        ),
+        # It will broadcast tx
+        ExpectTx(rcvd("funding_created.funding_txid")),
+        # Mine three blocks to confirm channel.
+        Block(blockheight=103, number=3),
+        Msg(
+            "channel_ready",
+            channel_id=sent(),
+            second_per_commitment_point=local_keyset.per_commit_point(1),
+        ),
+        ExpectMsg(
+            "channel_ready",
+            channel_id=sent(),
+            second_per_commitment_point=remote_per_commitment_point(1),
         ),
         # Ignore unknown odd messages
         TryAll([], RawMsg(bytes.fromhex("270F"))),
