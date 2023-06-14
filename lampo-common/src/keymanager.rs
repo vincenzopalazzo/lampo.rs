@@ -244,7 +244,7 @@ impl KeysManager {
         payment_base_secret: String,
         delayed_payment_base_secret: String,
         htlc_base_secret: String,
-        shachain_seed: String,
+        _shachain_seed: String,
     ) {
         use std::str::FromStr;
 

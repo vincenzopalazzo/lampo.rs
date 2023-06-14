@@ -8,12 +8,11 @@ use lampo_common::backend::Backend;
 use lampo_common::error;
 use lampo_common::types::ChannelState;
 
-use crate::chain::{LampoChainManager, LampoWalletManager, WalletManager};
+use crate::chain::{LampoChainManager, WalletManager};
 use crate::events::LampoEvent;
 use crate::handler::external_handler::ExternalHandler;
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents, PeerEvents};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::utils::logger;
 use crate::{async_run, LampoDeamon};
 
 use super::{Handler, InventoryHandler};

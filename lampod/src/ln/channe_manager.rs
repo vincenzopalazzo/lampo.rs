@@ -61,7 +61,7 @@ pub type LampoArcChannelManager<M, T, F, L> = ChannelManager<
     Arc<L>,
 >;
 
-type LampoChanneld =
+type LampoChannel =
     LampoArcChannelManager<LampoChainMonitor, LampoChainManager, LampoChainManager, LampoLogger>;
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
@@ -76,7 +76,7 @@ pub struct LampoChannelManager {
     graph: Option<Arc<LampoGraph>>,
     score: Option<Arc<Mutex<LampoScorer>>>,
 
-    pub(crate) channeld: Option<Arc<LampoChanneld>>,
+    pub(crate) channeld: Option<Arc<LampoChannel>>,
     pub(crate) logger: Arc<LampoLogger>,
 }
 
@@ -116,7 +116,7 @@ impl LampoChannelManager {
         monitor.clone()
     }
 
-    pub fn manager(&self) -> Arc<LampoChanneld> {
+    pub fn manager(&self) -> Arc<LampoChannel> {
         let channeld = self.channeld.clone().unwrap();
         channeld
     }
