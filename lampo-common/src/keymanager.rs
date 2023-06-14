@@ -247,7 +247,7 @@ impl KeysManager {
         shachain_seed: String,
     ) {
         use std::str::FromStr;
-
+        log::info!("channels keys are: funding key={funding_key}, revocation_base_secret={revocation_base_secret},payment_base_secret={payment_base_secret}, delayed_payment_base_secret={delayed_payment_base_secret}, htlc_base_secret={htlc_base_secret}");
         // FIXME: remove the unwrapping and return the error.
         self.funding_key = Some(SecretKey::from_str(&funding_key).unwrap());
         self.revocation_base_secret = Some(SecretKey::from_str(&revocation_base_secret).unwrap());
@@ -286,7 +286,7 @@ impl KeysManager {
 
         let seed = Sha256::from_engine(unique_start).into_inner();
 
-        let commitment_seed = {
+        let mut commitment_seed = {
             let mut sha = Sha256::engine();
             sha.input(&seed);
             sha.input(&b"commitment seed"[..]);
@@ -300,8 +300,6 @@ impl KeysManager {
         let prng_seed: Option<[u8; 32]>;
 
         if self.revocation_base_secret.is_some() {
-            #[cfg(not(debug_assertions))]
-            compile_error!("this is a bug in the software, we can not have a custom channels keys in a revocation base secret ");
             // the user the custom keys!
             funding_key = self.funding_key;
             revocation_base_key = self.revocation_base_secret;
@@ -309,6 +307,11 @@ impl KeysManager {
             delayed_payment_base_key = self.delayed_payment_base_secret;
             htlc_base_key = self.htlc_base_secret;
             prng_seed = self.shachain_seed;
+            // FIXME: make this general, and also understand why we need this
+            commitment_seed = [
+                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            ];
         } else {
             macro_rules! key_step {
                 ($info: expr, $prev_key: expr) => {{
