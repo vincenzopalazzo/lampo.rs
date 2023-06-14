@@ -182,7 +182,9 @@ def test_open_channel_opener_side(runner: Runner) -> None:
     local_funding_privkey = "20"
     local_keyset = gen_random_keyset(int(local_funding_privkey))
     connections_events = connect_to_node_helper(
-        runner=runner, tx_spendable=tx_spendable, conn_privkey="02"
+        runner=runner, tx_spendable=tx_spendable, conn_privkey="02",
+        features=bitfield(0, 8, 12, 14, 38),
+        global_features="",
     )
 
     # Now we test the 'opener' side of an open_channel (node initiates)

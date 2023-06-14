@@ -51,8 +51,10 @@ impl TryFrom<String> for LampoConf {
             .map_err(|err| anyhow::anyhow!("{err}"))?;
 
         // Dev options
-        let private_key: Option<String>;
-        let channels_keys: Option<String>;
+        #[allow(unused_mut)]
+        let mut private_key: Option<String> = None;
+        #[allow(unused_mut)]
+        let mut channels_keys: Option<String> = None;
 
         #[cfg(debug_assertions)]
         {
