@@ -28,7 +28,6 @@ use bitcoin::locktime::Height;
 use chain::WalletManager;
 use crossbeam_channel as chan;
 use handler::external_handler::ExternalHandler;
-use lightning::routing::utxo::UtxoLookup;
 use lightning::{events::Event, routing::gossip::P2PGossipSync};
 use lightning_background_processor::BackgroundProcessor;
 use tokio::runtime::Runtime;

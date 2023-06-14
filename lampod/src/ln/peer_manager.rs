@@ -5,7 +5,7 @@ use std::{sync::Arc, time::SystemTime};
 use async_trait::async_trait;
 use lightning::ln::peer_handler::MessageHandler;
 use lightning::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
-use lightning::onion_message::OnionMessenger;
+use lightning::onion_message::{MessageRouter, OnionMessenger};
 use lightning::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lightning_net_tokio;
 use lightning_net_tokio::SocketDescriptor;
@@ -25,8 +25,28 @@ use super::channe_manager::{LampoArcChannelManager, LampoChainMonitor};
 use super::events::PeerEvents;
 use super::peer_event;
 
-pub type LampoArcOnionMessenger<L> =
-    OnionMessenger<Arc<KeysManager>, Arc<KeysManager>, Arc<L>, IgnoringMessageHandler>;
+pub struct FakeMsgRouter;
+
+impl MessageRouter for FakeMsgRouter {
+    fn find_path(
+        &self,
+        sender: bitcoin::secp256k1::PublicKey,
+        peers: Vec<bitcoin::secp256k1::PublicKey>,
+        destination: lightning::onion_message::Destination,
+    ) -> Result<lightning::onion_message::OnionMessagePath, ()> {
+        log::warn!("ingoring the find path in the message router");
+        Err(())
+    }
+}
+
+pub type LampoArcOnionMessenger<L> = OnionMessenger<
+    Arc<KeysManager>,
+    Arc<KeysManager>,
+    Arc<L>,
+    Arc<FakeMsgRouter>,
+    IgnoringMessageHandler,
+    IgnoringMessageHandler,
+>;
 
 pub type SimpleArcPeerManager<SD, M, T, F, C, L> = PeerManager<
     SD,
@@ -71,7 +91,7 @@ impl LampoPeerManager {
 
     pub fn init(
         &mut self,
-        onchain_manager: Arc<LampoChainManager>,
+        _onchain_manager: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
         channel_manager: Arc<LampoChannelManager>,
     ) -> error::Result<()> {
@@ -85,6 +105,8 @@ impl LampoPeerManager {
             wallet_manager.ldk_keys().keys_manager.clone(),
             wallet_manager.ldk_keys().keys_manager.clone(),
             self.logger.clone(),
+            Arc::new(FakeMsgRouter {}),
+            IgnoringMessageHandler {},
             IgnoringMessageHandler {},
         ));
 
