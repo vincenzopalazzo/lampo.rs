@@ -71,6 +71,13 @@ class LampoDeamon:
             err = ffi.string(lampod.lampo_last_errror())
             raise Exception(err)
 
+    def register_unix_rpc(self):
+        """ ""
+        Run The lightning node!
+        """
+        lampod.add_jsonrpc_on_unixsocket(self.__inner)
+
+
     def listen(self):
         """ ""
         Run The lightning node!
@@ -78,11 +85,17 @@ class LampoDeamon:
         #lampod.add_jsonrpc_on_unixsocket(self.__inner)
         lampod.lampo_listen(self.__inner)
 
-    def call(self, method: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def call(self, method: str, payload: Dict[str, Any] = {}) -> Dict[str, Any]:
         """ " Perform a call to the lightning node"""
-        result = lampod.lampod_call(self.__inner, bytes(method, "utf-8"), b"{}")
+        payload = json.dumps(payload)
+        result = lampod.lampod_call(self.__inner, bytes(method, "utf-8"), bytes(payload, "utf-8"))
+        if result == ffi.NULL:
+            logging.error("response is null")
+            err = lampod.lampo_last_errror()
+            raise Exception(ffi.string(err))
         logging.debug(f"raw data {result}")
         result = ffi.string(result).decode("utf-8")
+        logging.debug(f"data {result}")
         assert result is not None
         result = json.loads(result)
 

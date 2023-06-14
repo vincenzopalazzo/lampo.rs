@@ -34,12 +34,12 @@ impl LampoKeys {
 
         let mut manager = KeysManager::new(&seed, start_time.as_secs(), start_time.subsec_nanos());
         manager.set_channels_keys(
-            keys[0].to_string(),
             keys[1].to_string(),
             keys[2].to_string(),
             keys[3].to_string(),
             keys[4].to_string(),
             keys[5].to_string(),
+            keys[6].to_string(),
         );
         LampoKeys {
             keys_manager: Arc::new(manager),
