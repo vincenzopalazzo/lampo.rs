@@ -219,8 +219,7 @@ pub extern "C" fn add_jsonrpc_on_unixsocket(lampod: *mut LampoDeamon) -> i64 {
         return -2;
     };
 
-    // FIXME: this is blocking?
-    let _ = server.spawn().join();
+    let _ = server.spawn();
     0
 }
 
