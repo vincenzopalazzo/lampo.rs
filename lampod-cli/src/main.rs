@@ -39,7 +39,9 @@ fn main() -> error::Result<()> {
 fn run(args: LampoCliArgs) -> error::Result<()> {
     let path = args.conf;
     let mut lampo_conf = LampoConf::try_from(path)?;
-    lampo_conf.set_network(&args.network)?;
+    if args.network.is_some() {
+        lampo_conf.set_network(&args.network.unwrap())?;
+    }
 
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {
         let key = secp256k1::SecretKey::from_str(&private_key)?;
@@ -61,18 +63,25 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         }
     };
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
-    let client: Arc<dyn Backend> = match args.client.clone().as_str() {
+    let client = args.client.unwrap_or(lampo_conf.node.clone());
+    let client: Arc<dyn Backend> = match client.as_str() {
         "nakamoto" => {
             let mut conf = Config::default();
             conf.network = Network::from_str(&lampo_conf.network.to_string()).unwrap();
             Arc::new(Nakamoto::new(conf).unwrap())
         }
         "core" => Arc::new(BitcoinCore::new(
-            &args.bitcoind_url.unwrap(),
-            &args.bitcoind_user.unwrap(),
-            &args.bitcoind_pass.unwrap(),
+            &args
+                .bitcoind_url
+                .unwrap_or(lampo_conf.core_url.clone().unwrap()),
+            &args
+                .bitcoind_user
+                .unwrap_or(lampo_conf.core_user.clone().unwrap()),
+            &args
+                .bitcoind_pass
+                .unwrap_or(lampo_conf.core_pass.clone().unwrap()),
         )?),
-        _ => error::bail!("client {:?} not supported", args.client),
+        _ => error::bail!("client {:?} not supported", client),
     };
     lampod.init(client)?;
 

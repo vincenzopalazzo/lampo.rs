@@ -4,7 +4,7 @@ pub use bitcoin::Network;
 use clightningrpc_conf::{CLNConf, SyncCLNConf};
 pub use lightning::util::config::UserConfig;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LampoConf {
     pub inner: CLNConf,
     pub network: Network,

@@ -30,8 +30,8 @@ Options
 #[derive(Debug)]
 pub struct LampoCliArgs {
     pub conf: String,
-    pub network: String,
-    pub client: String,
+    pub network: Option<String>,
+    pub client: Option<String>,
     pub mnemonic: Option<String>,
     pub bitcoind_url: Option<String>,
     pub bitcoind_user: Option<String>,
@@ -90,8 +90,8 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
 
     Ok(LampoCliArgs {
         conf: config.expect("Configuration option need to be specified"),
-        network: network.unwrap_or("testnet".to_owned()),
-        client: client.unwrap_or("nakamoto".to_owned()),
+        network,
+        client,
         mnemonic,
         bitcoind_url,
         bitcoind_pass,

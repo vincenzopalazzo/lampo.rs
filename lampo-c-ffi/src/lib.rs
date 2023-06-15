@@ -78,11 +78,21 @@ static INIT: Once = Once::new();
 static LAST_ERR: Mutex<Cell<Option<String>>> = Mutex::new(Cell::new(None));
 
 fn init_logger() {
-    // ignore error
-    INIT.call_once(|| {
-        use lampo_common::logger;
-        logger::init(logger::Level::Debug).expect("Unable to init the logger");
-    });
+    #[cfg(not(target_os = "android"))]
+    {
+        // ignore error
+        INIT.call_once(|| {
+            use lampo_common::logger;
+            logger::init(logger::Level::Debug).expect("Unable to init the logger");
+        });
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        use android_logger::Config;
+        use lampo_common::logger::Level;
+        android_logger::init_once(Config::default().with_min_level(Level::Debug));
+    }
 }
 
 /// Allow to create a lampo deamon from a configuration patch!
@@ -99,7 +109,10 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
 
     init_logger();
 
+    log::info!("init logger");
+
     let conf_path_t = from_cstr!(conf_path);
+    log::info!("configuration patch `{:?}`", conf_path_t);
     if conf_path_t.is_none() {
         LAST_ERR
             .lock()
@@ -109,7 +122,6 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     }
     let conf = match LampoConf::try_from(conf_path_t.unwrap().to_owned()) {
         Ok(conf) => conf,
-        // FIXME: log the error!
         Err(err) => {
             LAST_ERR
                 .lock()
@@ -119,11 +131,9 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
         }
     };
 
+    log::info!("configuration received `{:?}`", conf);
+
     let wallet = if let Some(ref priv_key) = conf.private_key {
-        #[cfg(not(debug_assertions))]
-        compile_error!(
-            "this should not be allowed, will be not possible set custom keys in release build!"
-        );
         let Ok(key) = secp256k1::SecretKey::from_str(&priv_key) else {
             LAST_ERR.lock().unwrap().set(Some(format!("invalid private key `{priv_key}`")));
             return null!();
@@ -147,11 +157,11 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     let client: Arc<dyn Backend> = match conf.node.as_str() {
         "core" => Arc::new(
             BitcoinCore::new(
-                &conf.core_url.clone().unwrap(),
-                &conf.core_user.clone().unwrap(),
-                &conf.core_pass.clone().unwrap(),
+                &conf.core_url.clone().expect("please add the url"),
+                &conf.core_user.clone().expect("plaase add the user"),
+                &conf.core_pass.clone().expect("please add the pass"),
             )
-            .unwrap(),
+            .expect("impossible connect to core"),
         ),
         "nakamoto" => {
             let mut nakamtot_conf = Config::default();
