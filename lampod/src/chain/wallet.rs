@@ -1,4 +1,5 @@
 //! Wallet Manager implementation with BDK
+use std::fmt::Display;
 use std::sync::Arc;
 
 use bdk::keys::bip39::{Language, Mnemonic, WordCount};
@@ -7,12 +8,13 @@ use bdk::template::Bip84;
 use bdk::wallet::Balance;
 use bdk::{KeychainKind, Wallet};
 use bdk_chain::ConfirmationTime;
+use bdk_esplora::EsploraExt;
 use bdk_file_store::KeychainStore;
 use bitcoin::util::bip32::ExtendedPrivKey;
 use tokio::sync::Mutex;
 
 use lampo_common::bitcoin::{PrivateKey, Script, Transaction};
-use lampo_common::conf::LampoConf;
+use lampo_common::conf::{LampoConf, Network};
 use lampo_common::model::response::NewAddress;
 
 use crate::async_run;
@@ -50,6 +52,11 @@ pub struct LampoWalletManager {
     // FIXME: remove the mutex here to be sync I used the tokio mutex but this is wrong!
     pub wallet: Mutex<Wallet<KeychainStore<KeychainKind, ConfirmationTime>>>,
     pub keymanager: Arc<LampoKeys>,
+    pub network: Network,
+}
+
+fn to_bdk_err<T: Display>(err: T) -> bdk::Error {
+    bdk::Error::Generic(format!("{err}"))
 }
 
 impl LampoWalletManager {
@@ -117,6 +124,50 @@ impl LampoWalletManager {
     }
 
     fn sync(&self) -> Result<(), bdk::Error> {
+        // Scanning the chain...
+        let esplora_url = match self.network {
+            Network::Bitcoin => "https://mempool.space/api",
+            Network::Testnet => "https://mempool.space/testnet/api",
+            _ => {
+                return Err(bdk::Error::Generic(format!(
+                    "network `{:?}` not supported",
+                    self.network
+                )))
+            }
+        };
+        let mut wallet = async_run!(self.wallet.lock());
+        let client = bdk_esplora::esplora_client::Builder::new(esplora_url)
+            .build_blocking()
+            .map_err(to_bdk_err)?;
+        let checkpoints = wallet.checkpoints();
+        let spks = wallet
+            .spks_of_all_keychains()
+            .into_iter()
+            .map(|(k, spks)| {
+                let mut first = true;
+                (
+                    k,
+                    spks.inspect(move |(spk_i, _)| {
+                        if first {
+                            first = false;
+                        }
+                    }),
+                )
+            })
+            .collect();
+        let update = client
+            .scan(
+                checkpoints,
+                spks,
+                core::iter::empty(),
+                core::iter::empty(),
+                50,
+                2,
+            )
+            .map_err(to_bdk_err)?;
+        wallet.apply_update(update).map_err(to_bdk_err)?;
+        wallet.commit().map_err(to_bdk_err)?;
+        log::info!("bdk in sync!");
         Ok(())
     }
 }
@@ -135,16 +186,18 @@ impl WalletManager for LampoWalletManager {
             Self {
                 wallet: Mutex::new(wallet),
                 keymanager: Arc::new(keymanager),
+                network: conf.network,
             },
             mnemonic_words,
         ))
     }
 
     fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> Result<Self, bdk::Error> {
-        let (wallet, keymanager) = LampoWalletManager::build_wallet(conf, mnemonic_words)?;
+        let (wallet, keymanager) = LampoWalletManager::build_wallet(conf.clone(), mnemonic_words)?;
         Ok(Self {
             wallet: Mutex::new(wallet),
             keymanager: Arc::new(keymanager),
+            network: conf.network,
         })
     }
 
@@ -184,6 +237,9 @@ impl TryFrom<(PrivateKey, Option<String>)> for LampoWalletManager {
         Ok(Self {
             wallet: Mutex::new(wallet),
             keymanager: Arc::new(keymanager),
+            // This should be possible only during integration testing
+            // FIXME: fix the sync method in bdk, the esplora client will crash!
+            network: Network::Regtest,
         })
     }
 }
