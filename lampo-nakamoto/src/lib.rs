@@ -71,9 +71,11 @@ impl Backend for Nakamoto {
 
     fn brodcast_tx(&self, tx: &nakamoto_common::block::Transaction) {
         let result = self.handler.submit_transaction(tx.clone());
-        if let Err(err) = result {
+        if let Err(ref err) = result {
             log::error!("brodcast tx fails: {err}");
+            return;
         };
+        log::info!("propagated to peers `{:?}`", result.unwrap());
     }
 
     fn is_lightway(&self) -> bool {

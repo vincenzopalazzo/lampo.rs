@@ -6,7 +6,7 @@ use bdk::keys::bip39::{Language, Mnemonic, WordCount};
 use bdk::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
 use bdk::template::Bip84;
 use bdk::wallet::Balance;
-use bdk::{KeychainKind, Wallet};
+use bdk::{KeychainKind, SignOptions, Wallet};
 use bdk_chain::ConfirmationTime;
 use bdk_esplora::EsploraExt;
 use bdk_file_store::KeychainStore;
@@ -220,11 +220,18 @@ impl WalletManager for LampoWalletManager {
 
     fn create_transaction(&self, script: Script, amount: u64) -> Result<Transaction, bdk::Error> {
         self.sync()?;
-        // FIXME: remove the unwrap here
         let mut wallet = async_run!(self.wallet.lock());
         let mut tx = wallet.build_tx();
+        // We need to fix this because we need to add the fee
+        //
+        // tx_builder.add_recipient(output_script, value_sats).fee_rate(fee_rate).enable_rbf();
         tx.add_recipient(script, amount);
-        let (psbt, _) = tx.finish()?;
+        let (mut psbt, _) = tx.finish()?;
+        if wallet.sign(&mut psbt, SignOptions::default())? {
+            return Err(bdk::Error::Generic(format!(
+                "Error while signing the transaction"
+            )));
+        }
         Ok(psbt.extract_tx())
     }
 }

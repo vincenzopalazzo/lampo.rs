@@ -122,7 +122,6 @@ impl Handler for LampoHandler {
                 let transaction = self
                     .wallet_manager
                     .create_transaction(output_script, channel_value_satoshis)?;
-                log::info!("funding transaction `{}`", transaction.txid());
                 self.chain_manager.backend.brodcast_tx(&transaction);
                 log::info!("propagate transaction wit id `{}`", transaction.txid());
                 Ok(())
