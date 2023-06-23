@@ -6,16 +6,16 @@ use bdk::keys::bip39::{Language, Mnemonic, WordCount};
 use bdk::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
 use bdk::template::Bip84;
 use bdk::wallet::Balance;
-use bdk::{descriptor, FeeRate, KeychainKind, SignOptions, Wallet};
-use bdk_chain::ConfirmationTime;
+use bdk::wallet::ChangeSet;
+use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
 use bdk_esplora::EsploraExt;
-use bdk_file_store::KeychainStore;
-use bitcoin::util::bip32::ExtendedPrivKey;
+use bdk_file_store::Store;
 use tokio::sync::Mutex;
 
+use lampo_common::bitcoin::util::bip32::ExtendedPrivKey;
 use lampo_common::bitcoin::{PrivateKey, Script, Transaction};
 use lampo_common::conf::{LampoConf, Network};
-use lampo_common::model::response::NewAddress;
+use lampo_common::model::response::{NewAddress, Utxo};
 
 use crate::async_run;
 use crate::keys::keys::LampoKeys;
@@ -53,7 +53,7 @@ pub trait WalletManager: Send + Sync {
     ) -> Result<Transaction, bdk::Error>;
 
     /// Return the list of transaction stored inside the wallet
-    fn list_transactions(&self) -> Result<Vec<Transaction>, bdk::Error>;
+    fn list_transactions(&self) -> Result<Vec<Utxo>, bdk::Error>;
 
     /// Sync the wallet.
     fn sync(&self) -> Result<(), bdk::Error>;
@@ -61,7 +61,7 @@ pub trait WalletManager: Send + Sync {
 
 pub struct LampoWalletManager {
     // FIXME: remove the mutex here to be sync I used the tokio mutex but this is wrong!
-    pub wallet: Mutex<Wallet<KeychainStore<KeychainKind, ConfirmationTime>>>,
+    pub wallet: Mutex<Wallet<Store<'static, ChangeSet>>>,
     pub keymanager: Arc<LampoKeys>,
     pub network: Network,
 }
@@ -75,13 +75,7 @@ impl LampoWalletManager {
     fn build_wallet(
         conf: Arc<LampoConf>,
         mnemonic_words: &str,
-    ) -> Result<
-        (
-            Wallet<KeychainStore<KeychainKind, ConfirmationTime>>,
-            LampoKeys,
-        ),
-        bdk::Error,
-    > {
+    ) -> Result<(Wallet<Store<'static, ChangeSet>>, LampoKeys), bdk::Error> {
         // Parse a mnemonic
         let mnemonic =
             Mnemonic::parse(mnemonic_words).map_err(|err| bdk::Error::Generic(format!("{err}")))?;
@@ -92,8 +86,11 @@ impl LampoWalletManager {
             "wrong convertion to a private key".to_string(),
         ))?;
 
-        let db = KeychainStore::new_from_path(format!("{}/onchain", conf.path()))
-            .map_err(|err| bdk::Error::Generic(format!("{err}")))?;
+        let db = Store::<ChangeSet>::new_from_path(
+            "lampo".as_bytes(),
+            format!("{}/onchain", conf.path()),
+        )
+        .map_err(|err| bdk::Error::Generic(format!("{err}")))?;
         let ldk_kesy = LampoKeys::new(xprv.private_key.secret_bytes());
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
         let wallet = Wallet::new(
@@ -112,13 +109,7 @@ impl LampoWalletManager {
     fn build_from_private_key(
         xprv: PrivateKey,
         channel_keys: Option<String>,
-    ) -> Result<
-        (
-            Wallet<KeychainStore<KeychainKind, ConfirmationTime>>,
-            LampoKeys,
-        ),
-        bdk::Error,
-    > {
+    ) -> Result<(Wallet<Store<'static, ChangeSet>>, LampoKeys), bdk::Error> {
         let ldk_keys = if channel_keys.is_some() {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
         } else {
@@ -126,7 +117,7 @@ impl LampoWalletManager {
         };
 
         // FIXME: Get a tmp path
-        let db = KeychainStore::new_from_path("/tmp/onchain")
+        let db = Store::new_from_path("lampo".as_bytes(), "/tmp/onchain")
             .map_err(|err| bdk::Error::Generic(format!("{err}")))?;
 
         let key = ExtendedPrivKey::new_master(xprv.network, &xprv.inner.secret_bytes())?;
@@ -210,10 +201,17 @@ impl WalletManager for LampoWalletManager {
         Ok(psbt.extract_tx())
     }
 
-    fn list_transactions(&self) -> Result<Vec<Transaction>, bdk::Error> {
+    fn list_transactions(&self) -> Result<Vec<Utxo>, bdk::Error> {
         self.sync()?;
         let wallet = async_run!(self.wallet.lock());
-        let txs = wallet.transactions().map(|(_, tx)| tx.to_owned()).collect();
+        let txs = wallet
+            .list_unspent()
+            .map(|tx| Utxo {
+                txid: tx.outpoint.txid,
+                vout: tx.outpoint.vout,
+                reserved: tx.is_spent,
+            })
+            .collect::<Vec<_>>();
         Ok(txs)
     }
 
