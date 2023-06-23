@@ -10,7 +10,6 @@ use std::thread::JoinHandle;
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
 use lampod::chain::{LampoWalletManager, WalletManager};
-use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use log;
 
@@ -109,7 +108,6 @@ fn run_jsonrpc(
     server.add_rpc("connect", json_connect).unwrap();
     server.add_rpc("fundchannel", json_open_channel).unwrap();
     server.add_rpc("newaddr", json_new_addr).unwrap();
-    server.add_rpc("funds", json_funds).unwrap();
     let handler = server.handler();
     Ok((server.spawn(), handler))
 }

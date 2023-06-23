@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use lightning::events::Event;
 
+use lampo_common::backend::Backend;
 use lampo_common::error;
 use lampo_common::types::ChannelState;
 
@@ -118,23 +119,12 @@ impl Handler for LampoHandler {
                 ..
             } => {
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
-                // FIXME: estimate the fee rate with a callback
-                let fee = self.chain_manager.backend.fee_rate_estimation(6);
-                log::info!("fee estimated {fee} sats");
-                let transaction = self.wallet_manager.create_transaction(
-                    output_script,
-                    channel_value_satoshis,
-                    fee,
-                )?;
-                log::info!("funding transaction created `{}`", transaction.txid());
-                self.channel_manager
-                    .manager()
-                    .funding_transaction_generated(
-                        &temporary_channel_id,
-                        &counterparty_node_id,
-                        transaction,
-                    )
-                    .map_err(|err| error::anyhow!("{:?}", err))?;
+                let transaction = self
+                    .wallet_manager
+                    .create_transaction(output_script, channel_value_satoshis)?;
+                log::info!("funding transaction `{}`", transaction.txid());
+                self.chain_manager.backend.brodcast_tx(&transaction);
+                log::info!("propagate transaction wit id `{}`", transaction.txid());
                 Ok(())
             }
             _ => unreachable!(),
