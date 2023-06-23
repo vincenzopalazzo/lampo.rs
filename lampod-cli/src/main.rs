@@ -31,7 +31,7 @@ use lampod::LampoDeamon;
 use crate::args::LampoCliArgs;
 
 fn main() -> error::Result<()> {
-    logger::init(log::Level::Info).expect("initializing logger for the first time");
+    logger::init(log::Level::Info).expect("unable to init the logger for the first time");
     let args = args::parse_args()?;
     run(args)?;
     Ok(())
@@ -45,9 +45,14 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     }
 
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {
-        let key = secp256k1::SecretKey::from_str(&private_key)?;
-        let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
-        LampoWalletManager::try_from((key, None))?
+        #[cfg(debug_assertions)]
+        {
+            let key = secp256k1::SecretKey::from_str(&private_key)?;
+            let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
+            LampoWalletManager::try_from((key, None))?
+        }
+        #[cfg(not(debug_assertions))]
+        unimplemented!()
     } else {
         if args.mnemonic.is_none() {
             let (wallet, mnemonic) = LampoWalletManager::new(Arc::new(lampo_conf.clone()))?;

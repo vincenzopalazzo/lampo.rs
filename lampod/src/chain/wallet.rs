@@ -10,6 +10,7 @@ use bdk::wallet::ChangeSet;
 use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
 use bdk_esplora::EsploraExt;
 use bdk_file_store::Store;
+use bitcoin::hashes::hex::ToHex;
 use tokio::sync::Mutex;
 
 use lampo_common::bitcoin::util::bip32::ExtendedPrivKey;
@@ -207,7 +208,7 @@ impl WalletManager for LampoWalletManager {
         let txs = wallet
             .list_unspent()
             .map(|tx| Utxo {
-                txid: tx.outpoint.txid,
+                txid: tx.outpoint.txid.to_hex(),
                 vout: tx.outpoint.vout,
                 reserved: tx.is_spent,
             })
@@ -270,6 +271,7 @@ impl WalletManager for LampoWalletManager {
     }
 }
 
+#[cfg(debug_assertions)]
 impl TryFrom<(PrivateKey, Option<String>)> for LampoWalletManager {
     type Error = bdk::Error;
 

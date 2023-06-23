@@ -7,7 +7,7 @@ pub mod response {
 
     #[derive(Serialize, Deserialize)]
     pub struct Utxo {
-        pub txid: Txid,
+        pub txid: String,
         pub vout: u32,
         pub reserved: bool,
     }
