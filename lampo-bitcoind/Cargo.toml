@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 lampo-common = { path = "../lampo-common" }
 bitcoincore-rpc = { git = "https://github.com/rust-bitcoin/rust-bitcoincore-rpc.git" }
+log = "0.4.17"

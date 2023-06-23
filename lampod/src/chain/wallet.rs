@@ -6,7 +6,7 @@ use bdk::keys::bip39::{Language, Mnemonic, WordCount};
 use bdk::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
 use bdk::template::Bip84;
 use bdk::wallet::Balance;
-use bdk::{KeychainKind, Wallet};
+use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
 use bdk_chain::ConfirmationTime;
 use bdk_esplora::EsploraExt;
 use bdk_file_store::KeychainStore;
@@ -45,7 +45,18 @@ pub trait WalletManager: Send + Sync {
 
     /// Create the transaction from a script and return the transaction
     /// to propagate to the network.
-    fn create_transaction(&self, script: Script, amount: u64) -> Result<Transaction, bdk::Error>;
+    fn create_transaction(
+        &self,
+        script: Script,
+        amount: u64,
+        fee_rate: u32,
+    ) -> Result<Transaction, bdk::Error>;
+
+    /// Return the list of transaction stored inside the wallet
+    fn list_transactions(&self) -> Result<Vec<Transaction>, bdk::Error>;
+
+    /// Sync the wallet.
+    fn sync(&self) -> Result<(), bdk::Error>;
 }
 
 pub struct LampoWalletManager {
@@ -122,54 +133,6 @@ impl LampoWalletManager {
             .map_err(|err| bdk::Error::Generic(err.to_string()))?;
         Ok((wallet, ldk_keys))
     }
-
-    fn sync(&self) -> Result<(), bdk::Error> {
-        // Scanning the chain...
-        let esplora_url = match self.network {
-            Network::Bitcoin => "https://mempool.space/api",
-            Network::Testnet => "https://mempool.space/testnet/api",
-            _ => {
-                return Err(bdk::Error::Generic(format!(
-                    "network `{:?}` not supported",
-                    self.network
-                )))
-            }
-        };
-        let mut wallet = async_run!(self.wallet.lock());
-        let client = bdk_esplora::esplora_client::Builder::new(esplora_url)
-            .build_blocking()
-            .map_err(to_bdk_err)?;
-        let checkpoints = wallet.checkpoints();
-        let spks = wallet
-            .spks_of_all_keychains()
-            .into_iter()
-            .map(|(k, spks)| {
-                let mut first = true;
-                (
-                    k,
-                    spks.inspect(move |(spk_i, _)| {
-                        if first {
-                            first = false;
-                        }
-                    }),
-                )
-            })
-            .collect();
-        let update = client
-            .scan(
-                checkpoints,
-                spks,
-                core::iter::empty(),
-                core::iter::empty(),
-                50,
-                2,
-            )
-            .map_err(to_bdk_err)?;
-        wallet.apply_update(update).map_err(to_bdk_err)?;
-        wallet.commit().map_err(to_bdk_err)?;
-        log::info!("bdk in sync!");
-        Ok(())
-    }
 }
 
 impl WalletManager for LampoWalletManager {
@@ -218,14 +181,83 @@ impl WalletManager for LampoWalletManager {
         Ok(balance)
     }
 
-    fn create_transaction(&self, script: Script, amount: u64) -> Result<Transaction, bdk::Error> {
+    fn create_transaction(
+        &self,
+        script: Script,
+        amount: u64,
+        fee_rate: u32,
+    ) -> Result<Transaction, bdk::Error> {
         self.sync()?;
-        // FIXME: remove the unwrap here
         let mut wallet = async_run!(self.wallet.lock());
         let mut tx = wallet.build_tx();
-        tx.add_recipient(script, amount);
-        let (psbt, _) = tx.finish()?;
+        tx.add_recipient(script, amount)
+            .fee_rate(FeeRate::from_sat_per_kvb(fee_rate as f32))
+            .enable_rbf();
+        let (mut psbt, _) = tx.finish()?;
+        log::debug!("pst `{psbt}`");
+        if !wallet.sign(&mut psbt, SignOptions::default())? {
+            return Err(bdk::Error::Generic(format!(
+                "wallet impossible sign the psbt: {}",
+                psbt
+            )));
+        };
         Ok(psbt.extract_tx())
+    }
+
+    fn list_transactions(&self) -> Result<Vec<Transaction>, bdk::Error> {
+        self.sync()?;
+        let wallet = async_run!(self.wallet.lock());
+        let txs = wallet.transactions().map(|(_, tx)| tx.to_owned()).collect();
+        Ok(txs)
+    }
+
+    fn sync(&self) -> Result<(), bdk::Error> {
+        // Scanning the chain...
+        let esplora_url = match self.network {
+            Network::Bitcoin => "https://mempool.space/api",
+            Network::Testnet => "https://mempool.space/testnet/api",
+            _ => {
+                return Err(bdk::Error::Generic(format!(
+                    "network `{:?}` not supported",
+                    self.network
+                )))
+            }
+        };
+        let mut wallet = async_run!(self.wallet.lock());
+        let client = bdk_esplora::esplora_client::Builder::new(esplora_url)
+            .build_blocking()
+            .map_err(to_bdk_err)?;
+        let checkpoints = wallet.checkpoints();
+        let spks = wallet
+            .spks_of_all_keychains()
+            .into_iter()
+            .map(|(k, spks)| {
+                let mut first = true;
+                (
+                    k,
+                    spks.inspect(move |(spk_i, _)| {
+                        if first {
+                            first = false;
+                        }
+                    }),
+                )
+            })
+            .collect();
+        log::info!("bdk stert to sync");
+        let update = client
+            .scan(
+                checkpoints,
+                spks,
+                core::iter::empty(),
+                core::iter::empty(),
+                50,
+                2,
+            )
+            .map_err(to_bdk_err)?;
+        wallet.apply_update(update).map_err(to_bdk_err)?;
+        wallet.commit().map_err(to_bdk_err)?;
+        log::info!("bdk in sync!");
+        Ok(())
     }
 }
 

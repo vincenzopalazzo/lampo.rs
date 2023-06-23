@@ -34,7 +34,8 @@ macro_rules! sync {
 impl Backend for BitcoinCore {
     fn brodcast_tx(&self, tx: &lampo_common::backend::Transaction) {
         // FIXME: check the result.
-        let _ = self.inner.send_raw_transaction(&serialize(tx));
+        let result = self.inner.send_raw_transaction(&serialize(tx));
+        log::info!(target: "bitcoind", "brodcast transaction return {:?}", result);
     }
 
     fn fee_rate_estimation(&self, blocks: u64) -> u32 {
@@ -43,7 +44,7 @@ impl Backend for BitcoinCore {
             return 0;
         };
         // FIXME: check what is the value that ldk want
-        result.fee_rate.unwrap_or_default().to_btc() as u32
+        result.fee_rate.unwrap_or_default().to_sat() as u32
     }
 
     fn get_best_block<'a>(

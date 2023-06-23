@@ -76,6 +76,9 @@ unsafe impl Sync for LampoDeamon {}
 impl LampoDeamon {
     pub fn new(config: LampoConf, wallet_manager: Arc<dyn WalletManager>) -> Self {
         let root_path = config.path();
+        //FIXME: sync some where else
+        let wallet = wallet_manager.clone();
+        let _ = std::thread::spawn(move || wallet.sync().unwrap());
         LampoDeamon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
@@ -248,6 +251,8 @@ impl LampoDeamon {
     /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
     /// at some point.
     pub fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
+        // FIXME: wrap this logic inside a reactor handler! to be able to pass
+        // the handler down different method.
         let request = Request::new(method, args);
         let (sender, receiver) = chan::bounded::<json::Value>(1);
         let command = LampoEvent::from_req(&request, &sender)?;
