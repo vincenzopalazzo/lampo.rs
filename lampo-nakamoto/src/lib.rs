@@ -1,12 +1,16 @@
 //! Nakamoto backend implementation for Lampo
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::net::TcpStream;
 
+use esplora_client::BlockingClient;
+use esplora_client::Builder;
 use nakamoto_client::traits::Handle;
-pub use nakamoto_client::{Client, Config, Error, Network};
 use nakamoto_common::block::Height;
 use nakamoto_net_poll::Reactor;
 use nakamoto_net_poll::Waker;
+
+pub use nakamoto_client::{Client, Config, Error, Network};
 
 use lampo_common::backend::AsyncBlockSourceResult;
 use lampo_common::backend::Backend;
@@ -15,25 +19,50 @@ use lampo_common::backend::BlockHash;
 use lampo_common::backend::BlockHeaderData;
 use lampo_common::backend::UtxoResult;
 use lampo_common::backend::WatchedOutput;
+use lampo_common::error;
 
 #[derive(Clone)]
 pub struct Nakamoto {
     handler: nakamoto_client::Handle<Waker>,
     current_height: Cell<Option<Height>>,
+    rest: BlockingClient,
 }
 
 impl Nakamoto {
-    pub fn new(config: Config) -> Result<Self, Error> {
+    pub fn new(config: Config) -> error::Result<Self> {
         let nakamoto = Client::<Reactor<TcpStream>>::new()?;
         let handler = nakamoto.handle();
+        let url = match config.network.as_str() {
+            "bitcoin" => "https://blockstream.info/api",
+            "testnet" => "https://blockstream.info/testnet/api",
+            _ => {
+                return Err(error::anyhow!(
+                    "network {} not supported",
+                    config.network.as_str()
+                ))
+            }
+        };
+
         // FIXME: join this later
         let _worker = std::thread::spawn(|| nakamoto.run(config));
         let client = Nakamoto {
             handler,
             current_height: Cell::new(None),
+            rest: Builder::new(url)
+                .build_blocking()
+                .map_err(|err| error::anyhow!("{err}"))?,
         };
-
         Ok(client)
+    }
+
+    fn fee_in_range(estimation: &HashMap<String, f64>, from: u64, to: u64) -> Option<i64> {
+        for rate in from..to {
+            let key = &format!("{rate}");
+            if estimation.contains_key(key) {
+                return Some(estimation[key] as i64);
+            }
+        }
+        None
     }
 }
 
@@ -95,26 +124,8 @@ impl Backend for Nakamoto {
     }
 
     fn fee_rate_estimation(&self, blocks: u64) -> u32 {
-        if self.current_height.get().is_none() {
-            let Ok(block) = self.handler.get_tip() else {
-              unreachable!()
-          };
-            self.current_height.set(Some(block.height));
-        }
-        let feerate = self
-            .handler
-            .estimate_feerate(self.current_height.get().unwrap() - blocks);
-        if feerate.is_err() {
-            log::error!("{:?}", feerate);
-            panic!("{:?}", feerate);
-        }
-
-        log::info!("fee rate estimated {:?}", feerate);
-        let Some(feerate) = feerate.unwrap() else {
-           log::warn!("feerate not found for block {:?} - {blocks}", self.current_height);
-            return 0;
-        };
-        feerate.median as u32
+        let fee_rates: HashMap<String, f64> = self.rest.get_fee_estimates().unwrap();
+        Nakamoto::fee_in_range(&fee_rates, 1, blocks + 2).unwrap() as u32
     }
 
     fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult {

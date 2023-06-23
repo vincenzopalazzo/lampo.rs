@@ -2,9 +2,9 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
+use bitcoin::hashes::hex::ToHex;
 use lightning::events::Event;
 
-use lampo_common::backend::Backend;
 use lampo_common::error;
 use lampo_common::types::ChannelState;
 
@@ -95,6 +95,7 @@ impl Handler for LampoHandler {
                 counterparty_node_id,
                 channel_type,
             } => {
+                log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
                 let event = ChangeStateChannelEvent {
                     channel_id,
                     node_id: counterparty_node_id,
@@ -119,15 +120,41 @@ impl Handler for LampoHandler {
                 ..
             } => {
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
-                let transaction = self
-                    .wallet_manager
-                    .create_transaction(output_script, channel_value_satoshis)?;
-                log::info!("funding transaction `{}`", transaction.txid());
-                self.chain_manager.backend.brodcast_tx(&transaction);
-                log::info!("propagate transaction wit id `{}`", transaction.txid());
+                // FIXME: estimate the fee rate with a callback
+                let fee = self.chain_manager.backend.fee_rate_estimation(6);
+                log::info!("fee estimated {fee} sats");
+                let transaction = self.wallet_manager.create_transaction(
+                    output_script,
+                    channel_value_satoshis,
+                    fee,
+                )?;
+                log::info!("funding transaction created `{}`", transaction.txid());
+                log::info!(
+                    "transaction hex `{}`",
+                    lampo_common::bitcoin::consensus::serialize(&transaction).to_hex()
+                );
+                self.channel_manager
+                    .manager()
+                    .funding_transaction_generated(
+                        &temporary_channel_id,
+                        &counterparty_node_id,
+                        transaction,
+                    )
+                    .map_err(|err| error::anyhow!("{:?}", err))?;
                 Ok(())
             }
-            _ => unreachable!(),
+            Event::ChannelPending {
+                counterparty_node_id,
+                funding_txo,
+                ..
+            } => {
+                log::info!(
+                    "channel pending with node `{}` with funding `{funding_txo}`",
+                    counterparty_node_id.to_hex()
+                );
+                Ok(())
+            }
+            _ => unreachable!("{:?}", event),
         }
     }
 }

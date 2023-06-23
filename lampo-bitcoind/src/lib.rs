@@ -5,11 +5,13 @@ use bitcoincore_rpc::Result;
 use bitcoincore_rpc::RpcApi;
 
 use bitcoincore_rpc::bitcoin::hashes::Hash;
+use bitcoincore_rpc::RawTx;
 use lampo_common::backend::Backend;
 use lampo_common::backend::BlockHash;
 use lampo_common::backend::BlockSourceResult;
 use lampo_common::backend::{deserialize, serialize};
 use lampo_common::backend::{Block, BlockData};
+use lampo_common::secp256k1::hashes::hex::ToHex;
 
 pub struct BitcoinCore {
     inner: Client,
@@ -34,16 +36,20 @@ macro_rules! sync {
 impl Backend for BitcoinCore {
     fn brodcast_tx(&self, tx: &lampo_common::backend::Transaction) {
         // FIXME: check the result.
-        let _ = self.inner.send_raw_transaction(&serialize(tx));
+        let result = self
+            .inner
+            .send_raw_transaction(lampo_common::bitcoin::consensus::serialize(&tx).to_hex());
+        log::info!(target: "bitcoind", "brodcast transaction return {:?}", result);
     }
 
     fn fee_rate_estimation(&self, blocks: u64) -> u32 {
         // FIXME: manage the error here.
         let Ok(result) = self.inner.estimate_smart_fee(blocks as u16, None) else {
+            log::error!("failing to estimate fee");
             return 0;
         };
         // FIXME: check what is the value that ldk want
-        result.fee_rate.unwrap_or_default().to_btc() as u32
+        result.fee_rate.unwrap_or_default().to_sat() as u32
     }
 
     fn get_best_block<'a>(
@@ -52,13 +58,13 @@ impl Backend for BitcoinCore {
         lampo_common::backend::BlockHash,
         Option<u32>,
     )> {
-        let block = self.inner.get_chain_tips().unwrap().clone();
-        let block = block.last().unwrap().clone();
-
+        let block = self.inner.get_blockchain_info().unwrap().clone();
+        log::info!(target: "bitcoind", "blockchain info {:?}", block);
         // FIXME: fix the rust bitcoin dependencies
-        let hash: BlockHash = deserialize(&serialize(&block.hash.to_byte_array())).unwrap();
+        let hash: BlockHash =
+            deserialize(&serialize(&block.best_block_hash.to_byte_array())).unwrap();
         sync! {
-            BlockSourceResult::Ok((hash, Some(block.height as u32)))
+            BlockSourceResult::Ok((hash, Some(block.blocks as u32)))
         }
     }
 

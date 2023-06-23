@@ -9,4 +9,5 @@ nakamoto-client = { git = "https://github.com/vincenzopalazzo/nakamoto", branch 
 nakamoto-net-poll = { git = "https://github.com/vincenzopalazzo/nakamoto", branch = "macros/client_model-fixes"  }
 nakamoto-p2p = { git = "https://github.com/vincenzopalazzo/nakamoto", branch = "macros/client_model-fixes"  }
 nakamoto-common = { git = "https://github.com/vincenzopalazzo/nakamoto", branch = "macros/client_model-fixes"  }
+esplora-client = { version = "0.5.0", features = ["blocking"] }
 log = { version = "0.4", features = ["std"] }

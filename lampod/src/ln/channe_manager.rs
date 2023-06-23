@@ -103,7 +103,7 @@ impl LampoChannelManager {
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {
         ChainMonitor::new(
-            Some(self.onchain.clone()),
+            None,
             self.onchain.clone(),
             self.logger.clone(),
             self.onchain.clone(),
