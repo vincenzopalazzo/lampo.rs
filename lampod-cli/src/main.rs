@@ -7,6 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use lampod::jsonrpc::channels::json_list_channels;
 use log;
 
 use lampo_bitcoind::BitcoinCore;
@@ -139,6 +140,7 @@ fn run_jsonrpc(
     server.add_rpc("connect", json_connect).unwrap();
     server.add_rpc("fundchannel", json_open_channel).unwrap();
     server.add_rpc("newaddr", json_new_addr).unwrap();
+    server.add_rpc("channels", json_list_channels).unwrap();
     server.add_rpc("funds", json_funds).unwrap();
     let handler = server.handler();
     Ok((server.spawn(), handler))

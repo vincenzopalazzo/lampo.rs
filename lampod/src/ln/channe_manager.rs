@@ -5,6 +5,7 @@ use std::io::BufReader;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use bitcoin::hashes::hex::ToHex;
 use bitcoin::locktime::Height;
 use bitcoin::BlockHash;
 use lightning::chain::chainmonitor::ChainMonitor;
@@ -26,7 +27,7 @@ use lampo_common::conf::{LampoConf, UserConfig};
 use lampo_common::error;
 use lampo_common::keymanager::KeysManager;
 use lampo_common::model::request;
-use lampo_common::model::response;
+use lampo_common::model::response::{self, Channel};
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents};
@@ -119,6 +120,24 @@ impl LampoChannelManager {
     pub fn manager(&self) -> Arc<LampoChannel> {
         let channeld = self.channeld.clone().unwrap();
         channeld
+    }
+
+    pub fn list_channel(&self) -> Vec<Channel> {
+        self.manager()
+            .list_channels()
+            .into_iter()
+            .map(|channel| Channel {
+                short_channel_id: channel.short_channel_id,
+                peer_id: channel.counterparty.node_id.to_hex(),
+                peer_alias: None,
+                ready: channel.is_channel_ready,
+                amount_satoshis: channel.channel_value_satoshis,
+                amount_msat: channel.balance_msat,
+                public: channel.is_public,
+                available_balance_for_send_msat: channel.outbound_capacity_msat,
+                available_balance_for_recv_msat: channel.inbound_capacity_msat,
+            })
+            .collect()
     }
 
     pub fn load_channel_monitors(&self, watch: bool) -> error::Result<()> {

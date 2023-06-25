@@ -1,4 +1,5 @@
 //! JSON RPC 2.0 implementation
+pub mod channels;
 pub mod inventory;
 pub mod onchain;
 pub mod open_channel;

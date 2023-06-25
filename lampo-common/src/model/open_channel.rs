@@ -48,4 +48,17 @@ pub mod response {
             Ok(node_id)
         }
     }
+
+    #[derive(Clone, Serialize, Deserialize, Debug)]
+    pub struct Channel {
+        pub short_channel_id: Option<u64>,
+        pub peer_id: String,
+        pub peer_alias: Option<String>,
+        pub ready: bool,
+        pub amount_satoshis: u64,
+        pub amount_msat: u64,
+        pub public: bool,
+        pub available_balance_for_send_msat: u64,
+        pub available_balance_for_recv_msat: u64,
+    }
 }
