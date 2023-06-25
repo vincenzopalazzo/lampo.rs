@@ -224,12 +224,16 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                             }
                             let buff = buff.trim();
                             log::info!("buffer read {buff}");
-                            let requ: Request<Value> = serde_json::from_str(&buff).unwrap();
+                            let requ: Request<Value> =
+                                serde_json::from_str(&buff).map_err(|err| {
+                                    io::Error::new(io::ErrorKind::Other, format!("{err}"))
+                                })?;
                             log::trace!("request {:?}", requ);
                             let Some(resp) = self.handler.run_callback(&requ) else {
                                 log::error!("`{}` not found!", requ.method);
                                 break;
                             };
+                            // FIXME; the id in the JSON RPC can be null!
                             let response = match resp {
                                 Ok(result) => Response {
                                     id: requ.id.clone().unwrap(),
@@ -339,7 +343,9 @@ mod tests {
     #[timeout(9000)]
     fn register_rpc() {
         logger::init(log::Level::Debug).unwrap();
-        let server = JSONRPCv2::new(Arc::new(DummyCtx), "/tmp/tmp.sock").unwrap();
+        let path = "/tmp/tmp.sock";
+        let _ = std::fs::remove_file(path);
+        let server = JSONRPCv2::new(Arc::new(DummyCtx), path).unwrap();
         let _ = server.add_rpc("foo", |_: &DummyCtx, request| {
             Ok(serde_json::json!(request))
         });
