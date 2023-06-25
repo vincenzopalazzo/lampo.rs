@@ -181,9 +181,9 @@ impl LampoPeerManager {
 
 #[async_trait]
 impl PeerEvents for LampoPeerManager {
-    async fn handle(&self, event: super::peer_event::PeerEvent) -> error::Result<()> {
+    async fn handle(&self, event: super::peer_event::PeerCommand) -> error::Result<()> {
         match event {
-            peer_event::PeerEvent::Connect(node_id, addr, chan) => {
+            peer_event::PeerCommand::Connect(node_id, addr, chan) => {
                 let connect = Connect {
                     node_id: node_id.to_string(),
                     addr: addr.ip().to_string(),

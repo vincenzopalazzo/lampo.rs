@@ -1,20 +1,26 @@
 //! Implementation of the bitcoin backend for
 //! lampo.
+use std::borrow::Borrow;
+use std::cell::Cell;
+use std::cell::RefCell;
+use std::sync::Arc;
+
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::Result;
 use bitcoincore_rpc::RpcApi;
 
 use bitcoincore_rpc::bitcoin::hashes::Hash;
-use bitcoincore_rpc::RawTx;
 use lampo_common::backend::Backend;
 use lampo_common::backend::BlockHash;
 use lampo_common::backend::BlockSourceResult;
 use lampo_common::backend::{deserialize, serialize};
 use lampo_common::backend::{Block, BlockData};
+use lampo_common::handler::Handler;
 use lampo_common::secp256k1::hashes::hex::ToHex;
 
 pub struct BitcoinCore {
     inner: Client,
+    handler: RefCell<Option<Arc<dyn Handler>>>,
 }
 
 impl BitcoinCore {
@@ -23,6 +29,7 @@ impl BitcoinCore {
         use bitcoincore_rpc::Auth;
         Ok(Self {
             inner: Client::new(url, Auth::UserPass(user.to_owned(), pass.to_owned()))?,
+            handler: RefCell::new(None),
         })
     }
 }
@@ -75,12 +82,16 @@ impl Backend for BitcoinCore {
         use bitcoincore_rpc::bitcoin::BlockHash;
         // FIXME: add in bitcoin core the from method
         use bitcoincore_rpc::bitcoin::consensus::serialize as inner_serialize;
+        use lampo_common::event::onchain::OnChainEvent;
+        use lampo_common::event::Event;
 
         // FIXME: change the version of rust bitcoin in nakamoto and in lampod_common.
         let bytes = serialize(header_hash);
         let hash = BlockHash::from_slice(bytes.as_slice()).unwrap();
         let result = self.inner.get_block(&hash).unwrap();
         let block: Block = deserialize(&inner_serialize(&result)).unwrap();
+        let handler = self.handler.borrow().clone().unwrap();
+        handler.emit(Event::OnChain(OnChainEvent::NewBlock(block.clone())));
 
         sync! {
            Ok(BlockData::FullBlock(block))
@@ -121,5 +132,9 @@ impl Backend for BitcoinCore {
         _script: &lampo_common::backend::Script,
     ) {
         unimplemented!()
+    }
+
+    fn set_handler(&self, handler: Arc<dyn Handler>) {
+        self.handler.replace(Some(handler));
     }
 }

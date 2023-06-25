@@ -6,6 +6,6 @@ use crossbeam_channel as chan;
 use lampo_common::{model::Connect, types::NodeId};
 
 #[derive(Debug, Clone)]
-pub enum PeerEvent {
+pub enum PeerCommand {
     Connect(NodeId, SocketAddr, chan::Sender<Connect>),
 }

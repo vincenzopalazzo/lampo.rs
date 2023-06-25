@@ -6,7 +6,7 @@ use lampo_common::json;
 
 use super::{LampoChannelManager, LampoPeerManager};
 use crate::actions::InventoryHandler;
-use crate::events;
+use crate::command;
 
 pub struct LampoInventoryManager {
     peer_manager: Arc<LampoPeerManager>,
@@ -26,12 +26,12 @@ impl LampoInventoryManager {
 }
 
 impl InventoryHandler for LampoInventoryManager {
-    fn handle(&self, event: events::InventoryEvent) -> error::Result<()> {
-        use events::InventoryEvent;
+    fn handle(&self, event: command::InventoryCommand) -> error::Result<()> {
+        use command::InventoryCommand;
         use lampo_common::model::GetInfo;
 
         match event {
-            InventoryEvent::GetNodeInfo(chan) => {
+            InventoryCommand::GetNodeInfo(chan) => {
                 let getinfo = GetInfo {
                     node_id: self.channel_manager.manager().get_our_node_id().to_string(),
                     peers: self.peer_manager.manager().get_peer_node_ids().len(),

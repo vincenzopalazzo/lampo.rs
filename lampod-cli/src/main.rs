@@ -11,19 +11,19 @@ use log;
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
-use lampod::chain::{LampoWalletManager, WalletManager};
-use lampod::jsonrpc::onchain::json_funds;
-use lampod::jsonrpc::onchain::json_new_addr;
-
 use lampo_common::bitcoin;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::handler::Handler as _;
 use lampo_common::logger;
 use lampo_common::secp256k1;
 use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
 use lampo_nakamoto::{Config, Nakamoto, Network};
+use lampod::chain::{LampoWalletManager, WalletManager};
 use lampod::jsonrpc::inventory::get_info;
+use lampod::jsonrpc::onchain::json_funds;
+use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
 use lampod::jsonrpc::CommandHandler;
@@ -96,7 +96,8 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
     lampod.add_external_handler(rpc_handler.clone())?;
 
-    let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path, "lampod".to_owned()).map_err(|_| error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?"))?;
+    let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path, "lampod".to_owned())
+        .map_err(|_| error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?"))?;
 
     let lampod = Arc::new(lampod);
     let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
@@ -109,6 +110,14 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         std::thread::sleep(Duration::from_secs(5));
         std::process::exit(0);
     })?;
+    let handler = lampod.handler();
+
+    // Just as debugging for us to manage the event through by lampod.
+    std::thread::spawn(move || {
+        while let Ok(event) = handler.events().recv() {
+            log::info!(target: "lampod-cli", "event emitted `{:?}`", event);
+        }
+    });
 
     let workder = lampod.listen().unwrap();
     let _ = workder.join();

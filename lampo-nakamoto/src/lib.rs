@@ -1,7 +1,9 @@
 //! Nakamoto backend implementation for Lampo
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::TcpStream;
+use std::sync::Arc;
 
 use esplora_client::BlockingClient;
 use esplora_client::Builder;
@@ -20,12 +22,16 @@ use lampo_common::backend::BlockHeaderData;
 use lampo_common::backend::UtxoResult;
 use lampo_common::backend::WatchedOutput;
 use lampo_common::error;
+use lampo_common::event::onchain::OnChainEvent;
+use lampo_common::event::Event;
+use lampo_common::handler::Handler;
 
 #[derive(Clone)]
 pub struct Nakamoto {
-    handler: nakamoto_client::Handle<Waker>,
+    nakamoto: nakamoto_client::Handle<Waker>,
     current_height: Cell<Option<Height>>,
     rest: BlockingClient,
+    handler: RefCell<Option<Arc<dyn Handler>>>,
 }
 
 impl Nakamoto {
@@ -46,11 +52,12 @@ impl Nakamoto {
         // FIXME: join this later
         let _worker = std::thread::spawn(|| nakamoto.run(config));
         let client = Nakamoto {
-            handler,
+            nakamoto: handler,
             current_height: Cell::new(None),
             rest: Builder::new(url)
                 .build_blocking()
                 .map_err(|err| error::anyhow!("{err}"))?,
+            handler: RefCell::new(None),
         };
         Ok(client)
     }
@@ -78,11 +85,17 @@ impl Backend for Nakamoto {
         &'a self,
         header_hash: &'a nakamoto_common::block::BlockHash,
     ) -> AsyncBlockSourceResult<'a, BlockData> {
-        let Some(block) = self.handler.get_block(header_hash).unwrap() else {
+        let blk_chan = self.nakamoto.blocks();
+        let Some(block) = self.nakamoto.get_block(header_hash).unwrap() else {
             unimplemented!();
         };
         log::info!("get block information {:?}", block);
         self.current_height.set(Some(block.0));
+
+        let handler = self.handler.borrow().clone().unwrap();
+        let (blk, _) = blk_chan.recv().unwrap();
+        handler.emit(Event::OnChain(OnChainEvent::NewBlock(blk)));
+
         sync! { Ok(BlockData::HeaderOnly(block.1)) }
     }
 
@@ -99,10 +112,13 @@ impl Backend for Nakamoto {
     }
 
     fn brodcast_tx(&self, tx: &nakamoto_common::block::Transaction) {
-        let result = self.handler.submit_transaction(tx.clone());
+        let result = self.nakamoto.submit_transaction(tx.clone());
         if let Err(err) = result {
             log::error!("brodcast tx fails: {err}");
-        };
+        } else {
+            let handler = self.handler.borrow().clone().unwrap();
+            handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
+        }
     }
 
     fn is_lightway(&self) -> bool {
@@ -112,7 +128,7 @@ impl Backend for Nakamoto {
     fn get_best_block<'a>(
         &'a self,
     ) -> AsyncBlockSourceResult<(nakamoto_common::block::BlockHash, Option<u32>)> {
-        let tip = self.handler.get_tip().unwrap();
+        let tip = self.nakamoto.get_tip().unwrap();
         sync! { Ok((tip.blk_header.block_hash(), Some(tip.height as u32))) }
     }
 
@@ -130,5 +146,9 @@ impl Backend for Nakamoto {
 
     fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult {
         todo!()
+    }
+
+    fn set_handler(&self, handler: std::sync::Arc<dyn lampo_common::handler::Handler>) {
+        self.handler.replace(Some(handler));
     }
 }

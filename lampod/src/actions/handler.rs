@@ -3,13 +3,17 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use bitcoin::hashes::hex::ToHex;
-use lightning::events::Event;
+use lampo_common::event::ln::LightningEvent;
+use lightning::events as ldk;
 
+use lampo_common::chan;
 use lampo_common::error;
+use lampo_common::event::{Emitter, Event, Subscriber};
+use lampo_common::handler::Handler as EventHandler;
 use lampo_common::types::ChannelState;
 
 use crate::chain::{LampoChainManager, WalletManager};
-use crate::events::LampoEvent;
+use crate::command::Command;
 use crate::handler::external_handler::ExternalHandler;
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents, PeerEvents};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
@@ -24,13 +28,18 @@ pub struct LampoHandler {
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
     external_handlers: RefCell<Vec<Arc<dyn ExternalHandler>>>,
+    #[allow(dead_code)]
+    emitter: Emitter<Event>,
+    subscriber: Subscriber<Event>,
 }
 
 unsafe impl Send for LampoHandler {}
 unsafe impl Sync for LampoHandler {}
 
 impl LampoHandler {
-    pub fn new(lampod: &LampoDeamon) -> Self {
+    pub(crate) fn new(lampod: &LampoDeamon) -> Self {
+        let emitter = Emitter::default();
+        let subscriber = emitter.subscriber();
         Self {
             channel_manager: lampod.channel_manager(),
             peer_manager: lampod.peer_manager(),
@@ -38,6 +47,8 @@ impl LampoHandler {
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
             external_handlers: RefCell::new(Vec::new()),
+            emitter,
+            subscriber,
         }
     }
 
@@ -48,20 +59,30 @@ impl LampoHandler {
     }
 }
 
+impl EventHandler for LampoHandler {
+    fn emit(&self, event: Event) {
+        self.emitter.emit(event)
+    }
+
+    fn events(&self) -> chan::Receiver<Event> {
+        self.subscriber.subscribe()
+    }
+}
+
 #[allow(unused_variables)]
 impl Handler for LampoHandler {
-    fn react(&self, event: crate::events::LampoEvent) -> error::Result<()> {
+    fn react(&self, event: crate::command::Command) -> error::Result<()> {
         match event {
-            LampoEvent::LNEvent() => unimplemented!(),
-            LampoEvent::OnChainEvent() => unimplemented!(),
-            LampoEvent::PeerEvent(event) => {
+            Command::LNCommand => unimplemented!(),
+            Command::OnChainCommand => unimplemented!(),
+            Command::PeerEvent(event) => {
                 async_run!(self.peer_manager.handle(event))
             }
-            LampoEvent::InventoryEvent(event) => {
+            Command::InventoryEvent(event) => {
                 self.inventory_manager.handle(event)?;
                 Ok(())
             }
-            LampoEvent::ExternalEvent(req, chan) => {
+            Command::ExternalCommand(req, chan) => {
                 log::info!(
                     "external handler size {}",
                     self.external_handlers.borrow().len()
@@ -80,7 +101,7 @@ impl Handler for LampoHandler {
     /// method used to handle the incoming event from ldk
     fn handle(&self, event: lightning::events::Event) -> error::Result<()> {
         match event {
-            Event::OpenChannelRequest {
+            ldk::Event::OpenChannelRequest {
                 temporary_channel_id,
                 counterparty_node_id,
                 funding_satoshis,
@@ -89,22 +110,21 @@ impl Handler for LampoHandler {
             } => {
                 unimplemented!()
             }
-            Event::ChannelReady {
+            ldk::Event::ChannelReady {
                 channel_id,
                 user_channel_id,
                 counterparty_node_id,
                 channel_type,
             } => {
                 log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
-                let event = ChangeStateChannelEvent {
+                self.emit(Event::Lightning(LightningEvent::ChannelReady {
+                    counterparty_node_id,
                     channel_id,
-                    node_id: counterparty_node_id,
                     channel_type,
-                    state: ChannelState::Ready,
-                };
-                self.channel_manager.change_state_channel(event)
+                }));
+                Ok(())
             }
-            Event::ChannelClosed {
+            ldk::Event::ChannelClosed {
                 channel_id,
                 user_channel_id,
                 reason,
@@ -112,13 +132,19 @@ impl Handler for LampoHandler {
                 log::info!("channel `{user_channel_id}` closed with reason: `{reason}`");
                 Ok(())
             }
-            Event::FundingGenerationReady {
+            ldk::Event::FundingGenerationReady {
                 temporary_channel_id,
                 counterparty_node_id,
                 channel_value_satoshis,
                 output_script,
                 ..
             } => {
+                self.emit(Event::Lightning(LightningEvent::FundingChannelStart {
+                    counterparty_node_id,
+                    temporary_channel_id,
+                    channel_value_satoshis,
+                }));
+
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
                 // FIXME: estimate the fee rate with a callback
                 let fee = self.chain_manager.backend.fee_rate_estimation(6);
@@ -133,6 +159,12 @@ impl Handler for LampoHandler {
                     "transaction hex `{}`",
                     lampo_common::bitcoin::consensus::serialize(&transaction).to_hex()
                 );
+                self.emit(Event::Lightning(LightningEvent::FundingChannelEnd {
+                    counterparty_node_id,
+                    temporary_channel_id,
+                    channel_value_satoshis,
+                    funding_transaction: transaction.clone(),
+                }));
                 self.channel_manager
                     .manager()
                     .funding_transaction_generated(
@@ -143,7 +175,7 @@ impl Handler for LampoHandler {
                     .map_err(|err| error::anyhow!("{:?}", err))?;
                 Ok(())
             }
-            Event::ChannelPending {
+            ldk::Event::ChannelPending {
                 counterparty_node_id,
                 funding_txo,
                 ..

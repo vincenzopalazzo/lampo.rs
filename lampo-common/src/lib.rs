@@ -1,10 +1,16 @@
 pub mod backend;
 pub mod chacha20;
 pub mod conf;
+pub mod event;
+pub mod handler;
 pub mod keymanager;
 pub mod logger;
 pub mod model;
 pub mod types;
+
+pub mod ldk {
+    pub use lightning::*;
+}
 
 pub mod error {
     pub use anyhow::*;
@@ -12,6 +18,10 @@ pub mod error {
 
 pub mod json {
     pub use serde_json::*;
+}
+
+pub mod chan {
+    pub use crossbeam_channel::*;
 }
 
 pub use bitcoin;

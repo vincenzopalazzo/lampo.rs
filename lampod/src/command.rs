@@ -5,7 +5,7 @@ use lampo_common::error;
 use lampo_common::json;
 use lampo_jsonrpc::json_rpc2::Request;
 
-use crate::ln::peer_event::PeerEvent;
+use crate::ln::peer_event::PeerCommand;
 
 /// All the event that are supported by the
 /// Lampo Node.
@@ -13,11 +13,11 @@ use crate::ln::peer_event::PeerEvent;
 /// This is the top level event enum, when it is possible
 /// find the Lightning Node Events and the OnChainEvents.
 #[derive(Debug, Clone)]
-pub enum LampoEvent {
-    LNEvent(),
-    OnChainEvent(),
-    PeerEvent(PeerEvent),
-    InventoryEvent(InventoryEvent),
+pub enum Command {
+    LNCommand,
+    OnChainCommand,
+    PeerEvent(PeerCommand),
+    InventoryEvent(InventoryCommand),
     /// External Event is done to be able to
     /// handle.
     ///
@@ -27,30 +27,30 @@ pub enum LampoEvent {
     /// Core Lightning Plugins works this way and we want
     /// keep this freedom, but we do not want people
     /// that are couple with our design choice.
-    ExternalEvent(Request<json::Value>, chan::Sender<json::Value>),
+    ExternalCommand(Request<json::Value>, chan::Sender<json::Value>),
 }
 
-impl LampoEvent {
+impl Command {
     pub fn from_req(
         req: &Request<json::Value>,
         chan: &chan::Sender<json::Value>,
     ) -> error::Result<Self> {
         match req.method.as_str() {
             "getinfo" => {
-                let inner = InventoryEvent::from_req(req, chan)?;
+                let inner = InventoryCommand::from_req(req, chan)?;
                 Ok(Self::InventoryEvent(inner))
             }
-            _ => Ok(LampoEvent::ExternalEvent(req.clone(), chan.clone())),
+            _ => Ok(Command::ExternalCommand(req.clone(), chan.clone())),
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum InventoryEvent {
+pub enum InventoryCommand {
     GetNodeInfo(chan::Sender<json::Value>),
 }
 
-impl InventoryEvent {
+impl InventoryCommand {
     pub fn from_req(
         req: &Request<json::Value>,
         chan: &chan::Sender<json::Value>,

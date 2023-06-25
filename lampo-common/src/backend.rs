@@ -1,6 +1,8 @@
 //! ...
 //! Beckend implementation
 
+use std::sync::Arc;
+
 pub use bitcoin::consensus::{deserialize, serialize};
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
 pub use lightning::chain::WatchedOutput;
@@ -8,6 +10,8 @@ pub use lightning::routing::utxo::UtxoResult;
 pub use lightning_block_sync::{
     AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult,
 };
+
+use crate::handler::Handler;
 
 /// Bakend Trait specification
 pub trait Backend {
@@ -40,4 +44,6 @@ pub trait Backend {
     fn get_best_block<'a>(&'a self) -> AsyncBlockSourceResult<(BlockHash, Option<u32>)>;
 
     fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
+
+    fn set_handler(&self, _: Arc<dyn Handler>) {}
 }

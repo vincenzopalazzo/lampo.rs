@@ -13,7 +13,7 @@
 pub mod actions;
 mod builtin;
 pub mod chain;
-pub mod events;
+pub mod command;
 pub mod handler;
 pub mod jsonrpc;
 pub mod keys;
@@ -41,7 +41,7 @@ use lampo_jsonrpc::json_rpc2::Request;
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
-use crate::events::LampoEvent;
+use crate::command::Command;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
@@ -192,6 +192,7 @@ impl LampoDeamon {
         self.init_peer_manager()?;
         self.init_inventory_manager()?;
         self.init_event_handler()?;
+        client.set_handler(self.handler());
         Ok(())
     }
 
@@ -255,7 +256,7 @@ impl LampoDeamon {
         // the handler down different method.
         let request = Request::new(method, args);
         let (sender, receiver) = chan::bounded::<json::Value>(1);
-        let command = LampoEvent::from_req(&request, &sender)?;
+        let command = Command::from_req(&request, &sender)?;
         log::info!("received {:?}", command);
         let Some(ref handler) = self.handler else {
             error::bail!("at this point the handler should be not None");

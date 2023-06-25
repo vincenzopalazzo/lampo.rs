@@ -2,6 +2,7 @@
 use std::net::SocketAddr;
 
 use async_trait::async_trait;
+use crossbeam_channel as chan;
 use lightning::ln::features::ChannelTypeFeatures;
 
 use lampo_common::error;
@@ -39,7 +40,7 @@ pub trait ChannelEvents {
 // FIXME: remove the async because we are using channels
 #[async_trait]
 pub trait PeerEvents {
-    async fn handle(&self, event: peer_event::PeerEvent) -> error::Result<()>;
+    async fn handle(&self, event: peer_event::PeerCommand) -> error::Result<()>;
 
     async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()>;
 
