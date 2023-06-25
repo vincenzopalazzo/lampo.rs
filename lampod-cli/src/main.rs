@@ -7,12 +7,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use log;
+
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
 use lampod::chain::{LampoWalletManager, WalletManager};
 use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
-use log;
 
 use lampo_common::bitcoin;
 use lampo_common::conf::LampoConf;
@@ -37,6 +38,7 @@ fn main() -> error::Result<()> {
     Ok(())
 }
 
+/// Return the root directory.
 fn run(args: LampoCliArgs) -> error::Result<()> {
     let path = args.conf;
     let mut lampo_conf = LampoConf::try_from(path)?;
@@ -94,12 +96,22 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
     lampod.add_external_handler(rpc_handler.clone())?;
 
+    let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path, "lampod".to_owned()).map_err(|_| error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?"))?;
+
     let lampod = Arc::new(lampod);
     let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
     rpc_handler.set_handler(handler.clone());
+
+    ctrlc::set_handler(move || {
+        use std::time::Duration;
+        log::info!("Shutdown...");
+        handler.stop();
+        std::thread::sleep(Duration::from_secs(5));
+        std::process::exit(0);
+    })?;
+
     let workder = lampod.listen().unwrap();
     let _ = workder.join();
-    handler.stop();
     let _ = jsorpc_worker.join().unwrap();
     Ok(())
 }
@@ -108,6 +120,10 @@ fn run_jsonrpc(
     lampod: Arc<LampoDeamon>,
 ) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler<LampoDeamon>>)> {
     let socket_path = format!("{}/lampod.socket", lampod.root_path());
+    // we take the lock with the pid file so if we are at this point
+    // we can delete the socket because there is no other process
+    // that it is running.
+    let _ = std::fs::remove_file(socket_path.clone());
     env::set_var("LAMPO_UNIX", socket_path.clone());
     let server = JSONRPCv2::new(lampod, &socket_path)?;
     server.add_rpc("getinfo", get_info).unwrap();
