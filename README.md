@@ -1,7 +1,7 @@
 <div align="center">
   <h1>Lampo SDK</h1>
 
-  <img src="https://github.com/saradurante/lampo.docs/blob/dc0dce971c3052f0e9dd668fdf0c7376b12fee7b/imgs/web/icon-512.png" />
+  <img src="https://github.com/saradurante/lampo.docs/blob/dc0dce971c3052f0e9dd668fdf0c7376b12fee7b/imgs/web/icon-512.png"  width="150" height="150" />
 
 
   <p>
