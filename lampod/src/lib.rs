@@ -127,7 +127,17 @@ impl LampoDeamon {
             .unwrap() else {
                 error::bail!("wrong result with from the `get_best_block` call")
         };
-        if let Err(err) = manager.start(block_hash, Height::from_consensus(height)?) {
+        let block = async_run!(self.rt, self
+            .onchain_manager()
+            .backend.get_block(&block_hash))
+            .unwrap() else {
+                error::bail!("wrong result with from the `get_best_block` call")
+        };
+        let timestamp = match block {
+            lampo_common::backend::BlockData::FullBlock(block) => block.header.time,
+            lampo_common::backend::BlockData::HeaderOnly(header) => header.time,
+        };
+        if let Err(err) = manager.start(block_hash, Height::from_consensus(height)?, timestamp) {
             error::bail!("{err}");
         }
         self.channel_manager = Some(Arc::new(manager));

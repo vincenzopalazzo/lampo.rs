@@ -234,7 +234,12 @@ impl LampoChannelManager {
         unimplemented!()
     }
 
-    pub fn start(&mut self, block: BlockHash, height: Height) -> error::Result<()> {
+    pub fn start(
+        &mut self,
+        block: BlockHash,
+        height: Height,
+        block_timestamp: u32,
+    ) -> error::Result<()> {
         let chain_params = ChainParameters {
             network: self.conf.network,
             best_block: BestBlock::new(block, height.to_consensus_u32()),
@@ -254,6 +259,7 @@ impl LampoChannelManager {
             keymanagers.clone(),
             self.conf.ldk_conf,
             chain_params,
+            block_timestamp,
         )));
         Ok(())
     }
