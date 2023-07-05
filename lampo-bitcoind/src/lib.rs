@@ -1,7 +1,5 @@
 //! Implementation of the bitcoin backend for
 //! lampo.
-use std::borrow::Borrow;
-use std::cell::Cell;
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -90,8 +88,10 @@ impl Backend for BitcoinCore {
         let hash = BlockHash::from_slice(bytes.as_slice()).unwrap();
         let result = self.inner.get_block(&hash).unwrap();
         let block: Block = deserialize(&inner_serialize(&result)).unwrap();
-        let handler = self.handler.borrow().clone().unwrap();
-        handler.emit(Event::OnChain(OnChainEvent::NewBlock(block.clone())));
+        let _ = self.handler.borrow().clone().and_then(|handler| {
+            handler.emit(Event::OnChain(OnChainEvent::NewBlock(block.clone())));
+            Some(handler)
+        });
 
         sync! {
            Ok(BlockData::FullBlock(block))

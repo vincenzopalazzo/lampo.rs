@@ -92,10 +92,11 @@ impl Backend for Nakamoto {
         log::info!("get block information {:?}", block);
         self.current_height.set(Some(block.0));
 
-        let handler = self.handler.borrow().clone().unwrap();
-        let (blk, _) = blk_chan.recv().unwrap();
-        handler.emit(Event::OnChain(OnChainEvent::NewBlock(blk)));
-
+        let _ = self.handler.borrow().clone().and_then(|handler| {
+            let (blk, _) = blk_chan.recv().unwrap();
+            handler.emit(Event::OnChain(OnChainEvent::NewBlock(blk)));
+            Some(handler)
+        });
         sync! { Ok(BlockData::HeaderOnly(block.1)) }
     }
 
