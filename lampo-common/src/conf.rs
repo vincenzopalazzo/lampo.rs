@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fmt::format, str::FromStr};
 
 pub use bitcoin::Network;
 use clightningrpc_conf::{CLNConf, SyncCLNConf};
@@ -18,6 +18,24 @@ pub struct LampoConf {
     pub core_pass: Option<String>,
     pub private_key: Option<String>,
     pub channels_keys: Option<String>,
+}
+
+impl LampoConf {
+    pub fn new(path: &str, network: Network, port: u64) -> Self {
+        Self {
+            inner: CLNConf::new(format!("{path}/lampo.conf"), true),
+            network,
+            ldk_conf: UserConfig::default(),
+            port,
+            path: path.to_string(),
+            node: "core".to_owned(),
+            core_url: None,
+            core_user: None,
+            core_pass: None,
+            private_key: None,
+            channels_keys: None,
+        }
+    }
 }
 
 impl TryFrom<String> for LampoConf {

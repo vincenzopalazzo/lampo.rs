@@ -1,7 +1,7 @@
 CC=cargo
 FMT=fmt
 
-OPTIONS=
+ARGS=
 
 default: fmt
 	rustup run nightly $(CC) build
@@ -20,3 +20,6 @@ install:
 	$(CC) install --path ./lampo-cli
 	$(CC) install --path ./lampod-cli
 	sudo cp target/debug/liblampo_lib.so /usr/local/lib
+
+integration: default
+	$(CC) test -p tests $(ARGS)

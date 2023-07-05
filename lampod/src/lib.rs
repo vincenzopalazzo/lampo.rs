@@ -127,12 +127,11 @@ impl LampoDeamon {
             .unwrap() else {
                 error::bail!("wrong result with from the `get_best_block` call")
         };
-        let block = async_run!(self.rt, self
-            .onchain_manager()
-            .backend.get_block(&block_hash))
-            .unwrap() else {
-                error::bail!("wrong result with from the `get_best_block` call")
-        };
+        let block = async_run!(
+            self.rt,
+            self.onchain_manager().backend.get_block(&block_hash)
+        )
+        .unwrap();
         let timestamp = match block {
             lampo_common::backend::BlockData::FullBlock(block) => block.header.time,
             lampo_common::backend::BlockData::HeaderOnly(header) => header.time,
