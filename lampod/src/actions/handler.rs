@@ -4,13 +4,14 @@ use std::sync::Arc;
 
 use bitcoin::hashes::hex::ToHex;
 use lampo_common::event::ln::LightningEvent;
+use lampo_jsonrpc::json_rpc2::Request;
 use lightning::events as ldk;
 
 use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::event::{Emitter, Event, Subscriber};
 use lampo_common::handler::Handler as EventHandler;
-use lampo_common::types::ChannelState;
+use lampo_common::json;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
@@ -56,6 +57,23 @@ impl LampoHandler {
         let mut vect = self.external_handlers.borrow_mut();
         vect.push(handler);
         Ok(())
+    }
+
+    /// Call any method supported by the lampod configuration. This includes
+    /// a lot of handler code. This function serves as a broker pattern in some ways,
+    /// but it may also function as a chain of responsibility pattern in certain cases.
+    ///
+    /// Welcome to the third design pattern in under 300 lines of code. The code will clarify the
+    /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
+    /// at some point.
+    pub fn call<T: json::Serialize>(&self, method: &str, args: T) -> error::Result<json::Value> {
+        let args = json::to_value(args)?;
+        let request = Request::new(method, args);
+        let (sender, receiver) = chan::bounded::<json::Value>(1);
+        let command = Command::from_req(&request, &sender)?;
+        log::info!("received {:?}", command);
+        self.react(command)?;
+        Ok(receiver.recv()?)
     }
 }
 

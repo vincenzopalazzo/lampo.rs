@@ -22,11 +22,13 @@ use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
 use lampo_nakamoto::{Config, Nakamoto, Network};
 use lampod::chain::{LampoWalletManager, WalletManager};
+
 use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
+
 use lampod::jsonrpc::CommandHandler;
 use lampod::LampoDeamon;
 

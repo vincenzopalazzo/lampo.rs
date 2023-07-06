@@ -220,10 +220,6 @@ impl LampoDeamon {
     }
 
     pub fn listen(&self) -> error::Result<JoinHandle<std::io::Result<()>>> {
-        // FIXME: usually if this return an error there is already a runtime
-        // so we ignore the error.
-        let _ = tokio::runtime::Runtime::new();
-
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<LampoChainManager>>,
@@ -261,17 +257,10 @@ impl LampoDeamon {
     /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
     /// at some point.
     pub fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
-        // FIXME: wrap this logic inside a reactor handler! to be able to pass
-        // the handler down different method.
-        let request = Request::new(method, args);
-        let (sender, receiver) = chan::bounded::<json::Value>(1);
-        let command = Command::from_req(&request, &sender)?;
-        log::info!("received {:?}", command);
         let Some(ref handler) = self.handler else {
             error::bail!("at this point the handler should be not None");
         };
-        handler.react(command)?;
-        Ok(receiver.recv()?)
+        handler.call(method, args)
     }
 }
 

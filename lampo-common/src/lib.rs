@@ -17,6 +17,7 @@ pub mod error {
 }
 
 pub mod json {
+    pub use serde::{Deserialize, Serialize};
     pub use serde_json::*;
 }
 
