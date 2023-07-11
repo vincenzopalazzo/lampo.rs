@@ -4,9 +4,11 @@ pub mod conf;
 pub mod event;
 pub mod handler;
 pub mod keymanager;
+pub mod keys;
 pub mod logger;
 pub mod model;
 pub mod types;
+pub mod wallet;
 
 pub mod ldk {
     pub use lightning::*;

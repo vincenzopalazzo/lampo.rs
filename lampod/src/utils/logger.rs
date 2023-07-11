@@ -1,7 +1,8 @@
 use std::str::FromStr;
 
-use lightning::util::logger::{Logger, Record};
 use log::{debug, error, info, warn};
+
+use lampo_common::ldk::util::logger::{Logger, Record};
 
 enum LogLevel {
     Info,
