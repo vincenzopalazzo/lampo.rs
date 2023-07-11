@@ -1,10 +1,10 @@
 use std::{sync::Arc, time::SystemTime};
 
-use lampo_common::keymanager::KeysManager;
+use crate::keymanager::KeysManager;
 
 /// Lampo keys implementations
 pub struct LampoKeys {
-    pub(crate) keys_manager: Arc<KeysManager>,
+    pub keys_manager: Arc<KeysManager>,
 }
 
 impl LampoKeys {

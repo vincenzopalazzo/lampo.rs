@@ -16,49 +16,12 @@ use tokio::sync::Mutex;
 use lampo_common::bitcoin::util::bip32::ExtendedPrivKey;
 use lampo_common::bitcoin::{PrivateKey, Script, Transaction};
 use lampo_common::conf::{LampoConf, Network};
+use lampo_common::error;
+use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::{NewAddress, Utxo};
+use lampo_common::wallet::WalletManager;
 
 use crate::async_run;
-use crate::keys::keys::LampoKeys;
-
-/// Wallet manager trait that define a generic interface
-/// over Wallet implementation!
-// FIXME: move this in a lampo_lib
-pub trait WalletManager: Send + Sync {
-    /// Generate a new wallet for the network
-    fn new(conf: Arc<LampoConf>) -> Result<(Self, String), bdk::Error>
-    where
-        Self: Sized;
-
-    /// Restore a previous created wallet from a network and a mnemonic_words
-    fn restore(network: Arc<LampoConf>, mnemonic_words: &str) -> Result<Self, bdk::Error>
-    where
-        Self: Sized;
-
-    /// Return the keys for ldk.
-    fn ldk_keys(&self) -> Arc<LampoKeys>;
-
-    /// return an on chain address
-    fn get_onchain_address(&self) -> Result<NewAddress, bdk::Error>;
-
-    /// Get the current balance of the wallet.
-    fn get_onchain_balance(&self) -> Result<Balance, bdk::Error>;
-
-    /// Create the transaction from a script and return the transaction
-    /// to propagate to the network.
-    fn create_transaction(
-        &self,
-        script: Script,
-        amount: u64,
-        fee_rate: u32,
-    ) -> Result<Transaction, bdk::Error>;
-
-    /// Return the list of transaction stored inside the wallet
-    fn list_transactions(&self) -> Result<Vec<Utxo>, bdk::Error>;
-
-    /// Sync the wallet.
-    fn sync(&self) -> Result<(), bdk::Error>;
-}
 
 pub struct LampoWalletManager {
     // FIXME: remove the mutex here to be sync I used the tokio mutex but this is wrong!
@@ -130,7 +93,7 @@ impl LampoWalletManager {
 }
 
 impl WalletManager for LampoWalletManager {
-    fn new(conf: Arc<LampoConf>) -> Result<(Self, String), bdk::Error> {
+    fn new(conf: Arc<LampoConf>) -> error::Result<(Self, String)> {
         // Generate fresh mnemonic
         let mnemonic: GeneratedKey<_, bdk::miniscript::Tap> =
             Mnemonic::generate((WordCount::Words12, Language::English))
@@ -149,7 +112,7 @@ impl WalletManager for LampoWalletManager {
         ))
     }
 
-    fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> Result<Self, bdk::Error> {
+    fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self> {
         let (wallet, keymanager) = LampoWalletManager::build_wallet(conf.clone(), mnemonic_words)?;
         Ok(Self {
             wallet: Mutex::new(wallet),
@@ -162,17 +125,17 @@ impl WalletManager for LampoWalletManager {
         self.keymanager.clone()
     }
 
-    fn get_onchain_address(&self) -> Result<NewAddress, bdk::Error> {
+    fn get_onchain_address(&self) -> error::Result<NewAddress> {
         let address = async_run!(self.wallet.lock()).get_address(bdk::wallet::AddressIndex::New);
         Ok(NewAddress {
             address: address.address.to_string(),
         })
     }
 
-    fn get_onchain_balance(&self) -> Result<Balance, bdk::Error> {
+    fn get_onchain_balance(&self) -> error::Result<u64> {
         self.sync()?;
         let balance = async_run!(self.wallet.lock()).get_balance();
-        Ok(balance)
+        Ok(balance.confirmed)
     }
 
     fn create_transaction(
@@ -180,7 +143,7 @@ impl WalletManager for LampoWalletManager {
         script: Script,
         amount: u64,
         fee_rate: u32,
-    ) -> Result<Transaction, bdk::Error> {
+    ) -> error::Result<Transaction> {
         self.sync()?;
         let mut wallet = async_run!(self.wallet.lock());
         let mut tx = wallet.build_tx();
@@ -189,20 +152,15 @@ impl WalletManager for LampoWalletManager {
             .enable_rbf();
         let (mut psbt, _) = tx.finish()?;
         if !wallet.sign(&mut psbt, SignOptions::default())? {
-            return Err(bdk::Error::Generic(format!(
-                "wallet not able to sing the psbt {psbt}"
-            )));
+            error::bail!("wallet not able to sing the psbt {psbt}");
         }
         if !wallet.finalize_psbt(&mut psbt, SignOptions::default())? {
-            return Err(bdk::Error::Generic(format!(
-                "wallet impossible finalize the psbt: {}",
-                psbt
-            )));
+            error::bail!("wallet impossible finalize the psbt: {psbt}");
         };
         Ok(psbt.extract_tx())
     }
 
-    fn list_transactions(&self) -> Result<Vec<Utxo>, bdk::Error> {
+    fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
         self.sync()?;
         let wallet = async_run!(self.wallet.lock());
         let txs = wallet
@@ -216,16 +174,13 @@ impl WalletManager for LampoWalletManager {
         Ok(txs)
     }
 
-    fn sync(&self) -> Result<(), bdk::Error> {
+    fn sync(&self) -> error::Result<()> {
         // Scanning the chain...
         let esplora_url = match self.network {
             Network::Bitcoin => "https://mempool.space/api",
             Network::Testnet => "https://mempool.space/testnet/api",
             _ => {
-                return Err(bdk::Error::Generic(format!(
-                    "network `{:?}` not supported",
-                    self.network
-                )))
+                error::bail!("network `{:?}` not supported", self.network);
             }
         };
         let mut wallet = async_run!(self.wallet.lock());

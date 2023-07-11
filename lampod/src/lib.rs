@@ -16,32 +16,30 @@ pub mod chain;
 pub mod command;
 pub mod handler;
 pub mod jsonrpc;
-pub mod keys;
 pub mod ln;
 pub mod persistence;
 pub mod utils;
 
+use std::cell::Cell;
+use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::{cell::Cell, sync::Arc};
 
-use bitcoin::locktime::Height;
-use chain::WalletManager;
-use crossbeam_channel as chan;
-use handler::external_handler::ExternalHandler;
-use lightning::{events::Event, routing::gossip::P2PGossipSync};
 use lightning_background_processor::BackgroundProcessor;
 use tokio::runtime::Runtime;
 
 use lampo_common::backend::Backend;
+use lampo_common::bitcoin::locktime::Height;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
-use lampo_jsonrpc::json_rpc2::Request;
+use lampo_common::ldk::events::Event;
+use lampo_common::ldk::routing::gossip::P2PGossipSync;
+use lampo_common::wallet::WalletManager;
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
-use crate::command::Command;
+use crate::handler::external_handler::ExternalHandler;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
@@ -279,8 +277,6 @@ mod tests {
     use lampo_common::model::request;
     use lampo_common::secp256k1;
     use lampo_nakamoto::{Config, Network};
-
-    use crate::chain::WalletManager;
 
     use crate::{async_run, chain::LampoWalletManager, ln::events::PeerEvents, LampoDeamon};
 

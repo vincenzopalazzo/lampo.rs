@@ -6,4 +6,5 @@ mod wallet;
 pub use bitcoin::Network;
 
 pub use blockchain::LampoChainManager;
-pub use wallet::{LampoWalletManager, WalletManager};
+pub use lampo_common::wallet::WalletManager;
+pub use wallet::LampoWalletManager;
