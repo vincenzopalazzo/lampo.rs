@@ -78,7 +78,7 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
         runner=runner,
         tx_spendable=tx_spendable,
         conn_privkey="02",
-        features=bitfield(0, 8, 12, 14, 38),
+        features=bitfield(0, 8, 12, 14),
         global_features="",
     )
 
@@ -119,7 +119,7 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
             delayed_payment_basepoint=remote_delayed_payment_basepoint(),
             htlc_basepoint=remote_htlc_basepoint(),
             first_per_commitment_point=remote_per_commitment_point(0),
-            minimum_depth=3,
+            minimum_depth=stash_field_from_event("accept_channel", dummy_val=3),
             channel_reserve_satoshis=9998,
         ),
         # Ignore unknown odd messages
@@ -182,7 +182,9 @@ def test_open_channel_opener_side(runner: Runner) -> None:
     local_funding_privkey = "20"
     local_keyset = gen_random_keyset(int(local_funding_privkey))
     connections_events = connect_to_node_helper(
-        runner=runner, tx_spendable=tx_spendable, conn_privkey="02",
+        runner=runner,
+        tx_spendable=tx_spendable,
+        conn_privkey="02",
         features=bitfield(0, 8, 12, 14, 38),
         global_features="",
     )
