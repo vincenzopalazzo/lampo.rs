@@ -120,7 +120,7 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
             .set(Some(format!("error: invalid c string `{:?}`", conf_path)));
         return null!();
     }
-    let conf = match LampoConf::try_from(conf_path_t.unwrap().to_owned()) {
+    let mut conf = match LampoConf::try_from(conf_path_t.unwrap().to_owned()) {
         Ok(conf) => conf,
         Err(err) => {
             LAST_ERR
@@ -130,6 +130,11 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
             return null!();
         }
     };
+
+    // FIXME: this is to make lnprototest working!
+    conf.ldk_conf
+        .channel_handshake_limits
+        .force_announced_channel_preference = false;
 
     log::info!("configuration received `{:?}`", conf);
 
