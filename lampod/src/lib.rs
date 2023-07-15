@@ -119,11 +119,10 @@ impl LampoDeamon {
             self.wallet_manager.clone(),
             self.persister.clone(),
         );
-        let (block_hash, Some(height)) = async_run!(self.rt, self
-            .onchain_manager()
-            .backend.get_best_block())
-            .unwrap() else {
-                error::bail!("wrong result with from the `get_best_block` call")
+        let (block_hash, Some(height)) =
+            async_run!(self.rt, self.onchain_manager().backend.get_best_block()).unwrap()
+        else {
+            error::bail!("wrong result with from the `get_best_block` call")
         };
         let block = async_run!(
             self.rt,
@@ -258,7 +257,7 @@ impl LampoDeamon {
         let Some(ref handler) = self.handler else {
             error::bail!("at this point the handler should be not None");
         };
-        handler.call(method, args)
+        handler.call::<json::Value, json::Value>(method, args)
     }
 }
 

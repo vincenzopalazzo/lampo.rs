@@ -39,6 +39,8 @@ impl FeeEstimator for LampoChainManager {
             ConfirmationTarget::Background => self.backend.fee_rate_estimation(24),
             ConfirmationTarget::Normal => self.backend.fee_rate_estimation(6),
             ConfirmationTarget::HighPriority => self.backend.fee_rate_estimation(2),
+            // FIXME: use the getmempoolinfo
+            ConfirmationTarget::MempoolMinimum => self.backend.fee_rate_estimation(2),
         };
     }
 }

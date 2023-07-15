@@ -42,10 +42,10 @@ impl LampoLogger {
 
     fn log(&self, log_level: LogLevel, msg: &str) {
         match log_level {
-            LogLevel::Debug => debug!("{msg}"),
-            LogLevel::Info => info!("{msg}"),
-            LogLevel::Warn => warn!("{msg}"),
-            LogLevel::Error => error!("{msg}"),
+            LogLevel::Debug => debug!(target: "ldk", "{msg}"),
+            LogLevel::Info => info!(target: "ldk", "{msg}"),
+            LogLevel::Warn => warn!(target: "ldk", "{msg}"),
+            LogLevel::Error => error!(target: "ldk", "{msg}"),
         }
     }
 }
@@ -56,12 +56,8 @@ impl Logger for LampoLogger {
         let level = record.level.to_string();
 
         let log = format!(
-            "{} {:<5} [{}:{}] {}\n",
-            "-1",
-            record.level.to_string(),
-            record.module_path,
-            record.line,
-            raw_log
+            "{}:{} {} {}",
+            record.module_path, record.line, level, raw_log
         );
 
         self.log(LogLevel::from_str(level.as_str()).unwrap(), log.as_str());

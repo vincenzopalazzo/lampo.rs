@@ -197,8 +197,10 @@ impl PeerEvents for LampoPeerManager {
     }
 
     async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
-        let Some(close_callback) = lightning_net_tokio::connect_outbound(self.manager(), node_id, host).await else {
-          error::bail!("impossible connect with the peer `{node_id}`");
+        let Some(close_callback) =
+            lightning_net_tokio::connect_outbound(self.manager(), node_id, host).await
+        else {
+            error::bail!("impossible connect with the peer `{node_id}`");
         };
         let mut connection_closed_future = Box::pin(close_callback);
         let manager = self.manager();

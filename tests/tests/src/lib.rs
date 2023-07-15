@@ -14,6 +14,6 @@ fn init() {
         use lampo_common::logger;
         use lampo_common::logger::Level;
 
-        logger::init(Level::Debug).expect("initializing logger for the first time");
+        logger::init(Level::Trace).expect("initializing logger for the first time");
     });
 }

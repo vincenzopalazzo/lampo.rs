@@ -1,0 +1,11 @@
+[package]
+name = "lampo-bdk-wallet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lampo-common = { path = "../lampo-common" }
+bdk = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["keys-bip39"] }
+bdk_chain = { git = "https://github.com/bitcoindevkit/bdk.git" }
+bdk_esplora = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["blocking"]  }
+bdk_file_store = { git = "https://github.com/bitcoindevkit/bdk.git" }

@@ -3,9 +3,8 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use bdk::keys::bip39::{Language, Mnemonic, WordCount};
-use bdk::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
+use bdk::keys::{DerivableKey, ExtendedKey, GeneratedKey};
 use bdk::template::Bip84;
-use bdk::wallet::Balance;
 use bdk::wallet::ChangeSet;
 use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
 use bdk_esplora::EsploraExt;

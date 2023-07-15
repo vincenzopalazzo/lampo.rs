@@ -66,23 +66,30 @@ impl LampoHandler {
     /// Welcome to the third design pattern in under 300 lines of code. The code will clarify the
     /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
     /// at some point.
-    pub fn call<T: json::Serialize>(&self, method: &str, args: T) -> error::Result<json::Value> {
+    pub fn call<T: json::Serialize, R: json::DeserializeOwned>(
+        &self,
+        method: &str,
+        args: T,
+    ) -> error::Result<R> {
         let args = json::to_value(args)?;
         let request = Request::new(method, args);
         let (sender, receiver) = chan::bounded::<json::Value>(1);
         let command = Command::from_req(&request, &sender)?;
         log::info!("received {:?}", command);
         self.react(command)?;
-        Ok(receiver.recv()?)
+        let result = receiver.recv()?;
+        Ok(json::from_value::<R>(result)?)
     }
 }
 
 impl EventHandler for LampoHandler {
     fn emit(&self, event: Event) {
+        log::debug!(target: "emitter", "emit event: {:?}", event);
         self.emitter.emit(event)
     }
 
     fn events(&self) -> chan::Receiver<Event> {
+        log::debug!(target: "listener", "subscribe for events");
         self.subscriber.subscribe()
     }
 }

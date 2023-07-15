@@ -67,11 +67,12 @@ impl<T: Send + Sync + 'static> Handler<T> {
     pub fn run_callback(&self, req: &Request<Value>) -> Option<Result<Value, errors::Error>> {
         let binding = self.rpc_method.borrow();
         let Some(callback) = binding.get(&req.method) else {
-            return Some(Err(errors::RpcError{
+            return Some(Err(errors::RpcError {
                 message: format!("method `{}` not found", req.method),
                 code: -1,
                 data: None,
-            }.into()));
+            }
+            .into()));
         };
         let resp = callback(self.ctx(), &req.params);
         Some(resp)

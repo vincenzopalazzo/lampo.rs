@@ -38,8 +38,8 @@ macro_rules! to_cstr {
     ($x:expr) => {{
         use std::ffi::CString;
         let Ok(c_str) = CString::new($x) else {
-                                                                                    return null!()
-                                                                                };
+            return null!();
+        };
         c_str.into_raw()
     }};
 }
@@ -48,7 +48,9 @@ macro_rules! to_cstr {
 macro_rules! json_buffer {
     ($x:expr) => {{
         use lampo_common::json;
-        let Ok(buff) = json::to_string_pretty($x) else { return null!() };
+        let Ok(buff) = json::to_string_pretty($x) else {
+            return null!();
+        };
         to_cstr!(buff)
     }};
 }
@@ -103,8 +105,9 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     use lampo_common::bitcoin;
     use lampo_common::conf::LampoConf;
     use lampo_common::secp256k1;
+    use lampo_core_wallet::CoreWalletManager;
     use lampo_nakamoto::{Config, Nakamoto, Network};
-    use lampod::chain::{LampoWalletManager, WalletManager};
+    use lampod::chain::WalletManager;
     use std::str::FromStr;
 
     init_logger();
@@ -136,30 +139,42 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
         .channel_handshake_limits
         .force_announced_channel_preference = false;
 
+    let conf = Arc::new(conf);
     log::info!("configuration received `{:?}`", conf);
 
     let wallet = if let Some(ref priv_key) = conf.private_key {
         let Ok(key) = secp256k1::SecretKey::from_str(&priv_key) else {
-            LAST_ERR.lock().unwrap().set(Some(format!("invalid private key `{priv_key}`")));
+            LAST_ERR
+                .lock()
+                .unwrap()
+                .set(Some(format!("invalid private key `{priv_key}`")));
             return null!();
         };
         let key = bitcoin::PrivateKey::new(key, conf.network);
-        let Ok(wallet) = LampoWalletManager::try_from((key, conf.channels_keys.clone())) else {
-            LAST_ERR.lock().unwrap().set(Some(format!("error init wallet")));
+        let Ok(wallet) =
+            CoreWalletManager::try_from((key, conf.channels_keys.clone(), conf.clone()))
+        else {
+            LAST_ERR
+                .lock()
+                .unwrap()
+                .set(Some(format!("error init wallet")));
             return null!();
         };
         wallet
     } else {
         // FIXME: add the possibility to create it from the mnemonic
-        let Ok((wallet, _mnemonic)) = LampoWalletManager::new(Arc::new(conf.clone())) else {
-            LAST_ERR.lock().unwrap().set(Some(format!("error init wallet")));
+        let Ok((wallet, _mnemonic)) = CoreWalletManager::new(conf.clone()) else {
+            LAST_ERR
+                .lock()
+                .unwrap()
+                .set(Some(format!("error init wallet")));
             return null!();
         };
         wallet
     };
 
     // FIXME: return an error and not just unwrap the value
-    let client: Arc<dyn Backend> = match conf.node.as_str() {
+    let client: Arc<dyn Backend> = match conf.node.clone().as_str() {
         "core" => Arc::new(
             BitcoinCore::new(
                 &conf.core_url.clone().expect("please add the url"),
@@ -181,7 +196,7 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
             return null!();
         }
     };
-    let mut lampod = LampoDeamon::new(conf, Arc::new(wallet));
+    let mut lampod = LampoDeamon::new(conf.as_ref().clone(), Arc::new(wallet));
     if let Err(err) = lampod.init(client) {
         LAST_ERR
             .lock()

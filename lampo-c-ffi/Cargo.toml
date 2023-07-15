@@ -15,6 +15,8 @@ lampo-common = { path = "../lampo-common" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-nakamoto = { path = "../lampo-nakamoto" }
 lampo-bitcoind = { path = "../lampo-bitcoind" }
+lampo-core-wallet = { path = "../lampo-core-wallet" }
+
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.11"

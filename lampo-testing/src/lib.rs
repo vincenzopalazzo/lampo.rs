@@ -2,6 +2,7 @@
 pub mod prelude {
     pub use cln4rust_testing::prelude::*;
     pub use cln4rust_testing::*;
+    pub use lampod;
     pub use lampod::async_run;
 }
 
@@ -9,15 +10,16 @@ use std::sync::Arc;
 
 use cln4rust_testing::btc::BtcNode;
 use cln4rust_testing::prelude::*;
+use lampo_core_wallet::CoreWalletManager;
 use lampod::jsonrpc::CommandHandler;
 use tempfile::TempDir;
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_jsonrpc::{Handler, JSONRPCv2};
+use lampo_jsonrpc::JSONRPCv2;
 use lampod::actions::handler::LampoHandler;
-use lampod::chain::{LampoWalletManager, WalletManager};
+use lampod::chain::WalletManager;
 use lampod::jsonrpc::channels::json_list_channels;
 use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::onchain::json_funds;
@@ -26,23 +28,49 @@ use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
 use lampod::LampoDeamon;
 
+#[macro_export]
+macro_rules! wait {
+    ($callback:expr, $timeout:expr) => {{
+        let mut success = false;
+        for wait in 0..$timeout {
+            let result = $callback();
+            if let Err(err) = result {
+                log::debug!("callback return {:?}", err);
+                std::thread::sleep(std::time::Duration::from_millis(wait));
+                continue;
+            }
+            log::info!("callback completed in {wait} milliseconds");
+            success = true;
+            break;
+        }
+        assert!(success, "callback got a timeout");
+    }};
+    ($callback:expr) => {
+        $crate::wait!($callback, 50);
+    };
+}
+
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
-    wallet: Arc<LampoWalletManager>,
-    mnemonic: String,
     root_path: Arc<TempDir>,
+    pub wallet: Arc<dyn WalletManager>,
+    pub mnemonic: String,
 }
 
 impl LampoTesting {
     pub fn new(btc: &BtcNode) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
-        let lampo_conf = LampoConf::new(
+        let mut lampo_conf = LampoConf::new(
             dir.path().to_str().unwrap(),
             lampo_common::bitcoin::Network::Regtest,
             port::random_free_port().unwrap().into(),
         );
-        let (wallet, mnemonic) = LampoWalletManager::new(Arc::new(lampo_conf.clone()))?;
+        let core_url = format!("127.0.0.1:{}", btc.port);
+        lampo_conf.core_pass = Some(btc.pass.clone());
+        lampo_conf.core_url = Some(core_url);
+        lampo_conf.core_user = Some(btc.user.clone());
+        let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
         let wallet = Arc::new(wallet);
         let mut lampo = LampoDeamon::new(lampo_conf.clone(), wallet.clone());
         let node = BitcoinCore::new(&format!("127.0.0.1:{}", btc.port), &btc.user, &btc.pass)?;

@@ -9,6 +9,8 @@ members = [
         "lampo-jsonrpc",
         "lampo-client",
         "lampo-c-ffi",
+        "lampo-core-wallet",
+        "lampo-bdk-wallet",
         "lampo-testing",
         "tests/tests",
 ]
@@ -23,5 +25,6 @@ default-members = [
         "lampo-jsonrpc",
         "lampo-client",
         "lampo-c-ffi",
+        "lampo-core-wallet",
 ]
 resolver = "2"

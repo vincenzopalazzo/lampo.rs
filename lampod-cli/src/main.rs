@@ -18,10 +18,11 @@ use lampo_common::error;
 use lampo_common::handler::Handler as _;
 use lampo_common::logger;
 use lampo_common::secp256k1;
+use lampo_core_wallet::CoreWalletManager;
 use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
 use lampo_nakamoto::{Config, Nakamoto, Network};
-use lampod::chain::{LampoWalletManager, WalletManager};
+use lampod::chain::WalletManager;
 
 use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::onchain::json_funds;
@@ -54,13 +55,14 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         {
             let key = secp256k1::SecretKey::from_str(&private_key)?;
             let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
-            LampoWalletManager::try_from((key, None))?
+            //      CoreWallet::try_from((key, None))?
+            unimplemented!()
         }
         #[cfg(not(debug_assertions))]
         unimplemented!()
     } else {
         if args.mnemonic.is_none() {
-            let (wallet, mnemonic) = LampoWalletManager::new(Arc::new(lampo_conf.clone()))?;
+            let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
             radicle_term::success!("Wallet Generated, please store this works in a safe way");
             radicle_term::println(
                 radicle_term::format::badge_primary("waller-keys"),
@@ -70,7 +72,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         } else {
             // SAFETY: It is safe to unwrap the mnemonic because we check it
             // before.
-            LampoWalletManager::restore(Arc::new(lampo_conf.clone()), &args.mnemonic.unwrap())?
+            CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &args.mnemonic.unwrap())?
         }
     };
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));

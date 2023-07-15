@@ -3,17 +3,18 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
+use bitcoincore_rpc::bitcoin::hashes::Hash;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::Result;
 use bitcoincore_rpc::RpcApi;
 
-use bitcoincore_rpc::bitcoin::hashes::Hash;
 use lampo_common::backend::Backend;
 use lampo_common::backend::BlockHash;
 use lampo_common::backend::BlockSourceResult;
 use lampo_common::backend::{deserialize, serialize};
 use lampo_common::backend::{Block, BlockData};
 use lampo_common::handler::Handler;
+use lampo_common::json;
 use lampo_common::secp256k1::hashes::hex::ToHex;
 
 pub struct BitcoinCore {
@@ -41,9 +42,12 @@ macro_rules! sync {
 impl Backend for BitcoinCore {
     fn brodcast_tx(&self, tx: &lampo_common::backend::Transaction) {
         // FIXME: check the result.
-        let result = self
-            .inner
-            .send_raw_transaction(lampo_common::bitcoin::consensus::serialize(&tx).to_hex());
+        let result: Result<json::Value> = self.inner.call(
+            "sendrawtransaction",
+            &[lampo_common::bitcoin::consensus::serialize(&tx)
+                .to_hex()
+                .into()],
+        );
         log::info!(target: "bitcoind", "brodcast transaction return {:?}", result);
     }
 
@@ -51,10 +55,17 @@ impl Backend for BitcoinCore {
         // FIXME: manage the error here.
         let Ok(result) = self.inner.estimate_smart_fee(blocks as u16, None) else {
             log::error!("failing to estimate fee");
+            if self.inner.get_blockchain_info().unwrap().chain == "regtest" {
+                return 100;
+            }
             return 0;
         };
         // FIXME: check what is the value that ldk want
-        result.fee_rate.unwrap_or_default().to_sat() as u32
+        let result = result.fee_rate.unwrap_or_default().to_sat() as u32;
+        if result == 0 {
+            return 1100;
+        }
+        result
     }
 
     fn get_best_block<'a>(

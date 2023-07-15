@@ -47,10 +47,16 @@ impl TryFrom<String> for LampoConf {
         conf.parse()
             .map_err(|err| anyhow::anyhow!("{}", err.cause))?;
 
-        let Some(network) = conf.get_conf("network").map_err(|err| anyhow::anyhow!("{err}"))? else {
+        let Some(network) = conf
+            .get_conf("network")
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+        else {
             anyhow::bail!("Network inside the configuration file missed");
         };
-        let Some(port) = conf.get_conf("port").map_err(|err| anyhow::anyhow!("{err}"))? else {
+        let Some(port) = conf
+            .get_conf("port")
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+        else {
             anyhow::bail!("Port need to be specified inside the file");
         };
 
@@ -111,7 +117,11 @@ impl LampoConf {
     }
 
     pub fn get_value(&self, key: &str) -> Result<Option<String>, anyhow::Error> {
-        let Some(value) = self.inner.get_conf(key).map_err(|err| anyhow::anyhow!("{err}"))? else {
+        let Some(value) = self
+            .inner
+            .get_conf(key)
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+        else {
             return Ok(None);
         };
         Ok(Some(value))

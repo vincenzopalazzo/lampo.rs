@@ -19,8 +19,13 @@ pub mod error {
 }
 
 pub mod json {
+    pub use serde::de::DeserializeOwned;
     pub use serde::{Deserialize, Serialize};
     pub use serde_json::*;
+
+    pub mod prelude {
+        pub use serde::*;
+    }
 }
 
 pub mod chan {

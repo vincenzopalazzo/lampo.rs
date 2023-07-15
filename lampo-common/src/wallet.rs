@@ -33,7 +33,7 @@ pub trait WalletManager: Send + Sync {
     fn create_transaction(
         &self,
         script: Script,
-        amount: u64,
+        amount_sat: u64,
         fee_rate: u32,
     ) -> error::Result<Transaction>;
 

@@ -17,10 +17,6 @@ lightning-persister = { git = "https://github.com/lightningdevkit/rust-lightning
 lightning-background-processor = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
 lightning-net-tokio = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
 lightning-rapid-gossip-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
-bdk = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["keys-bip39"] }
-bdk_chain = { git = "https://github.com/bitcoindevkit/bdk.git" }
-bdk_esplora = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["blocking"]  }
-bdk_file_store = { git = "https://github.com/bitcoindevkit/bdk.git" }
 log = "0.4.17"
 time = "0.3.13"
 bitcoin = "0.29.0"
