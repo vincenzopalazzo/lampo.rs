@@ -28,3 +28,4 @@ async-trait = "0.1.68"
 [dev-dependencies]
 lampo-nakamoto = { path = "../lampo-nakamoto" }
 clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
+lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }

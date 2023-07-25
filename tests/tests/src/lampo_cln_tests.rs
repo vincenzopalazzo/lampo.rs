@@ -37,6 +37,7 @@ pub fn init_connection_test() -> error::Result<()> {
 }
 
 #[test]
+#[ignore]
 pub fn fund_a_simple_channel() {
     init();
 

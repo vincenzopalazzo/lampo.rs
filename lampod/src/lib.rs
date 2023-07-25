@@ -269,6 +269,7 @@ mod tests {
     use clightningrpc_conf::CLNConf;
     use lightning::util::config::UserConfig;
 
+    use lampo_bdk_wallet::BDKWalletManager;
     use lampo_common::bitcoin;
     use lampo_common::conf::LampoConf;
     use lampo_common::json;
@@ -278,7 +279,7 @@ mod tests {
     use lampo_common::wallet::WalletManager;
     use lampo_nakamoto::{Config, Network};
 
-    use crate::{async_run, chain::LampoWalletManager, ln::events::PeerEvents, LampoDeamon};
+    use crate::{async_run, ln::events::PeerEvents, LampoDeamon};
 
     #[test]
     fn simple_node_connection() {
@@ -296,7 +297,7 @@ mod tests {
             core_url: None,
             core_user: None,
         };
-        let (wallet, _) = LampoWalletManager::new(conf.clone().into()).unwrap();
+        let (wallet, _) = BDKWalletManager::new(conf.clone().into()).unwrap();
         let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 
         let mut conf = Config::default();
@@ -336,7 +337,7 @@ mod tests {
             core_url: None,
             core_user: None,
         };
-        let (wallet, _) = LampoWalletManager::new(conf.clone().into()).unwrap();
+        let (wallet, _) = BDKWalletManager::new(conf.clone().into()).unwrap();
         let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 
         let mut conf = Config::default();
@@ -375,7 +376,7 @@ mod tests {
                 core_user: None,
             };
             let key = bitcoin::PrivateKey::new(key, conf.network);
-            let wallet = LampoWalletManager::try_from((key, None)).unwrap();
+            let wallet = BDKWalletManager::try_from((key, None)).unwrap();
 
             let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 
@@ -422,8 +423,7 @@ mod tests {
                 core_user: None,
             };
             let key = bitcoin::PrivateKey::new(key, conf.network);
-            let wallet =
-                LampoWalletManager::try_from((key, Some(channel_keys.to_string()))).unwrap();
+            let wallet = BDKWalletManager::try_from((key, Some(channel_keys.to_string()))).unwrap();
 
             let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 

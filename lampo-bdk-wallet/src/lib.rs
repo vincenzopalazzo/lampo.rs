@@ -1,17 +1,19 @@
 //! Wallet Manager implementation with BDK
-use std::fmt::Display;
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
+use bdk::bitcoin::Amount;
 use bdk::keys::bip39::{Language, Mnemonic, WordCount};
+use bdk::keys::GeneratableKey;
 use bdk::keys::{DerivableKey, ExtendedKey, GeneratedKey};
 use bdk::template::Bip84;
 use bdk::wallet::ChangeSet;
 use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
 use bdk_esplora::EsploraExt;
 use bdk_file_store::Store;
-use bitcoin::hashes::hex::ToHex;
-use tokio::sync::Mutex;
+use log;
 
+use lampo_common::bitcoin::hashes::hex::ToHex;
 use lampo_common::bitcoin::util::bip32::ExtendedPrivKey;
 use lampo_common::bitcoin::{PrivateKey, Script, Transaction};
 use lampo_common::conf::{LampoConf, Network};
@@ -20,20 +22,19 @@ use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::{NewAddress, Utxo};
 use lampo_common::wallet::WalletManager;
 
-use crate::async_run;
-
-pub struct LampoWalletManager {
-    // FIXME: remove the mutex here to be sync I used the tokio mutex but this is wrong!
-    pub wallet: Mutex<Wallet<Store<'static, ChangeSet>>>,
+pub struct BDKWalletManager {
+    pub wallet: RefCell<Mutex<Wallet<Store<'static, ChangeSet>>>>,
     pub keymanager: Arc<LampoKeys>,
     pub network: Network,
 }
 
-fn to_bdk_err<T: Display>(err: T) -> bdk::Error {
-    bdk::Error::Generic(format!("{err}"))
-}
+// SAFETY: It is safe to do because the `LampoWalletManager`
+// is not send and sync due the RefCell, but we use the Mutex
+// inside, so we are safe to share across threads.
+unsafe impl Send for BDKWalletManager {}
+unsafe impl Sync for BDKWalletManager {}
 
-impl LampoWalletManager {
+impl BDKWalletManager {
     /// from mnemonic_words build or bkd::Wallet or return an bdk::Error
     fn build_wallet(
         conf: Arc<LampoConf>,
@@ -91,7 +92,7 @@ impl LampoWalletManager {
     }
 }
 
-impl WalletManager for LampoWalletManager {
+impl WalletManager for BDKWalletManager {
     fn new(conf: Arc<LampoConf>) -> error::Result<(Self, String)> {
         // Generate fresh mnemonic
         let mnemonic: GeneratedKey<_, bdk::miniscript::Tap> =
@@ -100,10 +101,10 @@ impl WalletManager for LampoWalletManager {
         // Convert mnemonic to string
         let mnemonic_words = mnemonic.to_string();
         log::info!("mnemonic works `{mnemonic_words}`");
-        let (wallet, keymanager) = LampoWalletManager::build_wallet(conf.clone(), &mnemonic_words)?;
+        let (wallet, keymanager) = BDKWalletManager::build_wallet(conf.clone(), &mnemonic_words)?;
         Ok((
             Self {
-                wallet: Mutex::new(wallet),
+                wallet: RefCell::new(Mutex::new(wallet)),
                 keymanager: Arc::new(keymanager),
                 network: conf.network,
             },
@@ -112,9 +113,9 @@ impl WalletManager for LampoWalletManager {
     }
 
     fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self> {
-        let (wallet, keymanager) = LampoWalletManager::build_wallet(conf.clone(), mnemonic_words)?;
+        let (wallet, keymanager) = BDKWalletManager::build_wallet(conf.clone(), mnemonic_words)?;
         Ok(Self {
-            wallet: Mutex::new(wallet),
+            wallet: RefCell::new(Mutex::new(wallet)),
             keymanager: Arc::new(keymanager),
             network: conf.network,
         })
@@ -125,7 +126,12 @@ impl WalletManager for LampoWalletManager {
     }
 
     fn get_onchain_address(&self) -> error::Result<NewAddress> {
-        let address = async_run!(self.wallet.lock()).get_address(bdk::wallet::AddressIndex::New);
+        let address = self
+            .wallet
+            .borrow_mut()
+            .lock()
+            .unwrap()
+            .get_address(bdk::wallet::AddressIndex::New);
         Ok(NewAddress {
             address: address.address.to_string(),
         })
@@ -133,7 +139,7 @@ impl WalletManager for LampoWalletManager {
 
     fn get_onchain_balance(&self) -> error::Result<u64> {
         self.sync()?;
-        let balance = async_run!(self.wallet.lock()).get_balance();
+        let balance = self.wallet.borrow().lock().unwrap().get_balance();
         Ok(balance.confirmed)
     }
 
@@ -144,7 +150,8 @@ impl WalletManager for LampoWalletManager {
         fee_rate: u32,
     ) -> error::Result<Transaction> {
         self.sync()?;
-        let mut wallet = async_run!(self.wallet.lock());
+        let wallet = self.wallet.borrow_mut();
+        let mut wallet = wallet.lock().unwrap();
         let mut tx = wallet.build_tx();
         tx.add_recipient(script, amount)
             .fee_rate(FeeRate::from_sat_per_kvb(fee_rate as f32))
@@ -161,13 +168,17 @@ impl WalletManager for LampoWalletManager {
 
     fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
         self.sync()?;
-        let wallet = async_run!(self.wallet.lock());
+        let wallet = self.wallet.borrow();
+        let wallet = wallet.lock().unwrap();
         let txs = wallet
             .list_unspent()
             .map(|tx| Utxo {
                 txid: tx.outpoint.txid.to_hex(),
                 vout: tx.outpoint.vout,
                 reserved: tx.is_spent,
+                confirmed: 0,
+                amount_msat: Amount::from_btc(tx.txout.value as f64).unwrap().to_sat()
+                    * 1000 as u64,
             })
             .collect::<Vec<_>>();
         Ok(txs)
@@ -182,10 +193,9 @@ impl WalletManager for LampoWalletManager {
                 error::bail!("network `{:?}` not supported", self.network);
             }
         };
-        let mut wallet = async_run!(self.wallet.lock());
-        let client = bdk_esplora::esplora_client::Builder::new(esplora_url)
-            .build_blocking()
-            .map_err(to_bdk_err)?;
+        let wallet = self.wallet.borrow();
+        let mut wallet = wallet.lock().unwrap();
+        let client = bdk_esplora::esplora_client::Builder::new(esplora_url).build_blocking()?;
         let checkpoints = wallet.checkpoints();
         let spks = wallet
             .spks_of_all_keychains()
@@ -203,18 +213,16 @@ impl WalletManager for LampoWalletManager {
             })
             .collect();
         log::info!("bdk stert to sync");
-        let update = client
-            .scan(
-                checkpoints,
-                spks,
-                core::iter::empty(),
-                core::iter::empty(),
-                50,
-                2,
-            )
-            .map_err(to_bdk_err)?;
-        wallet.apply_update(update).map_err(to_bdk_err)?;
-        wallet.commit().map_err(to_bdk_err)?;
+        let update = client.scan(
+            checkpoints,
+            spks,
+            core::iter::empty(),
+            core::iter::empty(),
+            50,
+            2,
+        )?;
+        wallet.apply_update(update)?;
+        wallet.commit()?;
         log::info!(
             "bdk in sync at height {}!",
             client
@@ -226,13 +234,13 @@ impl WalletManager for LampoWalletManager {
 }
 
 #[cfg(debug_assertions)]
-impl TryFrom<(PrivateKey, Option<String>)> for LampoWalletManager {
+impl TryFrom<(PrivateKey, Option<String>)> for BDKWalletManager {
     type Error = bdk::Error;
 
     fn try_from(value: (PrivateKey, Option<String>)) -> Result<Self, Self::Error> {
-        let (wallet, keymanager) = LampoWalletManager::build_from_private_key(value.0, value.1)?;
+        let (wallet, keymanager) = BDKWalletManager::build_from_private_key(value.0, value.1)?;
         Ok(Self {
-            wallet: Mutex::new(wallet),
+            wallet: RefCell::new(Mutex::new(wallet)),
             keymanager: Arc::new(keymanager),
             // This should be possible only during integration testing
             // FIXME: fix the sync method in bdk, the esplora client will crash!
@@ -245,11 +253,11 @@ impl TryFrom<(PrivateKey, Option<String>)> for LampoWalletManager {
 mod tests {
     use std::str::FromStr;
 
-    use bitcoin::PrivateKey;
-
+    use lampo_common::bitcoin;
+    use lampo_common::bitcoin::PrivateKey;
     use lampo_common::secp256k1::SecretKey;
 
-    use super::{LampoWalletManager, WalletManager};
+    use super::{BDKWalletManager, WalletManager};
 
     #[test]
     fn from_private_key() {
@@ -258,7 +266,7 @@ mod tests {
                 .unwrap(),
             bitcoin::Network::Regtest,
         );
-        let wallet = LampoWalletManager::try_from((pkey, None));
+        let wallet = BDKWalletManager::try_from((pkey, None));
         assert!(wallet.is_ok(), "{:?}", wallet.err());
         let wallet = wallet.unwrap();
         assert!(wallet.get_onchain_address().is_ok());
