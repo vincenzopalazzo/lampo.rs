@@ -25,10 +25,10 @@ impl<T> Default for Emitter<T> {
 impl<T: Clone> Emitter<T> {
     /// Emit an event to all subscribers and drop subscribers who can't receive it.
     pub fn emit(&self, event: T) {
-        self.subscribers.lock().unwrap().retain(|s| {
-            s.try_send(event.clone()).unwrap();
-            true
-        });
+        self.subscribers
+            .lock()
+            .unwrap()
+            .retain(|s| s.try_send(event.clone()).is_ok());
     }
 
     /// Drop all subscribers.

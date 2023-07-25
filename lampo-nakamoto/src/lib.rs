@@ -73,22 +73,17 @@ impl Nakamoto {
     }
 }
 
-macro_rules! sync {
-    ($expr: expr) => {
-        Box::pin(async move { $expr })
-    };
-}
-
 #[allow(unused_variables)]
 impl Backend for Nakamoto {
     fn get_block<'a>(
         &'a self,
         header_hash: &'a nakamoto_common::block::BlockHash,
-    ) -> AsyncBlockSourceResult<'a, BlockData> {
+    ) -> error::Result<BlockData> {
         let blk_chan = self.nakamoto.blocks();
-        let Some(block) = self.nakamoto.get_block(header_hash).unwrap() else {
-            unimplemented!();
-        };
+        let block = self
+            .nakamoto
+            .get_block(header_hash)?
+            .ok_or(error::anyhow!("block `{header_hash}` not found"))?;
         log::info!("get block information {:?}", block);
         self.current_height.set(Some(block.0));
 
@@ -97,7 +92,7 @@ impl Backend for Nakamoto {
             handler.emit(Event::OnChain(OnChainEvent::NewBlock(blk)));
             Some(handler)
         });
-        sync! { Ok(BlockData::HeaderOnly(block.1)) }
+        Ok(BlockData::HeaderOnly(block.1))
     }
 
     fn watch_utxo(&self, _: &nakamoto_common::bitcoin::Txid, _: &nakamoto_common::bitcoin::Script) {
@@ -106,10 +101,10 @@ impl Backend for Nakamoto {
 
     fn get_header<'a>(
         &'a self,
-        _: &'a nakamoto_common::block::BlockHash,
-        _: Option<u32>,
+        header_hash: &'a BlockHash,
+        height_hint: Option<u32>,
     ) -> AsyncBlockSourceResult<'a, BlockHeaderData> {
-        todo!()
+        unimplemented!()
     }
 
     fn brodcast_tx(&self, tx: &nakamoto_common::block::Transaction) {
@@ -128,9 +123,9 @@ impl Backend for Nakamoto {
 
     fn get_best_block<'a>(
         &'a self,
-    ) -> AsyncBlockSourceResult<(nakamoto_common::block::BlockHash, Option<u32>)> {
-        let tip = self.nakamoto.get_tip().unwrap();
-        sync! { Ok((tip.blk_header.block_hash(), Some(tip.height as u32))) }
+    ) -> error::Result<(nakamoto_common::block::BlockHash, Option<u32>)> {
+        let tip = self.nakamoto.get_tip()?;
+        Ok((tip.blk_header.block_hash(), Some(tip.height as u32)))
     }
 
     fn register_output(
@@ -151,5 +146,24 @@ impl Backend for Nakamoto {
 
     fn set_handler(&self, handler: std::sync::Arc<dyn lampo_common::handler::Handler>) {
         self.handler.replace(Some(handler));
+    }
+
+    fn get_transaction(
+        &self,
+        txid: &esplora_client::api::Txid,
+    ) -> error::Result<lampo_common::backend::TxResult> {
+        unimplemented!()
+    }
+
+    fn manage_transactions(&self, txs: &mut Vec<esplora_client::api::Txid>) -> error::Result<()> {
+        unimplemented!()
+    }
+
+    fn listen(self: Arc<Self>) -> error::Result<std::thread::JoinHandle<()>> {
+        unimplemented!()
+    }
+
+    fn process_transactions(&self) -> error::Result<()> {
+        unimplemented!()
     }
 }

@@ -22,6 +22,7 @@ pub mod utils;
 
 use std::cell::Cell;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread::JoinHandle;
 
 use lightning_background_processor::BackgroundProcessor;
@@ -119,23 +120,16 @@ impl LampoDeamon {
             self.wallet_manager.clone(),
             self.persister.clone(),
         );
-        let (block_hash, Some(height)) =
-            async_run!(self.rt, self.onchain_manager().backend.get_best_block()).unwrap()
-        else {
-            error::bail!("wrong result with from the `get_best_block` call")
-        };
-        let block = async_run!(
-            self.rt,
-            self.onchain_manager().backend.get_block(&block_hash)
-        )
-        .unwrap();
+        let (block_hash, height) = self.onchain_manager().backend.get_best_block()?;
+        let block = self.onchain_manager().backend.get_block(&block_hash)?;
         let timestamp = match block {
             lampo_common::backend::BlockData::FullBlock(block) => block.header.time,
             lampo_common::backend::BlockData::HeaderOnly(header) => header.time,
         };
-        if let Err(err) = manager.start(block_hash, Height::from_consensus(height)?, timestamp) {
-            error::bail!("{err}");
-        }
+
+        let height = height.ok_or(error::anyhow!("height not present"))?;
+
+        manager.start(block_hash, Height::from_consensus(height)?, timestamp)?;
         self.channel_manager = Some(Arc::new(manager));
         Ok(())
     }
@@ -199,6 +193,7 @@ impl LampoDeamon {
         self.init_inventory_manager()?;
         self.init_event_handler()?;
         client.set_handler(self.handler());
+        self.channel_manager().set_handler(self.handler());
         Ok(())
     }
 
@@ -216,7 +211,7 @@ impl LampoDeamon {
         Ok(())
     }
 
-    pub fn listen(&self) -> error::Result<JoinHandle<std::io::Result<()>>> {
+    pub fn listen(self: Arc<Self>) -> error::Result<JoinHandle<std::io::Result<()>>> {
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<LampoChainManager>>,
@@ -242,8 +237,13 @@ impl LampoDeamon {
             Some(self.channel_manager().scorer()),
         );
 
-        self.peer_manager().run()?;
-        Ok(std::thread::spawn(|| background_processor.join()))
+        let _ = self.onchain_manager().backend.clone().listen();
+        let _ = self.channel_manager().listen();
+        let _ = self.peer_manager().run();
+        Ok(std::thread::spawn(move || {
+            let _ = background_processor.join();
+            Ok(())
+        }))
     }
 
     /// Call any method supported by the lampod configuration. This includes

@@ -2,16 +2,28 @@
 //! Beckend implementation
 
 use std::sync::Arc;
+use std::thread::JoinHandle;
 
 pub use bitcoin::consensus::{deserialize, serialize};
+use bitcoin::locktime::Height;
+use bitcoin::BlockHeader;
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
 pub use lightning::chain::WatchedOutput;
 pub use lightning::routing::utxo::UtxoResult;
 pub use lightning_block_sync::{
     AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult,
 };
+use serde::{Deserialize, Serialize};
 
+use crate::error;
 use crate::handler::Handler;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum TxResult {
+    Confirmed((Transaction, u32, BlockHeader, Height)),
+    Unconfirmed(Transaction),
+    Discarded,
+}
 
 /// Bakend Trait specification
 pub trait Backend {
@@ -38,12 +50,22 @@ pub trait Backend {
         height_hint: Option<u32>,
     ) -> AsyncBlockSourceResult<'a, BlockHeaderData>;
 
-    fn get_block<'a>(&'a self, header_hash: &'a BlockHash)
-        -> AsyncBlockSourceResult<'a, BlockData>;
+    fn get_block<'a>(&'a self, header_hash: &'a BlockHash) -> error::Result<BlockData>;
 
-    fn get_best_block<'a>(&'a self) -> AsyncBlockSourceResult<(BlockHash, Option<u32>)>;
+    fn get_best_block<'a>(&'a self) -> error::Result<(BlockHash, Option<u32>)>;
 
     fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
 
     fn set_handler(&self, _: Arc<dyn Handler>) {}
+
+    /// Ask to the backend to watch the following UTXO and notify you
+    /// when somethings changes
+    fn manage_transactions(&self, txs: &mut Vec<Txid>) -> error::Result<()>;
+    /// Spawn a thread and start to polling the backend and notify
+    /// the listener through the handler.
+    fn listen(self: Arc<Self>) -> error::Result<JoinHandle<()>>;
+    /// Get the information of a transaction inside the blockchain.
+    fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;
+    /// Process the transactions
+    fn process_transactions(&self) -> error::Result<()>;
 }

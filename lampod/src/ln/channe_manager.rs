@@ -1,16 +1,23 @@
 //! Channel Manager Implementation
 
+use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
 use bitcoin::hashes::hex::ToHex;
 use bitcoin::locktime::Height;
 use bitcoin::BlockHash;
+use lampo_common::event::onchain::OnChainEvent;
+use lampo_common::event::Event;
+use lampo_common::handler::Handler;
 use lightning::chain::chainmonitor::ChainMonitor;
-use lightning::chain::Watch;
+use lightning::chain::transaction::TransactionData;
 use lightning::chain::{BestBlock, Filter};
+use lightning::chain::{Confirm, Watch};
 use lightning::ln::channelmanager::{ChainParameters, ChannelManager};
 use lightning::routing::gossip::NetworkGraph;
 use lightning::routing::router::DefaultRouter;
@@ -29,6 +36,7 @@ use lampo_common::keymanager::KeysManager;
 use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel};
 
+use crate::actions::handler::LampoHandler;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents};
 use crate::persistence::LampoPersistence;
@@ -76,10 +84,19 @@ pub struct LampoChannelManager {
     persister: Arc<LampoPersistence>,
     graph: Option<Arc<LampoGraph>>,
     score: Option<Arc<Mutex<LampoScorer>>>,
+    handler: RefCell<Option<Arc<LampoHandler>>>,
 
     pub(crate) channeld: Option<Arc<LampoChannel>>,
     pub(crate) logger: Arc<LampoLogger>,
 }
+
+// SAFETY: due the init workflow of the lampod, we should
+// store the handler later and not use the new contructor.
+//
+// Due the constructor is called only one time as the sethandler
+// it is safe use the ref cell across thread.
+unsafe impl Send for LampoChannelManager {}
+unsafe impl Sync for LampoChannelManager {}
 
 impl LampoChannelManager {
     pub fn new(
@@ -97,9 +114,52 @@ impl LampoChannelManager {
             wallet_manager,
             logger,
             persister,
+            handler: RefCell::new(None),
             graph: None,
             score: None,
         }
+    }
+
+    pub fn set_handler(&self, handler: Arc<LampoHandler>) {
+        self.handler.replace(Some(handler));
+    }
+
+    pub fn handler(&self) -> Arc<LampoHandler> {
+        self.handler.borrow().clone().unwrap()
+    }
+
+    pub fn listen(self: Arc<Self>) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            log::info!(target: "channel_manager", "listening on chain event on the channel manager");
+            let events = self.handler().events();
+            loop {
+                let Ok(Event::OnChain(event)) = events.recv() else {
+                    continue;
+                };
+                log::trace!(target: "channel_manager", "event received {:?}", event);
+                match event {
+                    OnChainEvent::NewBestBlock((hash, height)) => {
+                        self.chain_monitor()
+                            .best_block_updated(&hash, height.to_consensus_u32());
+                        self.manager()
+                            .best_block_updated(&hash, height.to_consensus_u32());
+                    }
+                    OnChainEvent::ConfirmedTransaction((tx, idx, header, height)) => {
+                        self.chain_monitor().transactions_confirmed(
+                            &header,
+                            &[(idx as usize, &tx)],
+                            height.to_consensus_u32(),
+                        );
+                        self.manager().transactions_confirmed(
+                            &header,
+                            &[(idx as usize, &tx)],
+                            height.to_consensus_u32(),
+                        );
+                    }
+                    _ => continue,
+                }
+            }
+        })
     }
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {
@@ -146,17 +206,15 @@ impl LampoChannelManager {
             .persister
             .read_channelmonitors(keys.clone(), keys)
             .unwrap();
-        if self.onchain.is_lightway() {
-            for (_, chan_mon) in monitors.drain(..) {
-                chan_mon.load_outputs_to_watch(&self.onchain);
-                if watch {
-                    let Some(monitor) = self.monitor.clone() else {
-                        continue;
-                    };
+        for (_, chan_mon) in monitors.drain(..) {
+            chan_mon.load_outputs_to_watch(&self.onchain);
+            if watch {
+                let Some(monitor) = self.monitor.clone() else {
+                    continue;
+                };
 
-                    let outpoint = chan_mon.get_funding_txo().0;
-                    monitor.watch_channel(outpoint, chan_mon);
-                }
+                let outpoint = chan_mon.get_funding_txo().0;
+                monitor.watch_channel(outpoint, chan_mon);
             }
         }
         Ok(())

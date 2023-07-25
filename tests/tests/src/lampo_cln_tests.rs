@@ -37,7 +37,6 @@ pub fn init_connection_test() -> error::Result<()> {
 }
 
 #[test]
-#[ignore]
 pub fn fund_a_simple_channel() {
     init();
 
@@ -96,9 +95,7 @@ pub fn fund_a_simple_channel() {
         .unwrap();
 
     // mine some blocks
-    let _ = btc.rpc().generate_to_address(150, &address).unwrap();
-    let channels = cln.rpc().listfunds().unwrap().channels;
-    assert!(!channels.is_empty(), "{:?}", channels);
+    let _ = btc.rpc().generate_to_address(6, &address).unwrap();
     wait!(|| {
         let event = events.recv_timeout(Duration::from_secs(1));
         let Ok(Event::Lightning(LightningEvent::ChannelReady { .. })) = event else {
@@ -109,5 +106,12 @@ pub fn fund_a_simple_channel() {
         Ok(())
     });
 
+    let channels = cln.rpc().listfunds().unwrap().channels;
+    wait!(|| {
+        if channels.is_empty() {
+            return Err(());
+        }
+        Ok(())
+    });
     async_run!(cln.stop()).unwrap();
 }

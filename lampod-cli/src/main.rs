@@ -93,6 +93,8 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
             &args
                 .bitcoind_pass
                 .unwrap_or(lampo_conf.core_pass.clone().unwrap()),
+            Arc::new(false),
+            Some(1),
         )?),
         _ => error::bail!("client {:?} not supported", client),
     };

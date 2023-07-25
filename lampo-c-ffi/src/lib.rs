@@ -180,6 +180,8 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
                 &conf.core_url.clone().expect("please add the url"),
                 &conf.core_user.clone().expect("plaase add the user"),
                 &conf.core_pass.clone().expect("please add the pass"),
+                Arc::new(false),
+                Some(30),
             )
             .expect("impossible connect to core"),
         ),

@@ -73,7 +73,13 @@ impl LampoTesting {
         let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
         let wallet = Arc::new(wallet);
         let mut lampo = LampoDeamon::new(lampo_conf.clone(), wallet.clone());
-        let node = BitcoinCore::new(&format!("127.0.0.1:{}", btc.port), &btc.user, &btc.pass)?;
+        let node = BitcoinCore::new(
+            &format!("127.0.0.1:{}", btc.port),
+            &btc.user,
+            &btc.pass,
+            Arc::new(false),
+            Some(1),
+        )?;
         lampo.init(Arc::new(node))?;
 
         // Configuring the JSON RPC over unix
@@ -93,7 +99,7 @@ impl LampoTesting {
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
-        std::thread::spawn(move || lampo.listen());
+        std::thread::spawn(move || lampo.listen().unwrap().join());
         log::info!("ready for integration testing!");
         Ok(Self {
             inner: handler,

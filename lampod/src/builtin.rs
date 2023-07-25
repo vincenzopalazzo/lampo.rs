@@ -10,3 +10,10 @@ macro_rules! async_run {
         async_run!(rt, $expr)
     }};
 }
+
+#[macro_export]
+macro_rules! sync {
+    ($expr: expr) => {
+        Box::pin(async move { $expr })
+    };
+}

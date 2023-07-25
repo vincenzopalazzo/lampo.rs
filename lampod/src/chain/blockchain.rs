@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use bitcoin::Transaction;
-use lightning::chain::chaininterface::{BroadcasterInterface, ConfirmationTarget, FeeEstimator};
-use lightning::chain::Filter;
-use lightning::routing::utxo::UtxoLookup;
+use lampo_common::bitcoin::Transaction;
+use lampo_common::ldk::chain::chaininterface::{
+    BroadcasterInterface, ConfirmationTarget, FeeEstimator,
+};
+use lampo_common::ldk::chain::Filter;
+use lampo_common::ldk::routing::utxo::UtxoLookup;
 
 use lampo_common::backend::Backend;
+use lampo_common::wallet::WalletManager;
 
-use super::WalletManager;
-
-/// Lampo FeeEstimator implementation
 #[derive(Clone)]
 pub struct LampoChainManager {
     pub backend: Arc<dyn Backend>,
@@ -63,30 +63,6 @@ impl Filter for LampoChainManager {
     }
 }
 
-impl lightning_block_sync::BlockSource for LampoChainManager {
-    fn get_best_block<'a>(
-        &'a self,
-    ) -> lightning_block_sync::AsyncBlockSourceResult<(bitcoin::BlockHash, Option<u32>)> {
-        self.backend.get_best_block()
-    }
-
-    fn get_block<'a>(
-        &'a self,
-        header_hash: &'a bitcoin::BlockHash,
-    ) -> lightning_block_sync::AsyncBlockSourceResult<'a, lightning_block_sync::BlockData> {
-        self.backend.get_block(header_hash)
-    }
-
-    fn get_header<'a>(
-        &'a self,
-        header_hash: &'a bitcoin::BlockHash,
-        height_hint: Option<u32>,
-    ) -> lightning_block_sync::AsyncBlockSourceResult<'a, lightning_block_sync::BlockHeaderData>
-    {
-        self.backend.get_header(header_hash, height_hint)
-    }
-}
-
 impl UtxoLookup for LampoChainManager {
     fn get_utxo(
         &self,
@@ -98,6 +74,6 @@ impl UtxoLookup for LampoChainManager {
     }
 }
 
-// FIXME: fix this
+// SAFETY: there is no reason why this should not be send and sync
 unsafe impl Send for LampoChainManager {}
 unsafe impl Sync for LampoChainManager {}
