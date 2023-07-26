@@ -12,7 +12,6 @@ use log;
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
-use lampo_common::bitcoin;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::handler::Handler as _;
@@ -53,8 +52,8 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {
         #[cfg(debug_assertions)]
         {
-            let key = secp256k1::SecretKey::from_str(&private_key)?;
-            let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
+            let _ = secp256k1::SecretKey::from_str(&private_key)?;
+            //let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
             //      CoreWallet::try_from((key, None))?
             unimplemented!()
         }

@@ -22,7 +22,6 @@ pub mod utils;
 
 use std::cell::Cell;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::thread::JoinHandle;
 
 use lightning_background_processor::BackgroundProcessor;
@@ -212,6 +211,7 @@ impl LampoDeamon {
     }
 
     pub fn listen(self: Arc<Self>) -> error::Result<JoinHandle<std::io::Result<()>>> {
+        log::info!(target: "lampod", "Starting lightning node version `{}`", env!("CARGO_PKG_VERSION"));
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<LampoChainManager>>,

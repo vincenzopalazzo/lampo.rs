@@ -1,7 +1,8 @@
-use std::{fmt::format, str::FromStr};
+use std::str::FromStr;
+
+use clightningrpc_conf::{CLNConf, SyncCLNConf};
 
 pub use bitcoin::Network;
-use clightningrpc_conf::{CLNConf, SyncCLNConf};
 pub use lightning::util::config::UserConfig;
 
 #[derive(Clone, Debug)]
@@ -75,9 +76,9 @@ impl TryFrom<String> for LampoConf {
             .map_err(|err| anyhow::anyhow!("{err}"))?;
 
         // Dev options
-        #[allow(unused_mut)]
+        #[allow(unused_mut, unused_assignments)]
         let mut private_key: Option<String> = None;
-        #[allow(unused_mut)]
+        #[allow(unused_mut, unused_assignments)]
         let mut channels_keys: Option<String> = None;
 
         #[cfg(debug_assertions)]

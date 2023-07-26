@@ -4,7 +4,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bdk::bitcoin::Amount;
-use bdk::descriptor::ExtendedDescriptor;
 use bdk::keys::bip39::Language;
 use bdk::keys::bip39::Mnemonic;
 use bdk::keys::bip39::WordCount;
@@ -12,7 +11,6 @@ use bdk::keys::DerivableKey;
 use bdk::keys::ExtendedKey;
 use bdk::keys::GeneratableKey;
 use bdk::keys::GeneratedKey;
-use bdk::signer::SignersContainer;
 use bdk::template::Bip84;
 use bdk::KeychainKind;
 use bitcoin_hashes::hex::HexIterator;
@@ -127,7 +125,7 @@ impl CoreWalletManager {
         let internal_descriptor = wallet.get_descriptor_for_keychain(KeychainKind::Internal);
         let internal_descriptor = internal_descriptor.to_string_with_secret(&internal_signer);
 
-        let mut options = vec![
+        let options = vec![
             json::json!({
                 "desc": external_descriptor,
                 "active": true,
@@ -184,9 +182,7 @@ macro_rules! serialize {
 
 #[derive(Debug, Deserialize)]
 struct Tx {
-    psbt: Option<String>,
     hex: Option<String>,
-    hexstring: Option<String>,
 }
 
 impl WalletManager for CoreWalletManager {
@@ -256,8 +252,6 @@ impl WalletManager for CoreWalletManager {
             "fundrawtransaction",
             &[json::json!(hex), json::json!(options)],
         )?;
-
-        log::info!("psbt: {:?}", tx.hexstring);
 
         let hex: Tx = self
             .rpc

@@ -16,7 +16,7 @@ use lampo_common::json;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::handler::external_handler::ExternalHandler;
-use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents, PeerEvents};
+use crate::ln::events::PeerEvents;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::{async_run, LampoDeamon};
 

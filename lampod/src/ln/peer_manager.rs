@@ -30,9 +30,9 @@ pub struct FakeMsgRouter;
 impl MessageRouter for FakeMsgRouter {
     fn find_path(
         &self,
-        sender: bitcoin::secp256k1::PublicKey,
-        peers: Vec<bitcoin::secp256k1::PublicKey>,
-        destination: lightning::onion_message::Destination,
+        _: bitcoin::secp256k1::PublicKey,
+        _: Vec<bitcoin::secp256k1::PublicKey>,
+        _: lightning::onion_message::Destination,
     ) -> Result<lightning::onion_message::OnionMessagePath, ()> {
         log::warn!("ingoring the find path in the message router");
         Err(())

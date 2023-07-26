@@ -2,7 +2,6 @@
 use std::net::SocketAddr;
 
 use async_trait::async_trait;
-use crossbeam_channel as chan;
 use lightning::ln::features::ChannelTypeFeatures;
 
 use lampo_common::error;

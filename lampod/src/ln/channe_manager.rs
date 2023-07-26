@@ -1,6 +1,4 @@
 //! Channel Manager Implementation
-
-use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::BufReader;
@@ -11,11 +9,7 @@ use std::thread::JoinHandle;
 use bitcoin::hashes::hex::ToHex;
 use bitcoin::locktime::Height;
 use bitcoin::BlockHash;
-use lampo_common::event::onchain::OnChainEvent;
-use lampo_common::event::Event;
-use lampo_common::handler::Handler;
 use lightning::chain::chainmonitor::ChainMonitor;
-use lightning::chain::transaction::TransactionData;
 use lightning::chain::{BestBlock, Filter};
 use lightning::chain::{Confirm, Watch};
 use lightning::ln::channelmanager::{ChainParameters, ChannelManager};
@@ -30,6 +24,9 @@ use lightning::util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits};
 use lightning::util::ser::ReadableArgs;
 use lightning_persister::FilesystemPersister;
 
+use lampo_common::event::onchain::OnChainEvent;
+use lampo_common::event::Event;
+use lampo_common::handler::Handler;
 use lampo_common::conf::{LampoConf, UserConfig};
 use lampo_common::error;
 use lampo_common::keymanager::KeysManager;

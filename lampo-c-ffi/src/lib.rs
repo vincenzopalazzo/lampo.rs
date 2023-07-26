@@ -59,7 +59,7 @@ macro_rules! json_buffer {
 macro_rules! c_free {
     ($x:expr) => {{
         if !$x.is_null() {
-            unsafe { Box::from_raw($x) };
+            unsafe { let _ = Box::from_raw($x); };
         }
     }};
 }
@@ -76,7 +76,6 @@ macro_rules! as_rust {
 }
 
 static INIT: Once = Once::new();
-
 static LAST_ERR: Mutex<Cell<Option<String>>> = Mutex::new(Cell::new(None));
 
 fn init_logger() {
@@ -111,8 +110,6 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     use std::str::FromStr;
 
     init_logger();
-
-    log::info!("init logger");
 
     let conf_path_t = from_cstr!(conf_path);
     log::info!("configuration patch `{:?}`", conf_path_t);

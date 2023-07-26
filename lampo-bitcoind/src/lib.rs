@@ -16,7 +16,7 @@ use lampo_common::backend::{deserialize, serialize};
 use lampo_common::backend::{Backend, TxResult};
 use lampo_common::backend::{Block, BlockData};
 use lampo_common::bitcoin::locktime::Height;
-use lampo_common::bitcoin::{BlockHeader, Transaction, Txid};
+use lampo_common::bitcoin::{Transaction, Txid};
 use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
@@ -105,8 +105,7 @@ impl Backend for BitcoinCore {
     ) -> error::Result<(lampo_common::backend::BlockHash, Option<u32>)> {
         let block = self.inner.get_blockchain_info()?.clone();
         // FIXME: fix the rust bitcoin dependencies
-        let hash: BlockHash =
-            deserialize(&serialize(&block.best_block_hash.to_byte_array()))?;
+        let hash: BlockHash = deserialize(&serialize(&block.best_block_hash.to_byte_array()))?;
 
         log::trace!(target: "bitcoind", "best block with hash `{hash}` at height {}", block.blocks);
         Ok((hash, Some(block.blocks as u32)))
@@ -116,15 +115,14 @@ impl Backend for BitcoinCore {
         &'a self,
         header_hash: &'a lampo_common::backend::BlockHash,
     ) -> error::Result<lampo_common::backend::BlockData> {
-        use bitcoincore_rpc::bitcoin::BlockHash;
-        // FIXME: add in bitcoin core the from method
         use bitcoincore_rpc::bitcoin::consensus::serialize as inner_serialize;
+        use bitcoincore_rpc::bitcoin::BlockHash;
 
         // FIXME: change the version of rust bitcoin in nakamoto and in lampod_common.
         let bytes = serialize(header_hash);
-        let hash = BlockHash::from_slice(bytes.as_slice()).unwrap();
-        let result = self.inner.get_block(&hash).unwrap();
-        let block: Block = deserialize(&inner_serialize(&result)).unwrap();
+        let hash = BlockHash::from_slice(bytes.as_slice())?;
+        let result = self.inner.get_block(&hash)?;
+        let block: Block = deserialize(&inner_serialize(&result))?;
         let last_block = self.last_bloch_hash.borrow();
 
         let new = if let Some(last_hash) = last_block.as_ref() {
@@ -183,18 +181,23 @@ impl Backend for BitcoinCore {
             &bitcoincore_rpc::bitcoin::Txid::from_str(txid.to_string().as_str())?,
             None,
         )?;
+        // SAFETY: the transaction should contains always the first.
+        //
+        // FIXME: we are looking at the first is always a good ide?
         if let Some(true) = tx.details.first().unwrap().abandoned {
             return Ok(TxResult::Discarded);
         }
         let raw_tx: Transaction = deserialize(&tx.hex)?;
         if tx.info.confirmations > 0 {
+            // SAFETY: if it is confirmed, the block hash is not null.
             let block_hash = tx.info.blockhash.unwrap().to_string();
             let BlockData::FullBlock(block) = self.get_block(&BlockHash::from_str(&block_hash)?)?
             else {
                 unreachable!()
             };
+            // SAFETY: if it is confirmed the block height should be not null.
             let height = tx.info.blockheight.unwrap();
-            // SAFETY: the first element should be always present?
+            // FIXME: the first element should be always present?
             let idx = tx.details.first().unwrap().vout;
             return Ok(TxResult::Confirmed((
                 raw_tx,
@@ -257,24 +260,26 @@ impl Backend for BitcoinCore {
             .clone()
             .ok_or(error::anyhow!("handler is not set"))?
             .clone();
-        log::info!(target: "bitcoin", "preparing bitcoind polling ...");
+        log::info!(target: "bitcoin", "Starting bitcoind polling ...");
         Ok(std::thread::spawn(move || {
-            log::info!(target: "bitcoind", "poolling bitcoind for on chain events");
             while !self.stop.as_ref() {
-                let Ok((block_hash, height)) = self.get_best_block() else {
-                    log::warn!(target: "bitcoind", "error while querying the best block");
+                let best_block = self.get_best_block();
+                let Ok((block_hash, height)) = best_block else {
+                    // SAFETY: if we are in this block the error will be always not null
+                    log::warn!(target: "bitcoind", "Impossible get the inforamtion of the last besh block: {}", best_block.err().unwrap());
                     continue;
                 };
                 let Ok(lampo_common::backend::BlockData::FullBlock(block)) =
                     self.get_block(&block_hash)
                 else {
-                    log::warn!(target: "bitcoind", "impossible retrieval the block with hash `{block_hash}`");
+                    log::warn!(target: "bitcoind", "Impossible retrieval the block information with hash `{block_hash}`");
                     continue;
                 };
                 if height.unwrap_or_default() as u64 > self.best_height.borrow().clone() {
                     *self.best_height.borrow_mut() = height.unwrap().clone().into();
                     handler.emit(Event::OnChain(OnChainEvent::NewBestBlock((
                         block.header,
+                        // SAFETY: the height should be always a valid u32
                         Height::from_consensus(height.unwrap_or_default()).unwrap(),
                     ))));
                 }
