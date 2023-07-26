@@ -103,10 +103,10 @@ impl Backend for BitcoinCore {
     fn get_best_block<'a>(
         &'a self,
     ) -> error::Result<(lampo_common::backend::BlockHash, Option<u32>)> {
-        let block = self.inner.get_blockchain_info().unwrap().clone();
+        let block = self.inner.get_blockchain_info()?.clone();
         // FIXME: fix the rust bitcoin dependencies
         let hash: BlockHash =
-            deserialize(&serialize(&block.best_block_hash.to_byte_array())).unwrap();
+            deserialize(&serialize(&block.best_block_hash.to_byte_array()))?;
 
         log::trace!(target: "bitcoind", "best block with hash `{hash}` at height {}", block.blocks);
         Ok((hash, Some(block.blocks as u32)))
