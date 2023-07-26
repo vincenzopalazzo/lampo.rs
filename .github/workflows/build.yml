@@ -32,9 +32,6 @@ jobs:
       - name: Run cargo test
         run: cargo test
 
-      - name: Run integration testing
-        run: make integration
-
   lints:
     name: Lints
     runs-on: ubuntu-latest

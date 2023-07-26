@@ -38,8 +38,8 @@ macro_rules! to_cstr {
     ($x:expr) => {{
         use std::ffi::CString;
         let Ok(c_str) = CString::new($x) else {
-                    return null!();
-                };
+                        return null!();
+                    };
         c_str.into_raw()
     }};
 }
@@ -49,8 +49,8 @@ macro_rules! json_buffer {
     ($x:expr) => {{
         use lampo_common::json;
         let Ok(buff) = json::to_string_pretty($x) else {
-                    return null!();
-                };
+                        return null!();
+                    };
         to_cstr!(buff)
     }};
 }
