@@ -52,13 +52,12 @@ pub fn sign_with_aux_rand<C: Signing, ES: Deref>(
 where
     ES::Target: EntropySource,
 {
-    let sig = loop {
+    loop {
         let sig = ctx.sign_ecdsa_with_noncedata(msg, sk, &entropy_source.get_secure_random_bytes());
         if sig.serialize_compact()[0] < 0x80 {
             break sig;
         }
-    };
-    sig
+    }
 }
 
 /// A simple atomic counter that uses AtomicUsize to give a u64 counter.
@@ -343,7 +342,7 @@ impl KeysManager {
             htlc_base_key.unwrap(),
             commitment_seed,
             channel_value_satoshis,
-            params.clone(),
+            *params,
             prng_seed.unwrap(),
         )
     }
@@ -393,8 +392,8 @@ impl KeysManager {
                             .sign_counterparty_payment_input(
                                 &psbt.unsigned_tx,
                                 input_idx,
-                                &descriptor,
-                                &secp_ctx,
+                                descriptor,
+                                secp_ctx,
                             )?,
                     );
                     psbt.inputs[input_idx].final_script_witness = Some(witness);
@@ -423,8 +422,8 @@ impl KeysManager {
                         keys_cache.as_ref().unwrap().0.sign_dynamic_p2wsh_input(
                             &psbt.unsigned_tx,
                             input_idx,
-                            &descriptor,
-                            &secp_ctx,
+                            descriptor,
+                            secp_ctx,
                         )?,
                     );
                     psbt.inputs[input_idx].final_script_witness = Some(witness);
@@ -449,7 +448,7 @@ impl KeysManager {
                         match ExtendedPrivKey::new_master(Network::Testnet, &self.seed) {
                             Ok(master_key) => {
                                 match master_key.ckd_priv(
-                                    &secp_ctx,
+                                    secp_ctx,
                                     ChildNumber::from_hardened_idx(derivation_idx)
                                         .expect("key space exhausted"),
                                 ) {
@@ -460,7 +459,7 @@ impl KeysManager {
                             Err(_) => panic!("Your rng is busted"),
                         }
                     };
-                    let pubkey = ExtendedPubKey::from_priv(&secp_ctx, &secret).to_pub();
+                    let pubkey = ExtendedPubKey::from_priv(secp_ctx, &secret).to_pub();
                     if derivation_idx == 2 {
                         assert_eq!(pubkey.inner, self.shutdown_pubkey);
                     }
@@ -556,7 +555,7 @@ impl EntropySource for KeysManager {
 impl NodeSigner for KeysManager {
     fn get_node_id(&self, recipient: Recipient) -> Result<PublicKey, ()> {
         match recipient {
-            Recipient::Node => Ok(self.node_id.clone()),
+            Recipient::Node => Ok(self.node_id),
             Recipient::PhantomNode => Err(()),
         }
     }
@@ -568,7 +567,7 @@ impl NodeSigner for KeysManager {
         tweak: Option<&Scalar>,
     ) -> Result<SharedSecret, ()> {
         let mut node_secret = match recipient {
-            Recipient::Node => Ok(self.node_secret.clone()),
+            Recipient::Node => Ok(self.node_secret),
             Recipient::PhantomNode => Err(()),
         }?;
         if let Some(tweak) = tweak {
@@ -578,7 +577,7 @@ impl NodeSigner for KeysManager {
     }
 
     fn get_inbound_payment_key_material(&self) -> KeyMaterial {
-        self.inbound_payment_key.clone()
+        self.inbound_payment_key
     }
 
     fn sign_invoice(
@@ -587,7 +586,7 @@ impl NodeSigner for KeysManager {
         invoice_data: &[u5],
         recipient: Recipient,
     ) -> Result<RecoverableSignature, ()> {
-        let preimage = construct_invoice_preimage(&hrp_bytes, &invoice_data);
+        let preimage = construct_invoice_preimage(hrp_bytes, invoice_data);
         let secret = match recipient {
             Recipient::Node => Ok(&self.node_secret),
             Recipient::PhantomNode => Err(()),
@@ -647,7 +646,7 @@ impl SignerProvider for KeysManager {
     }
 
     fn get_shutdown_scriptpubkey(&self) -> Result<ShutdownScript, ()> {
-        let other_publickey = BitcoinPublicKey::new(self.shutdown_pubkey.clone());
+        let other_publickey = BitcoinPublicKey::new(self.shutdown_pubkey);
         let other_wpubkeyhash = other_publickey.wpubkey_hash().unwrap();
         Ok(ShutdownScript::new_p2wpkh(&other_wpubkeyhash))
     }

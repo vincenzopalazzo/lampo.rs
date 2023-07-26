@@ -87,10 +87,10 @@ impl Backend for Nakamoto {
         log::info!("get block information {:?}", block);
         self.current_height.set(Some(block.0));
 
-        let _ = self.handler.borrow().clone().and_then(|handler| {
+        let _ = self.handler.borrow().clone().map(|handler| {
             let (blk, _) = blk_chan.recv().unwrap();
             handler.emit(Event::OnChain(OnChainEvent::NewBlock(blk)));
-            Some(handler)
+            handler
         });
         Ok(BlockData::HeaderOnly(block.1))
     }
@@ -121,9 +121,7 @@ impl Backend for Nakamoto {
         true
     }
 
-    fn get_best_block<'a>(
-        &'a self,
-    ) -> error::Result<(nakamoto_common::block::BlockHash, Option<u32>)> {
+    fn get_best_block(&self) -> error::Result<(nakamoto_common::block::BlockHash, Option<u32>)> {
         let tip = self.nakamoto.get_tip()?;
         Ok((tip.blk_header.block_hash(), Some(tip.height as u32)))
     }
@@ -138,6 +136,10 @@ impl Backend for Nakamoto {
     fn fee_rate_estimation(&self, blocks: u64) -> u32 {
         let fee_rates: HashMap<String, f64> = self.rest.get_fee_estimates().unwrap();
         Nakamoto::fee_in_range(&fee_rates, 1, blocks + 2).unwrap() as u32
+    }
+
+    fn minimum_mempool_fee(&self) -> error::Result<u32> {
+        Ok(self.fee_rate_estimation(2))
     }
 
     fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult {

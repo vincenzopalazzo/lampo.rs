@@ -88,22 +88,30 @@ impl Backend for BitcoinCore {
         let Ok(result) = self.inner.estimate_smart_fee(blocks as u16, None) else {
             log::error!("failing to estimate fee");
             if self.inner.get_blockchain_info().unwrap().chain == "regtest" {
-                return 100;
+                return 500;
             }
             return 0;
         };
         // FIXME: check what is the value that ldk want
         let result = result.fee_rate.unwrap_or_default().to_sat() as u32;
         if result == 0 {
-            return 1100;
+            return 500;
         }
         result
     }
 
-    fn get_best_block<'a>(
-        &'a self,
-    ) -> error::Result<(lampo_common::backend::BlockHash, Option<u32>)> {
-        let block = self.inner.get_blockchain_info()?.clone();
+    fn minimum_mempool_fee(&self) -> error::Result<u32> {
+        let fee = self
+            .inner
+            .get_mempool_info()
+            .unwrap()
+            .mempool_min_fee
+            .to_sat() as u32;
+        Ok(fee)
+    }
+
+    fn get_best_block(&self) -> error::Result<(lampo_common::backend::BlockHash, Option<u32>)> {
+        let block = self.inner.get_blockchain_info()?;
         // FIXME: fix the rust bitcoin dependencies
         let hash: BlockHash = deserialize(&serialize(&block.best_block_hash.to_byte_array()))?;
 
@@ -132,9 +140,9 @@ impl Backend for BitcoinCore {
         };
 
         if new {
-            let _ = self.handler.borrow().clone().and_then(|handler| {
+            let _ = self.handler.borrow().clone().map(|handler| {
                 handler.emit(Event::OnChain(OnChainEvent::NewBlock(block.clone())));
-                Some(handler)
+                handler
             });
         }
         Ok(BlockData::FullBlock(block))
@@ -275,8 +283,8 @@ impl Backend for BitcoinCore {
                     log::warn!(target: "bitcoind", "Impossible retrieval the block information with hash `{block_hash}`");
                     continue;
                 };
-                if height.unwrap_or_default() as u64 > self.best_height.borrow().clone() {
-                    *self.best_height.borrow_mut() = height.unwrap().clone().into();
+                if height.unwrap_or_default() as u64 > *self.best_height.borrow() {
+                    *self.best_height.borrow_mut() = height.unwrap().into();
                     handler.emit(Event::OnChain(OnChainEvent::NewBestBlock((
                         block.header,
                         // SAFETY: the height should be always a valid u32

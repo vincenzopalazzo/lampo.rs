@@ -2,7 +2,6 @@ mod args;
 
 use std::process::exit;
 
-use log;
 use radicle_term as term;
 
 use lampo_client::UnixClient;
@@ -29,7 +28,7 @@ fn main() -> error::Result<()> {
             term::print(json::to_string_pretty(&resp)?);
         }
         Err(Error::Rpc(rpc)) => {
-            term::print(&json::to_string_pretty(&rpc)?);
+            term::print(json::to_string_pretty(&rpc)?);
         }
         Err(err) => {
             term::error(format!("{err}"));

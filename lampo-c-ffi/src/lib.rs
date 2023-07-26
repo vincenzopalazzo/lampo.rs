@@ -5,8 +5,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Once;
 
-use libc;
-
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
 
@@ -38,8 +36,8 @@ macro_rules! to_cstr {
     ($x:expr) => {{
         use std::ffi::CString;
         let Ok(c_str) = CString::new($x) else {
-                        return null!();
-                    };
+                                                                                    return null!();
+                                                                                };
         c_str.into_raw()
     }};
 }
@@ -49,8 +47,8 @@ macro_rules! json_buffer {
     ($x:expr) => {{
         use lampo_common::json;
         let Ok(buff) = json::to_string_pretty($x) else {
-                        return null!();
-                    };
+                                                                                    return null!();
+                                                                                };
         to_cstr!(buff)
     }};
 }
@@ -142,7 +140,7 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     log::info!("configuration received `{:?}`", conf);
 
     let wallet = if let Some(ref priv_key) = conf.private_key {
-        let Ok(key) = secp256k1::SecretKey::from_str(&priv_key) else {
+        let Ok(key) = secp256k1::SecretKey::from_str(priv_key) else {
             LAST_ERR
                 .lock()
                 .unwrap()
@@ -156,7 +154,7 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
             LAST_ERR
                 .lock()
                 .unwrap()
-                .set(Some(format!("error init wallet")));
+                .set(Some("error init wallet".to_string()));
             return null!();
         };
         wallet
@@ -166,7 +164,7 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
             LAST_ERR
                 .lock()
                 .unwrap()
-                .set(Some(format!("error init wallet")));
+                .set(Some("error init wallet".to_string()));
             return null!();
         };
         wallet
@@ -246,7 +244,7 @@ pub extern "C" fn add_jsonrpc_on_unixsocket(lampod: *mut LampoDeamon) -> i64 {
     };
     lampo_handler.set_handler(rpc_handler);
     let lampo_handler = Arc::new(lampo_handler);
-    let Ok(()) = lampod.add_external_handler(lampo_handler.clone()) else {
+    let Ok(()) = lampod.add_external_handler(lampo_handler) else {
         return -2;
     };
 

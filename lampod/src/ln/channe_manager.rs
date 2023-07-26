@@ -170,13 +170,11 @@ impl LampoChannelManager {
     }
 
     pub fn chain_monitor(&self) -> Arc<LampoChainMonitor> {
-        let monitor = self.monitor.clone().unwrap();
-        monitor.clone()
+        self.monitor.clone().unwrap()
     }
 
     pub fn manager(&self) -> Arc<LampoChannel> {
-        let channeld = self.channeld.clone().unwrap();
-        channeld
+        self.channeld.clone().unwrap()
     }
 
     pub fn list_channel(&self) -> Vec<Channel> {
@@ -217,13 +215,11 @@ impl LampoChannelManager {
         Ok(())
     }
     pub fn graph(&self) -> Arc<LampoGraph> {
-        let graph = self.graph.clone().unwrap();
-        graph
+        self.graph.clone().unwrap()
     }
 
     pub fn scorer(&self) -> Arc<Mutex<LampoScorer>> {
-        let score = self.score.clone().unwrap();
-        score
+        self.score.clone().unwrap()
     }
 
     // FIXME: Step 11: Optional: Initialize the NetGraphMsgHandler
@@ -250,13 +246,13 @@ impl LampoChannelManager {
         self.graph = Some(network_graph.clone());
         self.score = Some(scorer.clone());
         Arc::new(DefaultRouter::new(
-            network_graph.clone(),
+            network_graph,
             self.logger.clone(),
             self.wallet_manager
                 .ldk_keys()
                 .keys_manager
                 .get_secure_random_bytes(),
-            scorer.clone(),
+            scorer,
             ProbabilisticScoringFeeParameters::default(),
         ))
     }
@@ -268,7 +264,7 @@ impl LampoChannelManager {
     ) -> ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>> {
         let params = ProbabilisticScoringDecayParameters::default();
         if let Ok(file) = File::open(path) {
-            let args = (params.clone(), Arc::clone(&graph), self.logger.clone());
+            let args = (params, Arc::clone(graph), self.logger.clone());
             if let Ok(scorer) = ProbabilisticScorer::read(&mut BufReader::new(file), args) {
                 return scorer;
             }
@@ -311,7 +307,7 @@ impl LampoChannelManager {
             self.logger.clone(),
             keymanagers.clone(),
             keymanagers.clone(),
-            keymanagers.clone(),
+            keymanagers,
             self.conf.ldk_conf,
             chain_params,
             block_timestamp,

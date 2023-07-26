@@ -35,13 +35,12 @@ impl LampoChainManager {
 /// Rust lightning FeeEstimator implementation
 impl FeeEstimator for LampoChainManager {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        return match confirmation_target {
-            ConfirmationTarget::Background => self.backend.fee_rate_estimation(24),
-            ConfirmationTarget::Normal => self.backend.fee_rate_estimation(6),
-            ConfirmationTarget::HighPriority => self.backend.fee_rate_estimation(2),
-            // FIXME: use the getmempoolinfo
-            ConfirmationTarget::MempoolMinimum => self.backend.fee_rate_estimation(2),
-        };
+        match confirmation_target {
+            ConfirmationTarget::Background => self.backend.fee_rate_estimation(100),
+            ConfirmationTarget::Normal => self.backend.fee_rate_estimation(10),
+            ConfirmationTarget::HighPriority => self.backend.fee_rate_estimation(6),
+            ConfirmationTarget::MempoolMinimum => self.backend.minimum_mempool_fee().unwrap(),
+        }
     }
 }
 

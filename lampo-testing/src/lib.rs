@@ -7,6 +7,7 @@ pub mod prelude {
 }
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use cln4rust_testing::btc::BtcNode;
 use cln4rust_testing::prelude::*;
@@ -53,6 +54,7 @@ macro_rules! wait {
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     root_path: Arc<TempDir>,
+    pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
     pub mnemonic: String,
 }
@@ -61,15 +63,23 @@ impl LampoTesting {
     pub fn new(btc: &BtcNode) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
+        // SAFETY: this should be safe because if the system has no
+        // ports it is a bug
+        let port = port::random_free_port().unwrap();
+
         let mut lampo_conf = LampoConf::new(
             dir.path().to_str().unwrap(),
             lampo_common::bitcoin::Network::Regtest,
-            port::random_free_port().unwrap().into(),
+            port.into(),
         );
         let core_url = format!("127.0.0.1:{}", btc.port);
         lampo_conf.core_pass = Some(btc.pass.clone());
         lampo_conf.core_url = Some(core_url);
         lampo_conf.core_user = Some(btc.user.clone());
+        lampo_conf
+            .ldk_conf
+            .channel_handshake_limits
+            .force_announced_channel_preference = false;
         let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
         let wallet = Arc::new(wallet);
         let mut lampo = LampoDeamon::new(lampo_conf.clone(), wallet.clone());
@@ -93,18 +103,21 @@ impl LampoTesting {
         server.add_rpc("channels", json_list_channels).unwrap();
         server.add_rpc("funds", json_funds).unwrap();
         let handler = server.handler();
-        let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf.clone())?);
-        rpc_handler.set_handler(handler.clone());
-        lampo.add_external_handler(rpc_handler.clone())?;
+        let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
+        rpc_handler.set_handler(handler);
+        lampo.add_external_handler(rpc_handler)?;
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
         std::thread::spawn(move || lampo.listen().unwrap().join());
+        // wait that lampo starts
+        std::thread::sleep(Duration::from_secs(1));
         log::info!("ready for integration testing!");
         Ok(Self {
             inner: handler,
             mnemonic,
-            wallet: wallet.clone(),
+            port: port.into(),
+            wallet,
             root_path: Arc::new(dir),
         })
     }

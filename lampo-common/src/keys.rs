@@ -30,7 +30,7 @@ impl LampoKeys {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap();
 
-        let keys = channels_keys.split("/").collect::<Vec<_>>();
+        let keys = channels_keys.split('/').collect::<Vec<_>>();
 
         let mut manager = KeysManager::new(&seed, start_time.as_secs(), start_time.subsec_nanos());
         manager.set_channels_keys(

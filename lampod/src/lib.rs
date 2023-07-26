@@ -107,15 +107,14 @@ impl LampoDeamon {
     }
 
     pub fn onchain_manager(&self) -> Arc<LampoChainManager> {
-        let manager = self.onchain_manager.clone().unwrap();
-        manager.clone()
+        self.onchain_manager.clone().unwrap()
     }
 
     pub fn init_channeld(&mut self) -> error::Result<()> {
         let mut manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
-            self.onchain_manager().clone(),
+            self.onchain_manager(),
             self.wallet_manager.clone(),
             self.persister.clone(),
         );
@@ -134,8 +133,7 @@ impl LampoDeamon {
     }
 
     pub fn channel_manager(&self) -> Arc<LampoChannelManager> {
-        let manager = self.channel_manager.clone().unwrap();
-        manager.clone()
+        self.channel_manager.clone().unwrap()
     }
 
     pub fn init_peer_manager(&mut self) -> error::Result<()> {
@@ -150,8 +148,7 @@ impl LampoDeamon {
     }
 
     pub fn peer_manager(&self) -> Arc<LampoPeerManager> {
-        let manager = self.peer_manager.clone().unwrap();
-        manager.clone()
+        self.peer_manager.clone().unwrap()
     }
 
     fn init_inventory_manager(&mut self) -> error::Result<()> {
@@ -172,7 +169,7 @@ impl LampoDeamon {
     }
 
     pub fn init_event_handler(&mut self) -> error::Result<()> {
-        let handler = LampoHandler::new(&self);
+        let handler = LampoHandler::new(self);
         self.handler = Some(Arc::new(handler));
         Ok(())
     }

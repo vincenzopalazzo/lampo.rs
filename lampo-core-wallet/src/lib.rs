@@ -96,11 +96,10 @@ impl CoreWalletManager {
 
     fn configure_bitcoin_wallet(rpc: &Client, wallet: bdk::Wallet) -> error::Result<String> {
         let name_wallet = "lampo-wallet".to_owned();
-        if rpc
+        if !rpc
             .list_wallets()?
             .iter()
-            .find(|wallet| wallet == &&"lampo-wallet".to_string())
-            .is_none()
+            .any(|wallet| &wallet == &&"lampo-wallet".to_string())
         {
             let _: json::Value = rpc.call(
                 "createwallet",

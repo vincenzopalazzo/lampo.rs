@@ -85,8 +85,7 @@ impl LampoPeerManager {
     }
 
     pub fn manager(&self) -> Arc<InnerLampoPeerManager> {
-        let manager = self.peer_manager.clone().unwrap();
-        manager
+        self.peer_manager.clone().unwrap()
     }
 
     pub fn init(
@@ -119,7 +118,7 @@ impl LampoPeerManager {
         let lightning_msg_handler = MessageHandler {
             chan_handler: channel_manager.channeld.clone().unwrap(),
             onion_message_handler: onion_messenger,
-            route_handler: gossip_sync.clone(),
+            route_handler: gossip_sync,
             custom_message_handler: IgnoringMessageHandler {},
         };
 

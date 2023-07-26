@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use lampod::jsonrpc::channels::json_list_channels;
-use log;
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
@@ -52,27 +51,25 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {
         #[cfg(debug_assertions)]
         {
-            let _ = secp256k1::SecretKey::from_str(&private_key)?;
+            let _ = secp256k1::SecretKey::from_str(private_key)?;
             //let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
             //      CoreWallet::try_from((key, None))?
             unimplemented!()
         }
         #[cfg(not(debug_assertions))]
         unimplemented!()
+    } else if args.mnemonic.is_none() {
+        let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
+        radicle_term::success!("Wallet Generated, please store this works in a safe way");
+        radicle_term::println(
+            radicle_term::format::badge_primary("waller-keys"),
+            format!("{}", radicle_term::format::highlight(mnemonic)),
+        );
+        wallet
     } else {
-        if args.mnemonic.is_none() {
-            let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
-            radicle_term::success!("Wallet Generated, please store this works in a safe way");
-            radicle_term::println(
-                radicle_term::format::badge_primary("waller-keys"),
-                format!("{}", radicle_term::format::highlight(mnemonic)),
-            );
-            wallet
-        } else {
-            // SAFETY: It is safe to unwrap the mnemonic because we check it
-            // before.
-            CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &args.mnemonic.unwrap())?
-        }
+        // SAFETY: It is safe to unwrap the mnemonic because we check it
+        // before.
+        CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &args.mnemonic.unwrap())?
     };
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
     let client = args.client.unwrap_or(lampo_conf.node.clone());

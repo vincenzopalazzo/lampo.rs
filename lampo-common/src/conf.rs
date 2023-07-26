@@ -44,7 +44,7 @@ impl TryFrom<String> for LampoConf {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let path = format!("{value}/lampo.conf");
-        let mut conf = CLNConf::new(path.clone(), false);
+        let mut conf = CLNConf::new(path, false);
         conf.parse()
             .map_err(|err| anyhow::anyhow!("{}", err.cause))?;
 

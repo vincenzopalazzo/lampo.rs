@@ -30,6 +30,8 @@ pub trait Backend {
     /// Fetch feerate give a number of blocks
     fn fee_rate_estimation(&self, blocks: u64) -> u32;
 
+    fn minimum_mempool_fee(&self) -> error::Result<u32>;
+
     fn brodcast_tx(&self, tx: &Transaction);
 
     fn is_lightway(&self) -> bool;
@@ -52,7 +54,7 @@ pub trait Backend {
 
     fn get_block<'a>(&'a self, header_hash: &'a BlockHash) -> error::Result<BlockData>;
 
-    fn get_best_block<'a>(&'a self) -> error::Result<(BlockHash, Option<u32>)>;
+    fn get_best_block(&self) -> error::Result<(BlockHash, Option<u32>)>;
 
     fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
 

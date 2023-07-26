@@ -11,7 +11,6 @@ use bdk::wallet::ChangeSet;
 use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
 use bdk_esplora::EsploraExt;
 use bdk_file_store::Store;
-use log;
 
 use lampo_common::bitcoin::hashes::hex::ToHex;
 use lampo_common::bitcoin::util::bip32::ExtendedPrivKey;
@@ -177,8 +176,7 @@ impl WalletManager for BDKWalletManager {
                 vout: tx.outpoint.vout,
                 reserved: tx.is_spent,
                 confirmed: 0,
-                amount_msat: Amount::from_btc(tx.txout.value as f64).unwrap().to_sat()
-                    * 1000 as u64,
+                amount_msat: Amount::from_btc(tx.txout.value as f64).unwrap().to_sat() * 1000_u64,
             })
             .collect::<Vec<_>>();
         Ok(txs)
@@ -204,7 +202,7 @@ impl WalletManager for BDKWalletManager {
                 let mut first = true;
                 (
                     k,
-                    spks.inspect(move |(spk_i, _)| {
+                    spks.inspect(move |(_spk_i, _)| {
                         if first {
                             first = false;
                         }

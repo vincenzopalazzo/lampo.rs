@@ -49,7 +49,7 @@ impl ExternalHandler for CommandHandler {
         };
         log::debug!("handling the JSON RPC response with req {:?}", req);
         // FIXME: store the ctx inside the handler and not take as argument!
-        let Some(resp) = handler.run_callback(&req) else {
+        let Some(resp) = handler.run_callback(req) else {
             log::info!("callback `{}` not found, skipping handler", req.method);
             return Ok(None);
         };
