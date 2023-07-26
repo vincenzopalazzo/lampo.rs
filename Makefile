@@ -4,16 +4,16 @@ FMT=fmt
 ARGS=
 
 default: fmt
-	rustup run nightly $(CC) build
+	$(CC) build
 
 fmt:
-	rustup run nightly $(CC) fmt --all
+	$(CC) fmt --all
 
 check:
-	rustup run nightly $(CC) test --all -- --show-output
+	$(CC) test --all -- --show-output
 
 clean:
-	rustup run nightly $(CC) clean
+	$(CC) clean
 
 install:
 	$(CC) build

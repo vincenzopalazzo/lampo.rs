@@ -24,11 +24,11 @@ use lightning::util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits};
 use lightning::util::ser::ReadableArgs;
 use lightning_persister::FilesystemPersister;
 
+use lampo_common::conf::{LampoConf, UserConfig};
+use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
-use lampo_common::conf::{LampoConf, UserConfig};
-use lampo_common::error;
 use lampo_common::keymanager::KeysManager;
 use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel};

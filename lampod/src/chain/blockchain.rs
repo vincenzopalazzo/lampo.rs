@@ -64,11 +64,7 @@ impl Filter for LampoChainManager {
 }
 
 impl UtxoLookup for LampoChainManager {
-    fn get_utxo(
-        &self,
-        _: &bitcoin::BlockHash,
-        _: u64,
-    ) -> lightning::routing::utxo::UtxoResult {
+    fn get_utxo(&self, _: &bitcoin::BlockHash, _: u64) -> lightning::routing::utxo::UtxoResult {
         //self.backend.get_utxo(hash, idx)
         todo!()
     }
