@@ -148,13 +148,13 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
             return null!();
         };
         let key = bitcoin::PrivateKey::new(key, conf.network);
-        let Ok(wallet) =
-            CoreWalletManager::try_from((key, conf.channels_keys.clone(), conf.clone()))
+        let wallet = CoreWalletManager::try_from((key, conf.channels_keys.clone(), conf.clone()));
+        let Ok(wallet) = wallet
         else {
             LAST_ERR
                 .lock()
                 .unwrap()
-                .set(Some("error init wallet".to_string()));
+                .set(Some(format!("Error while create the wallet: {}", wallet.err().unwrap())));
             return null!();
         };
         wallet
