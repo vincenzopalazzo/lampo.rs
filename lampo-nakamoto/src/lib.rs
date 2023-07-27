@@ -146,6 +146,14 @@ impl Backend for Nakamoto {
         todo!()
     }
 
+    fn get_utxo_by_txid(
+        &self,
+        txid: &esplora_client::api::Txid,
+        script: &esplora_client::Script,
+    ) -> error::Result<lampo_common::backend::TxResult> {
+        unimplemented!()
+    }
+
     fn set_handler(&self, handler: std::sync::Arc<dyn lampo_common::handler::Handler>) {
         self.handler.replace(Some(handler));
     }

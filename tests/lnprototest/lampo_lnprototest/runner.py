@@ -124,7 +124,7 @@ class LampoRunner(Runner):
 
     def start(self) -> None:
         """Start the Runner."""
-        self.bitcoind = Bitcoind(self.directory)
+        self.bitcoind = Bitcoind(self.directory, with_wallet="lampo-wallet")
         try:
             self.bitcoind.start()
         except Exception as ex:

@@ -58,7 +58,7 @@ impl Filter for LampoChainManager {
     }
 
     fn register_tx(&self, txid: &bitcoin::Txid, script_pubkey: &bitcoin::Script) {
-        self.backend.watch_utxo(txid, script_pubkey)
+        self.backend.watch_utxo(txid, script_pubkey);
     }
 }
 

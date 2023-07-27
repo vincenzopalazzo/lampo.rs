@@ -161,7 +161,7 @@ impl LampoChannelManager {
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {
         ChainMonitor::new(
-            None,
+            Some(self.onchain.clone()),
             self.onchain.clone(),
             self.logger.clone(),
             self.onchain.clone(),

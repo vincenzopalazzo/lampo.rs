@@ -30,6 +30,7 @@ from lnprototest import (
     remote_delayed_payment_basepoint,
     Connect,
     Side,
+    Wait,
     CheckEq,
     msat,
     remote_funding_privkey,
@@ -78,8 +79,7 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
         runner=runner,
         tx_spendable=tx_spendable,
         conn_privkey="02",
-        features=bitfield(0, 8, 12, 14),
-        global_features="",
+        features=[0, 8, 12, 14],
     )
 
     regtest_hash = BitcoinUtils.blockchain_hash()
@@ -158,8 +158,14 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
             channel_id=channel_id(),
             signature=commitsig_to_recv(),
         ),
-        # Mine it and get it deep enough to confirm channel.
-        Block(blockheight=103, number=3, txs=[funding_tx()]),
+        # lampo works by event emitting, so the transaction is submitted
+        # to the backend when ldk cal sendrawtransaction, so we should wait a
+        # little bit more to get the tx confirmed.
+        #
+        # ofc: here we are simulating, this will be not possible in any network.
+        # Mine three blocks to confirm channel.
+        Block(blockheight=103, number=6, txs=[funding_tx()]),
+        Wait(1),
         ExpectMsg(
             "channel_ready",
             channel_id=channel_id(),
@@ -185,8 +191,7 @@ def test_open_channel_opener_side(runner: Runner) -> None:
         runner=runner,
         tx_spendable=tx_spendable,
         conn_privkey="02",
-        features=bitfield(0, 8, 12, 14, 38),
-        global_features="",
+        features=[0, 8, 12, 14],
     )
 
     # Now we test the 'opener' side of an open_channel (node initiates)
@@ -230,8 +235,6 @@ def test_open_channel_opener_side(runner: Runner) -> None:
             htlc_basepoint=local_keyset.htlc_basepoint(),
             first_per_commitment_point=local_keyset.per_commit_point(0),
         ),
-        # Ignore unknown odd messages
-        TryAll([], RawMsg(bytes.fromhex("270F"))),
         ExpectMsg("funding_created", temporary_channel_id=rcvd("temporary_channel_id")),
         # Now we can finally stash the funding information.
         AcceptFunding(
@@ -266,19 +269,33 @@ def test_open_channel_opener_side(runner: Runner) -> None:
         ),
         # It will broadcast tx
         ExpectTx(rcvd("funding_created.funding_txid")),
+        # lampo works by event emitting, so the transaction is submitted
+        # to the backend when ldk cal sendrawtransaction, so we should wait a
+        # little bit more to get the tx confirmed.
+        #
+        # ofc: here we are simulating, this will be not possible in any network.
         # Mine three blocks to confirm channel.
         Block(blockheight=103, number=3),
+        Wait(1),
         Msg(
             "channel_ready",
             channel_id=sent(),
             second_per_commitment_point=local_keyset.per_commit_point(1),
         ),
+        # lampo works by event emitting, so the transaction is submitted
+        # to the backend when ldk cal sendrawtransaction, so we should wait a
+        # little bit more to get the tx confirmed.
+        #
+        # ofc: here we are simulating, this will be not possible in any network.
+        # Mine three blocks to confirm channel.
+        Block(blockheight=106, number=3),
+        Wait(1),
         ExpectMsg(
             "channel_ready",
             channel_id=sent(),
             second_per_commitment_point=remote_per_commitment_point(1),
         ),
-        # Ignore unknown odd messages
-        TryAll([], RawMsg(bytes.fromhex("270F"))),
+        # waiting a little bit before closing
+        Wait(1),
     ]
     run_runner(runner, merge_events_sequences(connections_events, test_events))

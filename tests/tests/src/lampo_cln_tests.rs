@@ -81,6 +81,7 @@ pub fn fund_a_simple_channel_from_lampo() {
     let events = lampo.events();
     let balance = lampo_manager.wallet.get_onchain_balance().unwrap();
     log::info!("lampo wallet balance: {balance}");
+    log::info!("funding started");
     let _: json::Value = lampo
         .call(
             "fundchannel",
@@ -93,13 +94,14 @@ pub fn fund_a_simple_channel_from_lampo() {
             },
         )
         .unwrap();
-
+    log::info!("funding ended");
     // mine some blocks
     let _ = btc.rpc().generate_to_address(6, &address).unwrap();
     wait!(|| {
-        let event = events.recv_timeout(Duration::from_secs(1));
+        let event = events.recv();
+        log::trace!("{:?}", event);
         let Ok(Event::Lightning(LightningEvent::ChannelReady { .. })) = event else {
-            log::info!("event received {:?}", event);
+            log::warn!("event received {:?}", event);
             let _ = btc.rpc().generate_to_address(1, &address).unwrap();
             return Err(());
         };

@@ -58,6 +58,8 @@ pub trait Backend {
 
     fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
 
+    fn get_utxo_by_txid(&self, txid: &Txid, script: &Script) -> error::Result<TxResult>;
+
     fn set_handler(&self, _: Arc<dyn Handler>) {}
 
     /// Ask to the backend to watch the following UTXO and notify you

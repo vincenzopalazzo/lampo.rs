@@ -697,28 +697,26 @@ cffi = ">=1.15.1,<2.0.0"
 
 [[package]]
 name = "lnprototest"
-version = "0.0.4"
+version = "0.0.5b1"
 description = "Spec protocol tests for lightning network implementations"
 category = "main"
 optional = false
-python-versions = "^3.7"
-files = []
-develop = false
+python-versions = ">=3.7,<4.0"
+files = [
+    {file = "lnprototest-0.0.5b1-py3-none-any.whl", hash = "sha256:7fc3ed8a4c580c4e771c35bb20831b186e7d87ae626179668cf5d2da8598e294"},
+    {file = "lnprototest-0.0.5b1.tar.gz", hash = "sha256:9efd06e4ff601f151ffd74d4bae737af188c80103b3296d6e1ba302436096bc7"},
+]
 
 [package.dependencies]
-crc32c = "^2.2.post0"
-pyln-bolt1 = "^1.0.222"
-pyln-bolt2 = "^1.0.222"
-pyln-bolt4 = "^1.0.222"
-pyln-bolt7 = "^1.0.246"
-pyln-client = "^0.12.0"
-pyln-proto = {path = "../lightning/contrib/pyln-proto"}
-pyln-testing = "^0.12.0"
-python-bitcoinlib = "^0.11.2"
-
-[package.source]
-type = "directory"
-url = "../../../../lnprototest"
+crc32c = ">=2.2.post0,<3.0"
+pyln-bolt1 = ">=1.0.222,<2.0.0"
+pyln-bolt2 = ">=1.0.222,<2.0.0"
+pyln-bolt4 = ">=1.0.222,<2.0.0"
+pyln-bolt7 = ">=1.0.246,<2.0.0"
+pyln-client = ">=0.12.0,<0.13.0"
+pyln-proto = ">=23.05.2,<24.0.0"
+pyln-testing = ">=0.12.0,<0.13.0"
+python-bitcoinlib = ">=0.11.2,<0.12.0"
 
 [[package]]
 name = "markupsafe"
@@ -1167,24 +1165,22 @@ pyln-proto = ">=0.12"
 
 [[package]]
 name = "pyln-proto"
-version = "23.05.2"
+version = "23.5.2"
 description = "This package implements some of the Lightning Network protocol in pure python. It is intended for protocol testing and some minor tooling only. It is not deemed secure enough to handle any amount of real funds (you have been warned!)."
 category = "main"
 optional = false
-python-versions = "^3.7"
-files = []
-develop = false
+python-versions = ">=3.7,<4.0"
+files = [
+    {file = "pyln_proto-23.5.2-py3-none-any.whl", hash = "sha256:db0f137397bbb02e3142db227596025ea69ffbc1b1ba18d87f7645873e7e8d8a"},
+    {file = "pyln_proto-23.5.2.tar.gz", hash = "sha256:3a04e2707e1bb2d78a74089748b202aca891211af647f305f8fbbe0ae25a6bc6"},
+]
 
 [package.dependencies]
-base58 = "^2.1.1"
-bitstring = "^3"
-coincurve = "^18"
-cryptography = "^41"
-PySocks = "^1"
-
-[package.source]
-type = "directory"
-url = "../../../../lightning/contrib/pyln-proto"
+base58 = ">=2.1.1,<3.0.0"
+bitstring = ">=3,<4"
+coincurve = ">=18,<19"
+cryptography = ">=41,<42"
+PySocks = ">=1,<2"
 
 [[package]]
 name = "pyln-testing"
@@ -1392,4 +1388,4 @@ testing = ["big-O", "flake8 (<5)", "jaraco.functools", "jaraco.itertools", "more
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.8"
-content-hash = "bd3a784b082943623c5cd0adf7e5f8764607b94946c5cbd0a4535327ecde904e"
+content-hash = "3a1b5865549f07ab72d37ca70a99beefd9718f0e82b52b5116e40be1330f8f96"
