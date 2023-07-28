@@ -14,10 +14,10 @@ import socket
 import time
 
 import pyln
+import shutil
 
 from typing import Any, Optional, List, cast
 
-from threading import Thread
 from contextlib import closing
 from concurrent import futures
 
@@ -66,8 +66,11 @@ class LampoRunner(Runner):
         self.is_fundchannel_kill = False
 
     def __lampod_config_file(self) -> None:
+        self.lightning_dir = os.path.join(self.directory, "lampo")
+        if not os.path.exists(self.lightning_dir):
+            os.makedirs(self.lightning_dir)
         self.lightning_port = self.reserve_port()
-        f = open(f"{self.directory}/lampo.conf", "w")
+        f = open(f"{self.lightning_dir}/lampo.conf", "w")
         f.write(
             f"port={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001\ndev-force-channel-secrets={self.get_node_bitcoinkey()}/0000000000000000000000000000000000000000000000000000000000000010/0000000000000000000000000000000000000000000000000000000000000011/0000000000000000000000000000000000000000000000000000000000000012/0000000000000000000000000000000000000000000000000000000000000013/0000000000000000000000000000000000000000000000000000000000000014/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n"
         )
@@ -132,7 +135,7 @@ class LampoRunner(Runner):
         logging.debug(f"running bitcoin core on port {self.bitcoind.port}")
 
         self.__lampod_config_file()
-        self.node = LampoDeamon(self.directory)
+        self.node = LampoDeamon(self.lightning_dir)
         self.node.register_unix_rpc()
         self.node.listen()
         time.sleep(10)
@@ -160,6 +163,7 @@ class LampoRunner(Runner):
         for c in self.conns.values():
             cast(LampoConn, c).connection.connection.close()
         del self.node
+        shutil.rmtree(self.lightning_dir)
 
     def recv(self, event: Event, conn: Conn, outbuf: bytes) -> None:
         try:

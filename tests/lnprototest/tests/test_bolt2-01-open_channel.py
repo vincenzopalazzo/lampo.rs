@@ -83,7 +83,6 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
     )
 
     regtest_hash = BitcoinUtils.blockchain_hash()
-
     # Accepter side: we initiate a new channel.
     test_events = [
         Msg(
@@ -108,8 +107,6 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
             first_per_commitment_point=local_keyset.per_commit_point(0),
             channel_flags=1,
         ),
-        # Ignore unknown odd messages
-        TryAll([], RawMsg(bytes.fromhex("270F"))),
         ExpectMsg(
             "accept_channel",
             temporary_channel_id=sent(),
@@ -119,11 +116,9 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
             delayed_payment_basepoint=remote_delayed_payment_basepoint(),
             htlc_basepoint=remote_htlc_basepoint(),
             first_per_commitment_point=remote_per_commitment_point(0),
-            minimum_depth=stash_field_from_event("accept_channel", dummy_val=3),
+            minimum_depth=6,
             channel_reserve_satoshis=9998,
         ),
-        # Ignore unknown odd messages
-        TryAll([], RawMsg(bytes.fromhex("270F"))),
         # Create and stash Funding object and FundingTx
         CreateFunding(
             *utxo(0),
@@ -165,7 +160,6 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
         # ofc: here we are simulating, this will be not possible in any network.
         # Mine three blocks to confirm channel.
         Block(blockheight=103, number=6, txs=[funding_tx()]),
-        Wait(1),
         ExpectMsg(
             "channel_ready",
             channel_id=channel_id(),
@@ -176,8 +170,6 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
             channel_id=channel_id(),
             second_per_commitment_point="027eed8389cf8eb715d73111b73d94d2c2d04bf96dc43dfd5b0970d80b3617009d",
         ),
-        # Ignore unknown odd messages
-        TryAll([], RawMsg(bytes.fromhex("270F"))),
     ]
     run_runner(runner, merge_events_sequences(connections_events, test_events))
 
