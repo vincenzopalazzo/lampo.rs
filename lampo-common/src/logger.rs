@@ -33,7 +33,7 @@ impl Log for Logger {
                     Level::Warn => message.yellow(),
                     Level::Info => message.normal(),
                     Level::Debug => message.dimmed(),
-                    Level::Trace => message.white().dimmed(),
+                    Level::Trace => message.cyan().dimmed(),
                 };
 
                 writeln!(

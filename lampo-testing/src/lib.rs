@@ -88,7 +88,7 @@ impl LampoTesting {
             &btc.user,
             &btc.pass,
             Arc::new(false),
-            Some(1),
+            Some(5),
         )?;
         lampo.init(Arc::new(node))?;
 

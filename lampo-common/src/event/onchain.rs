@@ -21,8 +21,9 @@ impl Debug for OnChainEvent {
         match self {
             Self::ConfirmedTransaction((tx, idx, header, height)) => write!(
                 f,
-                "ConfirmedTransaction(txid: {:?}, idx {idx}, block: {:?}, height: {height})",
-                tx, header
+                "ConfirmedTransaction(txid: {}, idx {idx}, block: {:?}, height: {height})",
+                tx.txid(),
+                header
             ),
             Self::NewBestBlock((header, height)) => {
                 write!(f, "NewBestBlock({}, {height})", header.block_hash())

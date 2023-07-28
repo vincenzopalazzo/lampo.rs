@@ -28,8 +28,8 @@ use lampo_common::secp256k1::hashes::hex::ToHex;
 pub struct BitcoinCore {
     inner: Client,
     handler: RefCell<Option<Arc<dyn Handler>>>,
-    ours_txs: RefCell<Mutex<Vec<Txid>>>,
-    others_txs: RefCell<Mutex<Vec<(Txid, Script)>>>,
+    ours_txs: Mutex<RefCell<Vec<Txid>>>,
+    others_txs: Mutex<RefCell<Vec<(Txid, Script)>>>,
     // receive notification if the
     // deamon was stop
     stop: Arc<bool>,
@@ -55,8 +55,8 @@ impl BitcoinCore {
         Ok(Self {
             inner: Client::new(url, Auth::UserPass(user.to_owned(), pass.to_owned()))?,
             handler: RefCell::new(None),
-            ours_txs: RefCell::new(Mutex::new(Vec::new())),
-            others_txs: RefCell::new(Mutex::new(Vec::new())),
+            ours_txs: Mutex::new(RefCell::new(Vec::new())),
+            others_txs: Mutex::new(RefCell::new(Vec::new())),
             // by default the we pool bitcoind each 2 minutes
             pool_time: Duration::from_secs(pool_time.unwrap_or(120) as u64),
             stop,
@@ -75,9 +75,9 @@ impl BitcoinCore {
     pub fn watch_tx(&self, txid: &Txid, script: &Script) -> error::Result<()> {
         log::debug!(target: "bitcoind", "Looking an external transaction `{}`", txid);
         self.others_txs
-            .borrow_mut()
             .lock()
             .unwrap()
+            .borrow_mut()
             .push((txid.clone(), script.clone()));
         Ok(())
     }
@@ -89,8 +89,8 @@ impl BitcoinCore {
 
     pub fn find_tx_in_block(&self, block: &Block) -> error::Result<()> {
         log::debug!(target: "bitcoin", "looking the tx inside the new block");
-        let utxos = self.others_txs.borrow_mut();
-        let mut utxos = utxos.lock().unwrap();
+        let utxos = self.others_txs.lock().unwrap();
+        let mut utxos = utxos.borrow_mut();
         let mut still_unconfirmed: Vec<(Txid, Script)> = vec![];
         for (utxo, script) in utxos.iter() {
             log::debug!(target: "bitcoind", "looking for UTXO {} inside the block: {}", utxo, block.header.block_hash());
@@ -132,7 +132,7 @@ impl Backend for BitcoinCore {
         );
         log::info!(target: "bitcoind", "broadcast transaction return {:?}", result);
         if result.is_ok() {
-            self.ours_txs.borrow_mut().lock().unwrap().push(tx.txid());
+            self.ours_txs.lock().unwrap().borrow_mut().push(tx.txid());
             let handler = self.handler.borrow();
             let Some(handler) = handler.as_ref() else {
                 return;
@@ -311,8 +311,8 @@ impl Backend for BitcoinCore {
             .borrow()
             .clone()
             .ok_or(error::anyhow!("handler is not set"))?;
-        let txs = self.ours_txs.borrow_mut();
-        let mut txs = txs.lock().unwrap();
+        let txs = self.ours_txs.lock().unwrap();
+        let mut txs = txs.borrow_mut();
         let mut confirmed_txs: Vec<Txid> = Vec::new();
         let mut unconfirmed_txs: Vec<Txid> = Vec::new();
         for txid in txs.iter() {
@@ -339,8 +339,8 @@ impl Backend for BitcoinCore {
     }
 
     fn manage_transactions(&self, txs: &mut Vec<Txid>) -> lampo_common::error::Result<()> {
-        let transactions = self.ours_txs.borrow_mut();
-        let mut transactions = transactions.lock().unwrap();
+        let transactions = self.ours_txs.lock().unwrap();
+        let mut transactions = transactions.borrow_mut();
         transactions.append(txs);
         self.process_transactions()
     }
@@ -363,7 +363,7 @@ impl Backend for BitcoinCore {
                 };
                 let start: u64 = self.best_height.borrow().clone().into();
                 let end: u64 = height.unwrap_or_default().into();
-                for height in start..end {
+                for height in start..end + 1 {
                     let block_hash = self.get_block_hash(height).unwrap();
                     let Ok(lampo_common::backend::BlockData::FullBlock(block)) =
                         self.get_block(&block_hash)
