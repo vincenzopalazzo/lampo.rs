@@ -10,9 +10,10 @@ use bitcoin::hashes::hex::ToHex;
 use bitcoin::locktime::Height;
 use bitcoin::BlockHash;
 use lightning::chain::chainmonitor::ChainMonitor;
+use lightning::chain::channelmonitor::ChannelMonitor;
 use lightning::chain::{BestBlock, Filter};
 use lightning::chain::{Confirm, Watch};
-use lightning::ln::channelmanager::{ChainParameters, ChannelManager};
+use lightning::ln::channelmanager::{ChainParameters, ChannelManager, ChannelManagerReadArgs};
 use lightning::routing::gossip::NetworkGraph;
 use lightning::routing::router::DefaultRouter;
 use lightning::routing::scoring::{
@@ -72,6 +73,13 @@ type LampoChannel =
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
 pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
+pub type LampoRouter = DefaultRouter<
+    Arc<LampoGraph>,
+    Arc<LampoLogger>,
+    Arc<Mutex<LampoScorer>>,
+    ProbabilisticScoringFeeParameters,
+    LampoScorer,
+>;
 
 pub struct LampoChannelManager {
     conf: LampoConf,
@@ -82,6 +90,7 @@ pub struct LampoChannelManager {
     graph: Option<Arc<LampoGraph>>,
     score: Option<Arc<Mutex<LampoScorer>>>,
     handler: RefCell<Option<Arc<LampoHandler>>>,
+    router: Option<Arc<LampoRouter>>,
 
     pub(crate) channeld: Option<Arc<LampoChannel>>,
     pub(crate) logger: Arc<LampoLogger>,
@@ -114,6 +123,7 @@ impl LampoChannelManager {
             handler: RefCell::new(None),
             graph: None,
             score: None,
+            router: None,
         }
     }
 
@@ -197,22 +207,28 @@ impl LampoChannelManager {
 
     pub fn load_channel_monitors(&self, watch: bool) -> error::Result<()> {
         let keys = self.wallet_manager.ldk_keys().inner();
-        let mut monitors = self
-            .persister
-            .read_channelmonitors(keys.clone(), keys)
-            .unwrap();
+        let mut monitors = self.persister.read_channelmonitors(keys.clone(), keys)?;
         for (_, chan_mon) in monitors.drain(..) {
             chan_mon.load_outputs_to_watch(&self.onchain);
             if watch {
                 let Some(monitor) = self.monitor.clone() else {
                     continue;
                 };
-
                 let outpoint = chan_mon.get_funding_txo().0;
                 monitor.watch_channel(outpoint, chan_mon);
             }
         }
         Ok(())
+    }
+
+    pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
+        let keys = self.wallet_manager.ldk_keys().inner();
+        let mut monitors = self.persister.read_channelmonitors(keys.clone(), keys)?;
+        let mut channel_monitors = Vec::new();
+        for (_, monitor) in monitors.drain(..) {
+            channel_monitors.push(monitor);
+        }
+        Ok(channel_monitors)
     }
     pub fn graph(&self) -> Arc<LampoGraph> {
         self.graph.clone().unwrap()
@@ -234,27 +250,30 @@ impl LampoChannelManager {
             LampoScorer,
         >,
     > {
-        // Step 9: Initialize routing ProbabilisticScorer
-        let network_graph_path = format!("{}/network_graph", self.conf.path());
-        let network_graph = self.read_network(Path::new(&network_graph_path));
+        if self.router.is_none() {
+            // Step 9: Initialize routing ProbabilisticScorer
+            let network_graph_path = format!("{}/network_graph", self.conf.path());
+            let network_graph = self.read_network(Path::new(&network_graph_path));
 
-        let scorer_path = format!("{}/scorer", self.conf.path());
-        let scorer = Arc::new(Mutex::new(
-            self.read_scorer(Path::new(&scorer_path), &network_graph),
-        ));
+            let scorer_path = format!("{}/scorer", self.conf.path());
+            let scorer = Arc::new(Mutex::new(
+                self.read_scorer(Path::new(&scorer_path), &network_graph),
+            ));
 
-        self.graph = Some(network_graph.clone());
-        self.score = Some(scorer.clone());
-        Arc::new(DefaultRouter::new(
-            network_graph,
-            self.logger.clone(),
-            self.wallet_manager
-                .ldk_keys()
-                .keys_manager
-                .get_secure_random_bytes(),
-            scorer,
-            ProbabilisticScoringFeeParameters::default(),
-        ))
+            self.graph = Some(network_graph.clone());
+            self.score = Some(scorer.clone());
+            self.router = Some(Arc::new(DefaultRouter::new(
+                network_graph,
+                self.logger.clone(),
+                self.wallet_manager
+                    .ldk_keys()
+                    .keys_manager
+                    .get_secure_random_bytes(),
+                scorer,
+                ProbabilisticScoringFeeParameters::default(),
+            )))
+        }
+        self.router.clone().unwrap()
     }
 
     pub(crate) fn read_scorer(
@@ -281,8 +300,37 @@ impl LampoChannelManager {
         Arc::new(NetworkGraph::new(self.conf.network, self.logger.clone()))
     }
 
-    pub fn restart(&self) {
-        unimplemented!()
+    pub fn is_restarting(&self) -> error::Result<bool> {
+        Ok(Path::exists(Path::new(&format!(
+            "{}/manager",
+            self.conf.path
+        ))))
+    }
+
+    pub fn restart(&mut self) -> error::Result<()> {
+        let monitor = self.build_channel_monitor();
+        self.monitor = Some(Arc::new(monitor));
+        let _ = self.network_graph();
+        let mut monitors = self.get_channel_monitors()?;
+        let monitors = monitors.iter_mut().collect::<Vec<_>>();
+        let read_args = ChannelManagerReadArgs::new(
+            self.wallet_manager.ldk_keys().keys_manager.clone(),
+            self.wallet_manager.ldk_keys().keys_manager.clone(),
+            self.wallet_manager.ldk_keys().keys_manager.clone(),
+            self.onchain.clone(),
+            self.chain_monitor(),
+            self.onchain.clone(),
+            self.router.clone().unwrap(),
+            self.logger.clone(),
+            self.conf.ldk_conf,
+            monitors,
+        );
+        let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path))?;
+        let (_, channel_manager) =
+            <(BlockHash, LampoChannel)>::read(&mut channel_manager_file, read_args)
+                .map_err(|err| error::anyhow!("{err}"))?;
+        self.channeld = Some(channel_manager.into());
+        Ok(())
     }
 
     pub fn start(
@@ -297,8 +345,9 @@ impl LampoChannelManager {
         };
 
         let monitor = self.build_channel_monitor();
-        let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
         self.monitor = Some(Arc::new(monitor));
+
+        let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
         self.channeld = Some(Arc::new(LampoArcChannelManager::new(
             self.onchain.clone(),
             self.monitor.clone().unwrap().clone(),

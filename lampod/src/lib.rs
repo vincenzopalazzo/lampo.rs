@@ -127,7 +127,12 @@ impl LampoDeamon {
 
         let height = height.ok_or(error::anyhow!("height not present"))?;
 
-        manager.start(block_hash, Height::from_consensus(height)?, timestamp)?;
+        if manager.is_restarting()? {
+            manager.restart()?;
+        } else {
+            manager.start(block_hash, Height::from_consensus(height)?, timestamp)?;
+        }
+
         self.channel_manager = Some(Arc::new(manager));
         Ok(())
     }
@@ -302,7 +307,7 @@ mod tests {
         let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
 
         let result = lampo.init(client);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{:?}", result);
 
         let connect = request::Connect {
             node_id: "02049b60c296ffead3e7c8b124c5730153403a8314c1116c2d1b43cf9ac0de2d9d"
@@ -342,7 +347,7 @@ mod tests {
         let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
 
         let result = lampo.init(client);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "{:?}", result);
         let payload = json::json!({});
         let result = lampo.call("getinfo", payload);
         assert!(result.is_ok(), "{:?}", result);

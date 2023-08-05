@@ -389,7 +389,11 @@ impl Backend for BitcoinCore {
                         }
                         let _ = self.process_transactions();
                     }
-                } else if self.best_height.borrow().lt(&height.unwrap_or_default().into()) {
+                } else if self
+                    .best_height
+                    .borrow()
+                    .lt(&height.unwrap_or_default().into())
+                {
                     let _ = self.process_transactions();
                     *self.best_height.borrow_mut() = height.unwrap_or_default().into();
                     let Ok(lampo_common::backend::BlockData::FullBlock(block)) =
