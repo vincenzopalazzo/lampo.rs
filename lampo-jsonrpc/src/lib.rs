@@ -176,7 +176,6 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
             self.sources.poll(&mut events, Timeout::Never)?;
 
             for mut event in events.drain(..) {
-                log::trace!("event {:?}", event);
                 match &event.key {
                     RPCEvent::Listening => {
                         let conn = self.socket.accept();

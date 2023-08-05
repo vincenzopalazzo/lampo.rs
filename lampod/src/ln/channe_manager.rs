@@ -136,6 +136,10 @@ impl LampoChannelManager {
     }
 
     pub fn listen(self: Arc<Self>) -> JoinHandle<()> {
+        if self.is_restarting().unwrap() {
+            self.resume_channels().unwrap();
+            self.load_channel_monitors(true).unwrap();
+        }
         std::thread::spawn(move || {
             log::info!(target: "channel_manager", "listening on chain event on the channel manager");
             let events = self.handler().events();
@@ -211,9 +215,10 @@ impl LampoChannelManager {
         for (_, chan_mon) in monitors.drain(..) {
             chan_mon.load_outputs_to_watch(&self.onchain);
             if watch {
-                let Some(monitor) = self.monitor.clone() else {
-                    continue;
-                };
+                let monitor = self
+                    .monitor
+                    .clone()
+                    .ok_or(error::anyhow!("Channel Monitor not present"))?;
                 let outpoint = chan_mon.get_funding_txo().0;
                 monitor.watch_channel(outpoint, chan_mon);
             }
@@ -333,6 +338,36 @@ impl LampoChannelManager {
         Ok(())
     }
 
+    pub fn resume_channels(&self) -> error::Result<()> {
+        let mut relevant_txids_one = self
+            .channeld
+            .clone()
+            .unwrap()
+            .get_relevant_txids()
+            .iter()
+            .map(|(txid, _)| txid.clone())
+            .collect::<Vec<_>>();
+        let mut relevant_txids_two = self
+            .chain_monitor()
+            .get_relevant_txids()
+            .iter()
+            .map(|(txid, _)| txid.clone())
+            .collect::<Vec<_>>();
+        log::debug!(
+            "transactions {:?} {:?}",
+            relevant_txids_one,
+            relevant_txids_two
+        );
+        // FIXME: check if some of these transaction are out of chain
+        self.onchain
+            .backend
+            .manage_transactions(&mut relevant_txids_one)?;
+        self.onchain
+            .backend
+            .manage_transactions(&mut relevant_txids_two)?;
+        Ok(())
+    }
+
     pub fn start(
         &mut self,
         block: BlockHash,
@@ -350,7 +385,7 @@ impl LampoChannelManager {
         let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
         self.channeld = Some(Arc::new(LampoArcChannelManager::new(
             self.onchain.clone(),
-            self.monitor.clone().unwrap().clone(),
+            self.monitor.clone().unwrap(),
             self.onchain.clone(),
             self.network_graph(),
             self.logger.clone(),

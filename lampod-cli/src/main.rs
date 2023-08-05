@@ -34,7 +34,7 @@ use lampod::LampoDeamon;
 use crate::args::LampoCliArgs;
 
 fn main() -> error::Result<()> {
-    logger::init(log::Level::Info).expect("unable to init the logger for the first time");
+    logger::init(log::Level::Trace).expect("unable to init the logger for the first time");
     let args = args::parse_args()?;
     run(args)?;
     Ok(())
