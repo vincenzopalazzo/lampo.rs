@@ -102,7 +102,7 @@ impl CoreWalletManager {
                 ],
             );
             if result.is_err() {
-               let _ = rpc.load_wallet(&name_wallet)?;
+                let _ = rpc.load_wallet(&name_wallet)?;
             }
         };
 

@@ -361,32 +361,48 @@ impl Backend for BitcoinCore {
                     log::error!(target: "bitcoind", "Impossible get the inforamtion of the last besh block: {}", best_block.err().unwrap());
                     break;
                 };
-                let start: u64 = self.best_height.borrow().clone().into();
-                let end: u64 = height.unwrap_or_default().into();
-                for height in start..end + 1 {
-                    let block_hash = self.get_block_hash(height).unwrap();
+                if !self.others_txs.lock().unwrap().borrow().is_empty() {
+                    let start: u64 = self.best_height.borrow().clone().into();
+                    let end: u64 = height.unwrap_or_default().into();
+                    for height in start..end + 1 {
+                        let block_hash = self.get_block_hash(height).unwrap();
+                        let Ok(lampo_common::backend::BlockData::FullBlock(block)) =
+                        self.get_block(&block_hash)
+                        else {
+                            log::warn!(target: "bitcoind", "Impossible retrieval the block information with hash `{block_hash}`");
+                            continue;
+                        };
+                        if height as u64 > *self.best_height.borrow() {
+                            *self.best_height.borrow_mut() = height.into();
+                            *self.last_bloch_hash.borrow_mut() = Some(block_hash);
+                            handler.emit(Event::OnChain(OnChainEvent::NewBestBlock((
+                                block.header,
+                                // SAFETY: the height should be always a valid u32
+                                Height::from_consensus(height as u32).unwrap(),
+                            ))));
+
+                            let _ = self.handler.borrow().clone().map(|handler| {
+                                handler.emit(Event::OnChain(OnChainEvent::NewBlock(block.clone())));
+                                handler
+                            });
+                            let _ = self.find_tx_in_block(&block);
+                        }
+                        let _ = self.process_transactions();
+                    }
+                } else if self.best_height.borrow().lt(&height.unwrap_or_default().into()) {
+                    let _ = self.process_transactions();
+                    *self.best_height.borrow_mut() = height.unwrap_or_default().into();
                     let Ok(lampo_common::backend::BlockData::FullBlock(block)) =
                         self.get_block(&block_hash)
                         else {
                             log::warn!(target: "bitcoind", "Impossible retrieval the block information with hash `{block_hash}`");
                             continue;
                         };
-                    if height as u64 > *self.best_height.borrow() {
-                        *self.best_height.borrow_mut() = height.into();
-                        *self.last_bloch_hash.borrow_mut() = Some(block_hash);
-                        handler.emit(Event::OnChain(OnChainEvent::NewBestBlock((
-                            block.header,
-                            // SAFETY: the height should be always a valid u32
-                            Height::from_consensus(height as u32).unwrap(),
-                        ))));
-
-                        let _ = self.handler.borrow().clone().map(|handler| {
-                            handler.emit(Event::OnChain(OnChainEvent::NewBlock(block.clone())));
-                            handler
-                        });
-                        let _ = self.find_tx_in_block(&block);
-                    }
-                    let _ = self.process_transactions();
+                    handler.emit(Event::OnChain(OnChainEvent::NewBestBlock((
+                        block.header,
+                        // SAFETY: the height should be always a valid u32
+                        Height::from_consensus(height.unwrap_or_default()).unwrap(),
+                    ))));
                 }
                 *self.last_bloch_hash.borrow_mut() = Some(block_hash);
 
