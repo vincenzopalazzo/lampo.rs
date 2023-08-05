@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::ops::Not;
 use std::sync::Arc;
 
+use bdk::bitcoin::bip32::ExtendedPrivKey;
 use bdk::bitcoin::Amount;
 use bdk::keys::bip39::Language;
 use bdk::keys::bip39::Mnemonic;
@@ -17,7 +18,6 @@ use bitcoincore_rpc::{Auth, Client, RpcApi};
 
 use lampo_common::bitcoin;
 use lampo_common::bitcoin::consensus::Decodable;
-use lampo_common::bitcoin::util::bip32::ExtendedPrivKey;
 use lampo_common::bitcoin::PrivateKey;
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::error;
@@ -44,9 +44,16 @@ impl CoreWalletManager {
             Mnemonic::parse(mnemonic_words).map_err(|err| bdk::Error::Generic(format!("{err}")))?;
         // Generate the extended key
         let xkey: ExtendedKey = mnemonic.into_extended_key()?;
+        let network = match conf.network.to_string().as_str() {
+            "bitcoin" => bdk::bitcoin::Network::Bitcoin,
+            "testnet" => bdk::bitcoin::Network::Testnet,
+            "signet" => bdk::bitcoin::Network::Signet,
+            "regtest" => bdk::bitcoin::Network::Regtest,
+            _ => unreachable!(),
+        };
         // Get xprv from the extended key
         let xprv = xkey
-            .into_xprv(conf.network)
+            .into_xprv(network)
             .ok_or(error::anyhow!("impossible cast the private key"))?;
 
         let ldk_kesy = LampoKeys::new(xprv.private_key.secret_bytes());
@@ -55,7 +62,7 @@ impl CoreWalletManager {
             Bip84(xprv, KeychainKind::External),
             Some(Bip84(xprv, KeychainKind::Internal)),
             (),
-            conf.network,
+            network,
         )?;
         Ok((wallet, ldk_kesy))
     }
@@ -70,9 +77,16 @@ impl CoreWalletManager {
         } else {
             LampoKeys::new(xprv.inner.secret_bytes())
         };
-        let key = ExtendedPrivKey::new_master(xprv.network, &xprv.inner.secret_bytes())?;
+        let network = match xprv.network.to_string().as_str() {
+            "bitcoin" => bdk::bitcoin::Network::Bitcoin,
+            "testnet" => bdk::bitcoin::Network::Testnet,
+            "signet" => bdk::bitcoin::Network::Signet,
+            "regtest" => bdk::bitcoin::Network::Regtest,
+            _ => unreachable!(),
+        };
+        let key = ExtendedPrivKey::new_master(network, &xprv.inner.secret_bytes())?;
         let key = ExtendedKey::from(key);
-        let wallet = bdk::Wallet::new(Bip84(key, KeychainKind::External), None, (), xprv.network)
+        let wallet = bdk::Wallet::new(Bip84(key, KeychainKind::External), None, (), network)
             .map_err(|err| bdk::Error::Generic(err.to_string()))?;
         Ok((wallet, ldk_keys))
     }
