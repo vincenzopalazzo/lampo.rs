@@ -88,7 +88,7 @@ impl CoreWalletManager {
             .iter()
             .any(|wallet| &wallet == &&name_wallet)
         {
-            let _: json::Value = rpc.call(
+            let result: Result<json::Value, bitcoincore_rpc::Error> = rpc.call(
                 "createwallet",
                 &[
                     name_wallet.clone().into(),
@@ -100,8 +100,13 @@ impl CoreWalletManager {
                     true.into(),
                     false.into(),
                 ],
-            )?;
+            );
+            if result.is_err() {
+               let _ = rpc.load_wallet(&name_wallet)?;
+            }
         };
+
+        // FIXME: do not reload the descriptor if it is already loaded
         let external_signer = wallet.get_signers(KeychainKind::External);
         let external_signer = external_signer.as_key_map(wallet.secp_ctx());
         let external_descriptor = wallet.get_descriptor_for_keychain(KeychainKind::External);
