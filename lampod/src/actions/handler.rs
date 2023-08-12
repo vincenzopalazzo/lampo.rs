@@ -153,6 +153,7 @@ impl Handler for LampoHandler {
                 channel_id,
                 user_channel_id,
                 reason,
+                ..
             } => {
                 log::info!("channel `{user_channel_id}` closed with reason: `{reason}`");
                 Ok(())
