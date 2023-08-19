@@ -68,7 +68,8 @@ impl OffchainManager {
         Ok(invoice)
     }
 
-    pub fn decode_invoice(&self, invoice_str: &str) -> error::Result<()> {
-        todo!()
+    pub fn decode_invoice(&self, invoice_str: &str) -> error::Result<ldk::invoice::Bolt11Invoice> {
+        let invoice = invoice_str.parse::<ldk::invoice::Bolt11Invoice>()?;
+        Ok(invoice)
     }
 }
