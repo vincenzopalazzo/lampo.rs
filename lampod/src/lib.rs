@@ -40,6 +40,7 @@ use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
 use crate::handler::external_handler::ExternalHandler;
+use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
@@ -61,10 +62,13 @@ pub struct LampoDeamon {
     channel_manager: Option<Arc<LampoChannelManager>>,
     inventory_manager: Option<Arc<LampoInventoryManager>>,
     wallet_manager: Arc<dyn WalletManager>,
+    offchain_manager: Option<Arc<OffchainManager>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
+
+    // FIXME: remove this
     rt: Runtime,
 }
 
@@ -86,6 +90,7 @@ impl LampoDeamon {
             channel_manager: None,
             inventory_manager: None,
             wallet_manager,
+            offchain_manager: None,
             handler: None,
             process: Cell::new(None),
             rt: Runtime::new().unwrap(),
@@ -141,6 +146,21 @@ impl LampoDeamon {
         self.channel_manager.clone().unwrap()
     }
 
+    pub fn offchain_manager(&self) -> Arc<OffchainManager> {
+        self.offchain_manager.clone().unwrap()
+    }
+
+    pub fn init_offchain_manager(&mut self) -> error::Result<()> {
+        let manager = OffchainManager::new(
+            self.wallet_manager().ldk_keys().keys_manager.clone(),
+            self.channel_manager(),
+            self.logger.clone(),
+            Arc::new(self.conf.clone()),
+        )?;
+        self.offchain_manager = Some(Arc::new(manager));
+        Ok(())
+    }
+
     pub fn init_peer_manager(&mut self) -> error::Result<()> {
         let mut peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone());
         peer_manager.init(
@@ -190,6 +210,7 @@ impl LampoDeamon {
     pub fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         self.init_onchaind(client.clone())?;
         self.init_channeld()?;
+        self.init_offchain_manager()?;
         self.init_peer_manager()?;
         self.init_inventory_manager()?;
         self.init_event_handler()?;

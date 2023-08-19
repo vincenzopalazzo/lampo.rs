@@ -12,6 +12,7 @@ use std::time::Duration;
 use cln4rust_testing::btc::BtcNode;
 use cln4rust_testing::prelude::*;
 use lampo_core_wallet::CoreWalletManager;
+use lampod::jsonrpc::offchain::json_invoice;
 use lampod::jsonrpc::CommandHandler;
 use tempfile::TempDir;
 
@@ -102,6 +103,7 @@ impl LampoTesting {
         server.add_rpc("newaddr", json_new_addr).unwrap();
         server.add_rpc("channels", json_list_channels).unwrap();
         server.add_rpc("funds", json_funds).unwrap();
+        server.add_rpc("invoice", json_invoice).unwrap();
         let handler = server.handler();
         let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
         rpc_handler.set_handler(handler);
