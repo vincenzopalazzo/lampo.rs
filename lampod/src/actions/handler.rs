@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use bitcoin::hashes::hex::ToHex;
+use lampo_common::error::Ok;
 use lampo_common::event::ln::LightningEvent;
 use lampo_jsonrpc::json_rpc2::Request;
 use lightning::events as ldk;
@@ -210,6 +211,52 @@ impl Handler for LampoHandler {
                     "channel pending with node `{}` with funding `{funding_txo}`",
                     counterparty_node_id.to_hex()
                 );
+                Ok(())
+            }
+            ldk::Event::PendingHTLCsForwardable { time_forwardable } => {
+                self.channel_manager
+                    .manager()
+                    .process_pending_htlc_forwards();
+                Ok(())
+            }
+            ldk::Event::PaymentClaimable {
+                receiver_node_id,
+                payment_hash,
+                onion_fields,
+                amount_msat,
+                counterparty_skimmed_fee_msat,
+                purpose,
+                via_channel_id,
+                via_user_channel_id,
+                claim_deadline,
+            } => {
+                let preimage = match purpose {
+                    ldk::PaymentPurpose::InvoicePayment {
+                        payment_preimage, ..
+                    } => payment_preimage,
+                    ldk::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                };
+                self.channel_manager
+                    .manager()
+                    .claim_funds(preimage.unwrap());
+                Ok(())
+            }
+            ldk::Event::PaymentClaimed {
+                receiver_node_id,
+                payment_hash,
+                amount_msat,
+                purpose,
+            } => {
+                let (payment_preimage, payment_secret) = match purpose {
+                    ldk::PaymentPurpose::InvoicePayment {
+                        payment_preimage,
+                        payment_secret,
+                        ..
+                    } => (payment_preimage, Some(payment_secret)),
+                    ldk::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
+                };
+                log::warn!("please note the payments are not make persistent for the moment");
+                // FIXME: make peristant these information
                 Ok(())
             }
             _ => unreachable!("{:?}", event),

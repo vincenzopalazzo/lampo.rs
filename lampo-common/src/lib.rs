@@ -12,6 +12,7 @@ pub mod wallet;
 
 pub mod ldk {
     pub use lightning::*;
+    pub use lightning_invoice as invoice;
 }
 
 pub mod error {

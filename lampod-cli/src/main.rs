@@ -23,6 +23,7 @@ use lampo_nakamoto::{Config, Nakamoto, Network};
 use lampod::chain::WalletManager;
 
 use lampod::jsonrpc::inventory::get_info;
+use lampod::jsonrpc::offchain::json_invoice;
 use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
@@ -144,6 +145,7 @@ fn run_jsonrpc(
     server.add_rpc("newaddr", json_new_addr).unwrap();
     server.add_rpc("channels", json_list_channels).unwrap();
     server.add_rpc("funds", json_funds).unwrap();
+    server.add_rpc("invoice", json_invoice).unwrap();
     let handler = server.handler();
     Ok((server.spawn(), handler))
 }
