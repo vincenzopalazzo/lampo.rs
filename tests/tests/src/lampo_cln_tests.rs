@@ -8,6 +8,7 @@ use lampo_common::handler::Handler;
 use lampo_common::json;
 use lampo_common::model::request;
 use lampo_common::model::response;
+use lampo_common::model::response::InvoiceInfo;
 use lampo_common::model::response::NewAddress;
 use lampo_common::model::Connect;
 use lampo_testing::prelude::bitcoincore_rpc::RpcApi;
@@ -300,5 +301,49 @@ pub fn payinvoice_to_lampo() {
             }),
         )
         .unwrap();
+    async_run!(cln.stop()).unwrap();
+}
+
+#[test]
+pub fn decode_invoice_from_cln() {
+    init();
+
+    let mut cln = async_run!(cln::Node::with_params(
+        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "regtest"
+    ))
+    .unwrap();
+    let btc = cln.btc();
+    let lampo_manager = LampoTesting::new(btc).unwrap();
+    let lampo = lampo_manager.lampod();
+    let info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
+    let response = cln
+        .rpc()
+        .connect(
+            &info.node_id,
+            Some(&format!("127.0.0.1:{}", lampo_manager.port)),
+        )
+        .unwrap();
+    log::debug!("cln connected with cln {:?}", response);
+    let invoce = cln
+        .rpc()
+        .invoice(
+            None,
+            "lampo",
+            "need to be decoded by lampo",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let decode: InvoiceInfo = lampo
+        .call(
+            "decode_invoice",
+            json::json!({
+                "invoice_str": invoce.bolt11,
+            }),
+        )
+        .unwrap();
+    assert_eq!(decode.description, "need to be decoded by lampo");
     async_run!(cln.stop()).unwrap();
 }
