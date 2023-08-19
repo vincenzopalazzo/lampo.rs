@@ -11,11 +11,13 @@
 //!
 //! Author: Vincenzo Palazzo <vincenzopalazzo@member.fsf.org>
 use std::sync::Arc;
+use std::time::Duration;
 
 use lampo_common::conf::LampoConf;
-use lampo_common::error::{self, Ok};
+use lampo_common::error;
 use lampo_common::keymanager::KeysManager;
 use lampo_common::ldk;
+use lampo_common::ldk::ln::channelmanager::Retry;
 
 use crate::utils::logger::LampoLogger;
 
@@ -71,5 +73,32 @@ impl OffchainManager {
     pub fn decode_invoice(&self, invoice_str: &str) -> error::Result<ldk::invoice::Bolt11Invoice> {
         let invoice = invoice_str.parse::<ldk::invoice::Bolt11Invoice>()?;
         Ok(invoice)
+    }
+
+    pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
+        let invoice = self.decode_invoice(invoice_str)?;
+        if invoice.amount_milli_satoshis().is_none() {
+            ldk::invoice::payment::pay_zero_value_invoice(
+                &invoice,
+                amount_msat.ok_or(error::anyhow!(
+                    "invoice with no amount, and amount must be specified"
+                ))?,
+                Retry::Timeout(Duration::from_secs(10)),
+                &self.channel_manager.manager(),
+            )
+            .map_err(|err| error::anyhow!("{:?}", err))?;
+        } else {
+            ldk::invoice::payment::pay_invoice(
+                &invoice,
+                Retry::Timeout(Duration::from_secs(10)),
+                &self.channel_manager.manager(),
+            )
+            .map_err(|err| error::anyhow!("{:?}", err))?;
+        }
+        Ok(())
+    }
+
+    pub fn keysend(&self) -> error::Result<()> {
+        todo!()
     }
 }

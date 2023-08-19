@@ -347,3 +347,129 @@ pub fn decode_invoice_from_cln() {
     assert_eq!(decode.description, "need to be decoded by lampo");
     async_run!(cln.stop()).unwrap();
 }
+
+#[test]
+pub fn no_able_to_pay_invoice_to_cln() {
+    init();
+
+    let mut cln = async_run!(cln::Node::with_params(
+        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "regtest"
+    ))
+    .unwrap();
+    let btc = cln.btc();
+    let lampo_manager = LampoTesting::new(btc).unwrap();
+    let lampo = lampo_manager.lampod();
+
+    let invoce = cln
+        .rpc()
+        .invoice(
+            Some(1000),
+            "lampo",
+            "need to be decoded by lampo",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let result: error::Result<json::Value> = lampo.call(
+        "pay",
+        json::json!({
+            "invoice_str": invoce.bolt11,
+        }),
+    );
+    // there is no channel so we must fails
+    assert!(result.is_err());
+    async_run!(cln.stop()).unwrap();
+}
+
+#[test]
+pub fn pay_invoice_to_cln() {
+    init();
+
+    let mut cln = async_run!(cln::Node::with_params(
+        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "regtest"
+    ))
+    .unwrap();
+    let btc = cln.btc();
+    let lampo_manager = LampoTesting::new(btc).unwrap();
+    let lampo = lampo_manager.lampod();
+    // mine some bitcoin inside the lampo address
+    let address: NewAddress = lampo.call("newaddr", json::json!({})).unwrap();
+    let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
+        .unwrap()
+        .assume_checked();
+    let result = btc.rpc().generate_to_address(6, &address).unwrap();
+    log::info!("generate to the addr `{:?}`: `{:?}`", address, result);
+    wait!(|| {
+        let result: response::Utxos = lampo.call("funds", json::json!({})).unwrap();
+        if !result.transactions.is_empty() {
+            log::info!(target: "cln-test", "transactiosn {:?}", result);
+            return Ok(());
+        }
+        let _ = btc.rpc().generate_to_address(6, &address).unwrap();
+        Err(())
+    });
+
+    log::info!("core lightning info {:?}", cln.rpc().getinfo());
+    let events = lampo.events();
+    let _: json::Value = lampo
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: cln.rpc().getinfo().unwrap().id,
+                port: Some(cln.port.into()),
+                amount: 100000000,
+                public: true,
+                addr: Some("127.0.0.1".to_owned()),
+            },
+        )
+        .unwrap();
+    // mine some blocks
+    let _ = btc.rpc().generate_to_address(6, &address).unwrap();
+    wait!(|| {
+        while let Ok(event) = events.recv_timeout(Duration::from_millis(100)) {
+            log::trace!("{:?}", event);
+            let Event::Lightning(LightningEvent::ChannelReady { .. }) = event else {
+                log::warn!("event received {:?}", event);
+                let _ = btc.rpc().generate_to_address(1, &address).unwrap();
+                continue;
+            };
+            return Ok(());
+        }
+        Err(())
+    });
+
+    wait!(|| {
+        let channels = cln.rpc().listfunds().unwrap().channels;
+        if channels.is_empty() {
+            return Err(());
+        }
+        if channels.first().unwrap().state != "CHANNELD_NORMAL".to_string() {
+            return Err(());
+        }
+        Ok(())
+    });
+
+    let invoce = cln
+        .rpc()
+        .invoice(
+            Some(1000),
+            "lampo",
+            "need to be decoded by lampo",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let result: error::Result<json::Value> = lampo.call(
+        "pay",
+        json::json!({
+            "invoice_str": invoce.bolt11,
+        }),
+    );
+    // there is no channel so we must fails
+    assert!(result.is_ok(), "{:?}", result);
+    async_run!(cln.stop()).unwrap();
+}

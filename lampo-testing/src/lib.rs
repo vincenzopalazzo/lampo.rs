@@ -11,24 +11,25 @@ use std::time::Duration;
 
 use cln4rust_testing::btc::BtcNode;
 use cln4rust_testing::prelude::*;
-use lampo_core_wallet::CoreWalletManager;
-use lampod::jsonrpc::offchain::json_decode_invoice;
-use lampod::jsonrpc::offchain::json_invoice;
-use lampod::jsonrpc::CommandHandler;
 use tempfile::TempDir;
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_core_wallet::CoreWalletManager;
 use lampo_jsonrpc::JSONRPCv2;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::jsonrpc::channels::json_list_channels;
 use lampod::jsonrpc::inventory::get_info;
+use lampod::jsonrpc::offchain::json_decode_invoice;
+use lampod::jsonrpc::offchain::json_invoice;
+use lampod::jsonrpc::offchain::json_pay;
 use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
+use lampod::jsonrpc::CommandHandler;
 use lampod::LampoDeamon;
 
 #[macro_export]
@@ -108,6 +109,8 @@ impl LampoTesting {
         server
             .add_rpc("decode_invoice", json_decode_invoice)
             .unwrap();
+
+        server.add_rpc("pay", json_pay).unwrap();
         let handler = server.handler();
         let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
         rpc_handler.set_handler(handler);
