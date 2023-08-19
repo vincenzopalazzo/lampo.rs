@@ -59,3 +59,19 @@ pub fn json_decode_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<j
     };
     Ok(json::to_value(&invoice)?)
 }
+
+pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+    log::info!("call for `pay` with request `{:?}`", request);
+    let request: DecodeInvoice = json::from_value(request.clone())?;
+    ctx.offchain_manager()
+        .pay_invoice(&request.invoice_str, None)
+        .map_err(|err| {
+            Error::Rpc(RpcError {
+                code: -1,
+                message: format!("{err}"),
+                data: None,
+            })
+        })?;
+
+    Ok(json::json!({}))
+}
