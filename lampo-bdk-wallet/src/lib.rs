@@ -11,7 +11,7 @@ use bdk::keys::{DerivableKey, ExtendedKey, GeneratedKey};
 use bdk::template::Bip84;
 use bdk::wallet::ChangeSet;
 use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
-use bdk_chain::keychain::LocalUpdate;
+use bdk_chain::keychain::WalletUpdate;
 use bdk_esplora::EsploraExt;
 use bdk_file_store::Store;
 
@@ -233,10 +233,10 @@ impl WalletManager for BDKWalletManager {
             client.update_tx_graph(spks, None, None, 50, 2)?;
         let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
         let chain_update = client.update_local_chain(checkpoints, missing_heights)?;
-        let update = LocalUpdate {
+        let update = WalletUpdate {
             last_active_indices,
             graph: update_graph,
-            ..LocalUpdate::new(chain_update)
+            ..WalletUpdate::new(chain_update)
         };
 
         wallet.apply_update(update)?;
