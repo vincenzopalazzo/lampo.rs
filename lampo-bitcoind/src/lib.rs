@@ -159,12 +159,7 @@ impl Backend for BitcoinCore {
     }
 
     fn minimum_mempool_fee(&self) -> error::Result<u32> {
-        let fee = self
-            .inner
-            .get_mempool_info()
-            .unwrap()
-            .mempool_min_fee
-            .to_sat() as u32;
+        let fee = self.inner.get_mempool_info()?.mempool_min_fee.to_sat() as u32;
         Ok(fee)
     }
 
