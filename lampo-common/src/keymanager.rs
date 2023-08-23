@@ -7,9 +7,9 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::sha256d::Hash as Sha256dHash;
 use bitcoin::hashes::{Hash, HashEngine};
 use bitcoin::secp256k1::ecdsa::Signature;
+use bitcoin::secp256k1::schnorr;
 use bitcoin::secp256k1::{Message, PublicKey, Secp256k1, Signing};
 use bitcoin::util::sighash;
-use bitcoin::PublicKey as BitcoinPublicKey;
 use bitcoin::{
     blockdata::{opcodes, script::Builder},
     psbt::PartiallySignedTransaction,
@@ -17,6 +17,9 @@ use bitcoin::{
     util::bip32::{ChildNumber, ExtendedPrivKey, ExtendedPubKey},
     EcdsaSighashType, Network, PackedLockTime, Script, Transaction, TxOut, WPubkeyHash, Witness,
 };
+use bitcoin::{KeyPair, PublicKey as BitcoinPublicKey};
+use lightning::offers::invoice::UnsignedBolt12Invoice;
+use lightning::offers::invoice_request::UnsignedInvoiceRequest;
 use lightning::util::invoice::construct_invoice_preimage;
 use lightning::util::ser::ReadableArgs;
 use lightning::util::ser::Writeable;
@@ -594,6 +597,30 @@ impl NodeSigner for KeysManager {
         Ok(self
             .secp_ctx
             .sign_ecdsa_recoverable(&hash_to_message!(&Sha256::hash(&preimage)), secret))
+    }
+
+    fn sign_bolt12_invoice_request(
+        &self,
+        invoice_request: &UnsignedInvoiceRequest,
+    ) -> Result<schnorr::Signature, ()> {
+        let message = invoice_request.tagged_hash().as_digest();
+        let keys = KeyPair::from_secret_key(&self.secp_ctx, &self.node_secret);
+        let aux_rand = self.get_secure_random_bytes();
+        Ok(self
+            .secp_ctx
+            .sign_schnorr_with_aux_rand(message, &keys, &aux_rand))
+    }
+
+    fn sign_bolt12_invoice(
+        &self,
+        invoice: &UnsignedBolt12Invoice,
+    ) -> Result<schnorr::Signature, ()> {
+        let message = invoice.tagged_hash().as_digest();
+        let keys = KeyPair::from_secret_key(&self.secp_ctx, &self.node_secret);
+        let aux_rand = self.get_secure_random_bytes();
+        Ok(self
+            .secp_ctx
+            .sign_schnorr_with_aux_rand(message, &keys, &aux_rand))
     }
 
     fn sign_gossip_message(&self, msg: UnsignedGossipMessage) -> Result<Signature, ()> {

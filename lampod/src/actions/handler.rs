@@ -246,6 +246,7 @@ impl Handler for LampoHandler {
                 payment_hash,
                 amount_msat,
                 purpose,
+                ..
             } => {
                 let (payment_preimage, payment_secret) = match purpose {
                     ldk::PaymentPurpose::InvoicePayment {

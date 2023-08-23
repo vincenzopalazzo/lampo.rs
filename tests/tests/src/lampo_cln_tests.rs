@@ -357,6 +357,7 @@ pub fn no_able_to_pay_invoice_to_cln() {
         "regtest"
     ))
     .unwrap();
+    std::thread::sleep(Duration::from_secs(1));
     let btc = cln.btc();
     let lampo_manager = LampoTesting::new(btc).unwrap();
     let lampo = lampo_manager.lampod();
