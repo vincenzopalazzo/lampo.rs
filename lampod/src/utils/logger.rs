@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 
 use lampo_common::ldk::util::logger::{Logger, Record};
 
@@ -9,6 +9,7 @@ enum LogLevel {
     Debug,
     Warn,
     Error,
+    Trace,
 }
 
 impl FromStr for LogLevel {
@@ -23,7 +24,7 @@ impl FromStr for LogLevel {
             "info" => Ok(LogLevel::Info),
             "warning" => Ok(LogLevel::Warn),
             "error" => Ok(LogLevel::Error),
-            "trace" => Ok(LogLevel::Debug),
+            "trace" => Ok(LogLevel::Trace),
             _ => Err(format!("Unknown {} level", s)),
         }
     }
@@ -46,6 +47,7 @@ impl LampoLogger {
             LogLevel::Info => info!(target: "ldk", "{msg}"),
             LogLevel::Warn => warn!(target: "ldk", "{msg}"),
             LogLevel::Error => error!(target: "ldk", "{msg}"),
+            LogLevel::Trace => trace!(target: "ldk", "{msg}"),
         }
     }
 }

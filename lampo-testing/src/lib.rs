@@ -6,11 +6,15 @@ pub mod prelude {
     pub use lampod::async_run;
 }
 
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use cln4rust_testing::btc::BtcNode;
 use cln4rust_testing::prelude::*;
+use lampo_common::json;
+use lampo_common::model::response;
+use lampo_common::model::response::NewAddress;
 use tempfile::TempDir;
 
 use lampo_bitcoind::BitcoinCore;
@@ -38,8 +42,7 @@ macro_rules! wait {
         let mut success = false;
         for wait in 0..$timeout {
             let result = $callback();
-            if let Err(err) = result {
-                log::debug!("callback return {:?}", err);
+            if let Err(_) = result {
                 std::thread::sleep(std::time::Duration::from_millis(wait));
                 continue;
             }
@@ -50,7 +53,7 @@ macro_rules! wait {
         assert!(success, "callback got a timeout");
     }};
     ($callback:expr) => {
-        $crate::wait!($callback, 50);
+        $crate::wait!($callback, 100);
     };
 }
 
@@ -60,10 +63,11 @@ pub struct LampoTesting {
     pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
     pub mnemonic: String,
+    pub btc: Arc<BtcNode>,
 }
 
 impl LampoTesting {
-    pub fn new(btc: &BtcNode) -> error::Result<Self> {
+    pub fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -127,8 +131,33 @@ impl LampoTesting {
             mnemonic,
             port: port.into(),
             wallet,
+            btc,
             root_path: Arc::new(dir),
         })
+    }
+
+    pub fn fund_wallet(&self, blocks: u64) -> error::Result<bitcoincore_rpc::bitcoin::Address> {
+        use cln4rust_testing::prelude::bitcoincore_rpc::RpcApi;
+
+        // mine some bitcoin inside the lampo address
+        let address: NewAddress = self.lampod().call("newaddr", json::json!({})).unwrap();
+        let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
+            .unwrap()
+            .assume_checked();
+        let _ = self
+            .btc
+            .rpc()
+            .generate_to_address(blocks, &address)
+            .unwrap();
+
+        wait!(|| {
+            let funds: response::Utxos = self.inner.call("funds", json::json!({})).unwrap();
+            if !funds.transactions.is_empty() {
+                return Ok(());
+            }
+            Err(())
+        });
+        Ok(address)
     }
 
     pub fn lampod(&self) -> Arc<LampoHandler> {

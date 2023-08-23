@@ -34,6 +34,11 @@ pub mod response {
     use crate::types::NodeId;
 
     #[derive(Serialize, Deserialize)]
+    pub struct Channels {
+        pub channels: Vec<Channel>,
+    }
+
+    #[derive(Serialize, Deserialize)]
     pub struct OpenChannel {
         pub node_id: String,
         pub amount: u64,
