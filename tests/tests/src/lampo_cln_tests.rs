@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
+use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::json;
@@ -46,11 +47,12 @@ pub fn fund_a_simple_channel_from_lampo() {
         "regtest"
     ))
     .unwrap();
+    std::thread::sleep(Duration::from_secs(1));
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
     let lampo = lampo_manager.lampod();
     let info = cln.rpc().getinfo().unwrap();
-    let response: json::Value = lampo
+    let _: json::Value = lampo
         .call(
             "connect",
             Connect {
@@ -60,26 +62,19 @@ pub fn fund_a_simple_channel_from_lampo() {
             },
         )
         .unwrap();
-    log::debug!("lampo connected with cln {:?}", response);
-    // mine some bitcoin inside the lampo address
-    let address: NewAddress = lampo.call("newaddr", json::json!({})).unwrap();
-    let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
-        .unwrap()
-        .assume_checked();
-    let result = btc.rpc().generate_to_address(6, &address).unwrap();
-    log::info!("generate to the addr `{:?}`: `{:?}`", address, result);
+
+    let events = lampo.events();
+    let address = lampo_manager.fund_wallet(101).unwrap();
     wait!(|| {
-        let result: response::Utxos = lampo.call("funds", json::json!({})).unwrap();
-        if !result.transactions.is_empty() {
-            log::info!(target: "cln-test", "transactiosn {:?}", result);
+        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) = events.recv_timeout(Duration::from_millis(100)) else {
+            return Err(());
+        };
+        if height.to_consensus_u32() == 101 {
             return Ok(());
         }
-        let _ = btc.rpc().generate_to_address(6, &address).unwrap();
         Err(())
     });
 
-    log::info!("core lightning info {:?}", cln.rpc().getinfo());
-    let events = lampo.events();
     let _: json::Value = lampo
         .call(
             "fundchannel",
@@ -98,21 +93,24 @@ pub fn fund_a_simple_channel_from_lampo() {
         while let Ok(event) = events.recv_timeout(Duration::from_millis(100)) {
             log::trace!("{:?}", event);
             let Event::Lightning(LightningEvent::ChannelReady { .. }) = event else {
-                log::warn!("event received {:?}", event);
+                log::info!(target: "tests", "event received {:?}", event);
                 let _ = btc.rpc().generate_to_address(1, &address).unwrap();
                 continue;
             };
+            log::info!(target: "tests", "channel ready event received");
+            // check if lampo see the channel
+            let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+            if channels.channels.is_empty() {
+                return Err(());
+            }
+
+            if !channels.channels.first().unwrap().ready {
+                return Err(());
+            }
+            log::info!(target: "tests", "channel ready");
             return Ok(());
         }
         Err(())
-    });
-
-    let channels = cln.rpc().listfunds().unwrap().channels;
-    wait!(|| {
-        if channels.is_empty() {
-            return Err(());
-        }
-        Ok(())
     });
     async_run!(cln.stop()).unwrap();
 }
@@ -127,7 +125,7 @@ pub fn fund_a_simple_channel_to_lampo() {
     ))
     .unwrap();
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
     let lampo = lampo_manager.lampod();
     let info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
     let response = cln
@@ -194,6 +192,17 @@ pub fn fund_a_simple_channel_to_lampo() {
         if channels.is_empty() {
             return Err(());
         }
+
+        // check if lampo see the channel
+        let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+        if channels.channels.is_empty() {
+            return Err(());
+        }
+
+        if !channels.channels.first().unwrap().ready {
+            return Err(());
+        }
+
         Ok(())
     });
     async_run!(cln.stop()).unwrap();
@@ -209,7 +218,7 @@ pub fn payinvoice_to_lampo() {
     ))
     .unwrap();
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
     let lampo = lampo_manager.lampod();
     let info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
     let response = cln
@@ -313,8 +322,9 @@ pub fn decode_invoice_from_cln() {
         "regtest"
     ))
     .unwrap();
+    std::thread::sleep(Duration::from_secs(1));
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
     let lampo = lampo_manager.lampod();
     let info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
     let response = cln
@@ -359,7 +369,7 @@ pub fn no_able_to_pay_invoice_to_cln() {
     .unwrap();
     std::thread::sleep(Duration::from_secs(1));
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
     let lampo = lampo_manager.lampod();
 
     let invoce = cln
@@ -394,52 +404,48 @@ pub fn pay_invoice_to_cln() {
     ))
     .unwrap();
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
     let lampo = lampo_manager.lampod();
-    // mine some bitcoin inside the lampo address
-    let address: NewAddress = lampo.call("newaddr", json::json!({})).unwrap();
-    let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
-        .unwrap()
-        .assume_checked();
-    let result = btc.rpc().generate_to_address(6, &address).unwrap();
-    log::info!("generate to the addr `{:?}`: `{:?}`", address, result);
+
+    let events = lampo.events();
+    let address = lampo_manager.fund_wallet(101).unwrap();
     wait!(|| {
-        let result: response::Utxos = lampo.call("funds", json::json!({})).unwrap();
-        if !result.transactions.is_empty() {
-            log::info!(target: "cln-test", "transactiosn {:?}", result);
+        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) = events.recv_timeout(Duration::from_millis(100)) else {
+            return Err(());
+        };
+        if height.to_consensus_u32() == 101 {
             return Ok(());
         }
-        let _ = btc.rpc().generate_to_address(6, &address).unwrap();
         Err(())
     });
 
-    log::info!("core lightning info {:?}", cln.rpc().getinfo());
-    let events = lampo.events();
     let _: json::Value = lampo
         .call(
             "fundchannel",
             request::OpenChannel {
                 node_id: cln.rpc().getinfo().unwrap().id,
                 port: Some(cln.port.into()),
-                amount: 100000000,
+                amount: 500000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
             },
         )
         .unwrap();
-    // mine some blocks
+
+    // Wait a little bit that the open channel will finish!
+    std::thread::sleep(Duration::from_secs(2));
+    // Get the transaction confirmed
     let _ = btc.rpc().generate_to_address(6, &address).unwrap();
     wait!(|| {
-        while let Ok(event) = events.recv_timeout(Duration::from_millis(100)) {
-            log::trace!("{:?}", event);
-            let Event::Lightning(LightningEvent::ChannelReady { .. }) = event else {
-                log::warn!("event received {:?}", event);
-                let _ = btc.rpc().generate_to_address(1, &address).unwrap();
-                continue;
-            };
-            return Ok(());
-        }
-        Err(())
+        let Ok(event) = events.recv_timeout(Duration::from_millis(100)) else {
+            return Err(());
+        };
+        log::trace!("{:?}", event);
+        let Event::Lightning(LightningEvent::ChannelReady { .. }) = event else {
+            log::debug!(target: "test", "event received {:?}", event);
+            return Err(());
+        };
+        Ok(())
     });
 
     wait!(|| {
@@ -447,9 +453,17 @@ pub fn pay_invoice_to_cln() {
         if channels.is_empty() {
             return Err(());
         }
+
         if channels.first().unwrap().state != "CHANNELD_NORMAL".to_string() {
             return Err(());
         }
+
+        let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+
+        if !channels.channels.first().unwrap().ready {
+            return Err(());
+        }
+
         Ok(())
     });
 

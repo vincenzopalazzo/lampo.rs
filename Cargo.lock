@@ -118,7 +118,7 @@ checksum = "604178f6c5c21f02dc555784810edfb88d34ac2c73b2eae109655649ee73ce3d"
 [[package]]
 name = "bdk"
 version = "1.0.0-alpha.1"
-source = "git+https://github.com/bitcoindevkit/bdk.git#fb5cfa3c258f6311f8f8cd3ce38693294d1e8378"
+source = "git+https://github.com/bitcoindevkit/bdk.git#6125062a5b7f3fabe43820d7fdfbbe00414db61d"
 dependencies = [
  "bdk_chain",
  "bip39",
@@ -135,7 +135,7 @@ dependencies = [
 [[package]]
 name = "bdk_chain"
 version = "0.5.0"
-source = "git+https://github.com/bitcoindevkit/bdk.git#fb5cfa3c258f6311f8f8cd3ce38693294d1e8378"
+source = "git+https://github.com/bitcoindevkit/bdk.git#6125062a5b7f3fabe43820d7fdfbbe00414db61d"
 dependencies = [
  "bitcoin 0.30.1",
  "miniscript",
@@ -145,7 +145,7 @@ dependencies = [
 [[package]]
 name = "bdk_esplora"
 version = "0.3.0"
-source = "git+https://github.com/bitcoindevkit/bdk.git#fb5cfa3c258f6311f8f8cd3ce38693294d1e8378"
+source = "git+https://github.com/bitcoindevkit/bdk.git#6125062a5b7f3fabe43820d7fdfbbe00414db61d"
 dependencies = [
  "async-trait",
  "bdk_chain",
@@ -156,7 +156,7 @@ dependencies = [
 [[package]]
 name = "bdk_file_store"
 version = "0.2.0"
-source = "git+https://github.com/bitcoindevkit/bdk.git#fb5cfa3c258f6311f8f8cd3ce38693294d1e8378"
+source = "git+https://github.com/bitcoindevkit/bdk.git#6125062a5b7f3fabe43820d7fdfbbe00414db61d"
 dependencies = [
  "bdk_chain",
  "bincode",
@@ -346,9 +346,9 @@ dependencies = [
 
 [[package]]
 name = "clightningrpc"
-version = "0.3.0-beta.6"
+version = "0.3.0-beta.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78fb539a9ff076240519d1c6693d822791c697910718c22cf19e90b82ed191b5"
+checksum = "40990c6311c2cddc49991e47dd8fc2ae0ac5675ce92f9cefdc895f1a33563a3e"
 dependencies = [
  "clightningrpc-common",
  "serde",
@@ -368,7 +368,7 @@ dependencies = [
 [[package]]
 name = "clightningrpc-conf"
 version = "0.0.3"
-source = "git+https://github.com/laanwj/cln4rust.git?branch=master#5460467a7c52ead6e3d1dab1402b5da1ffcf86c9"
+source = "git+https://github.com/laanwj/cln4rust.git?branch=master#b2b92b71a5861b6bfc4250d2375ab0917e589737"
 dependencies = [
  "albert_stream",
  "indexmap 1.9.3",
@@ -377,7 +377,7 @@ dependencies = [
 [[package]]
 name = "cln4rust-testing"
 version = "0.1.0"
-source = "git+https://github.com/laanwj/cln4rust.git?branch=macros/test-framework-v2#3fe789cb9a2ad40dad586756b6b629259cbb05d6"
+source = "git+https://github.com/laanwj/cln4rust.git?branch=macros/test-framework-v2#78dab4d021d35347f99eeeb59563a5cb4040f209"
 dependencies = [
  "anyhow",
  "bitcoincore-rpc",
@@ -473,9 +473,9 @@ checksum = "a26ae43d7bcc3b814de94796a5e736d4029efb0ee900c12e2d54c993ad1a1e07"
 
 [[package]]
 name = "encoding_rs"
-version = "0.8.32"
+version = "0.8.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071a31f4ee85403370b58aca746f01041ede6f0da2730960ad001edc2b71b394"
+checksum = "7268b386296a025e474d5140678f75d6de9493ae55a5d709eeb9dd08149945e1"
 dependencies = [
  "cfg-if",
 ]
@@ -1126,7 +1126,7 @@ checksum = "b4668fb0ea861c1df094127ac5f1da3409a82116a4ba74fca2e58ef927159bb3"
 [[package]]
 name = "lightning"
 version = "0.0.116"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#8866ed35330bae1af2237c1951d9c4025938aa65"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#bbe20c3327d3af37a7d5f82a021af1945d689547"
 dependencies = [
  "bitcoin 0.29.2",
  "musig2",
@@ -1135,7 +1135,7 @@ dependencies = [
 [[package]]
 name = "lightning-background-processor"
 version = "0.0.116"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#8866ed35330bae1af2237c1951d9c4025938aa65"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#bbe20c3327d3af37a7d5f82a021af1945d689547"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -1145,7 +1145,7 @@ dependencies = [
 [[package]]
 name = "lightning-block-sync"
 version = "0.0.116"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#8866ed35330bae1af2237c1951d9c4025938aa65"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#bbe20c3327d3af37a7d5f82a021af1945d689547"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -1154,7 +1154,7 @@ dependencies = [
 [[package]]
 name = "lightning-invoice"
 version = "0.24.0"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#8866ed35330bae1af2237c1951d9c4025938aa65"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#bbe20c3327d3af37a7d5f82a021af1945d689547"
 dependencies = [
  "bech32 0.9.1",
  "bitcoin 0.29.2",
@@ -1167,7 +1167,7 @@ dependencies = [
 [[package]]
 name = "lightning-net-tokio"
 version = "0.0.116"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#8866ed35330bae1af2237c1951d9c4025938aa65"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#bbe20c3327d3af37a7d5f82a021af1945d689547"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -1177,7 +1177,7 @@ dependencies = [
 [[package]]
 name = "lightning-persister"
 version = "0.0.116"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#8866ed35330bae1af2237c1951d9c4025938aa65"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#bbe20c3327d3af37a7d5f82a021af1945d689547"
 dependencies = [
  "bitcoin 0.29.2",
  "libc",
@@ -1188,7 +1188,7 @@ dependencies = [
 [[package]]
 name = "lightning-rapid-gossip-sync"
 version = "0.0.116"
-source = "git+https://github.com/lightningdevkit/rust-lightning.git#8866ed35330bae1af2237c1951d9c4025938aa65"
+source = "git+https://github.com/lightningdevkit/rust-lightning.git#bbe20c3327d3af37a7d5f82a021af1945d689547"
 dependencies = [
  "bitcoin 0.29.2",
  "lightning",
@@ -1749,9 +1749,9 @@ checksum = "e5ea92a5b6195c6ef2a0295ea818b312502c6fc94dde986c5553242e18fd4ce2"
 
 [[package]]
 name = "reqwest"
-version = "0.11.19"
+version = "0.11.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20b9b67e2ca7dd9e9f9285b759de30ff538aab981abaaf7bc9bd90b84a0126c3"
+checksum = "3e9ad3fe7488d7e34558a2033d45a0c90b72d97b4f80705666fea71472e2e6a1"
 dependencies = [
  "base64 0.21.2",
  "bytes",
@@ -1948,18 +1948,18 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.185"
+version = "1.0.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be9b6f69f1dfd54c3b568ffa45c310d6973a5e5148fd40cf515acaf38cf5bc31"
+checksum = "9f5db24220c009de9bd45e69fb2938f4b6d2df856aa9304ce377b3180f83b7c1"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.185"
+version = "1.0.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc59dfdcbad1437773485e0367fea4b090a2e0a16d9ffc46af47764536a298ec"
+checksum = "5ad697f7e0b65af4983a4ce8f56ed5b357e8d3c36651bf6a7e13639c17b8e670"
 dependencies = [
  "proc-macro2",
  "quote",

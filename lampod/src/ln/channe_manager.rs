@@ -32,7 +32,7 @@ use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::keymanager::KeysManager;
 use lampo_common::model::request;
-use lampo_common::model::response::{self, Channel};
+use lampo_common::model::response::{self, Channel, Channels};
 
 use crate::actions::handler::LampoHandler;
 use crate::chain::{LampoChainManager, WalletManager};
@@ -141,21 +141,23 @@ impl LampoChannelManager {
             self.load_channel_monitors(true).unwrap();
         }
         std::thread::spawn(move || {
-            log::info!(target: "channel_manager", "listening on chain event on the channel manager");
+            log::info!(target: "lampo_channel_manager", "listening on chain event on the channel manager");
             let events = self.handler().events();
             loop {
                 let Ok(Event::OnChain(event)) = events.recv() else {
                     continue;
                 };
-                log::trace!(target: "channel_manager", "event received {:?}", event);
+                log::trace!(target: "lampo_channel_manager", "event received {:?}", event);
                 match event {
                     OnChainEvent::NewBestBlock((hash, height)) => {
+                        log::debug!(target: "lampo_channel_manager", "new best block with hash `{}` at height `{height}`", hash.block_hash());
                         self.chain_monitor()
                             .best_block_updated(&hash, height.to_consensus_u32());
                         self.manager()
                             .best_block_updated(&hash, height.to_consensus_u32());
                     }
                     OnChainEvent::ConfirmedTransaction((tx, idx, header, height)) => {
+                        log::debug!(target: "lampo_channel_manager", "confirmed transaction with txid `{}` at height `{height}`", tx.txid());
                         self.chain_monitor().transactions_confirmed(
                             &header,
                             &[(idx as usize, &tx)],
@@ -191,8 +193,9 @@ impl LampoChannelManager {
         self.channeld.clone().unwrap()
     }
 
-    pub fn list_channel(&self) -> Vec<Channel> {
-        self.manager()
+    pub fn list_channel(&self) -> Channels {
+        let channels: Vec<Channel> = self
+            .manager()
             .list_channels()
             .into_iter()
             .map(|channel| Channel {
@@ -206,7 +209,8 @@ impl LampoChannelManager {
                 available_balance_for_send_msat: channel.outbound_capacity_msat,
                 available_balance_for_recv_msat: channel.inbound_capacity_msat,
             })
-            .collect()
+            .collect();
+        Channels { channels }
     }
 
     pub fn load_channel_monitors(&self, watch: bool) -> error::Result<()> {

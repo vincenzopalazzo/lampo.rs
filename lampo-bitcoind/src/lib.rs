@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use bitcoincore_rpc::bitcoin::hashes::Hash;
 use bitcoincore_rpc::Client;
-use bitcoincore_rpc::Result;
 use bitcoincore_rpc::RpcApi;
 
 use bitcoincore_rpc::bitcoincore_rpc_json::GetTxOutResult;
@@ -38,6 +37,17 @@ pub struct BitcoinCore {
     last_bloch_hash: RefCell<Option<BlockHash>>,
 }
 
+impl std::fmt::Debug for BitcoinCore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "BitcoinCore {{ best_height: {:?}, last_bloch_hash: {:?} }}",
+            self.best_height, self.last_bloch_hash
+        )?;
+        Ok(())
+    }
+}
+
 // FIXME: fix this for bitcoin core struct
 unsafe impl Send for BitcoinCore {}
 unsafe impl Sync for BitcoinCore {}
@@ -49,7 +59,7 @@ impl BitcoinCore {
         pass: &str,
         stop: Arc<bool>,
         pool_time: Option<u8>,
-    ) -> Result<Self> {
+    ) -> bitcoincore_rpc::Result<Self> {
         // FIXME: the bitcoincore_rpc do not support the https protocol.
         use bitcoincore_rpc::Auth;
         Ok(Self {
@@ -74,6 +84,16 @@ impl BitcoinCore {
 
     pub fn watch_tx(&self, txid: &Txid, script: &Script) -> error::Result<()> {
         log::debug!(target: "bitcoind", "Looking an external transaction `{}`", txid);
+        if self
+            .ours_txs
+            .lock()
+            .unwrap()
+            .borrow()
+            .iter()
+            .any(|&i| i.to_string() == txid.to_string())
+        {
+            return Ok(());
+        }
         self.others_txs
             .lock()
             .unwrap()
@@ -93,7 +113,7 @@ impl BitcoinCore {
         let mut utxos = utxos.borrow_mut();
         let mut still_unconfirmed: Vec<(Txid, Script)> = vec![];
         for (utxo, script) in utxos.iter() {
-            log::debug!(target: "bitcoind", "looking for UTXO {} inside the block: {}", utxo, block.header.block_hash());
+            log::debug!(target: "bitcoind", "looking for UTXO {} inside the block at height: {}", utxo, self.best_height.borrow());
             if let Some((idx, tx)) = block
                 .txdata
                 .iter()
@@ -110,7 +130,7 @@ impl BitcoinCore {
                     idx as u32,
                     block.header,
                     Height::from_consensus(self.best_height.borrow().clone() as u32)?,
-                ))))
+                ))));
             } else {
                 still_unconfirmed.push((utxo.clone(), script.clone()));
             }
@@ -124,7 +144,7 @@ impl BitcoinCore {
 impl Backend for BitcoinCore {
     fn brodcast_tx(&self, tx: &lampo_common::backend::Transaction) {
         // FIXME: check the result.
-        let result: Result<json::Value> = self.inner.call(
+        let result: bitcoincore_rpc::Result<json::Value> = self.inner.call(
             "sendrawtransaction",
             &[lampo_common::bitcoin::consensus::serialize(&tx)
                 .to_hex()
@@ -133,6 +153,11 @@ impl Backend for BitcoinCore {
         log::info!(target: "bitcoind", "broadcast transaction return {:?}", result);
         if result.is_ok() {
             self.ours_txs.lock().unwrap().borrow_mut().push(tx.txid());
+            self.others_txs
+                .lock()
+                .unwrap()
+                .borrow_mut()
+                .retain(|(txid, _)| txid.to_string() == tx.txid().to_string());
             let handler = self.handler.borrow();
             let Some(handler) = handler.as_ref() else {
                 return;
@@ -328,7 +353,10 @@ impl Backend for BitcoinCore {
             }
         }
         txs.clear();
-        txs.append(&mut confirmed_txs);
+        // FIXME: if we want remember this we should put in a separate vector maybe?
+        // or make it persistan.
+        //
+        // txs.append(&mut confirmed_txs);
         txs.append(&mut unconfirmed_txs);
         Ok(())
     }
@@ -350,16 +378,25 @@ impl Backend for BitcoinCore {
         log::info!(target: "bitcoin", "Starting bitcoind polling ...");
         Ok(std::thread::spawn(move || {
             while !self.stop.as_ref() {
+                log::trace!(target: "bitcoind", "Current Status during another iteration {:#?}", self);
                 let best_block = self.get_best_block();
                 let Ok((block_hash, height)) = best_block else {
                     // SAFETY: if we are in this block the error will be always not null
                     log::error!(target: "bitcoind", "Impossible get the inforamtion of the last besh block: {}", best_block.err().unwrap());
                     break;
                 };
+                if height.is_none() {
+                    log::warn!(target: "bitcoind", "height is none for the best block found `{block_hash}`");
+                    continue;
+                }
+                let height = height.unwrap();
+
                 if !self.others_txs.lock().unwrap().borrow().is_empty() {
                     let start: u64 = self.best_height.borrow().clone().into();
-                    let end: u64 = height.unwrap_or_default().into();
+                    let end: u64 = height.into();
+                    log::trace!(target: "bitcoind", "Scan blocks in range [{start}..{end}]");
                     for height in start..end + 1 {
+                        log::trace!(target: "bitcoind", "Looking at block with height {height}");
                         let block_hash = self.get_block_hash(height).unwrap();
                         let Ok(lampo_common::backend::BlockData::FullBlock(block)) =
                         self.get_block(&block_hash)
@@ -367,30 +404,36 @@ impl Backend for BitcoinCore {
                             log::warn!(target: "bitcoind", "Impossible retrieval the block information with hash `{block_hash}`");
                             continue;
                         };
-                        if height as u64 > *self.best_height.borrow() {
+                        if self.best_height.borrow().lt(&height.into()) {
                             *self.best_height.borrow_mut() = height.into();
                             *self.last_bloch_hash.borrow_mut() = Some(block_hash);
+                            log::trace!(target: "bitcoind", "new best block with hash `{block_hash}` at height `{height}`");
                             handler.emit(Event::OnChain(OnChainEvent::NewBestBlock((
                                 block.header,
                                 // SAFETY: the height should be always a valid u32
                                 Height::from_consensus(height as u32).unwrap(),
                             ))));
 
-                            let _ = self.handler.borrow().clone().map(|handler| {
+                            self.handler.borrow().clone().map(|handler| {
                                 handler.emit(Event::OnChain(OnChainEvent::NewBlock(block.clone())));
-                                handler
                             });
                             let _ = self.find_tx_in_block(&block);
                         }
-                        let _ = self.process_transactions();
                     }
-                } else if self
-                    .best_height
-                    .borrow()
-                    .lt(&height.unwrap_or_default().into())
-                {
+                    // ok when the wallet is full in sync with the blockchain, we can query the
+                    // bitcoind wallet for ours transaction.
+                    //
+                    // This is the only place where we can query because otherwise the we can
+                    // confuse ldk when we send a new best block with height X and a Confirmed transaction
+                    // event at height Y, where Y > X. In this way ldk think that a reorgs happens.
+                    //
+                    // The reorgs do not happens, it is only that the bitcoind wallet is able to answer quickly
+                    // while the lampo wallet is still looking for external transaction inside the blocks.
                     let _ = self.process_transactions();
-                    *self.best_height.borrow_mut() = height.unwrap_or_default().into();
+                } else if self.best_height.borrow().lt(&height.into()) {
+                    log::trace!(target: "bitcoind", "New best block at height {height}, out current best block is {}", self.best_height.borrow());
+                    *self.best_height.borrow_mut() = height.into();
+                    *self.last_bloch_hash.borrow_mut() = Some(block_hash);
                     let Ok(lampo_common::backend::BlockData::FullBlock(block)) =
                         self.get_block(&block_hash)
                         else {
@@ -400,10 +443,11 @@ impl Backend for BitcoinCore {
                     handler.emit(Event::OnChain(OnChainEvent::NewBestBlock((
                         block.header,
                         // SAFETY: the height should be always a valid u32
-                        Height::from_consensus(height.unwrap_or_default()).unwrap(),
+                        Height::from_consensus(height).unwrap(),
                     ))));
+                    let _ = self.find_tx_in_block(&block);
+                    log::trace!(target: "bitcoind", "new best block with hash `{block_hash}` at height `{}`", height);
                 }
-                *self.last_bloch_hash.borrow_mut() = Some(block_hash);
 
                 // Emit new Best block!
                 std::thread::sleep(self.pool_time);
