@@ -30,6 +30,7 @@ pub mod response {
 
     use serde::{Deserialize, Serialize};
 
+    use crate::bitcoin::OutPoint;
     use crate::error;
     use crate::types::NodeId;
 
@@ -45,6 +46,7 @@ pub mod response {
         pub public: bool,
         pub push_mst: u64,
         pub to_self_delay: u64,
+        pub tx: Option<OutPoint>,
     }
 
     impl OpenChannel {

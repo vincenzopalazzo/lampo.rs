@@ -134,7 +134,7 @@ impl Handler for LampoHandler {
                 push_msat,
                 channel_type,
             } => {
-                unimplemented!()
+                Err(error::anyhow!("Request for open a channel received, unfortunatly we do not support this feature yet."))
             }
             ldk::Event::ChannelReady {
                 channel_id,
@@ -211,6 +211,7 @@ impl Handler for LampoHandler {
                     "channel pending with node `{}` with funding `{funding_txo}`",
                     counterparty_node_id.to_hex()
                 );
+                self.emit(Event::Lightning(LightningEvent::ChannelPending { counterparty_node_id, funding_transaction: funding_txo }));
                 Ok(())
             }
             ldk::Event::PendingHTLCsForwardable { time_forwardable } => {
@@ -260,7 +261,11 @@ impl Handler for LampoHandler {
                 // FIXME: make peristant these information
                 Ok(())
             }
-            _ => unreachable!("{:?}", event),
+            ldk::Event::PaymentSent { .. } => {
+                log::info!(target: "lampo_handler", "payment sent");
+                Ok(())
+            }
+            _ => Err(error::anyhow!("unexpected ldk event: {:?}", event)),
         }
     }
 }

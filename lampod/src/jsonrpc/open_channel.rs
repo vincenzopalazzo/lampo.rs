@@ -1,9 +1,13 @@
 //! Open Channel RPC Method implementation
-use lampo_common::json;
+
+use lampo_common::event::ln::LightningEvent;
+use lampo_common::handler::Handler;
 use lampo_common::model::request;
+use lampo_common::{event::Event, json};
 use lampo_jsonrpc::errors::{Error, RpcError};
 
-use crate::{ln::events::ChannelEvents, LampoDeamon};
+use crate::ln::events::ChannelEvents;
+use crate::LampoDeamon;
 
 pub fn json_open_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `openchannel` with request {:?}", request);
@@ -31,13 +35,19 @@ pub fn json_open_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<jso
             })
         })?;
     }
+
+    // FIXME: there are use case there need to be covered, like
+    // - When there is an error how we return back to the user?
+    // - In this case there is some feedback that ldk need to give us
+    // before return the message, so we should design a solution for this.
     let resp = ctx.channel_manager().open_channel(request);
-    match resp {
-        Ok(resp) => Ok(json::to_value(resp)?),
+    let resp = match resp {
+        Ok(resp) => Ok(resp),
         Err(err) => Err(Error::Rpc(RpcError {
             code: -1,
             message: format!("{err}"),
             data: None,
         })),
-    }
+    };
+    Ok(json::to_value(resp?)?)
 }

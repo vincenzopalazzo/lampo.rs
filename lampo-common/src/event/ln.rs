@@ -1,4 +1,4 @@
-use crate::bitcoin::Transaction;
+use crate::bitcoin::{OutPoint, Transaction};
 use crate::ldk::ln::features::ChannelTypeFeatures;
 use crate::types::NodeId;
 
@@ -7,6 +7,10 @@ pub enum LightningEvent {
     // FIXME: add new peer model
     PeerConnect {
         counterparty_node_id: NodeId,
+    },
+    ChannelPending {
+        counterparty_node_id: NodeId,
+        funding_transaction: OutPoint,
     },
     ChannelReady {
         counterparty_node_id: NodeId,
