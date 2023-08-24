@@ -437,6 +437,7 @@ impl ChannelEvents for LampoChannelManager {
             public: open_channel.public,
             push_mst: 0,
             to_self_delay: 2016,
+            tx: None,
         })
     }
 
