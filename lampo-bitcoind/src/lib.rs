@@ -399,7 +399,7 @@ impl Backend for BitcoinCore {
                         log::trace!(target: "bitcoind", "Looking at block with height {height}");
                         let block_hash = self.get_block_hash(height).unwrap();
                         let Ok(lampo_common::backend::BlockData::FullBlock(block)) =
-                        self.get_block(&block_hash)
+                            self.get_block(&block_hash)
                         else {
                             log::warn!(target: "bitcoind", "Impossible retrieval the block information with hash `{block_hash}`");
                             continue;
@@ -436,10 +436,10 @@ impl Backend for BitcoinCore {
                     *self.last_bloch_hash.borrow_mut() = Some(block_hash);
                     let Ok(lampo_common::backend::BlockData::FullBlock(block)) =
                         self.get_block(&block_hash)
-                        else {
-                            log::warn!(target: "bitcoind", "Impossible retrieval the block information with hash `{block_hash}`");
-                            continue;
-                        };
+                    else {
+                        log::warn!(target: "bitcoind", "Impossible retrieval the block information with hash `{block_hash}`");
+                        continue;
+                    };
                     handler.emit(Event::OnChain(OnChainEvent::NewBestBlock((
                         block.header,
                         // SAFETY: the height should be always a valid u32
