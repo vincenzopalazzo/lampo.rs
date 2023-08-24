@@ -25,6 +25,7 @@ use lampod::chain::WalletManager;
 use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::offchain::json_decode_invoice;
 use lampod::jsonrpc::offchain::json_invoice;
+use lampod::jsonrpc::offchain::json_keysend;
 use lampod::jsonrpc::offchain::json_pay;
 use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
@@ -152,6 +153,7 @@ fn run_jsonrpc(
         .add_rpc("decode_invoice", json_decode_invoice)
         .unwrap();
     server.add_rpc("pay", json_pay).unwrap();
+    server.add_rpc("keysend", json_keysend).unwrap();
     let handler = server.handler();
     Ok((server.spawn(), handler))
 }
