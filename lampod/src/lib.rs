@@ -67,7 +67,6 @@ pub struct LampoDeamon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
-
     // FIXME: remove this
     rt: Runtime,
 }
@@ -151,11 +150,13 @@ impl LampoDeamon {
     }
 
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
+        //! This needs to be fixed
         let manager = OffchainManager::new(
             self.wallet_manager().ldk_keys().keys_manager.clone(),
             self.channel_manager(),
             self.logger.clone(),
             Arc::new(self.conf.clone()),
+            self.onchain_manager(),
         )?;
         self.offchain_manager = Some(Arc::new(manager));
         Ok(())
