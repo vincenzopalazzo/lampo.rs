@@ -66,7 +66,9 @@ pub fn fund_a_simple_channel_from_lampo() {
     let events = lampo.events();
     let address = lampo_manager.fund_wallet(101).unwrap();
     wait!(|| {
-        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) = events.recv_timeout(Duration::from_millis(100)) else {
+        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
+            events.recv_timeout(Duration::from_millis(100))
+        else {
             return Err(());
         };
         if height.to_consensus_u32() == 101 {
@@ -410,7 +412,9 @@ pub fn pay_invoice_to_cln() {
     let events = lampo.events();
     let address = lampo_manager.fund_wallet(101).unwrap();
     wait!(|| {
-        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) = events.recv_timeout(Duration::from_millis(100)) else {
+        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
+            events.recv_timeout(Duration::from_millis(100))
+        else {
             return Err(());
         };
         if height.to_consensus_u32() == 101 {
