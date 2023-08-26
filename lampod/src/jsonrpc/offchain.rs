@@ -1,6 +1,5 @@
 //! Offchain RPC methods
 
-use bitcoin::PublicKey;
 use lampo_common::ldk;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::KeySend;
@@ -79,7 +78,7 @@ pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value,
 }
 
 pub fn json_keysend(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
-    log::info!("call for `pay` with request `{:?}`", request);
+    log::debug!("call for `keysend` with request `{:?}`", request);
     let request: KeySend = json::from_value(request.clone())?;
     ctx.offchain_manager()
         .keysend(request.destination, request.amount_msat)

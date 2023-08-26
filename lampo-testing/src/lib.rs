@@ -15,6 +15,7 @@ use cln4rust_testing::prelude::*;
 use lampo_common::json;
 use lampo_common::model::response;
 use lampo_common::model::response::NewAddress;
+use lampod::jsonrpc::offchain::json_keysend;
 use tempfile::TempDir;
 
 use lampo_bitcoind::BitcoinCore;
@@ -115,6 +116,7 @@ impl LampoTesting {
             .unwrap();
 
         server.add_rpc("pay", json_pay).unwrap();
+        server.add_rpc("keysend", json_keysend).unwrap();
         let handler = server.handler();
         let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
         rpc_handler.set_handler(handler);
