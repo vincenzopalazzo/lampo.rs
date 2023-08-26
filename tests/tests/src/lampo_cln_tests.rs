@@ -12,6 +12,7 @@ use lampo_common::model::response;
 use lampo_common::model::response::InvoiceInfo;
 use lampo_common::model::response::NewAddress;
 use lampo_common::model::Connect;
+use lampo_common::secp256k1::PublicKey;
 use lampo_testing::prelude::bitcoincore_rpc::RpcApi;
 use lampo_testing::prelude::*;
 use lampo_testing::wait;
@@ -489,6 +490,92 @@ pub fn pay_invoice_to_cln() {
         }),
     );
     // there is no channel so we must fails
+    assert!(result.is_ok(), "{:?}", result);
+    async_run!(cln.stop()).unwrap();
+}
+
+#[test]
+fn be_able_to_kesend_payments() {
+    init();
+    let mut cln = async_run!(cln::Node::with_params(
+        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "regtest"
+    ))
+    .unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    let btc = cln.btc();
+    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo = lampo_manager.lampod();
+    let _info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
+    let info_cln = cln.rpc().getinfo().unwrap();
+    let events = lampo.events();
+    let address = lampo_manager.fund_wallet(101).unwrap();
+    wait!(|| {
+        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
+            events.recv_timeout(Duration::from_millis(100))
+        else {
+            return Err(());
+        };
+        if height.to_consensus_u32() == 101 {
+            return Ok(());
+        }
+        Err(())
+    });
+    let _: json::Value = lampo
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: cln.rpc().getinfo().unwrap().id,
+                port: Some(cln.port.into()),
+                amount: 500000,
+                public: true,
+                addr: Some("127.0.0.1".to_owned()),
+            },
+        )
+        .unwrap();
+
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Get the transaction confirmed
+    let _ = btc.rpc().generate_to_address(6, &address).unwrap();
+    wait!(|| {
+        let Ok(event) = events.recv_timeout(Duration::from_millis(100)) else {
+            return Err(());
+        };
+        log::trace!("{:?}", event);
+        let Event::Lightning(LightningEvent::ChannelReady { .. }) = event else {
+            log::debug!(target: "test", "event received {:?}", event);
+            return Err(());
+        };
+        Ok(())
+    });
+
+    wait!(|| {
+        let channels = cln.rpc().listfunds().unwrap().channels;
+        if channels.is_empty() {
+            return Err(());
+        }
+
+        if channels.first().unwrap().state != "CHANNELD_NORMAL".to_string() {
+            return Err(());
+        }
+
+        let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+
+        if !channels.channels.first().unwrap().ready {
+            return Err(());
+        }
+
+        Ok(())
+    });
+
+    let result: error::Result<json::Value> = lampo.call(
+        "keysend",
+        request::KeySend {
+            destination: PublicKey::from_str(info_cln.id.as_str()).unwrap(),
+            amount_msat: 100000,
+        },
+    );
     assert!(result.is_ok(), "{:?}", result);
     async_run!(cln.stop()).unwrap();
 }
