@@ -67,7 +67,9 @@ pub struct LampoDeamon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
-
+    /// Mark the node that it is running. Used
+    /// to graceful shutdown all the lampo thread
+    running: Arc<bool>,
     // FIXME: remove this
     rt: Runtime,
 }
@@ -93,6 +95,7 @@ impl LampoDeamon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
+            running: Arc::new(false),
             rt: Runtime::new().unwrap(),
         }
     }
@@ -209,6 +212,7 @@ impl LampoDeamon {
     }
 
     pub fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
+        self.running = true.into();
         self.init_onchaind(client.clone())?;
         self.init_channeld()?;
         self.init_offchain_manager()?;
@@ -231,6 +235,11 @@ impl LampoDeamon {
             error::bail!("Initial handler is None");
         };
         handler.add_external_handler(ext_handler)?;
+        Ok(())
+    }
+
+    pub fn stop(&mut self) -> error::Result<()> {
+        self.running = false.into();
         Ok(())
     }
 
@@ -265,7 +274,8 @@ impl LampoDeamon {
         let _ = self.channel_manager().listen();
         let _ = self.peer_manager().run();
         Ok(std::thread::spawn(move || {
-            let _ = background_processor.join();
+            while *self.running {}
+            let _ = background_processor.stop();
             Ok(())
         }))
     }

@@ -113,7 +113,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     ctrlc::set_handler(move || {
         use std::time::Duration;
         log::info!("Shutdown...");
-        handler.stop();
+        let _ = handler.stop();
         std::thread::sleep(Duration::from_secs(5));
         std::process::exit(0);
     })?;
