@@ -1,8 +1,9 @@
-//! Lampo Common T
-use bitcoin::secp256k1::PublicKey;
+//! Lampo Common Types
+use crate::bitcoin::secp256k1::PublicKey;
+use crate::ldk;
 
 pub type NodeId = PublicKey;
-pub type ChannelId = [u8; 32];
+pub type ChannelId = ldk::ln::ChannelId;
 
 pub enum ChannelState {
     Opening,
