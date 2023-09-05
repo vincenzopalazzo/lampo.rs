@@ -171,7 +171,7 @@ impl WalletManager for BDKWalletManager {
         tx.add_recipient(ScriptBuf::from_bytes(script.into_bytes()), amount)
             .fee_rate(FeeRate::from_sat_per_kvb(fee_rate as f32))
             .enable_rbf();
-        let (mut psbt, _) = tx.finish()?;
+        let mut psbt = tx.finish()?;
         if !wallet.sign(&mut psbt, SignOptions::default())? {
             error::bail!("wallet not able to sing the psbt {psbt}");
         }
