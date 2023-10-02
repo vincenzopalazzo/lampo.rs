@@ -9,9 +9,8 @@ use bdk::keys::bip39::{Language, Mnemonic, WordCount};
 use bdk::keys::GeneratableKey;
 use bdk::keys::{DerivableKey, ExtendedKey, GeneratedKey};
 use bdk::template::Bip84;
-use bdk::wallet::ChangeSet;
+use bdk::wallet::{ChangeSet, Update};
 use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
-use bdk_chain::keychain::WalletUpdate;
 use bdk_esplora::EsploraExt;
 use bdk_file_store::Store;
 
@@ -230,13 +229,13 @@ impl WalletManager for BDKWalletManager {
         log::info!("bdk stert to sync");
 
         let (update_graph, last_active_indices) =
-            client.update_tx_graph(spks, None, None, 50, 2)?;
+            client.scan_txs_with_keychains(spks, None, None, 50, 2)?;
         let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
         let chain_update = client.update_local_chain(checkpoints, missing_heights)?;
-        let update = WalletUpdate {
+        let update = Update {
             last_active_indices,
             graph: update_graph,
-            ..WalletUpdate::new(chain_update)
+            chain: Some(chain_update),
         };
 
         wallet.apply_update(update)?;

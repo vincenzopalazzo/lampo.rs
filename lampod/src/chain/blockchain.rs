@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::Transaction;
 use lampo_common::ldk::chain::chaininterface::{
     BroadcasterInterface, ConfirmationTarget, FeeEstimator,
@@ -36,10 +37,15 @@ impl LampoChainManager {
 impl FeeEstimator for LampoChainManager {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         match confirmation_target {
-            ConfirmationTarget::Background => self.backend.fee_rate_estimation(100),
-            ConfirmationTarget::Normal => self.backend.fee_rate_estimation(10),
-            ConfirmationTarget::HighPriority => self.backend.fee_rate_estimation(6),
-            ConfirmationTarget::MempoolMinimum => self.backend.minimum_mempool_fee().unwrap(),
+            ConfirmationTarget::OnChainSweep => self.backend.fee_rate_estimation(1),
+            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee
+            | ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee
+            | ConfirmationTarget::AnchorChannelFee
+            | ConfirmationTarget::NonAnchorChannelFee => self.backend.fee_rate_estimation(6),
+            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee => {
+                self.backend.minimum_mempool_fee().unwrap()
+            }
+            ConfirmationTarget::ChannelCloseMinimum => self.backend.fee_rate_estimation(100),
         }
     }
 }
@@ -63,8 +69,7 @@ impl Filter for LampoChainManager {
 }
 
 impl UtxoLookup for LampoChainManager {
-    fn get_utxo(&self, _: &bitcoin::BlockHash, _: u64) -> lightning::routing::utxo::UtxoResult {
-        //self.backend.get_utxo(hash, idx)
+    fn get_utxo(&self, _: &ChainHash, _: u64) -> lampo_common::backend::UtxoResult {
         todo!()
     }
 }

@@ -11,8 +11,7 @@ use bitcoin::locktime::Height;
 use bitcoin::BlockHash;
 use lightning::chain::chainmonitor::ChainMonitor;
 use lightning::chain::channelmonitor::ChannelMonitor;
-use lightning::chain::{BestBlock, Filter};
-use lightning::chain::{Confirm, Watch};
+use lightning::chain::{BestBlock, Confirm, Filter, Watch};
 use lightning::ln::channelmanager::{ChainParameters, ChannelManager, ChannelManagerReadArgs};
 use lightning::routing::gossip::NetworkGraph;
 use lightning::routing::router::DefaultRouter;
@@ -22,8 +21,9 @@ use lightning::routing::scoring::{
 use lightning::sign::EntropySource;
 use lightning::sign::InMemorySigner;
 use lightning::util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits};
+use lightning::util::persist::read_channel_monitors;
 use lightning::util::ser::ReadableArgs;
-use lightning_persister::FilesystemPersister;
+use lightning_persister::fs_store::FilesystemStore;
 
 use lampo_common::conf::{LampoConf, UserConfig};
 use lampo_common::error;
@@ -46,7 +46,7 @@ pub type LampoChainMonitor = ChainMonitor<
     Arc<LampoChainManager>,
     Arc<LampoChainManager>,
     Arc<LampoLogger>,
-    Arc<FilesystemPersister>,
+    Arc<FilesystemStore>,
 >;
 
 pub type LampoArcChannelManager<M, T, F, L> = ChannelManager<
@@ -215,7 +215,7 @@ impl LampoChannelManager {
 
     pub fn load_channel_monitors(&self, watch: bool) -> error::Result<()> {
         let keys = self.wallet_manager.ldk_keys().inner();
-        let mut monitors = self.persister.read_channelmonitors(keys.clone(), keys)?;
+        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
         for (_, chan_mon) in monitors.drain(..) {
             chan_mon.load_outputs_to_watch(&self.onchain);
             if watch {
@@ -224,7 +224,9 @@ impl LampoChannelManager {
                     .clone()
                     .ok_or(error::anyhow!("Channel Monitor not present"))?;
                 let outpoint = chan_mon.get_funding_txo().0;
-                monitor.watch_channel(outpoint, chan_mon);
+                monitor
+                    .watch_channel(outpoint, chan_mon)
+                    .map_err(|err| error::anyhow!("{:?}", err))?;
             }
         }
         Ok(())
@@ -232,7 +234,7 @@ impl LampoChannelManager {
 
     pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
         let keys = self.wallet_manager.ldk_keys().inner();
-        let mut monitors = self.persister.read_channelmonitors(keys.clone(), keys)?;
+        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
         let mut channel_monitors = Vec::new();
         for (_, monitor) in monitors.drain(..) {
             channel_monitors.push(monitor);

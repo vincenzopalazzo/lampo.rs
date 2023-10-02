@@ -378,7 +378,7 @@ pub fn no_able_to_pay_invoice_to_cln() {
     let invoce = cln
         .rpc()
         .invoice(
-            Some(1000),
+            Some(4000),
             "lampo",
             "need to be decoded by lampo",
             None,
