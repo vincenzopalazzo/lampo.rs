@@ -171,14 +171,14 @@ impl Backend for BitcoinCore {
         let Ok(result) = self.inner.estimate_smart_fee(blocks as u16, None) else {
             log::error!("failing to estimate fee");
             if self.inner.get_blockchain_info().unwrap().chain == "regtest" {
-                return 500;
+                return 253;
             }
             return 0;
         };
         // FIXME: check what is the value that ldk want
         let result = result.fee_rate.unwrap_or_default().to_sat() as u32;
         if result == 0 {
-            return 500;
+            return 253;
         }
         result
     }

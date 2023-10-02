@@ -52,6 +52,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         lampo_conf.set_network(&args.network.unwrap())?;
     }
 
+    log::debug!(target: "lampod-cli", "init wallet ..");
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {
         #[cfg(debug_assertions)]
         {
@@ -75,6 +76,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         // before.
         CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &args.mnemonic.unwrap())?
     };
+    log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
     let client = args.client.unwrap_or(lampo_conf.node.clone());
     let client: Arc<dyn Backend> = match client.as_str() {

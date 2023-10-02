@@ -1,7 +1,7 @@
 //! Lampo test framework.
 pub mod prelude {
-    pub use cln4rust_testing::prelude::*;
-    pub use cln4rust_testing::*;
+    pub use clightning_testing::prelude::*;
+    pub use clightning_testing::*;
     pub use lampod;
     pub use lampod::async_run;
 }
@@ -10,8 +10,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cln4rust_testing::btc::BtcNode;
-use cln4rust_testing::prelude::*;
+use clightning_testing::btc::BtcNode;
+use clightning_testing::prelude::*;
 use lampo_common::json;
 use lampo_common::model::response;
 use lampo_common::model::response::NewAddress;
@@ -139,7 +139,7 @@ impl LampoTesting {
     }
 
     pub fn fund_wallet(&self, blocks: u64) -> error::Result<bitcoincore_rpc::bitcoin::Address> {
-        use cln4rust_testing::prelude::bitcoincore_rpc::RpcApi;
+        use clightning_testing::prelude::bitcoincore_rpc::RpcApi;
 
         // mine some bitcoin inside the lampo address
         let address: NewAddress = self.lampod().call("newaddr", json::json!({})).unwrap();

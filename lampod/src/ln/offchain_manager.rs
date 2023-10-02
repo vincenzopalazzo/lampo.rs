@@ -13,9 +13,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::LampoChannelManager;
-use crate::chain::LampoChainManager;
-use crate::utils::logger::LampoLogger;
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::PublicKey as pubkey;
@@ -28,6 +25,10 @@ use lightning::ln::channelmanager::{PaymentId, RecipientOnionFields};
 use lightning::ln::{PaymentHash, PaymentPreimage};
 use lightning::routing::router::{PaymentParameters, RouteParameters};
 use lightning::sign::EntropySource;
+
+use super::LampoChannelManager;
+use crate::chain::LampoChainManager;
+use crate::utils::logger::LampoLogger;
 
 pub struct OffchainManager {
     channel_manager: Arc<LampoChannelManager>,
@@ -86,6 +87,8 @@ impl OffchainManager {
 
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         let invoice = self.decode_invoice(invoice_str)?;
+        let channel_manager = self.channel_manager.manager();
+        let channel_manager = channel_manager.as_ref();
         if invoice.amount_milli_satoshis().is_none() {
             ldk::invoice::payment::pay_zero_value_invoice(
                 &invoice,
@@ -93,14 +96,14 @@ impl OffchainManager {
                     "invoice with no amount, and amount must be specified"
                 ))?,
                 Retry::Timeout(Duration::from_secs(10)),
-                &self.channel_manager.manager(),
+                channel_manager,
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         } else {
             ldk::invoice::payment::pay_invoice(
                 &invoice,
                 Retry::Timeout(Duration::from_secs(10)),
-                &self.channel_manager.manager(),
+                channel_manager,
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         }
@@ -122,6 +125,7 @@ impl OffchainManager {
         let route_params = RouteParameters {
             payment_params: PaymentParameters::for_keysend(destination, 40, false),
             final_value_msat: amount_msat,
+            max_total_routing_fee_msat: None,
         };
         log::info!("Initialised Keysend");
         let payment_result = self

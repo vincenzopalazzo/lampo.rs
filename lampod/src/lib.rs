@@ -84,7 +84,7 @@ impl LampoDeamon {
         LampoDeamon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
-            persister: Arc::new(LampoPersistence::new(root_path)),
+            persister: Arc::new(LampoPersistence::new(root_path.into())),
             peer_manager: None,
             onchain_manager: None,
             channel_manager: None,
@@ -106,6 +106,7 @@ impl LampoDeamon {
     }
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
+        log::debug!(target: "lampod", "init onchaind ..");
         let onchain_manager = LampoChainManager::new(client, self.wallet_manager.clone());
         self.onchain_manager = Some(Arc::new(onchain_manager));
         Ok(())
@@ -116,6 +117,7 @@ impl LampoDeamon {
     }
 
     pub fn init_channeld(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init channeld ...");
         let mut manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
@@ -151,6 +153,7 @@ impl LampoDeamon {
     }
 
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init offchain manager ...");
         let manager = OffchainManager::new(
             self.wallet_manager().ldk_keys().keys_manager.clone(),
             self.channel_manager(),
@@ -163,6 +166,7 @@ impl LampoDeamon {
     }
 
     pub fn init_peer_manager(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init peer manager ...");
         let mut peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone());
         peer_manager.init(
             self.onchain_manager(),
@@ -178,6 +182,7 @@ impl LampoDeamon {
     }
 
     fn init_inventory_manager(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init inventory manager ...");
         let manager = LampoInventoryManager::new(self.peer_manager(), self.channel_manager());
         self.inventory_manager = Some(Arc::new(manager));
         Ok(())
@@ -195,6 +200,7 @@ impl LampoDeamon {
     }
 
     pub fn init_event_handler(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init inventory manager ...");
         let handler = LampoHandler::new(self);
         self.handler = Some(Arc::new(handler));
         Ok(())
@@ -209,6 +215,7 @@ impl LampoDeamon {
     }
 
     pub fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
+        log::debug!(target: "lampod", "init lampod ...");
         self.init_onchaind(client.clone())?;
         self.init_channeld()?;
         self.init_offchain_manager()?;
