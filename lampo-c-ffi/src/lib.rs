@@ -100,6 +100,7 @@ fn init_logger() {
 #[no_mangle]
 #[allow(unused_variables)]
 #[allow(unused_assignments)]
+#[cfg(debug_assertions)]
 pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon {
     use lampo_common::bitcoin;
     use lampo_common::conf::LampoConf;
