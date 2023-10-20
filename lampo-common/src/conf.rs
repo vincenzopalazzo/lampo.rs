@@ -65,15 +65,24 @@ impl TryFrom<String> for LampoConf {
             .get_conf("backend")
             .map_err(|err| anyhow::anyhow!("{err}"))?
             .unwrap_or("nakamoto".to_owned());
+        // Strip the value of whitespace
+        let node = node.to_trimmed();
+
         let core_url = conf
             .get_conf("core-url")
             .map_err(|err| anyhow::anyhow!("{err}"))?;
+        // If the value isn't none, strip the value of whitespace
+        let core_url = core_url.map(|url| url.to_trimmed());
+
         let core_user = conf
             .get_conf("core-user")
             .map_err(|err| anyhow::anyhow!("{err}"))?;
+        let core_user = core_user.map(|user| user.to_trimmed());
+
         let core_pass = conf
             .get_conf("core-pass")
             .map_err(|err| anyhow::anyhow!("{err}"))?;
+        let core_pass = core_pass.map(|pass| pass.to_trimmed());
 
         // Dev options
         #[allow(unused_mut, unused_assignments)]
@@ -131,5 +140,16 @@ impl LampoConf {
     pub fn set_network(&mut self, network: &str) -> anyhow::Result<()> {
         self.network = Network::from_str(network)?;
         Ok(())
+    }
+}
+
+// A trait to trim a String
+trait TrimmedString {
+    fn to_trimmed(self) -> String;
+}
+
+impl TrimmedString for String {
+    fn to_trimmed(self) -> String {
+        self.trim().to_owned()
     }
 }
