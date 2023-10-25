@@ -89,7 +89,9 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     }
 
     Ok(LampoCliArgs {
-        conf: config.expect("Configuration option need to be specified"),
+        conf: config.ok_or_else(|| lexopt::Error::MissingValue {
+            option: Some("config is not specified".to_owned()),
+        })?,
         network,
         client,
         mnemonic,
