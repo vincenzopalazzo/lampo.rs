@@ -30,7 +30,7 @@ ENV CLIGHTNING_VERSION=master
 RUN git clone https://github.com/ElementsProject/lightning.git --branch=$CLIGHTNING_VERSION && \
     cd lightning && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    ./configure --enable-developer --disable-rust && git submodule update --init --recursive && \
+    ./configure --disable-rust && git submodule update --init --recursive && \
     pip3 install --upgrade pip && \
     pip3 install mako mistune==0.8.4 mrkd && \
     make -j$(nproc) && make install

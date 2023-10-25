@@ -23,7 +23,7 @@ use crate::init;
 #[test]
 pub fn init_connection_test() -> error::Result<()> {
     init();
-    let cln = async_run!(cln::Node::tmp("regtest"))?;
+    let cln = async_run!(cln::Node::with_params("--developer", "regtest"))?;
     let lampo = LampoTesting::new(cln.btc())?;
     let info = cln.rpc().getinfo()?;
     log::debug!("core lightning info {:?}", info);
@@ -44,7 +44,7 @@ pub fn fund_a_simple_channel_from_lampo() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -123,7 +123,7 @@ pub fn fund_a_simple_channel_to_lampo() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -216,7 +216,7 @@ pub fn payinvoice_to_lampo() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -321,7 +321,7 @@ pub fn decode_invoice_from_cln() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -366,7 +366,7 @@ pub fn no_able_to_pay_invoice_to_cln() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -402,7 +402,7 @@ pub fn pay_invoice_to_cln() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -435,9 +435,8 @@ pub fn pay_invoice_to_cln() {
                 addr: Some("127.0.0.1".to_owned()),
             },
         )
+        // Wait a little bit that the open channel will finish!
         .unwrap();
-
-    // Wait a little bit that the open channel will finish!
     std::thread::sleep(Duration::from_secs(2));
     // Get the transaction confirmed
     let _ = btc.rpc().generate_to_address(6, &address).unwrap();
@@ -498,7 +497,7 @@ pub fn pay_invoice_to_cln() {
 fn be_able_to_kesend_payments() {
     init();
     let mut cln = async_run!(cln::Node::with_params(
-        "--dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
