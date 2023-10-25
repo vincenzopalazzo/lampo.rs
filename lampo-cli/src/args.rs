@@ -92,9 +92,15 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
 
     log::debug!("args parser are {:?} {:?}", method, args);
     Ok(LampoCliArgs {
-        socket: socket.expect("Socket path need to be specified"),
-        method: method
-            .expect("Too few params, a method need to be specified. Try run `lampo-cli --help`"),
+        socket: socket.ok_or_else(|| lexopt::Error::MissingValue {
+            option: Some("Socket path need to be specified".to_owned()),
+        })?,
+        method: method.ok_or_else(|| lexopt::Error::MissingValue {
+            option: Some(
+                "Too few params, a method need to be specified. Try run `lampo-cli --hel"
+                    .to_owned(),
+            ),
+        })?,
         args,
     })
 }
