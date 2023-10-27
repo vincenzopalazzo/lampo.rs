@@ -34,7 +34,7 @@ pub mod response {
     use crate::error;
     use crate::types::NodeId;
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Debug)]
     pub struct Channels {
         pub channels: Vec<Channel>,
     }
@@ -67,5 +67,6 @@ pub mod response {
         pub public: bool,
         pub available_balance_for_send_msat: u64,
         pub available_balance_for_recv_msat: u64,
+        pub outbound_htlc_minimum_msat: Option<u64>,
     }
 }

@@ -208,6 +208,7 @@ impl LampoChannelManager {
                 public: channel.is_public,
                 available_balance_for_send_msat: channel.outbound_capacity_msat,
                 available_balance_for_recv_msat: channel.inbound_capacity_msat,
+                outbound_htlc_minimum_msat: channel.counterparty.outbound_htlc_minimum_msat,
             })
             .collect();
         Channels { channels }

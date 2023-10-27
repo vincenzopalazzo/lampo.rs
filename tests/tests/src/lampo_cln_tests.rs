@@ -497,7 +497,7 @@ pub fn pay_invoice_to_cln() {
 fn be_able_to_kesend_payments() {
     init();
     let mut cln = async_run!(cln::Node::with_params(
-        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost --log-file=/tmp/cln-log-be_able_to_kesend_payments.log --log-level=debug",
         "regtest"
     ))
     .unwrap();
@@ -560,7 +560,7 @@ fn be_able_to_kesend_payments() {
         }
 
         let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
-
+        log::trace!(target: "test", "lampo channels: {:#?}", channels);
         if !channels.channels.first().unwrap().ready {
             return Err(());
         }
