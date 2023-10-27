@@ -76,7 +76,7 @@ class LampoRunner(Runner):
         )
         # configure bitcoin core
         f.write(
-            f"backend=core\ncore-url=127.0.0.1:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest\n"
+            f"backend=core\ncore-url=localhost:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest\n"
         )
         f.flush()
         f.close()
@@ -133,7 +133,6 @@ class LampoRunner(Runner):
         except Exception as ex:
             logging.debug(f"Exception with message {ex}")
         logging.debug(f"running bitcoin core on port {self.bitcoind.port}")
-
         self.__lampod_config_file()
         self.node = LampoDeamon(self.lightning_dir)
         self.node.register_unix_rpc()
