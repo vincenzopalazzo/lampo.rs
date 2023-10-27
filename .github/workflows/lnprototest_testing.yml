@@ -1,0 +1,21 @@
+name: lnprototest testing
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '30 1 1,15 * *'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: lnprototest testing
+        env:
+          PROTO_TEST=1
+        run: |
+          cd docker
+          docker-compose up --exit-code-from lampo

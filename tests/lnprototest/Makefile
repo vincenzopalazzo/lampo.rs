@@ -1,6 +1,6 @@
 CC=python3
 FMT=black
-PYARGS=
+PYARGS="--log-cli-level=DEBUG"
 
 default: fmt
 
@@ -8,4 +8,4 @@ fmt:
 	$(FMT) .
 
 check:
-	pytest . --log-cli-level=DEBUG $(PYARGS)
+	pytest . $(PYARGS)
