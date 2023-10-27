@@ -16,4 +16,4 @@ jobs:
       - name: Integration testing
         run: |
           cd docker
-          docker-compose up --exit-code-from lampo
+          docker compose up --exit-code-from lampo

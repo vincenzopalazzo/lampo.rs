@@ -14,6 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: lnprototest testing
+        env:
+          PROTO_TEST: 1
         run: |
-          cd docker
-          PROTO_TEST=1 docker compose up --exit-code-from lampo
+          docker build -f docker/Dockerfile -t lampo-ci-ubuntu .
+          docker run -e PROTO_TEST=1 lampo-ci-ubuntu
