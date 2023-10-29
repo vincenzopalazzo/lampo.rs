@@ -27,6 +27,7 @@ use lampod::jsonrpc::offchain::json_decode_invoice;
 use lampod::jsonrpc::offchain::json_invoice;
 use lampod::jsonrpc::offchain::json_keysend;
 use lampod::jsonrpc::offchain::json_pay;
+use lampod::jsonrpc::onchain::json_estimate_fees;
 use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
@@ -96,7 +97,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
                 .bitcoind_pass
                 .unwrap_or(lampo_conf.core_pass.clone().unwrap()),
             Arc::new(false),
-            Some(120),
+            Some(60),
         )?),
         _ => error::bail!("client {:?} not supported", client),
     };
@@ -156,6 +157,7 @@ fn run_jsonrpc(
         .unwrap();
     server.add_rpc("pay", json_pay).unwrap();
     server.add_rpc("keysend", json_keysend).unwrap();
+    server.add_rpc("fees", json_estimate_fees).unwrap();
     let handler = server.handler();
     Ok((server.spawn(), handler))
 }

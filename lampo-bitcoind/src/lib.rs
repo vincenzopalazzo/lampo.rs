@@ -7,10 +7,10 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use bitcoincore_rpc::bitcoin::hashes::Hash;
+use bitcoincore_rpc::bitcoincore_rpc_json::GetTxOutResult;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi;
 
-use bitcoincore_rpc::bitcoincore_rpc_json::GetTxOutResult;
 use lampo_common::backend::BlockHash;
 use lampo_common::backend::{deserialize, serialize};
 use lampo_common::backend::{Backend, TxResult};
@@ -184,8 +184,12 @@ impl Backend for BitcoinCore {
     }
 
     fn minimum_mempool_fee(&self) -> error::Result<u32> {
-        let fee = self.inner.get_mempool_info()?.mempool_min_fee.to_sat() as u32;
-        Ok(fee)
+        use lampo_common::btc_rpc::MinimumMempoolFee;
+
+        let fee: MinimumMempoolFee = self.inner.call("getmempoolinfo", &[])?;
+        // FIXME: adds the trait for conversion from and to BTC
+        let fee = fee.mempoolminfee;
+        Ok((fee * 10000 as f32) as u32)
     }
 
     fn get_best_block(&self) -> error::Result<(lampo_common::backend::BlockHash, Option<u32>)> {
