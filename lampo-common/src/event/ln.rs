@@ -1,10 +1,11 @@
 use crate::bitcoin::{OutPoint, Transaction};
 use crate::ldk::ln::features::ChannelTypeFeatures;
+use crate::model::response::{PaymentHop, PaymentState};
 use crate::types::{ChannelId, NodeId};
 
 #[derive(Clone, Debug)]
 pub enum LightningEvent {
-    // FIXME: add new peer model
+    // FIXME: add new peer event
     PeerConnect {
         counterparty_node_id: NodeId,
     },
@@ -27,5 +28,10 @@ pub enum LightningEvent {
         temporary_channel_id: ChannelId,
         channel_value_satoshis: u64,
         funding_transaction: Transaction,
+    },
+    PaymentEvent {
+        state: PaymentState,
+        payment_hash: Option<String>,
+        path: Vec<PaymentHop>,
     },
 }

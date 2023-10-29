@@ -5,6 +5,8 @@ use std::sync::Arc;
 use bitcoin::hashes::hex::ToHex;
 use lampo_common::error::Ok;
 use lampo_common::event::ln::LightningEvent;
+use lampo_common::model::response::PaymentHop;
+use lampo_common::model::response::PaymentState;
 use lampo_jsonrpc::json_rpc2::Request;
 use lightning::events as ldk;
 
@@ -264,7 +266,13 @@ impl Handler for LampoHandler {
             ldk::Event::PaymentSent { .. } => {
                 log::info!(target: "lampo_handler", "payment sent");
                 Ok(())
-            }
+            },
+            ldk::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
+                let path = path.hops.iter().map(|hop| PaymentHop::from(hop.clone())).collect::<Vec<PaymentHop>>();
+                let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path };
+                self.emit(Event::Lightning(hop));
+                Ok(())
+            },
             _ => Err(error::anyhow!("unexpected ldk event: {:?}", event)),
         }
     }
