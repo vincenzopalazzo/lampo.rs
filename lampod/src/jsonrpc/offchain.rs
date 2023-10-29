@@ -1,5 +1,9 @@
 //! Offchain RPC methods
+use std::time::Duration;
 
+use lampo_common::event::ln::LightningEvent;
+use lampo_common::event::Event;
+use lampo_common::handler::Handler;
 use lampo_common::ldk;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::KeySend;
@@ -73,8 +77,35 @@ pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value,
                 data: None,
             })
         })?;
+    let events = ctx.handler().events();
 
-    Ok(json::json!({}))
+    // FIXME: this will loop when the Payment event is not generated
+    while let Event::Lightning(event) = events
+        .recv_timeout(Duration::from_secs(30))
+        // FIXME: this should be avoided, the `?` should be used here
+        .map_err(|err| {
+            Error::Rpc(RpcError {
+                code: -1,
+                message: format!("{err}"),
+                data: None,
+            })
+        })?
+    {
+        if let LightningEvent::PaymentEvent {
+            payment_hash,
+            path,
+            state,
+        } = event
+        {
+            return Ok(json::json!({
+                "state": state,
+                "path": path,
+                "payment_hash": payment_hash,
+            }));
+        }
+    }
+    // FIXME the code should be removed
+    unreachable!()
 }
 
 pub fn json_keysend(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
