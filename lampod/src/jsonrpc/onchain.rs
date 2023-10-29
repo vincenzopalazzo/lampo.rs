@@ -30,3 +30,16 @@ pub fn json_funds(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Valu
         })),
     }
 }
+
+pub fn json_estimate_fees(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+    log::info!("call for `estimate_fees` with request `{:?}`", request);
+    let response = ctx.onchain_manager().estimated_fees();
+    match json::to_value(response) {
+        Ok(resp) => Ok(resp),
+        Err(err) => Err(Error::Rpc(RpcError {
+            code: -1,
+            message: format!("{err}"),
+            data: None,
+        })),
+    }
+}

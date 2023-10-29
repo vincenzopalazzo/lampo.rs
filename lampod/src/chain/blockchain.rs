@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bitcoin::blockdata::constants::ChainHash;
@@ -30,6 +31,43 @@ impl LampoChainManager {
 
     pub fn is_lightway(&self) -> bool {
         self.backend.is_lightway()
+    }
+
+    fn print_ldk_target_to_string(&self, target: ConfirmationTarget) -> String {
+        match target {
+            ConfirmationTarget::OnChainSweep => String::from("on_chain_sweep"),
+            ConfirmationTarget::AnchorChannelFee => String::from("anchor_chanenl"),
+            ConfirmationTarget::NonAnchorChannelFee => String::from("non_anchor_channel"),
+            ConfirmationTarget::ChannelCloseMinimum => String::from("channel_close_minimum"),
+            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee => {
+                String::from("max_allowed_anchor_channel_remote")
+            }
+            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee => {
+                String::from("min_allowed_anchor_channel_remote")
+            }
+            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee => {
+                String::from("min_allowed_non_anchor_channel_remote")
+            }
+        }
+    }
+
+    pub fn estimated_fees(&self) -> HashMap<String, Option<u32>> {
+        let fees_targets = vec![
+            ConfirmationTarget::OnChainSweep,
+            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee,
+            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
+            ConfirmationTarget::NonAnchorChannelFee,
+            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
+            ConfirmationTarget::AnchorChannelFee,
+            ConfirmationTarget::ChannelCloseMinimum,
+        ];
+        let mut map: HashMap<String, Option<u32>> = HashMap::new();
+        for target in fees_targets {
+            let fee = self.get_est_sat_per_1000_weight(target);
+            let value = if fee == 0 { None } else { Some(fee) };
+            map.insert(self.print_ldk_target_to_string(target), value);
+        }
+        map
     }
 }
 
