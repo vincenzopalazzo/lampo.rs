@@ -29,7 +29,7 @@ Options
 
 #[derive(Debug)]
 pub struct LampoCliArgs {
-    pub conf: String,
+    pub conf: Option<String>,
     pub network: Option<String>,
     pub client: Option<String>,
     pub mnemonic: Option<String>,
@@ -89,9 +89,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     }
 
     Ok(LampoCliArgs {
-        conf: config.ok_or_else(|| lexopt::Error::MissingValue {
-            option: Some("config is not specified".to_owned()),
-        })?,
+        conf: config,
         network,
         client,
         mnemonic,

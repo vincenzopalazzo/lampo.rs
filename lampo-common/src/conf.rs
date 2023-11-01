@@ -22,6 +22,32 @@ pub struct LampoConf {
 }
 
 impl LampoConf {
+    // Create a new LampoConf with default values (This is used if the user doesn't specify a path)
+    pub fn default() -> Self {
+        // default path for the configuration file
+        // (use deprecated std::env::home_dir() to avoid a dependency on dirs)
+        #[allow(deprecated)]
+        let path = std::env::home_dir().expect("Impossible to get the home directory");
+        let path = path.to_str().unwrap();
+        let lampo_home = format!("{}/.lampo", path);
+        let lampo_testnet = format!("{}/testnet", lampo_home);
+        let lampo_config = format!("{}/lampo.conf", lampo_testnet);
+        Self {
+            inner: CLNConf::new(lampo_config, false),
+            // default network is testnet
+            network: Network::Testnet,
+            ldk_conf: UserConfig::default(),
+            port: 18332,
+            path: lampo_testnet,
+            node: "core".to_owned(),
+            core_url: None,
+            core_user: None,
+            core_pass: None,
+            private_key: None,
+            channels_keys: None,
+        }
+    }
+
     pub fn new(path: &str, network: Network, port: u64) -> Self {
         Self {
             inner: CLNConf::new(format!("{path}/lampo.conf"), true),
@@ -43,7 +69,15 @@ impl TryFrom<String> for LampoConf {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
+        // if the path doesn't exist, return an error
+        if !std::path::Path::new(&value).exists() {
+            anyhow::bail!("The path {} doesn't exist", value);
+        }
+
         let path = format!("{value}/lampo.conf");
+        // Check for double slashes
+        let path = path.replace("//", "/");
+
         let mut conf = CLNConf::new(path, false);
         conf.parse()
             .map_err(|err| anyhow::anyhow!("{}", err.cause))?;

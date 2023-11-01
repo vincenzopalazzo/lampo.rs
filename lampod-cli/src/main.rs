@@ -48,7 +48,14 @@ fn main() -> error::Result<()> {
 /// Return the root directory.
 fn run(args: LampoCliArgs) -> error::Result<()> {
     let path = args.conf;
-    let mut lampo_conf = LampoConf::try_from(path)?;
+    let mut lampo_conf = match path {
+        Some(path) => LampoConf::try_from(path)?,
+        None => {
+            log::info!("No configuration file specified, using default configuration");
+            LampoConf::default()
+        }
+    };
+
     if args.network.is_some() {
         lampo_conf.set_network(&args.network.unwrap())?;
     }
