@@ -62,8 +62,11 @@ impl BitcoinCore {
     ) -> bitcoincore_rpc::Result<Self> {
         // FIXME: the bitcoincore_rpc do not support the https protocol.
         use bitcoincore_rpc::Auth;
+
+        let client = Client::new(url, Auth::UserPass(user.to_owned(), pass.to_owned()))?;
+        // FIXME: grab some information from the blockchain, eg. Network
         Ok(Self {
-            inner: Client::new(url, Auth::UserPass(user.to_owned(), pass.to_owned()))?,
+            inner: client,
             handler: RefCell::new(None),
             ours_txs: Mutex::new(RefCell::new(Vec::new())),
             others_txs: Mutex::new(RefCell::new(Vec::new())),
@@ -166,21 +169,51 @@ impl Backend for BitcoinCore {
         }
     }
 
-    fn fee_rate_estimation(&self, blocks: u64) -> u32 {
-        // FIXME: manage the error here.
-        let Ok(result) = self.inner.estimate_smart_fee(blocks as u16, None) else {
-            log::error!("failing to estimate fee");
-            if self.inner.get_blockchain_info().unwrap().chain == "regtest" {
-                return 253;
+    /// Returning the fee rate estimation in sats.
+    fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32> {
+        let result = self.inner.estimate_smart_fee(blocks as u16, None)?;
+
+        // FIXME: store the network inside the self
+        let chain_info = self.inner.get_blockchain_info()?;
+        let network_str = chain_info.chain.as_str();
+
+        if let Some(errors) = &result.errors {
+            // Thanks to bitcoin core that will not process in time
+            // the estimation fee for regtest, in this way we start
+            // or conditional code skipping.
+            //
+            // What next LND? :)
+            if network_str == "regtest" {
+                return Ok(253);
             }
-            return 0;
-        };
-        // FIXME: check what is the value that ldk want
-        let result = result.fee_rate.unwrap_or_default().to_sat() as u32;
-        if result == 0 {
-            return 253;
+
+            error::bail!(
+                "{}",
+                errors
+                    .iter()
+                    .map(|err| format!("{err},"))
+                    .collect::<String>()
+            );
         }
-        result
+        let result: u32 = result.fee_rate.unwrap_or_default().to_sat() as u32;
+        let result = match network_str {
+            // in the regtest case that it is useful for integration testing
+            "regtest" => {
+                if result == 0 {
+                    253
+                } else {
+                    result
+                }
+            }
+            _ => {
+                if result != 0 {
+                    result
+                } else {
+                    error::bail!("Estimated fee is `{result}` on `{network_str}`")
+                }
+            }
+        };
+        Ok(result)
     }
 
     fn minimum_mempool_fee(&self) -> error::Result<u32> {
