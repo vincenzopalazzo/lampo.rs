@@ -28,7 +28,7 @@ pub enum TxResult {
 /// Bakend Trait specification
 pub trait Backend {
     /// Fetch feerate give a number of blocks
-    fn fee_rate_estimation(&self, blocks: u64) -> u32;
+    fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32>;
 
     fn minimum_mempool_fee(&self) -> error::Result<u32>;
 

@@ -15,6 +15,7 @@ use lampo_common::error;
 use lampo_common::event::{Emitter, Event, Subscriber};
 use lampo_common::handler::Handler as EventHandler;
 use lampo_common::json;
+use lampo_common::types::ChannelState;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
@@ -176,8 +177,12 @@ impl Handler for LampoHandler {
 
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
                 // FIXME: estimate the fee rate with a callback
-                let fee = self.chain_manager.backend.fee_rate_estimation(6);
-                log::info!("fee estimated {fee} sats");
+                let fee = self.chain_manager.backend.fee_rate_estimation(6).map_err(|err| {
+                    let msg = format!("Channel Opening Error: {err}");
+                    self.emit(Event::Lightning(LightningEvent::ChannelEvent { state: ChannelState::OpeningError, message : msg}));
+                    err
+                })?;
+                log::info!("fee estimated {:?} sats", fee);
                 let transaction = self.wallet_manager.create_transaction(
                     output_script,
                     channel_value_satoshis,
