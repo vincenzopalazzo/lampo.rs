@@ -74,16 +74,23 @@ impl LampoChainManager {
 /// Rust lightning FeeEstimator implementation
 impl FeeEstimator for LampoChainManager {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
+        //FIXME: use cache to avoid return default value (that is 0) on u32
         match confirmation_target {
-            ConfirmationTarget::OnChainSweep => self.backend.fee_rate_estimation(1),
+            ConfirmationTarget::OnChainSweep => {
+                self.backend.fee_rate_estimation(1).unwrap_or_default()
+            }
             ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee
             | ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee
             | ConfirmationTarget::AnchorChannelFee
-            | ConfirmationTarget::NonAnchorChannelFee => self.backend.fee_rate_estimation(6),
+            | ConfirmationTarget::NonAnchorChannelFee => {
+                self.backend.fee_rate_estimation(6).unwrap_or_default()
+            }
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee => {
                 self.backend.minimum_mempool_fee().unwrap()
             }
-            ConfirmationTarget::ChannelCloseMinimum => self.backend.fee_rate_estimation(100),
+            ConfirmationTarget::ChannelCloseMinimum => {
+                self.backend.fee_rate_estimation(100).unwrap_or_default()
+            }
         }
     }
 }
