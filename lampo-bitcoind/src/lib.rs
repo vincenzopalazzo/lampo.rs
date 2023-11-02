@@ -166,21 +166,34 @@ impl Backend for BitcoinCore {
         }
     }
 
-    fn fee_rate_estimation(&self, blocks: u64) -> u32 {
-        // FIXME: manage the error here.
-        let Ok(result) = self.inner.estimate_smart_fee(blocks as u16, None) else {
-            log::error!("failing to estimate fee");
-            if self.inner.get_blockchain_info().unwrap().chain == "regtest" {
-                return 253;
+    fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32> {
+        let result = self.inner.estimate_smart_fee(blocks as u16, None);
+
+        match result {
+            Ok(_) => {
+                let result: u32 = result.unwrap().fee_rate.unwrap_or_default().to_sat() as u32;
+                if result == 0 {
+                    return Ok(253);
+                }
+                Ok(result)
             }
-            return 0;
-        };
-        // FIXME: check what is the value that ldk want
-        let result = result.fee_rate.unwrap_or_default().to_sat() as u32;
-        if result == 0 {
-            return 253;
+            Err(err) => {
+                log::error!("failing to estimate fee");
+                let block_chain_info = self.inner.get_blockchain_info();
+                match block_chain_info {
+                    Ok(_) => {
+                        if block_chain_info.unwrap().chain == "regtest" {
+                            return Ok(253);
+                        } else {
+                            return Err(err.into());
+                        }
+                    }
+                    Err(err) => {
+                        return Err(err.into());
+                    }
+                }
+            }
         }
-        result
     }
 
     fn minimum_mempool_fee(&self) -> error::Result<u32> {
