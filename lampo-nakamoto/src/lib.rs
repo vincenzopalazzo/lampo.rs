@@ -133,13 +133,14 @@ impl Backend for Nakamoto {
         todo!()
     }
 
-    fn fee_rate_estimation(&self, blocks: u64) -> u32 {
+    fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32> {
+        // There may be errors here?
         let fee_rates: HashMap<String, f64> = self.rest.get_fee_estimates().unwrap();
-        Nakamoto::fee_in_range(&fee_rates, 1, blocks + 2).unwrap() as u32
+        Ok(Nakamoto::fee_in_range(&fee_rates, 1, blocks + 2).unwrap_or_default() as u32)
     }
 
     fn minimum_mempool_fee(&self) -> error::Result<u32> {
-        Ok(self.fee_rate_estimation(2))
+        self.fee_rate_estimation(2)
     }
 
     fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult {

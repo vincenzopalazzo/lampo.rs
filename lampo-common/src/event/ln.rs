@@ -1,7 +1,7 @@
 use crate::bitcoin::{OutPoint, Transaction};
 use crate::ldk::ln::features::ChannelTypeFeatures;
 use crate::model::response::{PaymentHop, PaymentState};
-use crate::types::{ChannelId, NodeId};
+use crate::types::{ChannelId, ChannelState, NodeId};
 
 #[derive(Clone, Debug)]
 pub enum LightningEvent {
@@ -33,5 +33,9 @@ pub enum LightningEvent {
         state: PaymentState,
         payment_hash: Option<String>,
         path: Vec<PaymentHop>,
+    },
+    ChannelEvent {
+        state: ChannelState,
+        message: String,
     },
 }
