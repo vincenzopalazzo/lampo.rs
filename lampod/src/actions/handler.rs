@@ -176,8 +176,8 @@ impl Handler for LampoHandler {
 
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
                 // FIXME: estimate the fee rate with a callback
-                let fee = self.chain_manager.backend.fee_rate_estimation(6);
-                log::info!("fee estimated {fee} sats");
+                let fee = self.chain_manager.backend.fee_rate_estimation(6)?;
+                log::info!("fee estimated {:?} sats", fee);
                 let transaction = self.wallet_manager.create_transaction(
                     output_script,
                     channel_value_satoshis,
