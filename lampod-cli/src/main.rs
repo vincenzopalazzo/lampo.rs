@@ -56,9 +56,18 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         }
     };
 
+    // Override the configuartion parameters from the command line.
+    // This is to account for the case where the user didn't specify
+    // a configuration file.
     if args.network.is_some() {
         lampo_conf.set_network(&args.network.unwrap())?;
     }
+    if let Some(val) = args.client.clone() {
+        lampo_conf.node = val;
+    }
+    lampo_conf.core_url = args.bitcoind_url.clone();
+    lampo_conf.core_user = args.bitcoind_user.clone();
+    lampo_conf.core_pass = args.bitcoind_pass.clone();
 
     log::debug!(target: "lampod-cli", "init wallet ..");
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {
@@ -86,7 +95,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     };
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
-    let client = args.client.unwrap_or(lampo_conf.node.clone());
+    let client = lampo_conf.node.clone();
     let client: Arc<dyn Backend> = match client.as_str() {
         "nakamoto" => {
             let mut conf = Config::default();

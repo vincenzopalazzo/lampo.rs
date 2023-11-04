@@ -7,7 +7,7 @@ pub use lightning::util::config::UserConfig;
 
 #[derive(Clone, Debug)]
 pub struct LampoConf {
-    pub inner: CLNConf,
+    pub inner: Option<CLNConf>,
     pub network: Network,
     pub ldk_conf: UserConfig,
     pub port: u64,
@@ -30,15 +30,15 @@ impl LampoConf {
         let path = std::env::home_dir().expect("Impossible to get the home directory");
         let path = path.to_str().unwrap();
         let lampo_home = format!("{}/.lampo", path);
-        let lampo_testnet = format!("{}/testnet", lampo_home);
-        let lampo_config = format!("{}/lampo.conf", lampo_testnet);
+        let lampo_testnet_path = format!("{}/testnet", lampo_home);
         Self {
-            inner: CLNConf::new(lampo_config, false),
+            inner: None,
             // default network is testnet
             network: Network::Testnet,
             ldk_conf: UserConfig::default(),
-            port: 18332,
-            path: lampo_testnet,
+            // default port is 19735 for testnet
+            port: 19735,
+            path: lampo_testnet_path,
             node: "core".to_owned(),
             core_url: None,
             core_user: None,
@@ -50,7 +50,7 @@ impl LampoConf {
 
     pub fn new(path: &str, network: Network, port: u64) -> Self {
         Self {
-            inner: CLNConf::new(format!("{path}/lampo.conf"), true),
+            inner: Some(CLNConf::new(format!("{path}/lampo.conf"), true)),
             network,
             ldk_conf: UserConfig::default(),
             port,
@@ -136,7 +136,7 @@ impl TryFrom<String> for LampoConf {
         }
 
         Ok(Self {
-            inner: conf,
+            inner: Some(conf),
             path: value,
             network: Network::from_str(&network)?,
             ldk_conf: UserConfig::default(),
@@ -156,16 +156,19 @@ impl LampoConf {
         self.path.clone()
     }
 
-    pub fn get_values(&self, key: &str) -> Vec<String> {
-        self.inner.get_confs(key)
+    pub fn get_values(&self, key: &str) -> Option<Vec<String>> {
+        match self.inner {
+            Some(ref conf) => Some(conf.get_confs(key)),
+            None => None,
+        }
     }
 
     pub fn get_value(&self, key: &str) -> Result<Option<String>, anyhow::Error> {
-        let Some(value) = self
-            .inner
-            .get_conf(key)
-            .map_err(|err| anyhow::anyhow!("{err}"))?
-        else {
+        let conf = self.inner.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Lampo configuration doesn't contain inner configuration path")
+        })?;
+
+        let Some(value) = conf.get_conf(key).map_err(|err| anyhow::anyhow!("{err}"))? else {
             return Ok(None);
         };
         Ok(Some(value))
