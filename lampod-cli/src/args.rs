@@ -20,16 +20,16 @@ Usage
 
 Options
 
-    -c | --config    Override the default path of the config field
-    -n | --network   Set the network for lampo
-    -h | --help      Print help
-    --client         Set the default lampo bitcoin backend
+    -c | --data-dir    Override the default path of the config field
+    -n | --network     Set the network for lampo
+    -h | --help        Print help
+    --client           Set the default lampo bitcoin backend
 "#,
 };
 
 #[derive(Debug)]
 pub struct LampoCliArgs {
-    pub conf: Option<String>,
+    pub data_dir: Option<String>,
     pub network: Option<String>,
     pub client: Option<String>,
     pub mnemonic: Option<String>,
@@ -41,7 +41,7 @@ pub struct LampoCliArgs {
 pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     use lexopt::prelude::*;
 
-    let mut config: Option<String> = None;
+    let mut data_dir: Option<String> = None;
     let mut network: Option<String> = None;
     let mut client: Option<String> = None;
     let mut bitcoind_url: Option<String> = None;
@@ -52,9 +52,9 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
-            Short('c') | Long("config") => {
+            Short('c') | Long("data-dir") => {
                 let val: String = parser.value()?.parse()?;
-                config = Some(val);
+                data_dir = Some(val);
             }
             Short('n') | Long("network") => {
                 let val: String = parser.value()?.parse()?;
@@ -89,7 +89,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     }
 
     Ok(LampoCliArgs {
-        conf: config,
+        data_dir,
         network,
         client,
         mnemonic,

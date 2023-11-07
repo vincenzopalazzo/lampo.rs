@@ -47,7 +47,7 @@ fn main() -> error::Result<()> {
 
 /// Return the root directory.
 fn run(args: LampoCliArgs) -> error::Result<()> {
-    let path = args.conf;
+    let path = args.data_dir;
     let mut lampo_conf = match path {
         Some(path) => LampoConf::try_from(path)?,
         None => {
@@ -65,9 +65,15 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     if let Some(val) = args.client.clone() {
         lampo_conf.node = val;
     }
-    lampo_conf.core_url = args.bitcoind_url.clone();
-    lampo_conf.core_user = args.bitcoind_user.clone();
-    lampo_conf.core_pass = args.bitcoind_pass.clone();
+    if let Some(val) = args.bitcoind_url.clone() {
+        lampo_conf.core_url = Some(val);
+    }
+    if let Some(val) = args.bitcoind_user.clone() {
+        lampo_conf.core_user = Some(val);
+    }
+    if let Some(val) = args.bitcoind_pass.clone() {
+        lampo_conf.core_pass = Some(val);
+    }
 
     log::debug!(target: "lampod-cli", "init wallet ..");
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {

@@ -164,9 +164,10 @@ impl LampoConf {
     }
 
     pub fn get_value(&self, key: &str) -> Result<Option<String>, anyhow::Error> {
-        let conf = self.inner.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Lampo configuration doesn't contain inner configuration path")
-        })?;
+        let conf = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Lampo configuration was not loaded"))?;
 
         let Some(value) = conf.get_conf(key).map_err(|err| anyhow::anyhow!("{err}"))? else {
             return Ok(None);
