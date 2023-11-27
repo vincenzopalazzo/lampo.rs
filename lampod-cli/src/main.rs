@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 mod args;
 
+use radicle_term as term;
 use std::env;
 use std::io;
 use std::str::FromStr;
@@ -48,19 +49,18 @@ fn main() -> error::Result<()> {
 /// Return the root directory.
 fn run(args: LampoCliArgs) -> error::Result<()> {
     let path = args.data_dir;
-    let mut lampo_conf = match path {
-        Some(path) => LampoConf::try_from(path)?,
-        None => {
-            log::info!("No configuration file specified, using default configuration");
-            LampoConf::default()
-        }
+    let network = args.network;
+
+    // If the user didn't specify a configuration file, create or retrieve the default one.
+    let path = match path {
+        Some(path) => path,
+        None => create_or_get_default_config_file(network.clone())?,
     };
+    let mut lampo_conf = LampoConf::try_from(path)?;
 
     // Override the configuartion parameters from the command line.
-    // This is to account for the case where the user didn't specify
-    // a configuration file.
-    if args.network.is_some() {
-        lampo_conf.set_network(&args.network.unwrap())?;
+    if network.is_some() {
+        lampo_conf.set_network(&network.unwrap())?;
     }
     if let Some(val) = args.client.clone() {
         lampo_conf.node = val;
@@ -155,6 +155,69 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let _ = workder.join();
     let _ = jsorpc_worker.join().unwrap();
     Ok(())
+}
+
+/// Creates or retrieves the default configuration file for Lampo.
+///
+/// This function checks if the user has a configuration file in their home directory. If the
+/// configuration file is missing, it creates a new one with default values and provides a message
+/// to fill in the configuration details.
+///
+/// If the user specified a network, use it.
+/// Otherwise, use the default network (testnet).
+// Allow deprecated std::env::home_dir() to avoid a dependency on dirs.
+#[allow(deprecated)]
+fn create_or_get_default_config_file(network: Option<String>) -> error::Result<String> {
+    // If the user specified a network, use it.
+    // Otherwise, use the default network (testnet).
+    let network = match network {
+        Some(network) => network,
+        None => "testnet".to_string(),
+    };
+
+    // Define the home directory path
+    let home_dir =
+        env::home_dir().ok_or_else(|| error::anyhow!("Failed to get the home directory path."))?;
+
+    // Define the Lampo directory path.
+    let mut lampo_dir = home_dir.clone();
+    lampo_dir.push(".lampo");
+    std::fs::create_dir_all(&lampo_dir)?;
+
+    // Define the Lampo network directory path.
+    lampo_dir.push(network.clone());
+    std::fs::create_dir_all(&lampo_dir)?;
+
+    // Define the Lampo configuration file path.
+    let lampo_conf = lampo_dir.join("lampo.conf");
+
+    if !lampo_conf.exists() {
+        // If the configuration file doesn't exist, create it.
+        std::fs::write(
+            &lampo_conf,
+            format!(
+                "backend={}\ncore-url=\ncore-user=\ncore-pass=\nnetwork={}\nport={}",
+                LampoConf::default().node,
+                network,
+                LampoConf::default().port
+            ),
+        )?;
+
+        // Print a message to the user.
+        println!(
+            "{}",
+            term::format::secondary(format!(
+                "Please fill in the configuration file at the path: {}",
+                lampo_conf.display()
+            ))
+        );
+    }
+
+    // Convert the path to a string and return it.
+    let dir = lampo_dir
+        .to_str()
+        .ok_or_else(|| error::anyhow!("Failed to convert lampo path to a string."))?;
+    Ok(dir.to_string())
 }
 
 fn run_jsonrpc(

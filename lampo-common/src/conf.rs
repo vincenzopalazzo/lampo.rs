@@ -98,7 +98,7 @@ impl TryFrom<String> for LampoConf {
         let node = conf
             .get_conf("backend")
             .map_err(|err| anyhow::anyhow!("{err}"))?
-            .unwrap_or("nakamoto".to_owned());
+            .unwrap_or(LampoConf::default().node);
         // Strip the value of whitespace
         let node = node.to_trimmed();
 
