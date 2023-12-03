@@ -130,32 +130,36 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
     }
 
     pub fn send_resp(&self, key: String, resp: Response<Value>) {
-        let mut queue = self.conn_queue.lock().unwrap().take();
-        log::debug!("{:?}", queue);
-        if queue.contains_key(&key) {
-            let Some(queue) = queue.get_mut(&key) else {
+        let queue = self.conn_queue.lock().unwrap();
+
+        let mut conns = queue.take();
+        log::debug!("{:?}", conns);
+        if conns.contains_key(&key) {
+            let Some(queue) = conns.get_mut(&key) else {
                 panic!("queue not found");
             };
             queue.push_back(resp);
         } else {
             let mut q = VecDeque::new();
             q.push_back(resp);
-            queue.insert(key, q);
+            conns.insert(key, q);
         }
-        log::debug!("{:?}", queue);
-        self.conn_queue.lock().unwrap().set(queue);
+        log::debug!("{:?}", conns);
+        queue.set(conns);
     }
 
     pub fn pop_resp(&self, key: String) -> Option<Response<Value>> {
-        let mut queue = self.conn_queue.lock().unwrap().take();
-        if !queue.contains_key(&key) {
+        let queue = self.conn_queue.lock().unwrap();
+
+        let mut conns = queue.take();
+        if !conns.contains_key(&key) {
             return None;
         }
-        let Some(q) = queue.get_mut(&key) else {
+        let Some(q) = conns.get_mut(&key) else {
             return None;
         };
         let resp = q.pop_front();
-        self.conn_queue.lock().unwrap().set(queue);
+        queue.set(conns);
         resp
     }
 
