@@ -7,7 +7,7 @@ pub use lightning::util::config::UserConfig;
 
 #[derive(Clone, Debug)]
 pub struct LampoConf {
-    pub inner: CLNConf,
+    pub inner: Option<CLNConf>,
     pub network: Network,
     pub ldk_conf: UserConfig,
     pub port: u64,
@@ -22,9 +22,35 @@ pub struct LampoConf {
 }
 
 impl LampoConf {
+    // Create a new LampoConf with default values (This is used if the user doesn't specify a path)
+    pub fn default() -> Self {
+        // default path for the configuration file
+        // (use deprecated std::env::home_dir() to avoid a dependency on dirs)
+        #[allow(deprecated)]
+        let path = std::env::home_dir().expect("Impossible to get the home directory");
+        let path = path.to_str().unwrap();
+        let lampo_home = format!("{}/.lampo", path);
+        let lampo_testnet_path = format!("{}/testnet", lampo_home);
+        Self {
+            inner: None,
+            // default network is testnet
+            network: Network::Testnet,
+            ldk_conf: UserConfig::default(),
+            // default port is 19735 for testnet
+            port: 19735,
+            path: lampo_testnet_path,
+            node: "core".to_owned(),
+            core_url: None,
+            core_user: None,
+            core_pass: None,
+            private_key: None,
+            channels_keys: None,
+        }
+    }
+
     pub fn new(path: &str, network: Network, port: u64) -> Self {
         Self {
-            inner: CLNConf::new(format!("{path}/lampo.conf"), true),
+            inner: Some(CLNConf::new(format!("{path}/lampo.conf"), true)),
             network,
             ldk_conf: UserConfig::default(),
             port,
@@ -43,7 +69,20 @@ impl TryFrom<String> for LampoConf {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
+        // if the path doesn't exist, return an error
+        if !std::path::Path::new(&value).exists() {
+            anyhow::bail!("The path {} doesn't exist", value);
+        }
+
         let path = format!("{value}/lampo.conf");
+        // Check for double slashes
+        let path = path.replace("//", "/");
+
+        // If lampo.conf doesn't exist, return the default configuration
+        if !std::path::Path::new(&path).exists() {
+            return Ok(Self::default());
+        }
+
         let mut conf = CLNConf::new(path, false);
         conf.parse()
             .map_err(|err| anyhow::anyhow!("{}", err.cause))?;
@@ -102,7 +141,7 @@ impl TryFrom<String> for LampoConf {
         }
 
         Ok(Self {
-            inner: conf,
+            inner: Some(conf),
             path: value,
             network: Network::from_str(&network)?,
             ldk_conf: UserConfig::default(),
@@ -122,16 +161,20 @@ impl LampoConf {
         self.path.clone()
     }
 
-    pub fn get_values(&self, key: &str) -> Vec<String> {
-        self.inner.get_confs(key)
+    pub fn get_values(&self, key: &str) -> Option<Vec<String>> {
+        match self.inner {
+            Some(ref conf) => Some(conf.get_confs(key)),
+            None => None,
+        }
     }
 
     pub fn get_value(&self, key: &str) -> Result<Option<String>, anyhow::Error> {
-        let Some(value) = self
+        let conf = self
             .inner
-            .get_conf(key)
-            .map_err(|err| anyhow::anyhow!("{err}"))?
-        else {
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Lampo configuration was not loaded"))?;
+
+        let Some(value) = conf.get_conf(key).map_err(|err| anyhow::anyhow!("{err}"))? else {
             return Ok(None);
         };
         Ok(Some(value))

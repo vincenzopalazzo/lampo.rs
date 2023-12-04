@@ -47,10 +47,48 @@ fn main() -> error::Result<()> {
 
 /// Return the root directory.
 fn run(args: LampoCliArgs) -> error::Result<()> {
-    let path = args.conf;
+    let path = args.data_dir;
+    let network = args.network;
+
+    let path = match path {
+        Some(path) => path,
+        None => {
+            // If the user specified a network, use it.
+            // Otherwise, use the default network (testnet).
+            let network_dir = match network.clone() {
+                Some(network) => network,
+                None => "testnet".to_string(),
+            };
+            // Define the Lampo directory path.
+            #[allow(deprecated)]
+            let home_dir = env::home_dir()
+                .ok_or_else(|| error::anyhow!("Failed to get the home directory path."))?;
+            let mut lampo_dir = home_dir.clone();
+            lampo_dir.push(".lampo");
+            lampo_dir.push(network_dir.clone());
+            std::fs::create_dir_all(&lampo_dir)?;
+
+            // return the path
+            lampo_dir.to_str().unwrap().to_string()
+        }
+    };
     let mut lampo_conf = LampoConf::try_from(path)?;
-    if args.network.is_some() {
-        lampo_conf.set_network(&args.network.unwrap())?;
+
+    // Override the configuartion parameters from the command line.
+    if let Some(network) = network {
+        lampo_conf.set_network(&network)?;
+    }
+    if let Some(val) = args.client.clone() {
+        lampo_conf.node = val;
+    }
+    if let Some(val) = args.bitcoind_url.clone() {
+        lampo_conf.core_url = Some(val);
+    }
+    if let Some(val) = args.bitcoind_user.clone() {
+        lampo_conf.core_user = Some(val);
+    }
+    if let Some(val) = args.bitcoind_pass.clone() {
+        lampo_conf.core_pass = Some(val);
     }
 
     log::debug!(target: "lampod-cli", "init wallet ..");
@@ -79,7 +117,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     };
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
-    let client = args.client.unwrap_or(lampo_conf.node.clone());
+    let client = lampo_conf.node.clone();
     let client: Arc<dyn Backend> = match client.as_str() {
         "nakamoto" => {
             let mut conf = Config::default();
