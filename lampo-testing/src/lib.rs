@@ -76,10 +76,11 @@ impl LampoTesting {
         let port = port::random_free_port().unwrap();
 
         let mut lampo_conf = LampoConf::new(
-            dir.path().to_str().unwrap(),
-            lampo_common::bitcoin::Network::Regtest,
-            port.into(),
-        );
+            // FIXME: this is bad we should wrap this logic
+            Some(dir.path().to_string_lossy().to_string()),
+            Some(lampo_common::bitcoin::Network::Regtest),
+            Some(port.into()),
+        )?;
         let core_url = format!("127.0.0.1:{}", btc.port);
         lampo_conf.core_pass = Some(btc.pass.clone());
         lampo_conf.core_url = Some(core_url);

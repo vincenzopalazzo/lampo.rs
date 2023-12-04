@@ -314,7 +314,7 @@ impl LampoChannelManager {
     pub fn is_restarting(&self) -> error::Result<bool> {
         Ok(Path::exists(Path::new(&format!(
             "{}/manager",
-            self.conf.path
+            self.conf.path()
         ))))
     }
 
@@ -336,7 +336,7 @@ impl LampoChannelManager {
             self.conf.ldk_conf,
             monitors,
         );
-        let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path))?;
+        let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
         let (_, channel_manager) =
             <(BlockHash, LampoChannel)>::read(&mut channel_manager_file, read_args)
                 .map_err(|err| error::anyhow!("{err}"))?;

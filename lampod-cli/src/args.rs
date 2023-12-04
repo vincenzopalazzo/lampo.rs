@@ -1,6 +1,9 @@
 use radicle_term as term;
 
-use lampo_common::error;
+use lampo_common::{
+    conf::{LampoConf, Network},
+    error,
+};
 
 struct Help {
     name: &'static str,
@@ -20,16 +23,16 @@ Usage
 
 Options
 
-    -c | --config    Override the default path of the config field
-    -n | --network   Set the network for lampo
-    -h | --help      Print help
-    --client         Set the default lampo bitcoin backend
+    -c | --data-dir    Override the default path of the config field
+    -n | --network     Set the network for lampo
+    -h | --help        Print help
+    --client           Set the default lampo bitcoin backend
 "#,
 };
 
 #[derive(Debug)]
 pub struct LampoCliArgs {
-    pub conf: String,
+    pub data_dir: Option<String>,
     pub network: Option<String>,
     pub client: Option<String>,
     pub mnemonic: Option<String>,
@@ -38,10 +41,47 @@ pub struct LampoCliArgs {
     pub bitcoind_pass: Option<String>,
 }
 
+impl TryInto<LampoConf> for LampoCliArgs {
+    type Error = error::Error;
+
+    fn try_into(self) -> Result<LampoConf, Self::Error> {
+        let mut conf = LampoConf::default();
+
+        // override the default configuration with
+        // a possible configuration file
+        if let Some(path) = self.data_dir {
+            // if the path doesn't exist, return an error
+            if !std::path::Path::new(&path).exists() {
+                error::bail!("The path {} doesn't exist", path);
+            }
+            // this override the full configuration, we should merge the two
+            conf = LampoConf::try_from(format!("{path}"))?;
+        }
+
+        // Override the lampo conf with the args
+        let network = self.network.unwrap_or(conf.network.to_string());
+        conf.network = match network.as_str() {
+            "bitcoin" => Network::Bitcoin,
+            "testnet" => Network::Testnet,
+            "regtest" => Network::Regtest,
+            "signet" => Network::Signet,
+            _ => error::bail!("Invalid network {network}"),
+        };
+
+        conf.prepare_dirs()?;
+
+        conf.node = self.client.unwrap_or(conf.node);
+        conf.core_url = self.bitcoind_url;
+        conf.core_user = self.bitcoind_user;
+        conf.core_pass = self.bitcoind_pass;
+        Ok(conf)
+    }
+}
+
 pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     use lexopt::prelude::*;
 
-    let mut config: Option<String> = None;
+    let mut data_dir: Option<String> = None;
     let mut network: Option<String> = None;
     let mut client: Option<String> = None;
     let mut bitcoind_url: Option<String> = None;
@@ -52,9 +92,9 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
-            Short('c') | Long("config") => {
+            Short('c') | Long("data-dir") => {
                 let val: String = parser.value()?.parse()?;
-                config = Some(val);
+                data_dir = Some(val);
             }
             Short('n') | Long("network") => {
                 let val: String = parser.value()?.parse()?;
@@ -89,9 +129,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     }
 
     Ok(LampoCliArgs {
-        conf: config.ok_or_else(|| lexopt::Error::MissingValue {
-            option: Some("config is not specified".to_owned()),
-        })?,
+        data_dir,
         network,
         client,
         mnemonic,
