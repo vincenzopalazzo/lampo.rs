@@ -319,8 +319,8 @@ mod tests {
             ldk_conf: UserConfig::default(),
             network: bitcoin::Network::Testnet,
             port: 19753,
-            path: "/tmp".to_string(),
-            inner: CLNConf::new("/tmp/".to_owned(), true),
+            root_path: "/tmp".to_string(),
+            inner: Some(CLNConf::new("/tmp/".to_owned(), true)),
             private_key: None,
             channels_keys: None,
             node: String::from("nakamoto"),
@@ -359,8 +359,8 @@ mod tests {
             ldk_conf: UserConfig::default(),
             network: bitcoin::Network::Testnet,
             port: 19753,
-            path: "/tmp".to_string(),
-            inner: CLNConf::new("/tmp/".to_owned(), true),
+            root_path: "/tmp".to_string(),
+            inner: Some(CLNConf::new("/tmp/".to_owned(), true)),
             private_key: None,
             channels_keys: None,
             node: String::from("nakamoto"),
@@ -368,6 +368,7 @@ mod tests {
             core_url: None,
             core_user: None,
         };
+        conf.prepare_dirs().unwrap();
         let (wallet, _) = BDKWalletManager::new(conf.clone().into()).unwrap();
         let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
 
@@ -396,8 +397,8 @@ mod tests {
                 ldk_conf: UserConfig::default(),
                 network: bitcoin::Network::Testnet,
                 port: 19753,
-                path: format!("/tmp/lampo-{i}"),
-                inner: CLNConf::new("/tmp/".to_owned(), true),
+                root_path: format!("/tmp/lampo-{i}"),
+                inner: Some(CLNConf::new("/tmp/".to_owned(), true)),
                 private_key: None,
                 channels_keys: None,
 
@@ -406,6 +407,7 @@ mod tests {
                 core_url: None,
                 core_user: None,
             };
+            conf.prepare_dirs().unwrap();
             let key = bitcoin::PrivateKey::new(key, conf.network);
             let wallet = BDKWalletManager::try_from((key, None)).unwrap();
 
@@ -443,8 +445,8 @@ mod tests {
                 ldk_conf: UserConfig::default(),
                 network: bitcoin::Network::Testnet,
                 port: 19753,
-                path: format!("/tmp/lampo-{i}"),
-                inner: CLNConf::new("/tmp/".to_owned(), true),
+                root_path: format!("/tmp/lampo-{i}"),
+                inner: Some(CLNConf::new("/tmp/".to_owned(), true)),
                 private_key: None,
                 channels_keys: None,
 

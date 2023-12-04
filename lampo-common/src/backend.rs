@@ -25,8 +25,17 @@ pub enum TxResult {
     Discarded,
 }
 
+/// Backend kind supported by the lampo
+pub enum BackendKind {
+    Core,
+    Nakamoto,
+}
+
 /// Bakend Trait specification
 pub trait Backend {
+    /// Return the kind of backend
+    fn kind(&self) -> BackendKind;
+
     /// Fetch feerate give a number of blocks
     fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32>;
 
