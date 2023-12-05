@@ -145,6 +145,10 @@ impl BitcoinCore {
 }
 
 impl Backend for BitcoinCore {
+    fn kind(&self) -> lampo_common::backend::BackendKind {
+        lampo_common::backend::BackendKind::Core
+    }
+
     fn brodcast_tx(&self, tx: &lampo_common::backend::Transaction) {
         // FIXME: check the result.
         let result: bitcoincore_rpc::Result<json::Value> = self.inner.call(

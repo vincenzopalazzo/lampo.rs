@@ -47,51 +47,40 @@ fn main() -> error::Result<()> {
 
 /// Return the root directory.
 fn run(args: LampoCliArgs) -> error::Result<()> {
-    let path = args.data_dir;
-    let network = args.network;
+    let mnemonic = args.mnemonic.clone();
 
-    let path = match path {
-        Some(path) => path,
-        None => {
-            // If the user specified a network, use it.
-            // Otherwise, use the default network (testnet).
-            let network_dir = match network.clone() {
-                Some(network) => network,
-                None => "testnet".to_string(),
-            };
-            // Define the Lampo directory path.
-            #[allow(deprecated)]
-            let home_dir = env::home_dir()
-                .ok_or_else(|| error::anyhow!("Failed to get the home directory path."))?;
-            let mut lampo_dir = home_dir.clone();
-            lampo_dir.push(".lampo");
-            lampo_dir.push(network_dir.clone());
-            std::fs::create_dir_all(&lampo_dir)?;
-
-            // return the path
-            lampo_dir.to_str().unwrap().to_string()
-        }
-    };
-    let mut lampo_conf = LampoConf::try_from(path)?;
-
-    // Override the configuartion parameters from the command line.
-    if let Some(network) = network {
-        lampo_conf.set_network(&network)?;
-    }
-    if let Some(val) = args.client.clone() {
-        lampo_conf.node = val;
-    }
-    if let Some(val) = args.bitcoind_url.clone() {
-        lampo_conf.core_url = Some(val);
-    }
-    if let Some(val) = args.bitcoind_user.clone() {
-        lampo_conf.core_user = Some(val);
-    }
-    if let Some(val) = args.bitcoind_pass.clone() {
-        lampo_conf.core_pass = Some(val);
-    }
-
+    // After this point the configuration is ready!
+    let lampo_conf: LampoConf = args.try_into()?;
     log::debug!(target: "lampod-cli", "init wallet ..");
+
+    // Prepare the backend
+    let client = lampo_conf.node.clone();
+    log::debug!(target: "lampod-cli", "lampo running with `{client}` backend");
+    let client: Arc<dyn Backend> = match client.as_str() {
+        "nakamoto" => {
+            let mut conf = Config::default();
+            conf.network = Network::from_str(&lampo_conf.network.to_string()).unwrap();
+            Arc::new(Nakamoto::new(conf).unwrap())
+        }
+        "core" => Arc::new(BitcoinCore::new(
+            &lampo_conf
+                .core_url
+                .clone()
+                .ok_or(error::anyhow!("Miss the bitcoin url"))?,
+            &lampo_conf
+                .core_user
+                .clone()
+                .ok_or(error::anyhow!("Miss the bitcoin user for auth"))?,
+            &lampo_conf
+                .core_pass
+                .clone()
+                .ok_or(error::anyhow!("Miss the bitcoin password for auth"))?,
+            Arc::new(false),
+            Some(60),
+        )?),
+        _ => error::bail!("client {:?} not supported", client),
+    };
+
     let wallet = if let Some(ref private_key) = lampo_conf.private_key {
         #[cfg(debug_assertions)]
         {
@@ -102,8 +91,16 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         }
         #[cfg(not(debug_assertions))]
         unimplemented!()
-    } else if args.mnemonic.is_none() {
-        let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
+    } else if mnemonic.is_none() {
+        let (wallet, mnemonic) = match client.kind() {
+            lampo_common::backend::BackendKind::Core => {
+                CoreWalletManager::new(Arc::new(lampo_conf.clone()))?
+            }
+            lampo_common::backend::BackendKind::Nakamoto => {
+                error::bail!("wallet is not implemented for nakamoto")
+            }
+        };
+
         radicle_term::success!("Wallet Generated, please store this works in a safe way");
         radicle_term::println(
             radicle_term::format::badge_primary("waller-keys"),
@@ -111,41 +108,32 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         );
         wallet
     } else {
-        // SAFETY: It is safe to unwrap the mnemonic because we check it
-        // before.
-        CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &args.mnemonic.unwrap())?
+        match client.kind() {
+            lampo_common::backend::BackendKind::Core => {
+                // SAFETY: It is safe to unwrap the mnemonic because we check it
+                // before.
+                CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic.unwrap())?
+            }
+            lampo_common::backend::BackendKind::Nakamoto => {
+                error::bail!("wallet is not implemented for nakamoto")
+            }
+        }
     };
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
-    let client = lampo_conf.node.clone();
-    let client: Arc<dyn Backend> = match client.as_str() {
-        "nakamoto" => {
-            let mut conf = Config::default();
-            conf.network = Network::from_str(&lampo_conf.network.to_string()).unwrap();
-            Arc::new(Nakamoto::new(conf).unwrap())
-        }
-        "core" => Arc::new(BitcoinCore::new(
-            &args
-                .bitcoind_url
-                .unwrap_or(lampo_conf.core_url.clone().unwrap()),
-            &args
-                .bitcoind_user
-                .unwrap_or(lampo_conf.core_user.clone().unwrap()),
-            &args
-                .bitcoind_pass
-                .unwrap_or(lampo_conf.core_pass.clone().unwrap()),
-            Arc::new(false),
-            Some(60),
-        )?),
-        _ => error::bail!("client {:?} not supported", client),
-    };
+
+    // Init the lampod
     lampod.init(client)?;
 
     let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
     lampod.add_external_handler(rpc_handler.clone())?;
 
-    let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path, "lampod".to_owned())
-        .map_err(|_| error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?"))?;
+    log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
+    let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
+        .map_err(|err| {
+            log::error!("{err}");
+            error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?")
+        })?;
 
     let lampod = Arc::new(lampod);
     let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();

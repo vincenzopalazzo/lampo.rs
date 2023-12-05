@@ -1,6 +1,9 @@
 use radicle_term as term;
 
-use lampo_common::error;
+use lampo_common::{
+    conf::{LampoConf, Network},
+    error,
+};
 
 struct Help {
     name: &'static str,
@@ -36,6 +39,43 @@ pub struct LampoCliArgs {
     pub bitcoind_url: Option<String>,
     pub bitcoind_user: Option<String>,
     pub bitcoind_pass: Option<String>,
+}
+
+impl TryInto<LampoConf> for LampoCliArgs {
+    type Error = error::Error;
+
+    fn try_into(self) -> Result<LampoConf, Self::Error> {
+        let mut conf = LampoConf::default();
+
+        // override the default configuration with
+        // a possible configuration file
+        if let Some(path) = self.data_dir {
+            // if the path doesn't exist, return an error
+            if !std::path::Path::new(&path).exists() {
+                error::bail!("The path {} doesn't exist", path);
+            }
+            // this override the full configuration, we should merge the two
+            conf = LampoConf::try_from(format!("{path}"))?;
+        }
+
+        // Override the lampo conf with the args
+        let network = self.network.unwrap_or(conf.network.to_string());
+        conf.network = match network.as_str() {
+            "bitcoin" => Network::Bitcoin,
+            "testnet" => Network::Testnet,
+            "regtest" => Network::Regtest,
+            "signet" => Network::Signet,
+            _ => error::bail!("Invalid network {network}"),
+        };
+
+        conf.prepare_dirs()?;
+
+        conf.node = self.client.unwrap_or(conf.node);
+        conf.core_url = self.bitcoind_url;
+        conf.core_user = self.bitcoind_user;
+        conf.core_pass = self.bitcoind_pass;
+        Ok(conf)
+    }
 }
 
 pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
