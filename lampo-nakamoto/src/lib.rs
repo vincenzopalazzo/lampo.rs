@@ -41,6 +41,7 @@ impl Nakamoto {
         let url = match config.network.as_str() {
             "bitcoin" => "https://blockstream.info/api",
             "testnet" => "https://blockstream.info/testnet/api",
+            "signet" => "https://mempool.space/signet/api",
             _ => {
                 return Err(error::anyhow!(
                     "network {} not supported",
@@ -75,6 +76,10 @@ impl Nakamoto {
 
 #[allow(unused_variables)]
 impl Backend for Nakamoto {
+    fn kind(&self) -> lampo_common::backend::BackendKind {
+        lampo_common::backend::BackendKind::Nakamoto
+    }
+
     fn get_block<'a>(
         &'a self,
         header_hash: &'a nakamoto_common::block::BlockHash,
