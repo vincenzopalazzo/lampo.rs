@@ -48,25 +48,14 @@ impl LampoConf {
     }
 
     pub fn prepare_dirs(&self) -> Result<(), anyhow::Error> {
-        Self::prepare_directories(&self.root_path, Some(self.network))
+        Self::prepare_directories(&self.root_path)
     }
 
-    pub fn prepare_directories(
-        root_path: &str,
-        network: Option<Network>,
-    ) -> Result<(), anyhow::Error> {
+    pub fn prepare_directories(root_path: &str) -> Result<(), anyhow::Error> {
         // make sure that the data-dir exist
         if !std::path::Path::new(root_path).exists() {
             log::info!("Creating root dir at `{}`", root_path);
             std::fs::create_dir(root_path)?;
-        }
-
-        if let Some(network) = network {
-            let network_path = format!("{root_path}/{network}");
-            if !std::path::Path::new(&network_path).exists() {
-                log::info!("Creating network directory at `{network_path}`");
-                std::fs::create_dir(network_path)?;
-            }
         }
         Ok(())
     }
@@ -80,7 +69,7 @@ impl LampoConf {
         conf.network = network.unwrap_or(conf.network);
         conf.port = port.unwrap_or(conf.port);
         conf.root_path = path.unwrap_or(conf.root_path);
-        Self::prepare_directories(&conf.root_path, Some(conf.network))?;
+        Self::prepare_directories(&conf.root_path)?;
 
         let path = format!("{}/{}", conf.root_path, conf.network);
         // if the path doesn't exist, return an error
@@ -96,7 +85,7 @@ impl TryFrom<String> for LampoConf {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::prepare_directories(&value, None)?;
+        Self::prepare_directories(&value)?;
 
         let path = format!("{value}/lampo.conf");
         // Check for double slashes
@@ -188,7 +177,7 @@ impl TryFrom<String> for LampoConf {
 
 impl LampoConf {
     pub fn path(&self) -> String {
-        format!("{}/{}", self.root_path, self.network)
+        self.root_path.to_string()
     }
 
     pub fn get_values(&self, key: &str) -> Option<Vec<String>> {

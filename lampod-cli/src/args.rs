@@ -44,36 +44,56 @@ pub struct LampoCliArgs {
 impl TryInto<LampoConf> for LampoCliArgs {
     type Error = error::Error;
 
+    /// Converts the command line arguments into a [`LampoConf`] struct, prioritizing arguments over configuration files.
+    /// The function overrides the default configuration with values from the specified configuration file,
+    /// if the file exists. It then updates the LampoConf with the provided command line arguments,
+    /// prioritizing them over the configuration file values.
     fn try_into(self) -> Result<LampoConf, Self::Error> {
         let mut conf = LampoConf::default();
 
-        // override the default configuration with
+        // Override the default configuration with
         // a possible configuration file
         if let Some(path) = self.data_dir {
             // if the path doesn't exist, return an error
             if !std::path::Path::new(&path).exists() {
                 error::bail!("The path {} doesn't exist", path);
             }
+            // If the network is specified, we should append it to the path
+            let path = if let Some(network) = self.network.clone() {
+                format!("{}/{}", path, network)
+            } else {
+                path
+            };
+
             // this override the full configuration, we should merge the two
             conf = LampoConf::try_from(format!("{path}"))?;
         }
 
-        // Override the lampo conf with the args
-        let network = self.network.unwrap_or(conf.network.to_string());
-        conf.network = match network.as_str() {
-            "bitcoin" => Network::Bitcoin,
-            "testnet" => Network::Testnet,
-            "regtest" => Network::Regtest,
-            "signet" => Network::Signet,
-            _ => error::bail!("Invalid network {network}"),
-        };
+        if let Some(network) = self.network {
+            conf.network = match network.as_str() {
+                "bitcoin" => Network::Bitcoin,
+                "testnet" => Network::Testnet,
+                "regtest" => Network::Regtest,
+                "signet" => Network::Signet,
+                _ => error::bail!("Invalid network {network}"),
+            };
+        }
 
         conf.prepare_dirs()?;
 
-        conf.node = self.client.unwrap_or(conf.node);
-        conf.core_url = self.bitcoind_url;
-        conf.core_user = self.bitcoind_user;
-        conf.core_pass = self.bitcoind_pass;
+        // Override the lampo conf with the args from the cli
+        if let Some(client) = self.client {
+            conf.node = client;
+        }
+        if let Some(url) = self.bitcoind_url {
+            conf.core_url = Some(url);
+        }
+        if let Some(user) = self.bitcoind_user {
+            conf.core_user = Some(user);
+        }
+        if let Some(pass) = self.bitcoind_pass {
+            conf.core_pass = Some(pass);
+        }
         Ok(conf)
     }
 }
