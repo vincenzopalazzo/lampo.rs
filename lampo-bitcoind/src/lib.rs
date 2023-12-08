@@ -63,6 +63,7 @@ impl BitcoinCore {
         // FIXME: the bitcoincore_rpc do not support the https protocol.
         use bitcoincore_rpc::Auth;
 
+        log::debug!(target: "lampo-bitcoind", "Connecting to bitcoin backend at `{url}`");
         let client = Client::new(url, Auth::UserPass(user.to_owned(), pass.to_owned()))?;
         // FIXME: grab some information from the blockchain, eg. Network
         Ok(Self {

@@ -55,10 +55,11 @@ impl LampoConf {
         root_path: &str,
         network: Option<Network>,
     ) -> Result<(), anyhow::Error> {
+        let root_path = Self::normalize_root_dir(root_path, network.unwrap_or(Network::Testnet));
         // make sure that the data-dir exist
-        if !std::path::Path::new(root_path).exists() {
+        if !std::path::Path::new(&root_path).exists() {
             log::info!("Creating root dir at `{}`", root_path);
-            std::fs::create_dir(root_path)?;
+            std::fs::create_dir(root_path.clone())?;
         }
 
         if let Some(network) = network {
@@ -69,6 +70,32 @@ impl LampoConf {
             }
         }
         Ok(())
+    }
+    // Sometimes the root path is given already with the network
+    // e.g: when we read the datadir from the cli args we do not have
+    // any way to get the network from the string (because it contains the root)
+    #[inline(always)]
+    pub fn normalize_root_dir(root_path: &str, network: Network) -> String {
+        let suffix_with_slash = format!("/{network}/");
+        let suffix_without_slash = format!("/{network}");
+
+        let root = if root_path.ends_with(&suffix_with_slash)
+            || root_path.ends_with(&suffix_without_slash)
+        {
+            root_path
+                .trim_end()
+                .strip_suffix(&suffix_with_slash)
+                // SAFETY: we make a check before inside the if condition
+                // so it is safe unwrap here otherwise we are hiding a bug
+                // and we must crash.
+                .or_else(|| root_path.strip_suffix(&suffix_without_slash))
+                .expect(&format!("path: {root_path} - network: {network}"))
+                .to_owned()
+        } else {
+            format!("{root_path}")
+        };
+        log::trace!("normalize root path {root}");
+        root
     }
 
     pub fn new(
@@ -82,10 +109,12 @@ impl LampoConf {
         conf.root_path = path.unwrap_or(conf.root_path);
         Self::prepare_directories(&conf.root_path, Some(conf.network))?;
 
-        let path = format!("{}/{}", conf.root_path, conf.network);
+        let path = Self::normalize_root_dir(&conf.root_path, conf.network);
+        conf.root_path = path.clone();
+
         // if the path doesn't exist, return an error
-        if std::fs::File::open(&path).is_ok() {
-            conf.inner = Some(CLNConf::new(path, false));
+        if std::fs::File::open(conf.path()).is_ok() {
+            conf.inner = Some(CLNConf::new(conf.path(), false));
         }
 
         Ok(conf)
@@ -105,7 +134,7 @@ impl TryFrom<String> for LampoConf {
         // If lampo.conf doesn't exist, return the default configuration
         if !std::path::Path::new(&path).exists() {
             let mut conf = Self::default();
-            conf.root_path = value;
+            conf.root_path = Self::normalize_root_dir(&value, conf.network);
             return Ok(conf);
         }
 
@@ -119,6 +148,7 @@ impl TryFrom<String> for LampoConf {
         else {
             anyhow::bail!("Network inside the configuration file missed");
         };
+
         let Some(port) = conf
             .get_conf("port")
             .map_err(|err| anyhow::anyhow!("{err}"))?
@@ -170,10 +200,13 @@ impl TryFrom<String> for LampoConf {
                 .map_err(|err| anyhow::anyhow!("{err}"))?;
         }
 
+        let network = Network::from_str(&network)?;
+        let root_path = Self::normalize_root_dir(&value, network);
+
         Ok(Self {
             inner: Some(conf),
-            root_path: value.clone(),
-            network: Network::from_str(&network)?,
+            root_path,
+            network,
             ldk_conf: UserConfig::default(),
             port: u64::from_str(&port)?,
             node,

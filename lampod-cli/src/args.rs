@@ -1,9 +1,7 @@
 use radicle_term as term;
 
-use lampo_common::{
-    conf::{LampoConf, Network},
-    error,
-};
+use lampo_common::conf::{LampoConf, Network};
+use lampo_common::error;
 
 struct Help {
     name: &'static str,
@@ -47,19 +45,8 @@ impl TryInto<LampoConf> for LampoCliArgs {
     fn try_into(self) -> Result<LampoConf, Self::Error> {
         let mut conf = LampoConf::default();
 
-        // override the default configuration with
-        // a possible configuration file
-        if let Some(path) = self.data_dir {
-            // if the path doesn't exist, return an error
-            if !std::path::Path::new(&path).exists() {
-                error::bail!("The path {} doesn't exist", path);
-            }
-            // this override the full configuration, we should merge the two
-            conf = LampoConf::try_from(format!("{path}"))?;
-        }
-
-        // Override the lampo conf with the args
-        let network = self.network.unwrap_or(conf.network.to_string());
+        // if network is not specified, set the testnet dir
+        let network = self.network.unwrap_or(String::from("testnet"));
         conf.network = match network.as_str() {
             "bitcoin" => Network::Bitcoin,
             "testnet" => Network::Testnet,
@@ -68,12 +55,33 @@ impl TryInto<LampoConf> for LampoCliArgs {
             _ => error::bail!("Invalid network {network}"),
         };
 
+        let path = self.data_dir.unwrap_or(conf.root_path);
+        // if the path doesn't exist, return an error
+        if !std::path::Path::new(&path).exists() {
+            error::bail!("The path {} doesn't exist", path);
+        }
+
+        let path = format!("{path}/{network}");
+        // FIXME: this override the full configuration, we should merge the two
+        conf = LampoConf::try_from(path)?;
         conf.prepare_dirs()?;
 
-        conf.node = self.client.unwrap_or(conf.node);
-        conf.core_url = self.bitcoind_url;
-        conf.core_user = self.bitcoind_user;
-        conf.core_pass = self.bitcoind_pass;
+        log::debug!(target: "lampod-cli", "lampo data dir `{}`", conf.path());
+        log::debug!(target: "lampod-cli", "client from args {:?}", self.client);
+        // Override the lampo conf with the args from the cli
+        if let Some(node) = self.client {
+            conf.node = node.clone();
+        }
+        if self.bitcoind_url.is_some() {
+            conf.core_url = self.bitcoind_url;
+        }
+        if self.bitcoind_user.is_some() {
+            conf.core_user = self.bitcoind_user;
+        }
+        if self.bitcoind_pass.is_some() {
+            conf.core_pass = self.bitcoind_pass;
+        }
+
         Ok(conf)
     }
 }
