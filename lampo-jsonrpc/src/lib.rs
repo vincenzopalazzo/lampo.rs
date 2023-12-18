@@ -1,9 +1,5 @@
-//! Full feature JSON RPC 2.0 Server/client with a
+//! Full feature async JSON RPC 2.0 Server/client with a
 //! minimal dependencies footprint.
-pub mod command;
-pub mod errors;
-pub mod json_rpc2;
-
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, ErrorKind};
@@ -13,9 +9,15 @@ use std::os::unix::net::{SocketAddr, UnixStream};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use command::Context;
+// FIXME: use mio for a better platform support.
 use popol::{Sources, Timeout};
 use serde_json::Value;
+
+pub mod command;
+pub mod errors;
+pub mod json_rpc2;
+
+use command::Context;
 
 use crate::errors::Error;
 use crate::json_rpc2::{Request, Response};
@@ -133,7 +135,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         let queue = self.conn_queue.lock().unwrap();
 
         let mut conns = queue.take();
-        log::debug!("{:?}", conns);
+        log::debug!(target: "jsonrpc", "{:?}", conns);
         if conns.contains_key(&key) {
             let Some(queue) = conns.get_mut(&key) else {
                 panic!("queue not found");
@@ -144,7 +146,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
             q.push_back(resp);
             conns.insert(key, q);
         }
-        log::debug!("{:?}", conns);
+        log::debug!(target: "jsonrpc", "{:?}", conns);
         queue.set(conns);
     }
 
@@ -173,7 +175,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         self.sources
             .register(RPCEvent::Listening, &self.socket, popol::interest::READ);
 
-        log::info!("starting server on {}", self.socket_path);
+        log::info!(target: "jsonrpc", "starting server on {}", self.socket_path);
         let mut events = vec![];
         while !self.handler.stop.get() {
             // Blocking while we are waiting new events!
@@ -189,10 +191,10 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                     break;
                                 }
                             }
-                            log::error!("fail to accept the connection: {:?}", conn);
+                            log::error!(target: "jsonrpc", "fail to accept the connection: {:?}", conn);
                             continue;
                         };
-                        log::trace!("new connection to unix rpc socket");
+                        log::trace!(target: "jsonrpc", "new connection to unix rpc socket");
                         self.add_connection(&addr, stream);
                     }
                     RPCEvent::Connect(addr) => {
@@ -200,19 +202,19 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                             break;
                         }
                         if event.is_error() {
-                            log::error!("an error occurs");
+                            log::error!(target: "jsonrpc", "an error occurs");
                             continue;
                         }
 
                         if event.is_invalid() {
-                            log::info!("event invalid, unregister event from the tracking one");
+                            log::info!(target: "jsonrpc", "event invalid, unregister event from the tracking one");
                             self.sources.unregister(&event.key);
                             break;
                         }
 
                         if event.is_readable() {
                             let Some(mut stream) = self.conn.get(addr) else {
-                                log::error!("connection not found `{addr}`");
+                                log::error!(target: "jsonrpc", "connection not found `{addr}`");
                                 continue;
                             };
                             let mut buff = String::new();
@@ -220,21 +222,21 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                 if err.kind() != ErrorKind::WouldBlock {
                                     return Err(err);
                                 }
-                                log::info!("blocking with err {:?}!", err);
+                                log::info!(target: "jsonrpc", "blocking with err {:?}!", err);
                             }
                             if buff.is_empty() {
-                                log::warn!("bufefe is empty");
+                                log::warn!(target: "jsonrpc", "buffer is empty");
                                 break;
                             }
                             let buff = buff.trim();
-                            log::info!("buffer read {buff}");
+                            log::info!(target: "jsonrpc", "buffer read {buff}");
                             let requ: Request<Value> =
                                 serde_json::from_str(&buff).map_err(|err| {
                                     io::Error::new(io::ErrorKind::Other, format!("{err}"))
                                 })?;
-                            log::trace!("request {:?}", requ);
+                            log::trace!(target: "jsonrpc", "request {:?}", requ);
                             let Some(resp) = self.handler.run_callback(&requ) else {
-                                log::error!("`{}` not found!", requ.method);
+                                log::error!(target: "jsonrpc", "`{}` not found!", requ.method);
                                 break;
                             };
                             // FIXME; the id in the JSON RPC can be null!
@@ -252,14 +254,14 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                     jsonrpc: requ.jsonrpc.clone(),
                                 },
                             };
-                            log::trace!("send response: `{:?}`", response);
+                            log::trace!(target: "jsonrpc", "send response: `{:?}`", response);
                             self.send_resp(addr.to_string(), response);
                         }
 
                         if event.is_writable() {
                             let stream = self.conn.get(addr);
                             if stream.is_none() {
-                                log::error!("connection not found `{addr}`");
+                                log::error!(target: "jsonrpc", "connection not found `{addr}`");
                                 continue;
                             };
 
@@ -290,7 +292,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                     event.source.set(popol::interest::WRITE);
                                 }
                                 Err(err) => {
-                                    log::error!(target: "net", "{}: Write error: {}", addr, err.to_string());
+                                    log::error!(target: "jsonrpc", "{}: Write error: {}", addr, err.to_string());
                                 }
                             }
                             stream.shutdown(std::net::Shutdown::Both)?;

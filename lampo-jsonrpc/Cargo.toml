@@ -1,14 +1,21 @@
 [package]
 name = "lampo-jsonrpc"
-version = "0.1.0"
+version = "0.0.1-alpha.1"
 edition = "2021"
+authors = ["Vincenzo Palazzo <vincenzopalazzodev@gmail.com>"]
+description = "Crate that provides a plugin API to give the possibility to implement a plugin in Rust"
+license = "Apache-2.0"
+homepage = "https://git.hedwing.dev/dev-crew/lampo.rs"
+repository = "https://git.hedwing.dev/dev-crew/lampo.rs"
+keywords = [ "jsonrpc", "json-rpc-v2", "json-rpc-server" ]
+readme = "README.md"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-popol = "2.2.0 "
+popol = "2.2.0"
 log = "0.4.17"
 
 [dev-dependencies]
 lampo-common = { path = "../lampo-common" }
-ntest = "*"
+ntest = "0.9.0"
