@@ -1,6 +1,7 @@
 use std::io;
 use std::{error, fmt};
 
+use lampo_common::error::Error as lampo_error;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -19,6 +20,8 @@ pub enum Error {
     NonceMismatch,
     /// Response to a request had a jsonrpc field other than "2.0"
     VersionMismatch,
+    /// Error returned by lampo_jsonrpc
+    LampoError(lampo_error),
 }
 
 impl From<serde_json::Error> for Error {
@@ -39,6 +42,12 @@ impl From<RpcError> for Error {
     }
 }
 
+impl From<lampo_error> for Error {
+    fn from(e: lampo_error) -> Error {
+        Error::LampoError(e)
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -48,6 +57,7 @@ impl fmt::Display for Error {
             Error::NoErrorOrResult => write!(f, "Malformed RPC response"),
             Error::NonceMismatch => write!(f, "Nonce of response did not match nonce of request"),
             Error::VersionMismatch => write!(f, "`jsonrpc` field set to non-\"2.0\""),
+            Error::LampoError(ref e) => write!(f, "JsonRPC error response: {e}"),
         }
     }
 }

@@ -348,7 +348,7 @@ mod tests {
             lampo.rt,
             lampo
                 .peer_manager()
-                .connect(connect.node_id(), connect.addr())
+                .connect(connect.node_id().unwrap(), connect.addr().unwrap())
         );
         assert!(result.is_ok(), "{:?}", result);
     }

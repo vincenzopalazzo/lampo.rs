@@ -15,13 +15,15 @@ pub struct Connect {
 }
 
 impl Connect {
-    pub fn node_id(&self) -> NodeId {
-        NodeId::from_str(&self.node_id).unwrap()
+    pub fn node_id(&self) -> error::Result<NodeId> {
+        let node_id = NodeId::from_str(&self.node_id)?;
+        Ok(node_id)
     }
 
-    pub fn addr(&self) -> SocketAddr {
+    pub fn addr(&self) -> error::Result<SocketAddr> {
         let addr = format!("{}:{}", self.addr, self.port);
-        SocketAddr::from_str(&addr).unwrap()
+        let socket_addr = SocketAddr::from_str(&addr)?;
+        Ok(socket_addr)
     }
 }
 
