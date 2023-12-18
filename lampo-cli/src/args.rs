@@ -107,9 +107,6 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     // by appending the network name (default: testnet) to the path
     // and adding the socket path (lampod.socket)
     if socket.is_none() {
-        log::info!(
-            "data-dir is specified and socket is not specified, try to get socket path from it"
-        );
         let data_dir = data_dir
             .or_else(|| {
                 #[allow(deprecated)]
