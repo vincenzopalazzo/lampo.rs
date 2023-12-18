@@ -19,9 +19,13 @@ impl Connect {
         NodeId::from_str(&self.node_id).unwrap()
     }
 
-    pub fn addr(&self) -> SocketAddr {
+    pub fn addr(&self) -> error::Result<SocketAddr> {
         let addr = format!("{}:{}", self.addr, self.port);
-        SocketAddr::from_str(&addr).unwrap()
+        let result = SocketAddr::from_str(&addr);
+        match result {
+            Ok(res) => Ok(res),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 
