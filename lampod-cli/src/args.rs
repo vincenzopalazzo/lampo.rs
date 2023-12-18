@@ -21,7 +21,7 @@ Usage
 
 Options
 
-    -c | --data-dir    Override the default path of the config field
+    -d | --data-dir    Override the default path of the config field
     -n | --network     Set the network for lampo
     -h | --help        Print help
     --client           Set the default lampo bitcoin backend
@@ -100,7 +100,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
-            Short('c') | Long("data-dir") => {
+            Short('d') | Long("data-dir") => {
                 let val: String = parser.value()?.parse()?;
                 data_dir = Some(val);
             }
