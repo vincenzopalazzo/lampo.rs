@@ -4,17 +4,14 @@ use std::process::exit;
 
 use radicle_term as term;
 
+use lampo_client::errors::Error;
 use lampo_client::UnixClient;
 use lampo_common::error;
 use lampo_common::json;
-use lampo_common::logger;
 
 use crate::args::LampoCliArgs;
 
 fn main() -> error::Result<()> {
-    use lampo_client::errors::Error;
-
-    logger::init(log::Level::Info).unwrap();
     let args = match args::parse_args() {
         Ok(args) => args,
         Err(err) => {

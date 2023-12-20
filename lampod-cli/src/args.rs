@@ -24,6 +24,9 @@ Options
     -d | --data-dir    Override the default path of the config field
     -n | --network     Set the network for lampo
     -h | --help        Print help
+
+    --log-file         Redirect the lampo logs on the file
+    --log-level        Set the log level, by default is `info`
     --client           Set the default lampo bitcoin backend
 "#,
 };
@@ -34,6 +37,8 @@ pub struct LampoCliArgs {
     pub network: Option<String>,
     pub client: Option<String>,
     pub mnemonic: Option<String>,
+    pub log_level: String,
+    pub log_file: Option<String>,
     pub bitcoind_url: Option<String>,
     pub bitcoind_user: Option<String>,
     pub bitcoind_pass: Option<String>,
@@ -90,6 +95,8 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     use lexopt::prelude::*;
 
     let mut data_dir: Option<String> = None;
+    let mut log_file: Option<String> = None;
+    let mut level: Option<String> = None;
     let mut network: Option<String> = None;
     let mut client: Option<String> = None;
     let mut bitcoind_url: Option<String> = None;
@@ -103,6 +110,14 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
             Short('d') | Long("data-dir") => {
                 let val: String = parser.value()?.parse()?;
                 data_dir = Some(val);
+            }
+            Long("log-file") => {
+                let val: String = parser.value()?.parse()?;
+                log_file = Some(val);
+            }
+            Long("log-level") => {
+                let val: String = parser.value()?.parse()?;
+                level = Some(val);
             }
             Short('n') | Long("network") => {
                 let val: String = parser.value()?.parse()?;
@@ -141,9 +156,13 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         network,
         client,
         mnemonic,
+        log_file,
         bitcoind_url,
         bitcoind_pass,
         bitcoind_user,
+        // Default log level is info if it is not specified
+        // in the command line
+        log_level: level.unwrap_or("info".to_owned()),
     })
 }
 
