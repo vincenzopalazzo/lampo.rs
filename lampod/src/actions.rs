@@ -2,9 +2,9 @@
 pub mod handler;
 
 use crossbeam_channel as chan;
-use lightning::events::Event;
 
 use lampo_common::error;
+use lampo_common::ldk::events::Event;
 
 use crate::command::{Command, InventoryCommand};
 

@@ -13,18 +13,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use bitcoin::hashes::sha256::Hash as Sha256;
-use bitcoin::hashes::Hash;
-use bitcoin::secp256k1::PublicKey as pubkey;
+use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
+use lampo_common::bitcoin::hashes::Hash;
+use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::keymanager::KeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::ln::channelmanager::Retry;
-use lightning::ln::channelmanager::{PaymentId, RecipientOnionFields};
-use lightning::ln::{PaymentHash, PaymentPreimage};
-use lightning::routing::router::{PaymentParameters, RouteParameters};
-use lightning::sign::EntropySource;
+use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
+use lampo_common::ldk::ln::{PaymentHash, PaymentPreimage};
+use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
+use lampo_common::ldk::sign::EntropySource;
 
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;

@@ -10,13 +10,6 @@ tokio = { version = "^1.29.1", features = ["rt-multi-thread", "parking_lot"] }
 lampo-common = { path = "../lampo-common" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-client = { path = "../lampo-client" }
-lightning = { git = "https://github.com/lightningdevkit/rust-lightning.git", features = ["max_level_trace"] }
-lightning-block-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
-lightning-invoice = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
-lightning-persister = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
-lightning-background-processor = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
-lightning-net-tokio = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
-lightning-rapid-gossip-sync = { git = "https://github.com/lightningdevkit/rust-lightning.git" }
 log = "0.4.17"
 time = "0.3.13"
 bitcoin = "0.29.0"

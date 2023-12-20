@@ -2,9 +2,9 @@
 use std::net::SocketAddr;
 
 use async_trait::async_trait;
-use lightning::ln::features::ChannelTypeFeatures;
 
 use lampo_common::error;
+use lampo_common::ldk::ln::features::ChannelTypeFeatures;
 use lampo_common::model::request;
 use lampo_common::model::response;
 use lampo_common::types::{ChannelId, ChannelState, NodeId};
