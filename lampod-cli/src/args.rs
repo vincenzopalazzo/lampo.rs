@@ -28,6 +28,10 @@ Options
     --log-file         Redirect the lampo logs on the file
     --log-level        Set the log level, by default is `info`
     --client           Set the default lampo bitcoin backend
+    --core-url         Set the url of the bitcoin core backend
+    --core-user        Set the username of the bitcoin core backend
+    --core-pass        Set the password of the bitcoin core backend
+    --restore-wallet   Restore a wallet from a mnemonic 
 "#,
 };
 
