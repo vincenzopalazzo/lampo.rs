@@ -3,10 +3,10 @@
 use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::Once;
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
+use std::sync::Once;
 
 pub use lampod::LampoDeamon;
 
@@ -84,7 +84,7 @@ fn init_logger() {
         // ignore error
         INIT.call_once(|| {
             use lampo_common::logger;
-            logger::init(logger::Level::Debug).expect("Unable to init the logger");
+            logger::init("trace", None).expect("Unable to init the logger");
         });
     }
 

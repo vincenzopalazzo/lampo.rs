@@ -3,6 +3,7 @@ mod args;
 
 use std::env;
 use std::io;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -39,8 +40,14 @@ use lampod::LampoDeamon;
 use crate::args::LampoCliArgs;
 
 fn main() -> error::Result<()> {
-    logger::init(log::Level::Trace).expect("unable to init the logger for the first time");
     let args = args::parse_args()?;
+    logger::init(
+        &args.log_level,
+        args.log_file
+            .as_ref()
+            .and_then(|path| Some(PathBuf::from_str(&path).unwrap())),
+    )
+    .expect("unable to init the logger for the first time");
     run(args)?;
     Ok(())
 }
