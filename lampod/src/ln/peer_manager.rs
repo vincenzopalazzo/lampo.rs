@@ -3,16 +3,17 @@ use std::time::Duration;
 use std::{sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
-use lightning::ln::peer_handler::MessageHandler;
-use lightning::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
-use lightning::onion_message::{MessageRouter, OnionMessenger};
-use lightning::routing::gossip::{NetworkGraph, P2PGossipSync};
-use lightning_net_tokio;
-use lightning_net_tokio::SocketDescriptor;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::keymanager::KeysManager;
+use lampo_common::ldk;
+use lampo_common::ldk::ln::peer_handler::MessageHandler;
+use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
+use lampo_common::ldk::net;
+use lampo_common::ldk::net::SocketDescriptor;
+use lampo_common::ldk::onion_message::{MessageRouter, OnionMessenger};
+use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
 
@@ -32,8 +33,8 @@ impl MessageRouter for FakeMsgRouter {
         &self,
         _: bitcoin::secp256k1::PublicKey,
         _: Vec<bitcoin::secp256k1::PublicKey>,
-        _: lightning::onion_message::Destination,
-    ) -> Result<lightning::onion_message::OnionMessagePath, ()> {
+        _: ldk::onion_message::Destination,
+    ) -> Result<ldk::onion_message::OnionMessagePath, ()> {
         log::warn!("ingoring the find path in the message router");
         Err(())
     }
@@ -154,11 +155,7 @@ impl LampoPeerManager {
                 tokio::spawn(async move {
                     // Use LDK's supplied networking battery to facilitate inbound
                     // connections.
-                    lightning_net_tokio::setup_inbound(
-                        peer_manager.clone(),
-                        tcp_stream.into_std().unwrap(),
-                    )
-                    .await;
+                    net::setup_inbound(peer_manager.clone(), tcp_stream.into_std().unwrap()).await;
                 });
             }
         });
@@ -196,8 +193,7 @@ impl PeerEvents for LampoPeerManager {
     }
 
     async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
-        let Some(close_callback) =
-            lightning_net_tokio::connect_outbound(self.manager(), node_id, host).await
+        let Some(close_callback) = net::connect_outbound(self.manager(), node_id, host).await
         else {
             error::bail!("impossible connect with the peer `{node_id}`");
         };

@@ -24,7 +24,6 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use lightning_background_processor::BackgroundProcessor;
 use tokio::runtime::Runtime;
 
 use lampo_common::backend::Backend;
@@ -33,6 +32,7 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::ldk::events::Event;
+use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
 use lampo_common::ldk::routing::gossip::P2PGossipSync;
 use lampo_common::wallet::WalletManager;
 
@@ -262,7 +262,7 @@ impl LampoDeamon {
             event_handler,
             self.channel_manager().chain_monitor(),
             self.channel_manager().manager(),
-            lightning_background_processor::GossipSync::p2p(gossip_sync),
+            GossipSync::p2p(gossip_sync),
             self.peer_manager().manager(),
             self.logger.clone(),
             Some(self.channel_manager().scorer()),
@@ -298,12 +298,12 @@ mod tests {
     use std::sync::Arc;
 
     use clightningrpc_conf::CLNConf;
-    use lightning::util::config::UserConfig;
 
     use lampo_bdk_wallet::BDKWalletManager;
     use lampo_common::bitcoin;
     use lampo_common::conf::LampoConf;
     use lampo_common::json;
+    use lampo_common::ldk::util::config::UserConfig;
     use lampo_common::logger;
     use lampo_common::model::request;
     use lampo_common::secp256k1;

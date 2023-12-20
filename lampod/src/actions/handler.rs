@@ -2,20 +2,19 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use bitcoin::hashes::hex::ToHex;
-use lampo_common::error::Ok;
-use lampo_common::event::ln::LightningEvent;
-use lampo_common::model::response::PaymentHop;
-use lampo_common::model::response::PaymentState;
-use lampo_jsonrpc::json_rpc2::Request;
-use lightning::events as ldk;
-
+use lampo_common::bitcoin::hashes::hex::ToHex;
 use lampo_common::chan;
 use lampo_common::error;
+use lampo_common::error::Ok;
+use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::{Emitter, Event, Subscriber};
 use lampo_common::handler::Handler as EventHandler;
 use lampo_common::json;
+use lampo_common::ldk;
+use lampo_common::model::response::PaymentHop;
+use lampo_common::model::response::PaymentState;
 use lampo_common::types::ChannelState;
+use lampo_jsonrpc::json_rpc2::Request;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
@@ -128,9 +127,9 @@ impl Handler for LampoHandler {
     }
 
     /// method used to handle the incoming event from ldk
-    fn handle(&self, event: lightning::events::Event) -> error::Result<()> {
+    fn handle(&self, event: ldk::events::Event) -> error::Result<()> {
         match event {
-            ldk::Event::OpenChannelRequest {
+            ldk::events::Event::OpenChannelRequest {
                 temporary_channel_id,
                 counterparty_node_id,
                 funding_satoshis,
@@ -139,7 +138,7 @@ impl Handler for LampoHandler {
             } => {
                 Err(error::anyhow!("Request for open a channel received, unfortunatly we do not support this feature yet."))
             }
-            ldk::Event::ChannelReady {
+            ldk::events::Event::ChannelReady {
                 channel_id,
                 user_channel_id,
                 counterparty_node_id,
@@ -153,7 +152,7 @@ impl Handler for LampoHandler {
                 }));
                 Ok(())
             }
-            ldk::Event::ChannelClosed {
+            ldk::events::Event::ChannelClosed {
                 channel_id,
                 user_channel_id,
                 reason,
@@ -162,7 +161,7 @@ impl Handler for LampoHandler {
                 log::info!("channel `{user_channel_id}` closed with reason: `{reason}`");
                 Ok(())
             }
-            ldk::Event::FundingGenerationReady {
+            ldk::events::Event::FundingGenerationReady {
                 temporary_channel_id,
                 counterparty_node_id,
                 channel_value_satoshis,
@@ -209,7 +208,7 @@ impl Handler for LampoHandler {
                     .map_err(|err| error::anyhow!("{:?}", err))?;
                 Ok(())
             }
-            ldk::Event::ChannelPending {
+            ldk::events::Event::ChannelPending {
                 counterparty_node_id,
                 funding_txo,
                 ..
@@ -221,13 +220,13 @@ impl Handler for LampoHandler {
                 self.emit(Event::Lightning(LightningEvent::ChannelPending { counterparty_node_id, funding_transaction: funding_txo }));
                 Ok(())
             }
-            ldk::Event::PendingHTLCsForwardable { time_forwardable } => {
+            ldk::events::Event::PendingHTLCsForwardable { time_forwardable } => {
                 self.channel_manager
                     .manager()
                     .process_pending_htlc_forwards();
                 Ok(())
             }
-            ldk::Event::PaymentClaimable {
+            ldk::events::Event::PaymentClaimable {
                 receiver_node_id,
                 payment_hash,
                 onion_fields,
@@ -239,17 +238,17 @@ impl Handler for LampoHandler {
                 claim_deadline,
             } => {
                 let preimage = match purpose {
-                    ldk::PaymentPurpose::InvoicePayment {
+                    ldk::events::PaymentPurpose::InvoicePayment {
                         payment_preimage, ..
                     } => payment_preimage,
-                    ldk::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
                 };
                 self.channel_manager
                     .manager()
                     .claim_funds(preimage.unwrap());
                 Ok(())
             }
-            ldk::Event::PaymentClaimed {
+            ldk::events::Event::PaymentClaimed {
                 receiver_node_id,
                 payment_hash,
                 amount_msat,
@@ -257,22 +256,22 @@ impl Handler for LampoHandler {
                 ..
             } => {
                 let (payment_preimage, payment_secret) = match purpose {
-                    ldk::PaymentPurpose::InvoicePayment {
+                    ldk::events::PaymentPurpose::InvoicePayment {
                         payment_preimage,
                         payment_secret,
                         ..
                     } => (payment_preimage, Some(payment_secret)),
-                    ldk::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
+                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
                 };
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristant these information
                 Ok(())
             }
-            ldk::Event::PaymentSent { .. } => {
+            ldk::events::Event::PaymentSent { .. } => {
                 log::info!(target: "lampo_handler", "payment sent");
                 Ok(())
             },
-            ldk::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
+            ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
                 let path = path.hops.iter().map(|hop| PaymentHop::from(hop.clone())).collect::<Vec<PaymentHop>>();
                 let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path };
                 self.emit(Event::Lightning(hop));

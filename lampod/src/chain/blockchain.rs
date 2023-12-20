@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bitcoin::blockdata::constants::ChainHash;
+use lampo_common::backend::Backend;
+use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::Transaction;
+use lampo_common::ldk;
 use lampo_common::ldk::chain::chaininterface::{
     BroadcasterInterface, ConfirmationTarget, FeeEstimator,
 };
 use lampo_common::ldk::chain::Filter;
 use lampo_common::ldk::routing::utxo::UtxoLookup;
-
-use lampo_common::backend::Backend;
 use lampo_common::wallet::WalletManager;
 
 #[derive(Clone)]
@@ -104,7 +104,7 @@ impl BroadcasterInterface for LampoChainManager {
 }
 
 impl Filter for LampoChainManager {
-    fn register_output(&self, output: lightning::chain::WatchedOutput) {
+    fn register_output(&self, output: ldk::chain::WatchedOutput) {
         self.backend.register_output(output);
     }
 

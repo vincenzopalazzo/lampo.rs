@@ -12,7 +12,10 @@ pub mod wallet;
 
 pub mod ldk {
     pub use lightning::*;
+    pub use lightning_background_processor as processor;
     pub use lightning_invoice as invoice;
+    pub use lightning_net_tokio as net;
+    pub use lightning_persister as persister;
 }
 
 pub mod error {
