@@ -41,7 +41,7 @@ pub struct LampoCliArgs {
     pub network: Option<String>,
     pub client: Option<String>,
     pub mnemonic: Option<String>,
-    pub log_level: String,
+    pub log_level: Option<String>,
     pub log_file: Option<String>,
     pub bitcoind_url: Option<String>,
     pub bitcoind_user: Option<String>,
@@ -89,7 +89,12 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if self.bitcoind_pass.is_some() {
             conf.core_pass = self.bitcoind_pass;
         }
-
+        if self.log_file.is_some() {
+            conf.log_file = self.log_file;
+        }
+        if self.log_level.is_some() {
+            conf.log_level = self.log_level.unwrap();
+        }
         Ok(conf)
     }
 }
@@ -165,7 +170,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         bitcoind_user,
         // Default log level is info if it is not specified
         // in the command line
-        log_level: level.unwrap_or("info".to_owned()),
+        log_level: level,
     })
 }
 

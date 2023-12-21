@@ -19,6 +19,8 @@ pub struct LampoConf {
     pub core_pass: Option<String>,
     pub private_key: Option<String>,
     pub channels_keys: Option<String>,
+    pub log_file: Option<String>,
+    pub log_level: String,
 }
 
 impl LampoConf {
@@ -44,6 +46,8 @@ impl LampoConf {
             core_pass: None,
             private_key: None,
             channels_keys: None,
+            log_level: "info".to_string(),
+            log_file: None,
         }
     }
 
@@ -203,7 +207,12 @@ impl TryFrom<String> for LampoConf {
 
         let network = Network::from_str(&network)?;
         let root_path = Self::normalize_root_dir(&value, network);
-
+        let log_level = conf.get_conf("log-level");
+        let level = match log_level {
+            Ok(Some(level)) => level,
+            _ => "info".to_string(),
+        };
+        let log_file = conf.get_conf("log-file").unwrap_or_else(|_| None);
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -216,6 +225,8 @@ impl TryFrom<String> for LampoConf {
             core_pass,
             private_key,
             channels_keys,
+            log_file,
+            log_level: level,
         })
     }
 }
