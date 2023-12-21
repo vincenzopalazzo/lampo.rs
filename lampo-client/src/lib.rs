@@ -58,7 +58,7 @@ mod tests {
     #[test]
     #[ignore = "we need to run a node"]
     fn connect_call() {
-        logger::init(log::Level::Debug).unwrap();
+        logger::init("debug", None).unwrap();
         let client = UnixClient::new("/home/vincent/.lampo/testnet/lampod.socket").unwrap();
         let input = Connect {
             node_id: "02049b60c296ffead3e7c8b124c5730153403a8314c1116c2d1b43cf9ac0de2d9d"
