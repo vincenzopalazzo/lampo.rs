@@ -348,7 +348,7 @@ mod tests {
     #[test]
     #[timeout(9000)]
     fn register_rpc() {
-        logger::init(log::Level::Debug).unwrap();
+        logger::init("debug", None).unwrap();
         let path = "/tmp/tmp.sock";
         let _ = std::fs::remove_file(path);
         let server = JSONRPCv2::new(Arc::new(DummyCtx), path).unwrap();

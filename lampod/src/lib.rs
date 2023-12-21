@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn simple_node_connection() {
-        logger::init(log::Level::Debug).expect("initializing logger for the first time");
+        logger::init("debug", None).expect("initializing logger for the first time");
         let conf = LampoConf {
             ldk_conf: UserConfig::default(),
             network: bitcoin::Network::Testnet,
