@@ -40,14 +40,8 @@ use lampod::LampoDeamon;
 use crate::args::LampoCliArgs;
 
 fn main() -> error::Result<()> {
+    log::debug!("Started!");
     let args = args::parse_args()?;
-    logger::init(
-        &args.log_level,
-        args.log_file
-            .as_ref()
-            .and_then(|path| Some(PathBuf::from_str(&path).unwrap())),
-    )
-    .expect("unable to init the logger for the first time");
     run(args)?;
     Ok(())
 }
@@ -59,6 +53,15 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     // After this point the configuration is ready!
     let lampo_conf: LampoConf = args.try_into()?;
     log::debug!(target: "lampod-cli", "init wallet ..");
+    // init the logger here
+    logger::init(
+        &lampo_conf.log_level,
+        lampo_conf
+            .log_file
+            .as_ref()
+            .and_then(|path| Some(PathBuf::from_str(&path).unwrap())),
+    )
+    .expect("unable to init the logger for the first time");
 
     // Prepare the backend
     let client = lampo_conf.node.clone();
