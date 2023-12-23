@@ -4,17 +4,19 @@
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-pub use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::locktime::Height;
 use bitcoin::BlockHeader;
+use serde::{Deserialize, Serialize};
+
+pub use bitcoin::consensus::{deserialize, serialize};
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
 pub use lightning::chain::WatchedOutput;
 pub use lightning::routing::utxo::UtxoResult;
 pub use lightning_block_sync::{
     AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult,
 };
-use serde::{Deserialize, Serialize};
 
+use crate::conf::Network;
 use crate::error;
 use crate::handler::Handler;
 
@@ -31,10 +33,25 @@ pub enum BackendKind {
     Nakamoto,
 }
 
+/// Contains information of the backend
+/// to explore the status of the backend.
+#[derive(Serialize, Debug, Deserialize)]
+pub struct BackendInfo {
+    /// The backend is syncing with the network
+    pub is_syncing: bool,
+    /// The backend network
+    pub chain: Network,
+    /// If the backend is pruned
+    pub pruned: bool,
+}
+
 /// Bakend Trait specification
 pub trait Backend {
     /// Return the kind of backend
     fn kind(&self) -> BackendKind;
+
+    /// Return the information of the bancked
+    fn backend_info(&self) -> error::Result<BackendInfo>;
 
     /// Fetch feerate give a number of blocks
     fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32>;

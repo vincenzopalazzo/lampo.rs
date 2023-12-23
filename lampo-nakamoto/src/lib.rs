@@ -3,6 +3,7 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::TcpStream;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use esplora_client::BlockingClient;
@@ -32,13 +33,15 @@ pub struct Nakamoto {
     current_height: Cell<Option<Height>>,
     rest: BlockingClient,
     handler: RefCell<Option<Arc<dyn Handler>>>,
+    chain: lampo_common::conf::Network,
 }
 
 impl Nakamoto {
     pub fn new(config: Config) -> error::Result<Self> {
         let nakamoto = Client::<Reactor<TcpStream>>::new()?;
         let handler = nakamoto.handle();
-        let url = match config.network.as_str() {
+        let network = config.network;
+        let url = match network.as_str() {
             "bitcoin" => "https://blockstream.info/api",
             "testnet" => "https://blockstream.info/testnet/api",
             "signet" => "https://mempool.space/signet/api",
@@ -59,6 +62,7 @@ impl Nakamoto {
                 .build_blocking()
                 .map_err(|err| error::anyhow!("{err}"))?,
             handler: RefCell::new(None),
+            chain: lampo_common::conf::Network::from_str(network.as_str())?,
         };
         Ok(client)
     }
@@ -78,6 +82,14 @@ impl Nakamoto {
 impl Backend for Nakamoto {
     fn kind(&self) -> lampo_common::backend::BackendKind {
         lampo_common::backend::BackendKind::Nakamoto
+    }
+
+    fn backend_info(&self) -> error::Result<lampo_common::backend::BackendInfo> {
+        Ok(lampo_common::backend::BackendInfo {
+            is_syncing: false,
+            pruned: true,
+            chain: self.chain,
+        })
     }
 
     fn get_block<'a>(

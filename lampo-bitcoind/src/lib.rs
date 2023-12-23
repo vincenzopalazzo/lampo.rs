@@ -17,6 +17,7 @@ use lampo_common::backend::{Backend, TxResult};
 use lampo_common::backend::{Block, BlockData};
 use lampo_common::bitcoin::locktime::Height;
 use lampo_common::bitcoin::{Script, Transaction, Txid};
+use lampo_common::conf::Network;
 use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
@@ -63,7 +64,6 @@ impl BitcoinCore {
         // FIXME: the bitcoincore_rpc do not support the https protocol.
         use bitcoincore_rpc::Auth;
 
-        log::debug!(target: "lampo-bitcoind", "Connecting to bitcoin backend at `{url}`");
         let client = Client::new(url, Auth::UserPass(user.to_owned(), pass.to_owned()))?;
         // FIXME: grab some information from the blockchain, eg. Network
         Ok(Self {
@@ -148,6 +148,15 @@ impl BitcoinCore {
 impl Backend for BitcoinCore {
     fn kind(&self) -> lampo_common::backend::BackendKind {
         lampo_common::backend::BackendKind::Core
+    }
+
+    fn backend_info(&self) -> error::Result<lampo_common::backend::BackendInfo> {
+        let info = self.inner.get_blockchain_info()?;
+        Ok(lampo_common::backend::BackendInfo {
+            pruned: info.pruned,
+            is_syncing: info.initial_block_download,
+            chain: Network::from_str(&info.chain)?,
+        })
     }
 
     fn brodcast_tx(&self, tx: &lampo_common::backend::Transaction) {
