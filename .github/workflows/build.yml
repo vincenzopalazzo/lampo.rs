@@ -32,6 +32,9 @@ jobs:
       - name: Run cargo test
         run: cargo test
 
+      - name: Build release binary
+        run: cargo build --release
+
   lints:
     name: Lints
     runs-on: ubuntu-latest
