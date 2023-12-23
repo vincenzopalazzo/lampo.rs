@@ -14,7 +14,6 @@ use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::handler::Handler as _;
 use lampo_common::logger;
 use lampo_core_wallet::CoreWalletManager;
 use lampo_jsonrpc::Handler;
@@ -152,14 +151,6 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         std::thread::sleep(Duration::from_secs(5));
         std::process::exit(0);
     })?;
-    let handler = lampod.handler();
-
-    // Just as debugging for us to manage the event through by lampod.
-    std::thread::spawn(move || {
-        while let Ok(event) = handler.events().recv() {
-            log::info!(target: "lampod-cli", "event emitted `{:?}`", event);
-        }
-    });
 
     let workder = lampod.listen().unwrap();
     let _ = workder.join();
