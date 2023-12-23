@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::ops::Not;
 use std::sync::Arc;
 
-use bdk::bitcoin::bip32::ExtendedPrivKey;
 use bdk::bitcoin::Amount;
 use bdk::keys::bip39::Language;
 use bdk::keys::bip39::Mnemonic;
@@ -16,9 +15,11 @@ use bdk::KeychainKind;
 use bitcoin_hashes::hex::HexIterator;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 
+#[cfg(debug_assertions)]
+use crate::bitcoin::PrivateKey;
+
 use lampo_common::bitcoin;
 use lampo_common::bitcoin::consensus::Decodable;
-use lampo_common::bitcoin::PrivateKey;
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::error;
 use lampo_common::json;
@@ -72,6 +73,8 @@ impl CoreWalletManager {
         xprv: lampo_common::bitcoin::PrivateKey,
         channel_keys: Option<String>,
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
+        use bdk::bitcoin::bip32::ExtendedPrivKey;
+
         let ldk_keys = if channel_keys.is_some() {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
         } else {

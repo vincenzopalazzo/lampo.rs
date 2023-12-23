@@ -16,7 +16,6 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::handler::Handler as _;
 use lampo_common::logger;
-use lampo_common::secp256k1;
 use lampo_core_wallet::CoreWalletManager;
 use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
@@ -88,10 +87,10 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", client),
     };
 
-    let wallet = if let Some(ref private_key) = lampo_conf.private_key {
+    let wallet = if let Some(ref _private_key) = lampo_conf.private_key {
         #[cfg(debug_assertions)]
         {
-            let _ = secp256k1::SecretKey::from_str(private_key)?;
+            let _ = lampo_common::secp256k1::SecretKey::from_str(_private_key)?;
             //let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
             //      CoreWallet::try_from((key, None))?
             unimplemented!()
