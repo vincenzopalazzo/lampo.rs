@@ -153,6 +153,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     })?;
 
     let workder = lampod.listen().unwrap();
+    log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     let _ = workder.join();
     let _ = jsorpc_worker.join().unwrap();
     Ok(())
