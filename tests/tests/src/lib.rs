@@ -12,8 +12,7 @@ fn init() {
     // ignore error
     INIT.call_once(|| {
         use lampo_common::logger;
-        use lampo_common::logger::Level;
 
-        logger::init(Level::Trace).expect("initializing logger for the first time");
+        logger::init("trace", None).expect("initializing logger for the first time");
     });
 }

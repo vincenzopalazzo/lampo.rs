@@ -96,6 +96,8 @@ impl CoreWalletManager {
         conf: Arc<LampoConf>,
         wallet: bdk::Wallet,
     ) -> error::Result<String> {
+        // FIXME: allow to support multiple wallet for the same chain, so
+        // we should make a suffix in the following name
         let name_wallet = "lampo-wallet".to_owned();
         if !rpc
             .list_wallets()?
@@ -117,37 +119,41 @@ impl CoreWalletManager {
             );
             if result.is_err() {
                 let _ = rpc.load_wallet(&name_wallet)?;
+            } else {
+                let external_signer = wallet.get_signers(KeychainKind::External);
+                let external_signer = external_signer.as_key_map(wallet.secp_ctx());
+                let external_descriptor =
+                    wallet.get_descriptor_for_keychain(KeychainKind::External);
+                let external_descriptor =
+                    external_descriptor.to_string_with_secret(&external_signer);
+                let internal_signer = wallet.get_signers(KeychainKind::Internal);
+                let internal_signer = internal_signer.as_key_map(wallet.secp_ctx());
+                let internal_descriptor =
+                    wallet.get_descriptor_for_keychain(KeychainKind::Internal);
+                let internal_descriptor =
+                    internal_descriptor.to_string_with_secret(&internal_signer);
+
+                let options = vec![
+                    json::json!({
+                        "desc": external_descriptor,
+                        "active": true,
+                        "timestamp": "now",
+                        "internal": false,
+                    }),
+                    json::json!({
+                        "desc": internal_descriptor,
+                        "active": true,
+                        "timestamp": "now",
+                        "internal": true,
+                    }),
+                ];
+
+                let rpc = Self::build_bitcoin_rpc(conf.clone(), Some(&name_wallet))?;
+                log::trace!(target: "core", "impot descriptor options: {:?}", options);
+                let _: json::Value = rpc.call("importdescriptors", &[json::json!(options)])?;
             }
         };
 
-        // FIXME: do not reload the descriptor if it is already loaded
-        let external_signer = wallet.get_signers(KeychainKind::External);
-        let external_signer = external_signer.as_key_map(wallet.secp_ctx());
-        let external_descriptor = wallet.get_descriptor_for_keychain(KeychainKind::External);
-        let external_descriptor = external_descriptor.to_string_with_secret(&external_signer);
-        let internal_signer = wallet.get_signers(KeychainKind::Internal);
-        let internal_signer = internal_signer.as_key_map(wallet.secp_ctx());
-        let internal_descriptor = wallet.get_descriptor_for_keychain(KeychainKind::Internal);
-        let internal_descriptor = internal_descriptor.to_string_with_secret(&internal_signer);
-
-        let options = vec![
-            json::json!({
-                "desc": external_descriptor,
-                "active": true,
-                "timestamp": "now",
-                "internal": false,
-            }),
-            json::json!({
-                "desc": internal_descriptor,
-                "active": true,
-                "timestamp": "now",
-                "internal": true,
-            }),
-        ];
-
-        let rpc = Self::build_bitcoin_rpc(conf.clone(), Some(&name_wallet))?;
-        log::trace!(target: "core", "impot descriptor options: {:?}", options);
-        let _: json::Value = rpc.call("importdescriptors", &[json::json!(options)])?;
         Ok(name_wallet)
     }
 
