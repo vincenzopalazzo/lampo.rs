@@ -141,21 +141,24 @@ impl LampoPeerManager {
             error::bail!("peer manager is None, at this point this should be not None");
         };
         let peer_manager = peer_manager.clone();
-        async_run!(async move {
-            let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", listen_port))
-                .await
-                .unwrap();
-            loop {
-                let peer_manager = peer_manager.clone();
-                let addr = listener.local_addr().unwrap().to_string();
-                let tcp_stream = listener.accept().await.unwrap().0;
-                log::info!(target: "lampo", "Listen inbound connection at {addr}");
-                tokio::spawn(async move {
-                    // Use LDK's supplied networking battery to facilitate inbound
-                    // connections.
-                    net::setup_inbound(peer_manager.clone(), tcp_stream.into_std().unwrap()).await;
-                });
-            }
+        std::thread::spawn(move || {
+            async_run!(async move {
+                let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", listen_port))
+                    .await
+                    .unwrap();
+                loop {
+                    let peer_manager = peer_manager.clone();
+                    let addr = listener.local_addr().unwrap().to_string();
+                    let tcp_stream = listener.accept().await.unwrap().0;
+                    log::info!(target: "lampo", "Listen inbound connection at {addr}");
+                    tokio::spawn(async move {
+                        // Use LDK's supplied networking battery to facilitate inbound
+                        // connections.
+                        net::setup_inbound(peer_manager.clone(), tcp_stream.into_std().unwrap())
+                            .await;
+                    });
+                }
+            });
         });
         Ok(())
     }
