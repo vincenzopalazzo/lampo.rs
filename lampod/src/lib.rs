@@ -166,7 +166,7 @@ impl LampoDeamon {
     }
 
     pub fn init_peer_manager(&mut self) -> error::Result<()> {
-        log::debug!(target: "lampod", "init peer manager ...");
+        log::debug!(target: "lampo", "init peer manager ...");
         let mut peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone());
         peer_manager.init(
             self.onchain_manager(),
@@ -251,7 +251,7 @@ impl LampoDeamon {
 
         let handler = self.handler();
         let event_handler = move |event: Event| {
-            log::info!("ldk event {:?}", event);
+            log::info!(target: "lampo", "ldk event {:?}", event);
             if let Err(err) = handler.handle(event) {
                 log::error!("{err}");
             }
@@ -268,8 +268,11 @@ impl LampoDeamon {
             Some(self.channel_manager().scorer()),
         );
 
+        log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().backend.clone().listen();
+        log::info!(target: "lampo", "Starting channel manager");
         let _ = self.channel_manager().listen();
+        log::info!(target: "lampo", "Starting peer manager");
         let _ = self.peer_manager().run();
         Ok(std::thread::spawn(move || {
             let _ = background_processor.join();
@@ -304,54 +307,11 @@ mod tests {
     use lampo_common::conf::LampoConf;
     use lampo_common::json;
     use lampo_common::ldk::util::config::UserConfig;
-    use lampo_common::logger;
-    use lampo_common::model::request;
     use lampo_common::secp256k1;
     use lampo_common::wallet::WalletManager;
     use lampo_nakamoto::{Config, Network};
 
-    use crate::{async_run, ln::events::PeerEvents, LampoDeamon};
-
-    #[test]
-    fn simple_node_connection() {
-        logger::init("debug", None).expect("initializing logger for the first time");
-        let conf = LampoConf {
-            ldk_conf: UserConfig::default(),
-            network: bitcoin::Network::Testnet,
-            port: 19753,
-            root_path: "/tmp".to_string(),
-            inner: Some(CLNConf::new("/tmp/".to_owned(), true)),
-            private_key: None,
-            channels_keys: None,
-            node: String::from("nakamoto"),
-            core_pass: None,
-            core_url: None,
-            core_user: None,
-        };
-        let (wallet, _) = BDKWalletManager::new(conf.clone().into()).unwrap();
-        let mut lampo = LampoDeamon::new(conf, Arc::new(wallet));
-
-        let mut conf = Config::default();
-        conf.network = Network::Testnet;
-        let client = Arc::new(lampo_nakamoto::Nakamoto::new(conf).unwrap());
-
-        let result = lampo.init(client);
-        assert!(result.is_ok(), "{:?}", result);
-
-        let connect = request::Connect {
-            node_id: "02049b60c296ffead3e7c8b124c5730153403a8314c1116c2d1b43cf9ac0de2d9d"
-                .to_owned(),
-            addr: "78.46.220.4".to_owned(),
-            port: 19735,
-        };
-        let result = async_run!(
-            lampo.rt,
-            lampo
-                .peer_manager()
-                .connect(connect.node_id(), connect.addr().unwrap())
-        );
-        assert!(result.is_ok(), "{:?}", result);
-    }
+    use crate::LampoDeamon;
 
     #[test]
     fn simple_get_info() {

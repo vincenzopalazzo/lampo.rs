@@ -145,13 +145,11 @@ impl LampoPeerManager {
             let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", listen_port))
                 .await
                 .unwrap();
-            log::info!(target: "lampod", "Preparing inbound connections");
             loop {
                 let peer_manager = peer_manager.clone();
                 let addr = listener.local_addr().unwrap().to_string();
-                log::info!(target: "lampod", "preparing address {addr}");
                 let tcp_stream = listener.accept().await.unwrap().0;
-                log::info!(target: "lampod", "--------- start server on {addr} -----------");
+                log::info!(target: "lampo", "Listen inbound connection at {addr}");
                 tokio::spawn(async move {
                     // Use LDK's supplied networking battery to facilitate inbound
                     // connections.
