@@ -16,9 +16,9 @@ clean:
 	$(CC) clean
 
 install:
-	$(CC) build
+	$(CC) build --release
 	$(CC) install --locked --path ./lampo-cli 
-	$(CC) install --locked --path ./lampod-cli --debug
+	$(CC) install --locked --path ./lampod-cli
 	sudo cp target/debug/liblampo.so /usr/local/lib
 
 integration: default
