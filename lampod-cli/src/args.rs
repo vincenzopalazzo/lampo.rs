@@ -70,9 +70,8 @@ impl TryInto<LampoConf> for LampoCliArgs {
             error::bail!("The path {} doesn't exist", path);
         }
 
-        let path = format!("{path}/{network}");
         // FIXME: this override the full configuration, we should merge the two
-        conf = LampoConf::try_from(path)?;
+        conf = LampoConf::new(Some(path), Some(conf.network), None)?;
         conf.prepare_dirs()?;
 
         log::debug!(target: "lampod-cli", "lampo data dir `{}`", conf.path());

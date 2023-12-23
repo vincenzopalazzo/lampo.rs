@@ -94,7 +94,7 @@ impl LampoConf {
         } else {
             format!("{root_path}")
         };
-        log::trace!("normalize root path {root}");
+        log::trace!("normalize root path {root} for network {network}");
         root
     }
 
@@ -106,15 +106,20 @@ impl LampoConf {
         let mut conf = Self::default();
         conf.network = network.unwrap_or(conf.network);
         conf.port = port.unwrap_or(conf.port);
-        conf.root_path = path.unwrap_or(conf.root_path);
+        conf.root_path = path.clone().unwrap_or(conf.root_path);
         Self::prepare_directories(&conf.root_path, Some(conf.network))?;
-
+        let input_path = path;
         let path = Self::normalize_root_dir(&conf.root_path, conf.network);
         conf.root_path = path.clone();
 
-        // if the path doesn't exist, return an error
-        if std::fs::File::open(conf.path()).is_ok() {
-            conf.inner = Some(CLNConf::new(conf.path(), false));
+        let lampo_file = format!("{}/lampo.conf", conf.path());
+
+        if std::fs::File::open(lampo_file.clone()).is_ok() {
+            let mut conf = Self::try_from(conf.path())?;
+            conf.network = network.unwrap_or(conf.network);
+            conf.port = port.unwrap_or(conf.port);
+            conf.root_path = input_path.unwrap_or(conf.root_path);
+            return Ok(conf);
         }
 
         Ok(conf)
@@ -125,17 +130,13 @@ impl TryFrom<String> for LampoConf {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::prepare_directories(&value, None)?;
-
         let path = format!("{value}/lampo.conf");
         // Check for double slashes
         let path = path.replace("//", "/");
 
         // If lampo.conf doesn't exist, return the default configuration
         if !std::path::Path::new(&path).exists() {
-            let mut conf = Self::default();
-            conf.root_path = Self::normalize_root_dir(&value, conf.network);
-            return Ok(conf);
+            anyhow::bail!("Configuration file not found at `{path}`");
         }
 
         let mut conf = CLNConf::new(path, false);

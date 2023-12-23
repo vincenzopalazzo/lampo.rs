@@ -143,12 +143,10 @@ impl LampoPeerManager {
         let peer_manager = peer_manager.clone();
         std::thread::spawn(move || {
             async_run!(async move {
-                let bind_addr = format!("127.0.0.1:{}", listen_port);
+                let bind_addr = format!("0.0.0.0:{}", listen_port);
                 log::info!(target: "lampo", "Litening for in-bound connection on {bind_addr}");
-                let listener = tokio::net::TcpListener::bind(bind_addr)
-                    .await
-                    .unwrap();
-                loop{
+                let listener = tokio::net::TcpListener::bind(bind_addr).await.unwrap();
+                loop {
                     let peer_manager = peer_manager.clone();
                     let tcp_stream = listener.accept().await.unwrap().0;
                     log::info!(target: "lampo", "Got new connection {}", tcp_stream.peer_addr().unwrap());
@@ -157,7 +155,8 @@ impl LampoPeerManager {
                         // connections.
                         net::setup_inbound(peer_manager.clone(), tcp_stream.into_std().unwrap())
                             .await;
-                    }).await;
+                    })
+                    .await;
                 }
             });
         });
