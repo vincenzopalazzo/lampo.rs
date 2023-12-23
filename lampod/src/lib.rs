@@ -166,7 +166,7 @@ impl LampoDeamon {
     }
 
     pub fn init_peer_manager(&mut self) -> error::Result<()> {
-        log::debug!(target: "lampod", "init peer manager ...");
+        log::debug!(target: "lampo", "init peer manager ...");
         let mut peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone());
         peer_manager.init(
             self.onchain_manager(),
@@ -251,7 +251,7 @@ impl LampoDeamon {
 
         let handler = self.handler();
         let event_handler = move |event: Event| {
-            log::info!("ldk event {:?}", event);
+            log::info!(target: "lampo", "ldk event {:?}", event);
             if let Err(err) = handler.handle(event) {
                 log::error!("{err}");
             }
@@ -268,8 +268,11 @@ impl LampoDeamon {
             Some(self.channel_manager().scorer()),
         );
 
+        log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().backend.clone().listen();
+        log::info!(target: "lampo", "Starting channel manager");
         let _ = self.channel_manager().listen();
+        log::info!(target: "lampo", "Starting peer manager");
         let _ = self.peer_manager().run();
         Ok(std::thread::spawn(move || {
             let _ = background_processor.join();

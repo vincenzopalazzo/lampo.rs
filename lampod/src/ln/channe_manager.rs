@@ -372,6 +372,7 @@ impl LampoChannelManager {
         self.onchain
             .backend
             .manage_transactions(&mut relevant_txids_two)?;
+        self.onchain.backend.process_transactions()?;
         Ok(())
     }
 
