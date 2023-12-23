@@ -101,9 +101,7 @@ fn init_logger() {
 #[allow(unused_variables)]
 #[allow(unused_assignments)]
 pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon {
-    use lampo_common::bitcoin;
     use lampo_common::conf::LampoConf;
-    use lampo_common::secp256k1;
     use lampo_core_wallet::CoreWalletManager;
     use lampo_nakamoto::{Config, Nakamoto, Network};
     use lampod::chain::WalletManager;
@@ -140,23 +138,29 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
     log::info!("configuration received `{:?}`", conf);
 
     let wallet = if let Some(ref priv_key) = conf.private_key {
-        let Ok(key) = secp256k1::SecretKey::from_str(priv_key) else {
-            LAST_ERR
-                .lock()
-                .unwrap()
-                .set(Some(format!("invalid private key `{priv_key}`")));
-            return null!();
-        };
-        let key = bitcoin::PrivateKey::new(key, conf.network);
-        let wallet = CoreWalletManager::try_from((key, conf.channels_keys.clone(), conf.clone()));
-        let Ok(wallet) = wallet else {
-            LAST_ERR.lock().unwrap().set(Some(format!(
-                "Error while create the wallet: {}",
-                wallet.err().unwrap()
-            )));
-            return null!();
-        };
-        wallet
+        #[cfg(debug_assertions)]
+        {
+            let Ok(key) = lampo_common::secp256k1::SecretKey::from_str(priv_key) else {
+                LAST_ERR
+                    .lock()
+                    .unwrap()
+                    .set(Some(format!("invalid private key `{priv_key}`")));
+                return null!();
+            };
+            let key = lampo_common::bitcoin::PrivateKey::new(key, conf.network);
+            let wallet =
+                CoreWalletManager::try_from((key, conf.channels_keys.clone(), conf.clone()));
+            let Ok(wallet) = wallet else {
+                LAST_ERR.lock().unwrap().set(Some(format!(
+                    "Error while create the wallet: {}",
+                    wallet.err().unwrap()
+                )));
+                return null!();
+            };
+            wallet
+        }
+        #[cfg(not(debug_assertions))]
+        unimplemented!()
     } else {
         // FIXME: add the possibility to create it from the mnemonic
         let Ok((wallet, _mnemonic)) = CoreWalletManager::new(conf.clone()) else {
