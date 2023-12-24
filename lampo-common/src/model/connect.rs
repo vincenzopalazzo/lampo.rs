@@ -15,8 +15,12 @@ pub struct Connect {
 }
 
 impl Connect {
-    pub fn node_id(&self) -> NodeId {
-        NodeId::from_str(&self.node_id).unwrap()
+    pub fn node_id(&self) -> error::Result<NodeId> {
+        let result = NodeId::from_str(&self.node_id);
+        match result {
+            Ok(res) => Ok(res),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub fn addr(&self) -> error::Result<SocketAddr> {
