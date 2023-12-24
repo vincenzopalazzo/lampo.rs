@@ -10,6 +10,17 @@ pub fn json_connect(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Va
     log::info!("call for `connect` with request `{:?}`", request);
     let input: Connect = json::from_value(request.clone())?;
     let host = input.addr();
+    let node_id = match input.node_id() {
+        Err(err) => {
+            let rpc_error = Error::Rpc(RpcError {
+                code: -1,
+                message: format!("{err}"),
+                data: None,
+            });
+            return Err(rpc_error);
+        }
+        Ok(id) => id,
+    };
     let result = match host {
         Err(err) => {
             let rpc_error = Error::Rpc(RpcError {
@@ -21,7 +32,7 @@ pub fn json_connect(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Va
         }
         Ok(host_value) => {
             ctx.rt
-                .block_on(ctx.peer_manager().connect(input.node_id(), host_value))
+                .block_on(ctx.peer_manager().connect(node_id, host_value))
                 .map_err(|err| RpcError {
                     code: -1,
                     message: format!("{err}"),

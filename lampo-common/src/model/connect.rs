@@ -15,8 +15,8 @@ pub struct Connect {
 }
 
 impl Connect {
-    pub fn node_id(&self) -> NodeId {
-        NodeId::from_str(&self.node_id).unwrap()
+    pub fn node_id(&self) -> error::Result<NodeId> {
+        Ok(NodeId::from_str(&self.node_id)?)
     }
 
     pub fn addr(&self) -> error::Result<SocketAddr> {
