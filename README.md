@@ -44,7 +44,7 @@ commands can be ran
 
 N.B: Store your wallet works, and then reuse them to restore the waller with `--restore-wallet`.
 
-Please note that this need to have a `lampo.conf` in the path `~/.lampo/signet`.
+Please note that this need to have a `lampo.conf` in the path `~/.lampo/signet`. See an example in lampo.example.conf
 
 Then you can query the node with the following command 
 
