@@ -22,7 +22,7 @@ use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
-use super::channe_manager::{LampoArcChannelManager, LampoChainMonitor};
+use super::channel_manager::{LampoArcChannelManager, LampoChainMonitor};
 use super::events::PeerEvents;
 use super::peer_event;
 
