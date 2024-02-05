@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 lampo-common = { path = "../lampo-common" }
-bdk = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["keys-bip39"] }
-bdk_chain = { git = "https://github.com/bitcoindevkit/bdk.git" }
-bdk_esplora = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["blocking"]  }
-bdk_file_store = { git = "https://github.com/bitcoindevkit/bdk.git" }
+bdk = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["keys-bip39"], rev = "f741122ffbc46aefb7579697b4dc6c6c40e485d3"}
+bdk_chain = { git = "https://github.com/bitcoindevkit/bdk.git", rev = "f741122ffbc46aefb7579697b4dc6c6c40e485d3" }
+bdk_esplora = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["blocking"], rev = "f741122ffbc46aefb7579697b4dc6c6c40e485d3" }
+bdk_file_store = { git = "https://github.com/bitcoindevkit/bdk.git", ref = "f741122ffbc46aefb7579697b4dc6c6c40e485d3" }
 tokio = { version = "^1.29.1", features = ["rt-multi-thread", "parking_lot"] }
 log = "0.4.17"

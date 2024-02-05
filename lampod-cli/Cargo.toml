@@ -11,6 +11,8 @@ lampo-nakamoto = { path = "../lampo-nakamoto" }
 lampo-bitcoind = { path = "../lampo-bitcoind" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-core-wallet = { path = "../lampo-core-wallet" }
+lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
+
 
 tokio = { version = "1.22.0", features = ["rt"] }
 lexopt = { version = "0.3" }
