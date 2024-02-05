@@ -19,7 +19,7 @@ install:
 	$(CC) build --release
 	$(CC) install --locked --path ./lampo-cli 
 	$(CC) install --locked --path ./lampod-cli
-	sudo cp target/debug/liblampo.so /usr/local/lib
+	sudo cp target/release/liblampo.so /usr/local/lib
 
 integration: default
 	$(CC) test -p tests $(ARGS)
