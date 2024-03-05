@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::SystemTime};
 
-use crate::keymanager::KeysManager;
+use crate::ldk::sign::KeysManager;
 
 /// Lampo keys implementations
 pub struct LampoKeys {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::bitcoin::{Script, Transaction};
+use crate::bitcoin::{ScriptBuf, Transaction};
 use crate::conf::LampoConf;
 use crate::error;
 use crate::keys::LampoKeys;
@@ -32,7 +32,7 @@ pub trait WalletManager: Send + Sync {
     /// to propagate to the network.
     fn create_transaction(
         &self,
-        script: Script,
+        script: ScriptBuf,
         amount_sat: u64,
         fee_rate: u32,
     ) -> error::Result<Transaction>;

@@ -18,13 +18,13 @@ use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::keymanager::KeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::ln::channelmanager::Retry;
 use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
 use lampo_common::ldk::ln::{PaymentHash, PaymentPreimage};
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
 use lampo_common::ldk::sign::EntropySource;
+use lampo_common::ldk::sign::KeysManager;
 
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
@@ -87,28 +87,21 @@ impl OffchainManager {
 
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         let invoice = self.decode_invoice(invoice_str)?;
-        let channel_manager = self.channel_manager.manager();
-        let channel_manager = channel_manager.as_ref();
         if invoice.amount_milli_satoshis().is_none() {
-            ldk::invoice::payment::pay_zero_value_invoice(
+            ldk::invoice::payment::payment_parameters_from_zero_amount_invoice(
                 &invoice,
                 amount_msat.ok_or(error::anyhow!(
                     "invoice with no amount, and amount must be specified"
                 ))?,
-                Retry::Timeout(Duration::from_secs(10)),
-                channel_manager,
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         } else {
-            ldk::invoice::payment::pay_invoice(
-                &invoice,
-                Retry::Timeout(Duration::from_secs(10)),
-                channel_manager,
-            )
-            .map_err(|err| error::anyhow!("{:?}", err))?;
+            ldk::invoice::payment::payment_parameters_from_invoice(&invoice)
+                .map_err(|err| error::anyhow!("{:?}", err))?;
         }
         Ok(())
     }
+
     pub fn keysend(&self, destination: pubkey, amount_msat: u64) -> error::Result<PaymentHash> {
         let payment_preimage = PaymentPreimage(
             self.chain_manager
@@ -119,7 +112,7 @@ impl OffchainManager {
                 .get_secure_random_bytes(),
         );
         let PaymentPreimage(bytes) = payment_preimage;
-        let payment_hash = PaymentHash(Sha256::hash(&bytes).into_inner());
+        let payment_hash = PaymentHash(Sha256::hash(&bytes).to_byte_array());
         // The 40 here is the max CheckLockTimeVerify which locks the output of the transaction for a certain
         // period of time.The false here stands for the allow_mpp, which is to allow the multi part route payments.
         let route_params = RouteParameters {

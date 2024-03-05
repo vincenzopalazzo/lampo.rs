@@ -18,7 +18,6 @@ use lampo_common::logger;
 use lampo_core_wallet::CoreWalletManager;
 use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
-use lampo_nakamoto::{Config, Nakamoto, Network};
 use lampod::chain::WalletManager;
 
 use lampod::jsonrpc::inventory::get_info;
@@ -65,11 +64,6 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let client = lampo_conf.node.clone();
     log::debug!(target: "lampod-cli", "lampo running with `{client}` backend");
     let client: Arc<dyn Backend> = match client.as_str() {
-        "nakamoto" => {
-            let mut conf = Config::default();
-            conf.network = Network::from_str(&lampo_conf.network.to_string()).unwrap();
-            Arc::new(Nakamoto::new(conf).unwrap())
-        }
         "core" => Arc::new(BitcoinCore::new(
             &lampo_conf
                 .core_url
@@ -90,14 +84,6 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     };
 
     let wallet = if let Some(ref _private_key) = lampo_conf.private_key {
-        #[cfg(debug_assertions)]
-        {
-            let _ = lampo_common::secp256k1::SecretKey::from_str(_private_key)?;
-            //let key = bitcoin::PrivateKey::new(key, lampo_conf.network);
-            //      CoreWallet::try_from((key, None))?
-            unimplemented!()
-        }
-        #[cfg(not(debug_assertions))]
         unimplemented!()
     } else if mnemonic.is_none() {
         let (wallet, mnemonic) = match client.kind() {

@@ -41,8 +41,7 @@ impl CoreWalletManager {
         mnemonic_words: &str,
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
         // Parse a mnemonic
-        let mnemonic =
-            Mnemonic::parse(mnemonic_words).map_err(|err| bdk::Error::Generic(format!("{err}")))?;
+        let mnemonic = Mnemonic::parse(mnemonic_words).map_err(|err| error::anyhow!("{err}"))?;
         // Generate the extended key
         let xkey: ExtendedKey = mnemonic.into_extended_key()?;
         let network = match conf.network.to_string().as_str() {
@@ -90,7 +89,7 @@ impl CoreWalletManager {
         let key = ExtendedPrivKey::new_master(network, &xprv.inner.secret_bytes())?;
         let key = ExtendedKey::from(key);
         let wallet = bdk::Wallet::new(Bip84(key, KeychainKind::External), None, (), network)
-            .map_err(|err| bdk::Error::Generic(err.to_string()))?;
+            .map_err(|err| error::anyhow!(err.to_string()))?;
         Ok((wallet, ldk_keys))
     }
 
@@ -226,17 +225,18 @@ impl WalletManager for CoreWalletManager {
 
     fn create_transaction(
         &self,
-        script: bitcoin::Script,
+        script: bitcoin::ScriptBuf,
         amount_sat: u64,
         fee_rate: u32,
     ) -> error::Result<bitcoin::Transaction> {
         let addr = bitcoin_bech32::WitnessProgram::from_scriptpubkey(
-            &script[..],
+            &script.as_bytes(),
             match self.network {
                 Network::Bitcoin => bitcoin_bech32::constants::Network::Bitcoin,
                 Network::Testnet => bitcoin_bech32::constants::Network::Testnet,
                 Network::Regtest => bitcoin_bech32::constants::Network::Regtest,
                 Network::Signet => bitcoin_bech32::constants::Network::Signet,
+                _ => error::bail!("network `{}` not supported", self.network),
             },
         )?
         .to_address();

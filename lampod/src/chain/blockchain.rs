@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lampo_common::backend::Backend;
+use lampo_common::bitcoin;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::Transaction;
 use lampo_common::ldk;
@@ -39,9 +40,6 @@ impl LampoChainManager {
             ConfirmationTarget::AnchorChannelFee => String::from("anchor_chanenl"),
             ConfirmationTarget::NonAnchorChannelFee => String::from("non_anchor_channel"),
             ConfirmationTarget::ChannelCloseMinimum => String::from("channel_close_minimum"),
-            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee => {
-                String::from("max_allowed_anchor_channel_remote")
-            }
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee => {
                 String::from("min_allowed_anchor_channel_remote")
             }
@@ -54,7 +52,6 @@ impl LampoChainManager {
     pub fn estimated_fees(&self) -> HashMap<String, Option<u32>> {
         let fees_targets = vec![
             ConfirmationTarget::OnChainSweep,
-            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee,
             ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
             ConfirmationTarget::NonAnchorChannelFee,
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
@@ -79,8 +76,7 @@ impl FeeEstimator for LampoChainManager {
             ConfirmationTarget::OnChainSweep => {
                 self.backend.fee_rate_estimation(1).unwrap_or_default()
             }
-            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee
-            | ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee
+            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee
             | ConfirmationTarget::AnchorChannelFee
             | ConfirmationTarget::NonAnchorChannelFee => {
                 self.backend.fee_rate_estimation(6).unwrap_or_default()

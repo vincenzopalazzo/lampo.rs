@@ -4,16 +4,17 @@ use std::{sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 
+use lampo_common::bitcoin;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::keymanager::KeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::ln::peer_handler::MessageHandler;
 use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
 use lampo_common::ldk::net;
 use lampo_common::ldk::net::SocketDescriptor;
-use lampo_common::ldk::onion_message::{MessageRouter, OnionMessenger};
+use lampo_common::ldk::onion_message::messenger::{MessageRouter, OnionMessenger};
 use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
+use lampo_common::ldk::sign::KeysManager;
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
 
@@ -33,10 +34,21 @@ impl MessageRouter for FakeMsgRouter {
         &self,
         _: bitcoin::secp256k1::PublicKey,
         _: Vec<bitcoin::secp256k1::PublicKey>,
-        _: ldk::onion_message::Destination,
-    ) -> Result<ldk::onion_message::OnionMessagePath, ()> {
+        _: ldk::onion_message::messenger::Destination,
+    ) -> Result<ldk::onion_message::messenger::OnionMessagePath, ()> {
         log::warn!("ingoring the find path in the message router");
         Err(())
+    }
+
+    fn create_blinded_paths<
+        T: lampo_common::secp256k1::Signing + lampo_common::secp256k1::Verification,
+    >(
+        &self,
+        _recipient: lampo_common::secp256k1::PublicKey,
+        _peers: Vec<lampo_common::secp256k1::PublicKey>,
+        _secp_ctx: &lampo_common::secp256k1::Secp256k1<T>,
+    ) -> Result<Vec<ldk::blinded_path::BlindedPath>, ()> {
+        unimplemented!()
     }
 }
 
@@ -49,24 +61,18 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     IgnoringMessageHandler,
 >;
 
-pub type SimpleArcPeerManager<SD, M, T, F, C, L> = PeerManager<
-    SD,
-    Arc<LampoArcChannelManager<M, T, F, L>>,
-    Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, Arc<C>, Arc<L>>>,
+pub type SimpleArcPeerManager<M, T, L> = PeerManager<
+    SocketDescriptor,
+    Arc<LampoArcChannelManager<M, T, T, L>>,
+    Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, Arc<T>, Arc<L>>>,
     Arc<LampoArcOnionMessenger<L>>,
     Arc<L>,
     IgnoringMessageHandler,
     Arc<KeysManager>,
 >;
 
-type InnerLampoPeerManager = SimpleArcPeerManager<
-    SocketDescriptor,
-    LampoChainMonitor,
-    LampoChainManager,
-    LampoChainManager,
-    LampoChainManager,
-    LampoLogger,
->;
+type InnerLampoPeerManager =
+    SimpleArcPeerManager<LampoChainMonitor, LampoChainManager, LampoLogger>;
 
 pub struct LampoPeerManager {
     peer_manager: Option<Arc<InnerLampoPeerManager>>,
@@ -167,12 +173,7 @@ impl LampoPeerManager {
         let Some(ref manager) = self.peer_manager else {
             panic!("at this point the peer manager should be known");
         };
-        for (node_id, _) in manager.get_peer_node_ids() {
-            if node_id == peer_id {
-                return true;
-            }
-        }
-        false
+        manager.peer_by_node_id(&peer_id).is_some()
     }
 }
 
@@ -209,11 +210,7 @@ impl PeerEvents for LampoPeerManager {
                 std::task::Poll::Pending => {}
             }
             // Avoid blocking the tokio context by sleeping a bit
-            match manager
-                .get_peer_node_ids()
-                .iter()
-                .find(|(id, _)| *id == node_id)
-            {
+            match manager.peer_by_node_id(&node_id) {
                 Some(_) => return Ok(()),
                 None => tokio::time::sleep(Duration::from_millis(10)).await,
             }
@@ -221,11 +218,8 @@ impl PeerEvents for LampoPeerManager {
     }
 
     async fn disconnect(&self, node_id: NodeId) -> error::Result<()> {
-        //check for open channels with peer
-
         //check the pubkey matches a valid connected peer
-        let peers = self.manager().get_peer_node_ids();
-        if !peers.iter().any(|(pk, _)| &node_id == pk) {
+        if self.manager().peer_by_node_id(&node_id).is_none() {
             error::bail!("Error: Could not find peer `{node_id}`");
         }
 

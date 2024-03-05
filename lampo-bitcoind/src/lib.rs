@@ -7,28 +7,27 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use bitcoincore_rpc::bitcoin::hashes::Hash;
+use bitcoincore_rpc::bitcoin::ScriptBuf;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetTxOutResult;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi;
 
-use lampo_common::backend::BlockHash;
 use lampo_common::backend::{deserialize, serialize};
 use lampo_common::backend::{Backend, TxResult};
-use lampo_common::backend::{Block, BlockData};
-use lampo_common::bitcoin::locktime::Height;
-use lampo_common::bitcoin::{Script, Transaction, Txid};
+use lampo_common::backend::{Block, BlockData, BlockHash};
+use lampo_common::bitcoin::absolute::Height;
+use lampo_common::bitcoin::{Transaction, Txid};
 use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::json;
-use lampo_common::secp256k1::hashes::hex::ToHex;
 
 pub struct BitcoinCore {
     inner: Client,
     handler: RefCell<Option<Arc<dyn Handler>>>,
     ours_txs: Mutex<RefCell<Vec<Txid>>>,
-    others_txs: Mutex<RefCell<Vec<(Txid, Script)>>>,
+    others_txs: Mutex<RefCell<Vec<(Txid, ScriptBuf)>>>,
     // receive notification if the
     // deamon was stop
     stop: Arc<bool>,
@@ -86,7 +85,7 @@ impl BitcoinCore {
         Ok(tx.script_pub_key.hex)
     }
 
-    pub fn watch_tx(&self, txid: &Txid, script: &Script) -> error::Result<()> {
+    pub fn watch_tx(&self, txid: &Txid, script: &ScriptBuf) -> error::Result<()> {
         log::debug!(target: "bitcoind", "Looking an external transaction `{}`", txid);
         if self
             .ours_txs
@@ -115,7 +114,7 @@ impl BitcoinCore {
         log::debug!(target: "bitcoin", "looking the tx inside the new block");
         let utxos = self.others_txs.lock().unwrap();
         let mut utxos = utxos.borrow_mut();
-        let mut still_unconfirmed: Vec<(Txid, Script)> = vec![];
+        let mut still_unconfirmed: Vec<(Txid, ScriptBuf)> = vec![];
         for (utxo, script) in utxos.iter() {
             log::debug!(target: "bitcoind", "looking for UTXO {} inside the block at height: {}", utxo, self.best_height.borrow());
             if let Some((idx, tx)) = block
@@ -154,9 +153,7 @@ impl Backend for BitcoinCore {
         // FIXME: check the result.
         let result: bitcoincore_rpc::Result<json::Value> = self.inner.call(
             "sendrawtransaction",
-            &[lampo_common::bitcoin::consensus::serialize(&tx)
-                .to_hex()
-                .into()],
+            &[lampo_common::bitcoin::consensus::serialize(&tx).into()],
         );
         log::info!(target: "bitcoind", "broadcast transaction return {:?}", result);
         if result.is_ok() {
@@ -244,7 +241,6 @@ impl Backend for BitcoinCore {
         header_hash: &lampo_common::backend::BlockHash,
     ) -> error::Result<lampo_common::backend::BlockData> {
         use bitcoincore_rpc::bitcoin::consensus::serialize as inner_serialize;
-        use bitcoincore_rpc::bitcoin::BlockHash;
 
         // FIXME: change the version of rust bitcoin in nakamoto and in lampod_common.
         let bytes = serialize(header_hash);
@@ -291,7 +287,7 @@ impl Backend for BitcoinCore {
         txid: &lampo_common::backend::Txid,
         script: &lampo_common::backend::Script,
     ) {
-        self.watch_tx(txid, script).unwrap();
+        self.watch_tx(txid, &script.to_owned()).unwrap();
         let _ = self.process_transactions();
     }
 
@@ -310,7 +306,7 @@ impl Backend for BitcoinCore {
         let raw_tx: Transaction = deserialize(&tx.hex)?;
         if tx.info.confirmations > 0 {
             // SAFETY: if it is confirmed, the block hash is not null.
-            let block_hash = tx.info.blockhash.unwrap().to_hex();
+            let block_hash = tx.info.blockhash.unwrap().to_string();
             let BlockData::FullBlock(block) = self.get_block(&BlockHash::from_str(&block_hash)?)?
             else {
                 unreachable!()
@@ -350,7 +346,11 @@ impl Backend for BitcoinCore {
                 .vout
                 .iter()
                 .enumerate()
-                .find(|vout| vout.1.script_pub_key.hex.to_hex() == script.to_hex())
+                // FIXME: I am not sure that this magic with script is correct
+                .find(|vout| {
+                    ScriptBuf::from_bytes(vout.1.script_pub_key.hex.clone()).to_hex_string()
+                        == script.to_hex_string()
+                })
                 .unwrap();
             return Ok(TxResult::Confirmed((
                 raw_tx,

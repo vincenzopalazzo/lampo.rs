@@ -34,8 +34,8 @@ impl InventoryHandler for LampoInventoryManager {
             InventoryCommand::GetNodeInfo(chan) => {
                 let getinfo = GetInfo {
                     node_id: self.channel_manager.manager().get_our_node_id().to_string(),
-                    peers: self.peer_manager.manager().get_peer_node_ids().len(),
-                    channels: 0,
+                    peers: self.peer_manager.manager().list_peers().len(),
+                    channels: self.channel_manager.manager().list_channels().len(),
                 };
                 let getinfo = json::to_value(getinfo)?;
                 chan.send(getinfo)?;
