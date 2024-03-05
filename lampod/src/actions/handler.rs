@@ -2,7 +2,6 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use lampo_common::bitcoin::hashes::hex::ToHex;
 use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::error::Ok;
@@ -190,7 +189,7 @@ impl Handler for LampoHandler {
                 log::info!("funding transaction created `{}`", transaction.txid());
                 log::info!(
                     "transaction hex `{}`",
-                    lampo_common::bitcoin::consensus::serialize(&transaction).to_hex()
+                    lampo_common::bitcoin::consensus::encode::serialize_hex(&transaction)
                 );
                 self.emit(Event::Lightning(LightningEvent::FundingChannelEnd {
                     counterparty_node_id,
@@ -215,7 +214,7 @@ impl Handler for LampoHandler {
             } => {
                 log::info!(
                     "channel pending with node `{}` with funding `{funding_txo}`",
-                    counterparty_node_id.to_hex()
+                    counterparty_node_id.to_string()
                 );
                 self.emit(Event::Lightning(LightningEvent::ChannelPending { counterparty_node_id, funding_transaction: funding_txo }));
                 Ok(())

@@ -6,15 +6,13 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use lampo_common::bitcoin::hashes::hex::ToHex;
-use lampo_common::bitcoin::locktime::Height;
+use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::BlockHash;
 use lampo_common::conf::{LampoConf, UserConfig};
 use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
-use lampo_common::keymanager::KeysManager;
 use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
 use lampo_common::ldk::chain::{BestBlock, Confirm, Filter, Watch};
@@ -27,8 +25,8 @@ use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
-use lampo_common::ldk::sign::EntropySource;
 use lampo_common::ldk::sign::InMemorySigner;
+use lampo_common::ldk::sign::KeysManager;
 use lampo_common::ldk::util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits};
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
@@ -57,15 +55,7 @@ pub type LampoArcChannelManager<M, T, F, L> = ChannelManager<
     Arc<KeysManager>,
     Arc<KeysManager>,
     Arc<F>,
-    Arc<
-        DefaultRouter<
-            Arc<NetworkGraph<Arc<L>>>,
-            Arc<L>,
-            Arc<Mutex<ProbabilisticScorer<Arc<NetworkGraph<Arc<L>>>, Arc<L>>>>,
-            ProbabilisticScoringFeeParameters,
-            ProbabilisticScorer<Arc<NetworkGraph<Arc<L>>>, Arc<L>>,
-        >,
-    >,
+    Arc<LampoRouter>,
     Arc<L>,
 >;
 
@@ -77,6 +67,7 @@ pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
 pub type LampoRouter = DefaultRouter<
     Arc<LampoGraph>,
     Arc<LampoLogger>,
+    Arc<KeysManager>,
     Arc<Mutex<LampoScorer>>,
     ProbabilisticScoringFeeParameters,
     LampoScorer,
@@ -201,7 +192,7 @@ impl LampoChannelManager {
             .into_iter()
             .map(|channel| Channel {
                 short_channel_id: channel.short_channel_id,
-                peer_id: channel.counterparty.node_id.to_hex(),
+                peer_id: channel.counterparty.node_id.to_string(),
                 peer_alias: None,
                 ready: channel.is_channel_ready,
                 amount_satoshis: channel.channel_value_satoshis,
@@ -218,7 +209,7 @@ impl LampoChannelManager {
         let keys = self.wallet_manager.ldk_keys().inner();
         let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
         for (_, chan_mon) in monitors.drain(..) {
-            chan_mon.load_outputs_to_watch(&self.onchain);
+            chan_mon.load_outputs_to_watch(&self.onchain, &self.logger);
             if watch {
                 let monitor = self
                     .monitor
@@ -257,6 +248,7 @@ impl LampoChannelManager {
         DefaultRouter<
             Arc<LampoGraph>,
             Arc<LampoLogger>,
+            Arc<KeysManager>,
             Arc<Mutex<LampoScorer>>,
             ProbabilisticScoringFeeParameters,
             LampoScorer,
@@ -277,10 +269,7 @@ impl LampoChannelManager {
             self.router = Some(Arc::new(DefaultRouter::new(
                 network_graph,
                 self.logger.clone(),
-                self.wallet_manager
-                    .ldk_keys()
-                    .keys_manager
-                    .get_secure_random_bytes(),
+                self.wallet_manager.ldk_keys().keys_manager.clone(),
                 scorer,
                 ProbabilisticScoringFeeParameters::default(),
             )))
@@ -352,13 +341,13 @@ impl LampoChannelManager {
             .unwrap()
             .get_relevant_txids()
             .iter()
-            .map(|(txid, _)| txid.clone())
+            .map(|(txid, _, _)| txid.clone())
             .collect::<Vec<_>>();
         let mut relevant_txids_two = self
             .chain_monitor()
             .get_relevant_txids()
             .iter()
-            .map(|(txid, _)| txid.clone())
+            .map(|(txid, _, _)| txid.clone())
             .collect::<Vec<_>>();
         log::debug!(
             "transactions {:?} {:?}",
@@ -431,6 +420,8 @@ impl ChannelEvents for LampoChannelManager {
                 open_channel.amount,
                 0,
                 0,
+                // FIXME: this ia temponary channel id, we should double check this
+                None,
                 Some(config),
                 // FIXME: LDK should return a better error struct here
             )

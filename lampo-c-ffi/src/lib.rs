@@ -103,7 +103,6 @@ fn init_logger() {
 pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon {
     use lampo_common::conf::LampoConf;
     use lampo_core_wallet::CoreWalletManager;
-    use lampo_nakamoto::{Config, Nakamoto, Network};
     use lampod::chain::WalletManager;
     use std::str::FromStr;
 
@@ -185,11 +184,6 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
             )
             .expect("impossible connect to core"),
         ),
-        "nakamoto" => {
-            let mut nakamtot_conf = Config::default();
-            nakamtot_conf.network = Network::from_str(&conf.network.to_string()).unwrap();
-            Arc::new(Nakamoto::new(nakamtot_conf).unwrap())
-        }
         _ => {
             LAST_ERR
                 .lock()

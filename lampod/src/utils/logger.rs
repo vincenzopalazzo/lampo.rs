@@ -53,7 +53,7 @@ impl LampoLogger {
 }
 
 impl Logger for LampoLogger {
-    fn log(&self, record: &Record) {
+    fn log(&self, record: Record) {
         let raw_log = record.args.to_string();
         let level = record.level.to_string();
 

@@ -12,13 +12,7 @@ lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-client = { path = "../lampo-client" }
 log = "0.4.17"
 time = "0.3.13"
-bitcoin = "0.29.0"
 futures = "0.3.28"
 crossbeam-channel = "0.5.8"
 once_cell = "1.17.1"
 async-trait = "0.1.68"
-
-[dev-dependencies]
-lampo-nakamoto = { path = "../lampo-nakamoto" }
-clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
-lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }

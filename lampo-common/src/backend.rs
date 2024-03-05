@@ -4,9 +4,10 @@
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use bitcoin::absolute::Height;
+use bitcoin::block::Header as BlockHeader;
+
 pub use bitcoin::consensus::{deserialize, serialize};
-use bitcoin::locktime::Height;
-use bitcoin::BlockHeader;
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
 pub use lightning::chain::WatchedOutput;
 pub use lightning::routing::utxo::UtxoResult;
