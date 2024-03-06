@@ -1,0 +1,12 @@
+[package]
+name = "lampo-vls"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+lampo-common = { path = "../lampo-common" }
+vls-core = { git = "https://gitlab.com/lightning-signer/validating-lightning-signer.git", branch = "main" }
+vls-persist = { git = "https://gitlab.com/lightning-signer/validating-lightning-signer.git", branch = "main" }
+vls-proxy = { git = "https://gitlab.com/lightning-signer/validating-lightning-signer.git", branch = "main" }

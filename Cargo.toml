@@ -11,6 +11,7 @@ members = [
         "lampo-c-ffi",
         "lampo-core-wallet",
         "lampo-bdk-wallet",
+        "lampo-vls",
         "lampo-testing",
         "tests/tests",
 ]

@@ -32,10 +32,12 @@ impl InventoryHandler for LampoInventoryManager {
 
         match event {
             InventoryCommand::GetNodeInfo(chan) => {
+                let chain = self.channel_manager.conf.network.to_string();
                 let getinfo = GetInfo {
                     node_id: self.channel_manager.manager().get_our_node_id().to_string(),
                     peers: self.peer_manager.manager().list_peers().len(),
                     channels: self.channel_manager.manager().list_channels().len(),
+                    chain,
                 };
                 let getinfo = json::to_value(getinfo)?;
                 chan.send(getinfo)?;
