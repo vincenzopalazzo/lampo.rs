@@ -68,6 +68,7 @@ pub fn json_decode_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<j
 pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `pay` with request `{:?}`", request);
     let request: DecodeInvoice = json::from_value(request.clone())?;
+    let events = ctx.handler().events();
     ctx.offchain_manager()
         .pay_invoice(&request.invoice_str, None)
         .map_err(|err| {
@@ -77,25 +78,25 @@ pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value,
                 data: None,
             })
         })?;
-    let events = ctx.handler().events();
 
     // FIXME: this will loop when the Payment event is not generated
-    while let Event::Lightning(event) = events
-        .recv_timeout(Duration::from_secs(30))
-        // FIXME: this should be avoided, the `?` should be used here
-        .map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: format!("{err}"),
-                data: None,
-            })
-        })?
-    {
-        if let LightningEvent::PaymentEvent {
+    loop {
+        let event = events
+            .recv_timeout(Duration::from_secs(30))
+            // FIXME: this should be avoided, the `?` should be used here
+            .map_err(|err| {
+                Error::Rpc(RpcError {
+                    code: -1,
+                    message: format!("{err}"),
+                    data: None,
+                })
+            })?;
+
+        if let Event::Lightning(LightningEvent::PaymentEvent {
             payment_hash,
             path,
             state,
-        } = event
+        }) = event
         {
             return Ok(json::json!({
                 "state": state,
@@ -104,8 +105,6 @@ pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value,
             }));
         }
     }
-    // FIXME the code should be removed
-    unreachable!()
 }
 
 pub fn json_keysend(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {

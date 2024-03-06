@@ -41,20 +41,19 @@ use lampod::LampoDeamon;
 macro_rules! wait {
     ($callback:expr, $timeout:expr) => {{
         let mut success = false;
-        for wait in 0..$timeout {
+        for _ in 0..4 {
             let result = $callback();
             if let Err(_) = result {
-                std::thread::sleep(std::time::Duration::from_millis(wait));
+                std::thread::sleep(std::time::Duration::from_secs($timeout));
                 continue;
             }
-            log::info!("callback completed in {wait} milliseconds");
             success = true;
             break;
         }
         assert!(success, "callback got a timeout");
     }};
     ($callback:expr) => {
-        $crate::wait!($callback, 100);
+        $crate::wait!($callback, 5);
     };
 }
 

@@ -4,7 +4,6 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-
     naersk.url = "github:nix-community/naersk";
   };
 
@@ -17,13 +16,11 @@
           version = "master-62dd";
           src = pkgs.fetchgit {
             url = "https://github.com/ElementsProject/lightning";
-            rev = "62ddf84b4f15a460ed5a8f72b313998a83eefe19";
-            sha256 = "sha256-Xl7mrV9dSATfYIFvhK9qPyRQM2gZGPV27I/5ic5avpM=";
+            rev = "d1101f416f1ec959981a8ebe5639a6b267885bfd";
+            sha256 = "sha256-OFACPl6cSH+JwlcWDHUw+A2g2gp5RwTc1JZAhYs+2WI=";
             fetchSubmodules = true;
           };
           configureFlags = [ "--disable-rust" "--disable-valgrind" ];
-        } // pkgs.lib.optionalAttrs (!pkgs.stdenv.isDarwin) {
-          NIX_CFLAGS_COMPILE = "-Wno-stringop-truncation -w";
         });
         # Our integration tests required the cln and bitcoind
         # so in this variable we declare everthin that we need

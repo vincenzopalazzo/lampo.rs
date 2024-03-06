@@ -1,5 +1,7 @@
 #[cfg(test)]
 pub mod lampo_cln_tests;
+#[cfg(test)]
+mod utils;
 
 #[cfg(test)]
 use std::sync::Once;
