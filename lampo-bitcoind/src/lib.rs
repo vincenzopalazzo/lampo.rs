@@ -153,7 +153,7 @@ impl Backend for BitcoinCore {
         // FIXME: check the result.
         let result: bitcoincore_rpc::Result<json::Value> = self.inner.call(
             "sendrawtransaction",
-            &[lampo_common::bitcoin::consensus::serialize(&tx).into()],
+            &[lampo_common::bitcoin::consensus::encode::serialize_hex(&tx).into()],
         );
         log::info!(target: "bitcoind", "broadcast transaction return {:?}", result);
         if result.is_ok() {
@@ -168,6 +168,8 @@ impl Backend for BitcoinCore {
                 return;
             };
             handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
+        } else {
+            log::error!(target: "bitcoind", "broadcast transaction return {:?}", result);
         }
     }
 

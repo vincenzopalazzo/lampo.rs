@@ -87,18 +87,29 @@ impl OffchainManager {
 
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         let invoice = self.decode_invoice(invoice_str)?;
-        if invoice.amount_milli_satoshis().is_none() {
+        let payment_id = PaymentId((*invoice.payment_hash()).to_byte_array());
+        let (payment_hash, onion, route) = if invoice.amount_milli_satoshis().is_none() {
             ldk::invoice::payment::payment_parameters_from_zero_amount_invoice(
                 &invoice,
                 amount_msat.ok_or(error::anyhow!(
                     "invoice with no amount, and amount must be specified"
                 ))?,
             )
-            .map_err(|err| error::anyhow!("{:?}", err))?;
+            .map_err(|err| error::anyhow!("{:?}", err))?
         } else {
             ldk::invoice::payment::payment_parameters_from_invoice(&invoice)
-                .map_err(|err| error::anyhow!("{:?}", err))?;
-        }
+                .map_err(|err| error::anyhow!("{:?}", err))?
+        };
+        self.channel_manager
+            .manager()
+            .send_payment(
+                payment_hash,
+                onion,
+                payment_id,
+                route,
+                Retry::Timeout(Duration::from_secs(10)),
+            )
+            .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(())
     }
 
