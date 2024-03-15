@@ -10,6 +10,9 @@ use crate::LampoDeamon;
 pub fn json_open_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `openchannel` with request {:?}", request);
     let request: request::OpenChannel = json::from_value(request.clone())?;
+
+    // LDK's `create_channel()` doesn't check if you are currently connected
+    // to the given peer so we need to check ourselves
     // FIXME: remove unwrap!
     if !ctx
         .peer_manager()
