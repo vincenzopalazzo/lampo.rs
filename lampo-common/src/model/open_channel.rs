@@ -28,6 +28,7 @@ pub mod request {
 pub mod response {
     use std::str::FromStr;
 
+    use lightning::ln::ChannelId;
     use serde::{Deserialize, Serialize};
 
     use crate::bitcoin::OutPoint;
@@ -47,6 +48,7 @@ pub mod response {
         pub push_mst: u64,
         pub to_self_delay: u64,
         pub tx: Option<OutPoint>,
+        pub channelid: String,
     }
 
     impl OpenChannel {

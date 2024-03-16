@@ -20,6 +20,7 @@ use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
 use lampod::chain::WalletManager;
 
+use lampod::jsonrpc::close_channel::json_close_channel;
 use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::offchain::json_decode_invoice;
 use lampod::jsonrpc::offchain::json_invoice;
@@ -171,6 +172,7 @@ fn run_jsonrpc(
     server.add_rpc("pay", json_pay).unwrap();
     server.add_rpc("keysend", json_keysend).unwrap();
     server.add_rpc("fees", json_estimate_fees).unwrap();
+    server.add_rpc("close_channel", json_close_channel).unwrap();
     let handler = server.handler();
     Ok((server.spawn(), handler))
 }
