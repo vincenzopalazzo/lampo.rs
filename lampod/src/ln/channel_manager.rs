@@ -31,7 +31,7 @@ use lampo_common::ldk::util::config::{ChannelHandshakeConfig, ChannelHandshakeLi
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
-use lampo_common::model::response::{self, Channel, Channels};
+use lampo_common::model::response::{self, Channel, Channels, CloseChannel};
 
 use crate::actions::handler::LampoHandler;
 use crate::chain::{LampoChainManager, WalletManager};
@@ -414,7 +414,8 @@ impl ChannelEvents for LampoChannelManager {
             },
             ..Default::default()
         };
-        self.manager()
+        let channel_id = self
+            .manager()
             .create_channel(
                 open_channel.node_id()?,
                 open_channel.amount,
@@ -433,11 +434,24 @@ impl ChannelEvents for LampoChannelManager {
             push_mst: 0,
             to_self_delay: 2016,
             tx: None,
+            channelid: channel_id.to_string(),
         })
     }
 
-    fn close_channel(&self) -> error::Result<()> {
-        unimplemented!()
+    fn close_channel(
+        &self,
+        channel: request::CloseChannel,
+    ) -> error::Result<response::CloseChannel> {
+        let channel_id = channel.channel_id()?;
+        let node_id = channel.counterpart_node_id()?;
+
+        self.manager()
+            .close_channel(&channel_id, &node_id)
+            .map_err(|err| error::anyhow!("{:?}", err))?;
+        log::info!("Channel closed!");
+        Ok(CloseChannel {
+            channel_id: channel.channel_id,
+        })
     }
 
     fn change_state_channel(&self, _: ChangeStateChannelEvent) -> error::Result<()> {

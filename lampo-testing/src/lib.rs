@@ -15,6 +15,7 @@ use clightning_testing::prelude::*;
 use lampo_common::json;
 use lampo_common::model::response;
 use lampo_common::model::response::NewAddress;
+use lampod::jsonrpc::close_channel::json_close_channel;
 use lampod::jsonrpc::offchain::json_keysend;
 use tempfile::TempDir;
 
@@ -117,6 +118,7 @@ impl LampoTesting {
 
         server.add_rpc("pay", json_pay).unwrap();
         server.add_rpc("keysend", json_keysend).unwrap();
+        server.add_rpc("close_channel", json_close_channel).unwrap();
         let handler = server.handler();
         let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
         rpc_handler.set_handler(handler);
