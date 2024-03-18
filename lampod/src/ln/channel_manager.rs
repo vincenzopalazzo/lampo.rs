@@ -428,6 +428,7 @@ impl ChannelEvents for LampoChannelManager {
             .map_err(|err| error::anyhow!("{:?}", err))?;
 
         // Wait for SendRawTransaction to be received so to get the funding transaction
+        // FIXME: we can loop forever here
         let tx: Option<Transaction> = loop {
             let events = self.handler().events();
             let event = events.recv_timeout(std::time::Duration::from_secs(30))?;
