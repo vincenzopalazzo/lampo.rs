@@ -10,7 +10,6 @@ use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::{BlockHash, Transaction};
 use lampo_common::conf::{LampoConf, UserConfig};
 use lampo_common::error;
-use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
@@ -428,17 +427,13 @@ impl ChannelEvents for LampoChannelManager {
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
 
-        // Wait for FundingChannelEnd to be received so to get the txid
+        // Wait for SendRawTransaction to be received so to get the funding transaction
         let tx: Option<Transaction> = loop {
             let events = self.handler().events();
             let event = events.recv_timeout(std::time::Duration::from_secs(30))?;
 
-            if let Event::Lightning(LightningEvent::FundingChannelEnd {
-                funding_transaction,
-                ..
-            }) = event
-            {
-                break Some(funding_transaction);
+            if let Event::OnChain(OnChainEvent::SendRawTransaction(tx)) = event {
+                break Some(tx);
             }
         };
 
