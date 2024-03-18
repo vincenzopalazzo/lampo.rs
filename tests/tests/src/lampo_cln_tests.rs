@@ -78,7 +78,7 @@ pub fn fund_a_simple_channel_from_lampo() {
         Err(())
     });
 
-    let _: json::Value = lampo
+    let response: json::Value = lampo
         .call(
             "fundchannel",
             request::OpenChannel {
@@ -90,6 +90,8 @@ pub fn fund_a_simple_channel_from_lampo() {
             },
         )
         .unwrap();
+    assert!(response.get("tx").is_some());
+
     wait!(|| {
         while let Ok(event) = events.recv_timeout(Duration::from_millis(100)) {
             log::trace!("{:?}", event);
