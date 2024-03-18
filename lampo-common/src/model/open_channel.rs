@@ -30,9 +30,9 @@ pub mod response {
 
     use serde::{Deserialize, Serialize};
 
+    use crate::bitcoin::Transaction;
     use crate::error;
     use crate::types::NodeId;
-    use bitcoin::Transaction;
 
     #[derive(Serialize, Deserialize)]
     pub struct Channels {
