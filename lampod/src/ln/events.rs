@@ -34,7 +34,7 @@ pub trait ChannelEvents {
     fn close_channel(
         &self,
         channel: request::CloseChannel,
-    ) -> error::Result<response::CloseChannel>;
+    ) -> error::Result<()>;
 
     fn change_state_channel(&self, event: ChangeStateChannelEvent) -> error::Result<()>;
 }

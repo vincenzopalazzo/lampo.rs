@@ -453,32 +453,14 @@ impl ChannelEvents for LampoChannelManager {
     fn close_channel(
         &self,
         channel: request::CloseChannel,
-    ) -> error::Result<response::CloseChannel> {
+    ) -> error::Result<()> {
         let channel_id = channel.channel_id()?;
         let node_id = channel.counterpart_node_id()?;
 
         self.manager()
             .close_channel(&channel_id, &node_id)
             .map_err(|err| error::anyhow!("{:?}", err))?;
-        let events = self.handler().events();
-        let (message, channel_id, node_id, funding_utxo) = loop {
-            let event = events.recv_timeout(std::time::Duration::from_secs(30))?;
-            if let Event::Lightning(LightningEvent::CloseChannelEvent {
-                message,
-                channel_id,
-                counterparty_node_id,
-                funding_utxo,
-            }) = event
-            {
-                break (message, channel_id, counterparty_node_id, funding_utxo);
-            }
-        };
-        Ok(CloseChannel {
-            channel_id,
-            message,
-            counterparty_node_id: node_id,
-            funding_utxo,
-        })
+        Ok(())
     }
     fn change_state_channel(&self, _: ChangeStateChannelEvent) -> error::Result<()> {
         unimplemented!()
