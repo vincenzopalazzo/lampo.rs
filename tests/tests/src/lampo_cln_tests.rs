@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+use lampo_common::bitcoin::hashes::hex;
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
@@ -538,4 +539,101 @@ fn be_able_to_kesend_payments() {
     );
     assert!(result.is_ok(), "{:?}", result);
     async_run!(cln.stop()).unwrap();
+}
+
+#[test]
+fn close_channel() {
+    init();
+    let cln = async_run!(cln::Node::with_params(
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "regtest"
+    ))
+    .unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    let btc = cln.btc();
+    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo = lampo_manager.lampod();
+    let _info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
+    let info_cln = cln.rpc().getinfo().unwrap();
+    let events = lampo.events();
+    let address = lampo_manager.fund_wallet(101).unwrap();
+    wait!(|| {
+        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
+            events.recv_timeout(Duration::from_millis(100))
+        else {
+            return Err(());
+        };
+        if height.to_consensus_u32() == 101 {
+            return Ok(());
+        }
+        Err(())
+    });
+    let _: json::Value = lampo
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: cln.rpc().getinfo().unwrap().id,
+                port: Some(cln.port.into()),
+                amount: 1_500_000_000,
+                public: true,
+                addr: Some("127.0.0.1".to_owned()),
+            },
+        )
+        .unwrap();
+
+    std::thread::sleep(Duration::from_secs(2));
+
+    // Get the transaction confirmed
+    let _ = btc.rpc().generate_to_address(6, &address).unwrap();
+    wait!(|| {
+        log::info!(target: "tests", "wait for confimetion");
+        let _ = btc.rpc().generate_to_address(1, &address).unwrap();
+        // Get the transaction confirmed
+        for _ in 0..100 {
+            let Ok(event) = events.recv_timeout(Duration::from_nanos(100)) else {
+                continue;
+            };
+            log::info!(target: "tests", "lampo event: {:?}", event);
+            match event {
+                Event::Lightning(LightningEvent::ChannelReady { .. }) => return Ok(()),
+                _ => continue,
+            };
+        }
+        Err(())
+    });
+
+    wait!(|| {
+        let channels = cln.rpc().listfunds().unwrap().channels;
+        if channels.is_empty() {
+            return Err(());
+        }
+
+        let mut channels = cln.rpc().listfunds().unwrap().channels;
+        let origin_size = channels.len();
+        channels.retain(|chan| chan.state == "CHANNELD_NORMAL");
+        if channels.len() == origin_size {
+            return Ok(());
+        }
+
+        let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+        if !channels.channels.first().unwrap().ready {
+            return Err(());
+        }
+        let address = cln.rpc().newaddr(None).unwrap();
+        fund_wallet(btc.clone(), &address.bech32.unwrap(), 1).unwrap();
+        crate::wait_cln_sync!(cln);
+        Err(())
+    });
+
+    // This should return the final channel_id as channel_id may differ from the time being in ChannelPending, ChannelClosed state.
+    let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+
+    let result: Result<response::CloseChannel, _> = lampo.call(
+        "close",
+        request::CloseChannel {
+            node_id: info_cln.id.to_string(),
+            channel_id: Some(channels.channels.first().unwrap().channel_id),
+        },
+    );
+    assert!(result.is_ok(), "{:?}", result);
 }

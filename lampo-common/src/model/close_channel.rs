@@ -10,20 +10,26 @@ pub mod request {
 
     #[derive(Clone, Serialize, Deserialize)]
     pub struct CloseChannel {
-        pub counterpart_node_id: String,
+        pub node_id: String,
         // Hex of the channel
-        pub channel_id: String,
+        pub channel_id: Option<String>,
     }
 
     impl CloseChannel {
         pub fn counterpart_node_id(&self) -> error::Result<PublicKey> {
-            let node_id = PublicKey::from_str(&self.counterpart_node_id)?;
+            let node_id = PublicKey::from_str(&self.node_id)?;
             Ok(node_id)
         }
 
         // Returns ChannelId in byte format from hex of channelid
         pub fn channel_id(&self) -> error::Result<ChannelId> {
-            let result = self.decode_hex(&self.channel_id)?;
+            let id = if let Some(id) = &self.channel_id {
+                id
+            } else {
+                error::bail!("No node_id provided");
+            };
+            let result = self.decode_hex(&id)?;
+            // FIXME: We can do better here
             let mut result_array: [u8; 32] = [0; 32];
             for i in 0..32 {
                 result_array[i] = result[i]
