@@ -38,4 +38,10 @@ pub enum LightningEvent {
         state: ChannelState,
         message: String,
     },
+    CloseChannelEvent {
+        channel_id: String,
+        message: String,
+        counterparty_node_id: String,
+        funding_utxo: String,
+    },
 }

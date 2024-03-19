@@ -34,7 +34,7 @@ pub mod response {
     use crate::error;
     use crate::types::NodeId;
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub struct Channels {
         pub channels: Vec<Channel>,
     }
@@ -58,6 +58,8 @@ pub mod response {
 
     #[derive(Clone, Serialize, Deserialize, Debug)]
     pub struct Channel {
+        // Channel_id needs to be string as it currently does not derive Serialize
+        pub channel_id: String,
         pub short_channel_id: Option<u64>,
         pub peer_id: String,
         pub peer_alias: Option<String>,

@@ -10,6 +10,7 @@ use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::{BlockHash, Transaction};
 use lampo_common::conf::{LampoConf, UserConfig};
 use lampo_common::error;
+use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
@@ -31,7 +32,7 @@ use lampo_common::ldk::util::config::{ChannelHandshakeConfig, ChannelHandshakeLi
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
-use lampo_common::model::response::{self, Channel, Channels};
+use lampo_common::model::response::{self, Channel, Channels, CloseChannel};
 
 use crate::actions::handler::LampoHandler;
 use crate::chain::{LampoChainManager, WalletManager};
@@ -191,6 +192,7 @@ impl LampoChannelManager {
             .list_channels()
             .into_iter()
             .map(|channel| Channel {
+                channel_id: channel.channel_id.to_string(),
                 short_channel_id: channel.short_channel_id,
                 peer_id: channel.counterparty.node_id.to_string(),
                 peer_alias: None,
@@ -448,10 +450,36 @@ impl ChannelEvents for LampoChannelManager {
         })
     }
 
-    fn close_channel(&self) -> error::Result<()> {
-        unimplemented!()
-    }
+    fn close_channel(
+        &self,
+        channel: request::CloseChannel,
+    ) -> error::Result<response::CloseChannel> {
+        let channel_id = channel.channel_id()?;
+        let node_id = channel.counterpart_node_id()?;
 
+        self.manager()
+            .close_channel(&channel_id, &node_id)
+            .map_err(|err| error::anyhow!("{:?}", err))?;
+        let events = self.handler().events();
+        let (message, channel_id, node_id, funding_utxo) = loop {
+            let event = events.recv_timeout(std::time::Duration::from_secs(30))?;
+            if let Event::Lightning(LightningEvent::CloseChannelEvent {
+                message,
+                channel_id,
+                counterparty_node_id,
+                funding_utxo,
+            }) = event
+            {
+                break (message, channel_id, counterparty_node_id, funding_utxo);
+            }
+        };
+        Ok(CloseChannel {
+            channel_id,
+            message,
+            counterparty_node_id: node_id,
+            funding_utxo,
+        })
+    }
     fn change_state_channel(&self, _: ChangeStateChannelEvent) -> error::Result<()> {
         unimplemented!()
     }
