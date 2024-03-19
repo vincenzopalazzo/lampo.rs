@@ -1,3 +1,4 @@
+mod close_channel;
 mod connect;
 mod getinfo;
 mod invoice;
@@ -10,6 +11,7 @@ pub use connect::Connect;
 pub use getinfo::GetInfo;
 
 pub mod request {
+    pub use crate::model::close_channel::request::*;
     pub use crate::model::connect::Connect;
     pub use crate::model::getinfo::GetInfo;
     pub use crate::model::invoice::request::*;
@@ -21,6 +23,7 @@ pub mod request {
 }
 
 pub mod response {
+    pub use crate::model::close_channel::response::*;
     pub use crate::model::connect::Connect;
     pub use crate::model::getinfo::GetInfo;
     pub use crate::model::invoice::response::*;

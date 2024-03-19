@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use lampod::jsonrpc::channels::json_close_channel;
 use lampod::jsonrpc::channels::json_list_channels;
 
 use lampo_bitcoind::BitcoinCore;
@@ -171,6 +172,7 @@ fn run_jsonrpc(
     server.add_rpc("pay", json_pay).unwrap();
     server.add_rpc("keysend", json_keysend).unwrap();
     server.add_rpc("fees", json_estimate_fees).unwrap();
+    server.add_rpc("close", json_close_channel).unwrap();
     let handler = server.handler();
     Ok((server.spawn(), handler))
 }
