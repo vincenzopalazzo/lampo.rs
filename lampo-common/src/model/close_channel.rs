@@ -37,6 +37,11 @@ pub mod request {
             Ok(ChannelId::from_bytes(result_array))
         }
 
+        /// This converts hex to bytes array.
+        /// Stolen from https://stackoverflow.com/a/52992629
+        /// It takes two values every in each iteration from the hex
+        /// then convert the formed hexdecimal digit to u8, collects it in a vector
+        /// and return it (redix = 16 for hexadecimal)
         fn decode_hex(&self, s: &str) -> Result<Vec<u8>, ParseIntError> {
             (0..s.len())
                 .step_by(2)

@@ -159,16 +159,8 @@ impl Handler for LampoHandler {
                 channel_funding_txo,
                 ..
             } => {
-                let node_id = if let Some(id) = counterparty_node_id {
-                    id.to_string()
-                } else {
-                    "Node_id not found".to_string()
-                };
-                let txo = if let Some(txo) = channel_funding_txo {
-                    txo.to_string()
-                } else {
-                    "Outpoint not found".to_string()
-                };
+                let node_id = counterparty_node_id.map(|id| id.to_string());
+                let txo = channel_funding_txo.map(|txo| txo.to_string());
                 self.emit(Event::Lightning(LightningEvent::CloseChannelEvent { channel_id: channel_id.to_string(), message: reason.to_string(), counterparty_node_id : node_id, funding_utxo : txo}));
                 log::info!("channel `{user_channel_id}` closed with reason: `{reason}`");
                 Ok(())
