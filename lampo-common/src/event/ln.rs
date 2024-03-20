@@ -41,7 +41,7 @@ pub enum LightningEvent {
     CloseChannelEvent {
         channel_id: String,
         message: String,
-        counterparty_node_id: String,
-        funding_utxo: String,
+        counterparty_node_id: Option<String>,
+        funding_utxo: Option<String>,
     },
 }

@@ -1,7 +1,6 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use lampo_common::bitcoin::hashes::hex;
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
@@ -549,7 +548,6 @@ fn close_channel() {
         "regtest"
     ))
     .unwrap();
-    std::thread::sleep(Duration::from_secs(2));
     let btc = cln.btc();
     let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
     let lampo = lampo_manager.lampod();
@@ -581,7 +579,19 @@ fn close_channel() {
         )
         .unwrap();
 
-    std::thread::sleep(Duration::from_secs(2));
+    // This would be the second channel
+    let _: json::Value = lampo
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: cln.rpc().getinfo().unwrap().id,
+                port: Some(cln.port.into()),
+                amount: 1_000_000_000,
+                public: true,
+                addr: Some("127.0.0.1".to_owned()),
+            },
+        )
+        .unwrap();
 
     // Get the transaction confirmed
     let _ = btc.rpc().generate_to_address(6, &address).unwrap();
@@ -628,12 +638,53 @@ fn close_channel() {
     // This should return the final channel_id as channel_id may differ from the time being in ChannelPending, ChannelClosed state.
     let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
 
+    // This should fail as there are two channels with the peer so we need to pass the specific `channel_id`
     let result: Result<response::CloseChannel, _> = lampo.call(
         "close",
         request::CloseChannel {
             node_id: info_cln.id.to_string(),
-            channel_id: Some(channels.channels.first().unwrap().channel_id),
+            channel_id: None,
+        },
+    );
+
+    assert!(result.is_err(), "{:?}", result);
+
+    // Closing the first channel
+    let result: Result<response::CloseChannel, _> = lampo.call(
+        "close",
+        request::CloseChannel {
+            node_id: info_cln.id.to_string(),
+            channel_id: Some(channels.channels.first().unwrap().channel_id.to_string()),
         },
     );
     assert!(result.is_ok(), "{:?}", result);
+    // assert_eq!(&result.unwrap().counterparty_node_id, &info_cln.id.to_string());
+    assert_eq!(
+        &result.unwrap().channel_id,
+        &channels.channels.first().unwrap().channel_id.to_string()
+    );
+
+    // Closing the second channel - at this point there is only 1 channel with the peer
+    let result: Result<response::CloseChannel, _> = lampo.call(
+        "close",
+        request::CloseChannel {
+            node_id: info_cln.id.to_string(),
+            channel_id: None,
+        },
+    );
+    assert!(result.is_ok(), "{:?}", result);
+    assert_eq!(
+        result.unwrap().counterparty_node_id,
+        info_cln.id.to_string()
+    );
+
+    // Closing the third channel (this channel does not exist)
+    let result: Result<response::CloseChannel, _> = lampo.call(
+        "close",
+        request::CloseChannel {
+            node_id: info_cln.id.to_string(),
+            channel_id: Some(channels.channels.first().unwrap().channel_id.to_string()),
+        },
+    );
+    assert!(result.is_err(), "{:?}", result);
 }

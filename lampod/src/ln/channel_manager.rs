@@ -10,7 +10,6 @@ use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::{BlockHash, Transaction};
 use lampo_common::conf::{LampoConf, UserConfig};
 use lampo_common::error;
-use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
@@ -32,7 +31,7 @@ use lampo_common::ldk::util::config::{ChannelHandshakeConfig, ChannelHandshakeLi
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
-use lampo_common::model::response::{self, Channel, Channels, CloseChannel};
+use lampo_common::model::response::{self, Channel, Channels};
 
 use crate::actions::handler::LampoHandler;
 use crate::chain::{LampoChainManager, WalletManager};
@@ -450,10 +449,7 @@ impl ChannelEvents for LampoChannelManager {
         })
     }
 
-    fn close_channel(
-        &self,
-        channel: request::CloseChannel,
-    ) -> error::Result<()> {
+    fn close_channel(&self, channel: request::CloseChannel) -> error::Result<()> {
         let channel_id = channel.channel_id()?;
         let node_id = channel.counterpart_node_id()?;
 
