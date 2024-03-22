@@ -23,17 +23,13 @@ pub mod request {
 
         // Returns ChannelId in byte format from hex of channelid
         pub fn channel_id(&self) -> error::Result<ChannelId> {
-            let id = if let Some(id) = &self.channel_id {
-                id
-            } else {
-                error::bail!("No node_id provided");
-            };
+            let id = self
+                .channel_id
+                .as_ref()
+                .ok_or(error::anyhow!("`channel_id` not found"))?;
             let result = self.decode_hex(&id)?;
-            // FIXME: We can do better here
             let mut result_array: [u8; 32] = [0; 32];
-            for i in 0..32 {
-                result_array[i] = result[i]
-            }
+            result_array.copy_from_slice(&result);
             Ok(ChannelId::from_bytes(result_array))
         }
 
@@ -58,7 +54,7 @@ pub mod response {
     pub struct CloseChannel {
         pub channel_id: String,
         pub message: String,
-        pub counterparty_node_id: String,
+        pub peer_id: String,
         pub funding_utxo: String,
     }
 }
