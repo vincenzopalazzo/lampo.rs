@@ -21,7 +21,6 @@ pub fn json_close_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<js
     log::info!("call for `closechannel` with request {:?}", request);
     let mut request: request::CloseChannel = json::from_value(request.clone())?;
     let events = ctx.handler().events();
-    let res;
     // This gives all the channels with associated peer
     let channels: response::Channels = ctx
         .handler()
@@ -38,7 +37,7 @@ pub fn json_close_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<js
                 data: None,
             })
         })?;
-    if channels.channels.len() > 1 {
+    let res = if channels.channels.len() > 1 {
         // check the channel_id if it is not none, if it is return an error
         // and if it is not none then we need to have the channel_id that needs to be shut
         if request.channel_id.is_none() {
@@ -48,14 +47,14 @@ pub fn json_close_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<js
                 data: None,
             }));
         } else {
-            res = ctx.channel_manager().close_channel(request.clone());
-        };
+            request
+        }
     } else if !channels.channels.is_empty() {
         // This is the case where channel with the given node_id = 1
         // SAFETY: it is safe to unwrap because the channels is not empty
         let channel = channels.channels.first().unwrap();
         request.channel_id = Some(channel.channel_id.clone());
-        res = ctx.channel_manager().close_channel(request);
+        request
     } else {
         // No channels with the given peer.
         return Err(Error::Rpc(RpcError {
@@ -63,6 +62,16 @@ pub fn json_close_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<js
             message: format!("No channels with associated peer"),
             data: None,
         }));
+    };
+    match ctx.channel_manager().close_channel(res) {
+        Err(err) => {
+            return Err(Error::Rpc(RpcError {
+                code: -1,
+                message: format!("{err}"),
+                data: None,
+            }))
+        }
+        Ok(_) => {}
     };
     let (message, channel_id, node_id, funding_utxo) = loop {
         let event = events
@@ -84,18 +93,10 @@ pub fn json_close_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<js
             break (message, channel_id, counterparty_node_id, funding_utxo);
         }
     };
-    let resp = match res {
-        Ok(_) => Ok(json::json!({
-            "message" : message,
-            "channel_id" : channel_id,
-            "counterparty_node_id" : node_id,
-            "funding_utxo" : funding_utxo,
-        })),
-        Err(err) => Err(Error::Rpc(RpcError {
-            code: -1,
-            message: format!("{err}"),
-            data: None,
-        })),
-    };
-    Ok(json::to_value(resp?)?)
+    Ok(json::json!({
+        "message" : message,
+        "channel_id" : channel_id,
+        "peer_id" : node_id,
+        "funding_utxo" : funding_utxo,
+    }))
 }
