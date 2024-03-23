@@ -58,3 +58,26 @@ pub mod response {
         pub funding_utxo: String,
     }
 }
+
+pub mod tests {
+
+    #[test]
+    fn channel_id_tests() {
+        let node_id =
+            "039c108cc6777e7d5066dfa33c611c32e6baa1c49de6d546b5b76686486d0360ac".to_string();
+
+        // This is a correct channel_hex of 32 bytes
+        let channel_hex =
+            Some("0a44677526ac8c607616bd91258d7e5df1d86fae9c32e23aa18703a650944c64".to_string());
+        let req = crate::model::request::CloseChannel {
+            node_id: node_id.clone(),
+            channel_id: channel_hex,
+        };
+        let channel_bytes = [
+            10, 68, 103, 117, 38, 172, 140, 96, 118, 22, 189, 145, 37, 141, 126, 93, 241, 216, 111,
+            174, 156, 50, 226, 58, 161, 135, 3, 166, 80, 148, 76, 100,
+        ];
+        let channel_id_bytes = req.channel_id();
+        assert_eq!(channel_bytes, channel_id_bytes.unwrap().0);
+    }
+}
