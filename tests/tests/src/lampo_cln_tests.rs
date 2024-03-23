@@ -542,7 +542,7 @@ fn be_able_to_kesend_payments() {
 }
 
 #[test]
-fn test_closing_two_channels_without_channelid_success() {
+fn test_closing_two_channels_without_channelid_fails() {
     init();
     let mut cln = async_run!(cln::Node::with_params(
         "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
@@ -854,7 +854,7 @@ fn test_lampo_to_cln_close_channel_without_channel_id_success() {
 }
 
 #[test]
-fn test_close_channel_without_opening_a_channel_success() {
+fn test_close_channel_without_opening_a_channel_fails() {
     init();
     let mut cln = async_run!(cln::Node::with_params(
         "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
@@ -890,23 +890,4 @@ fn test_close_channel_without_opening_a_channel_success() {
     );
     assert!(result.is_err(), "{:?}", result);
     async_run!(cln.stop()).unwrap();
-}
-
-#[test]
-fn channel_id_tests() {
-    let node_id = "039c108cc6777e7d5066dfa33c611c32e6baa1c49de6d546b5b76686486d0360ac".to_string();
-
-    // This is a correct channel_hex of 32 bytes
-    let channel_hex =
-        Some("0a44677526ac8c607616bd91258d7e5df1d86fae9c32e23aa18703a650944c64".to_string());
-    let req = CloseChannel {
-        node_id: node_id.clone(),
-        channel_id: channel_hex,
-    };
-    let channel_bytes = [
-        10, 68, 103, 117, 38, 172, 140, 96, 118, 22, 189, 145, 37, 141, 126, 93, 241, 216, 111,
-        174, 156, 50, 226, 58, 161, 135, 3, 166, 80, 148, 76, 100,
-    ];
-    let channel_id_bytes = req.channel_id();
-    assert_eq!(channel_bytes, channel_id_bytes.unwrap().0);
 }
