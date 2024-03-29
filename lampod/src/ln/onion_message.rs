@@ -47,6 +47,10 @@ where
         const MAX_PATHS: usize = 3;
 
         let network_graph = self.graph.deref().read_only();
+        let is_recipient_announced = network_graph
+            .nodes()
+            .contains_key(&NodeId::from_pubkey(&recipient));
+
         let peer_info = peers
             .iter()
             // Limit to peers with announced channels
@@ -56,7 +60,6 @@ where
                     .map(|info| (*pubkey, info.channels.len()))
             })
             .collect::<Vec<_>>();
-
         let paths = peer_info
             .into_iter()
             .map(|(pubkey, _)| vec![pubkey, recipient])
@@ -64,10 +67,23 @@ where
             .take(MAX_PATHS)
             .collect::<Result<Vec<_>, _>>();
 
+        // BOLT 12:
+        // if it is connected only by private channels:
+        //  - MUST include offer_paths containing one or more paths to the node from publicly reachable nodes.
+        // otherwise:
+        //  - MAY include offer_paths.
+        // if it includes offer_paths:
+        //  - SHOULD ignore any invoice_request which does not use the path.
         match paths {
             Ok(paths) if !paths.is_empty() => Ok(paths),
-            _ => BlindedPath::one_hop_for_message(recipient, &*self.keys, secp_ctx)
-                .map(|path| vec![path]),
+            _ => {
+                if is_recipient_announced {
+                    BlindedPath::one_hop_for_message(recipient, &*self.keys, secp_ctx)
+                        .map(|path| vec![path])
+                } else {
+                    Err(())
+                }
+            }
         }
     }
 

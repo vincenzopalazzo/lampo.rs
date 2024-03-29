@@ -18,6 +18,17 @@ use lampo_jsonrpc::Handler;
 
 use crate::{handler::external_handler::ExternalHandler, LampoDeamon};
 
+#[macro_export]
+macro_rules! rpc_error {
+    ($($msg:tt)*) => {{
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!($($msg)*),
+            data: None,
+        })
+    }};
+}
+
 /// JSON RPC 2.0 Command handler!
 pub struct CommandHandler {
     pub handler: RefCell<Option<Arc<Handler<LampoDeamon>>>>,
