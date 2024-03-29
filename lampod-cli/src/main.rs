@@ -25,6 +25,7 @@ use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::offchain::json_decode_invoice;
 use lampod::jsonrpc::offchain::json_invoice;
 use lampod::jsonrpc::offchain::json_keysend;
+use lampod::jsonrpc::offchain::json_offer;
 use lampod::jsonrpc::offchain::json_pay;
 use lampod::jsonrpc::onchain::json_estimate_fees;
 use lampod::jsonrpc::onchain::json_funds;
@@ -166,6 +167,7 @@ fn run_jsonrpc(
     server.add_rpc("channels", json_list_channels).unwrap();
     server.add_rpc("funds", json_funds).unwrap();
     server.add_rpc("invoice", json_invoice).unwrap();
+    server.add_rpc("offer", json_offer).unwrap();
     server
         .add_rpc("decode_invoice", json_decode_invoice)
         .unwrap();

@@ -272,7 +272,7 @@ impl Handler for LampoHandler {
                 Ok(())
             }
             ldk::events::Event::PaymentSent { .. } => {
-                log::info!(target: "lampo_handler", "payment sent");
+                log::info!("payment sent: `{:?}`", event);
                 Ok(())
             },
             ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {

@@ -11,6 +11,12 @@ pub mod request {
     }
 
     #[derive(Serialize, Deserialize)]
+    pub struct GenerateOffer {
+        pub amount_msat: Option<u64>,
+        pub description: String,
+    }
+
+    #[derive(Serialize, Deserialize)]
     pub struct DecodeInvoice {
         pub invoice_str: String,
         pub amount: Option<u64>,
@@ -23,9 +29,28 @@ pub mod response {
     use lightning::routing::router::RouteHop;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Serialize, Deserialize)]
+    use crate::ldk;
+
+    #[derive(Serialize, Deserialize, Debug)]
     pub struct Invoice {
         pub bolt11: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    pub struct Offer {
+        pub bolt12: String,
+        pub metadata: Option<String>,
+        pub metadata_pubkey: String,
+    }
+
+    impl From<ldk::offers::offer::Offer> for Offer {
+        fn from(value: ldk::offers::offer::Offer) -> Self {
+            Self {
+                bolt12: value.to_string(),
+                metadata: value.metadata().map(|bytes| hex::encode(bytes)),
+                metadata_pubkey: value.signing_pubkey().to_string(),
+            }
+        }
     }
 
     #[derive(Serialize, Deserialize)]

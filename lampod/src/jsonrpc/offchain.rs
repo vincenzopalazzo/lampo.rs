@@ -6,7 +6,9 @@ use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::ldk;
 use lampo_common::model::request::GenerateInvoice;
+use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
+use lampo_common::model::response::Offer;
 use lampo_common::model::response::{Invoice, InvoiceInfo};
 use lampo_common::{json, model::request::DecodeInvoice};
 use lampo_jsonrpc::errors::{Error, RpcError};
@@ -34,6 +36,25 @@ pub fn json_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Va
         bolt11: invoice.to_string(),
     };
     Ok(json::to_value(&invoice)?)
+}
+
+pub fn json_offer(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+    log::info!("call for `offer` with request `{:?}`", request);
+    let request: GenerateOffer = json::from_value(request.clone())?;
+    let manager = ctx.channel_manager().manager();
+    let mut offer_builder = manager
+        .create_offer_builder(request.description)
+        .map_err(|err| crate::rpc_error!("{:?}", err))?;
+
+    if let Some(amount_msat) = request.amount_msat {
+        offer_builder = offer_builder.amount_msats(amount_msat);
+    }
+    let offer: Offer = offer_builder
+        .build()
+        // FIXME: implement display error on top of the bolt12 error
+        .map_err(|err| crate::rpc_error!("{:?}", err))?
+        .into();
+    Ok(json::to_value(&offer)?)
 }
 
 pub fn json_decode_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
