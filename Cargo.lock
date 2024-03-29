@@ -116,7 +116,7 @@ source = "git+https://github.com/bitcoindevkit/bdk.git#c01983d02aac6ee49c1bb34ad
 dependencies = [
  "bdk_chain",
  "bip39",
- "bitcoin 0.30.2",
+ "bitcoin",
  "getrandom",
  "js-sys",
  "miniscript",
@@ -130,7 +130,7 @@ name = "bdk_chain"
 version = "0.11.0"
 source = "git+https://github.com/bitcoindevkit/bdk.git#c01983d02aac6ee49c1bb34ade833e5d72bc8738"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "miniscript",
  "serde",
 ]
@@ -142,7 +142,7 @@ source = "git+https://github.com/bitcoindevkit/bdk.git#c01983d02aac6ee49c1bb34ad
 dependencies = [
  "async-trait",
  "bdk_chain",
- "esplora-client 0.6.0",
+ "esplora-client",
  "futures",
 ]
 
@@ -190,18 +190,6 @@ dependencies = [
 
 [[package]]
 name = "bitcoin"
-version = "0.29.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0694ea59225b0c5f3cb405ff3f670e4828358ed26aec49dc352f730f0cb1a8a3"
-dependencies = [
- "bech32 0.9.1",
- "bitcoin_hashes 0.11.0",
- "secp256k1 0.24.3",
- "serde",
-]
-
-[[package]]
-name = "bitcoin"
 version = "0.30.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1945a5048598e4189e239d3f809b19bdad4845c4b2ba400d304d2dcf26d2c462"
@@ -211,7 +199,7 @@ dependencies = [
  "bitcoin-private",
  "bitcoin_hashes 0.12.0",
  "hex_lit",
- "secp256k1 0.27.0",
+ "secp256k1",
  "serde",
 ]
 
@@ -241,9 +229,6 @@ name = "bitcoin_hashes"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90064b8dee6815a6470d60bad07bbbaee885c0e12d04177138fa3291a01b7bc4"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "bitcoin_hashes"
@@ -275,7 +260,7 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d30ce6f40fb0a2e8d98522796219282504b7a4b14e2b4c26139a7bea6aec6586"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "bitcoin-private",
  "serde",
  "serde_json",
@@ -498,38 +483,16 @@ dependencies = [
 
 [[package]]
 name = "esplora-client"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3e11244e7fd8b0beee0a3c62137c4bd9f756fe2c492ccf93171f81467b59200"
-dependencies = [
- "bitcoin 0.29.2",
- "log",
- "reqwest",
- "serde",
- "ureq",
-]
-
-[[package]]
-name = "esplora-client"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cb1f7f2489cce83bc3bd92784f9ba5271eeb6e729b975895fc541f78cbfcdca"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "bitcoin-internals",
  "log",
  "reqwest",
  "serde",
  "ureq",
-]
-
-[[package]]
-name = "fastrand"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e51093e27b0797c359783294ca4f0a911c270184cb10f85783b118614a1501be"
-dependencies = [
- "instant",
 ]
 
 [[package]]
@@ -744,6 +707,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hex-conservative"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -806,7 +775,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.6",
+ "socket2",
  "tokio",
  "tower-service",
  "tracing",
@@ -871,15 +840,6 @@ dependencies = [
  "thiserror",
  "unicode-segmentation",
  "unicode-width",
-]
-
-[[package]]
-name = "instant"
-version = "0.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a5bbe824c507c5da5956355e86a746d82e0e1464f65d862cc5e71da70e94b2c"
-dependencies = [
- "cfg-if",
 ]
 
 [[package]]
@@ -997,11 +957,12 @@ name = "lampo-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bitcoin 0.30.2",
+ "bitcoin",
  "chrono",
  "clightningrpc-conf",
  "colored",
  "crossbeam-channel",
+ "hex",
  "lightning",
  "lightning-background-processor",
  "lightning-block-sync",
@@ -1037,19 +998,6 @@ dependencies = [
  "popol",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "lampo-nakamoto"
-version = "0.1.0"
-dependencies = [
- "esplora-client 0.5.0",
- "lampo-common",
- "log",
- "nakamoto-client",
- "nakamoto-common",
- "nakamoto-net-poll",
- "nakamoto-p2p",
 ]
 
 [[package]]
@@ -1160,7 +1108,7 @@ name = "lightning"
 version = "0.0.121"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=macros/allow-to-inject-channels-keys#4a28d1b63746f2c9e38f941fe2d9ffe04c408ff1"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "hex-conservative",
  "musig2",
 ]
@@ -1170,7 +1118,7 @@ name = "lightning-background-processor"
 version = "0.0.121"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=macros/allow-to-inject-channels-keys#4a28d1b63746f2c9e38f941fe2d9ffe04c408ff1"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "lightning",
  "lightning-rapid-gossip-sync",
 ]
@@ -1180,7 +1128,7 @@ name = "lightning-block-sync"
 version = "0.0.121"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=macros/allow-to-inject-channels-keys#4a28d1b63746f2c9e38f941fe2d9ffe04c408ff1"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "hex-conservative",
  "lightning",
 ]
@@ -1191,10 +1139,10 @@ version = "0.29.0"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=macros/allow-to-inject-channels-keys#4a28d1b63746f2c9e38f941fe2d9ffe04c408ff1"
 dependencies = [
  "bech32 0.9.1",
- "bitcoin 0.30.2",
+ "bitcoin",
  "lightning",
  "num-traits",
- "secp256k1 0.27.0",
+ "secp256k1",
 ]
 
 [[package]]
@@ -1202,7 +1150,7 @@ name = "lightning-net-tokio"
 version = "0.0.121"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=macros/allow-to-inject-channels-keys#4a28d1b63746f2c9e38f941fe2d9ffe04c408ff1"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "lightning",
  "tokio",
 ]
@@ -1212,7 +1160,7 @@ name = "lightning-persister"
 version = "0.0.121"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=macros/allow-to-inject-channels-keys#4a28d1b63746f2c9e38f941fe2d9ffe04c408ff1"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "lightning",
  "windows-sys 0.48.0",
 ]
@@ -1222,7 +1170,7 @@ name = "lightning-rapid-gossip-sync"
 version = "0.0.121"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=macros/allow-to-inject-channels-keys#4a28d1b63746f2c9e38f941fe2d9ffe04c408ff1"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "lightning",
 ]
 
@@ -1255,26 +1203,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "523dc4f511e55ab87b694dc30d0f820d60906ef06413f93d4d7a1385599cc149"
 
 [[package]]
-name = "microserde"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc73d64402c57ce913a4a4788ca4e0c60329a2e29782f8e88d510c1c951fac46"
-dependencies = [
- "microserde-derive",
-]
-
-[[package]]
-name = "microserde-derive"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e3afa8ee462bb9ed735b544476a9e4ece0f10be76864ff9b80a6a525b837232"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1286,7 +1214,7 @@ version = "10.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1eb102b66b2127a872dbcc73095b7b47aeb9d92f7b03c2b2298253ffc82c7594"
 dependencies = [
- "bitcoin 0.30.2",
+ "bitcoin",
  "bitcoin-private",
  "serde",
 ]
@@ -1316,86 +1244,7 @@ name = "musig2"
 version = "0.1.0"
 source = "git+https://github.com/arik-so/rust-musig2?rev=cff11e3#cff11e3b1af1691f721a120dc6acb921afa31f89"
 dependencies = [
- "bitcoin 0.30.2",
-]
-
-[[package]]
-name = "nakamoto-chain"
-version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
-dependencies = [
- "log",
- "nakamoto-common",
- "thiserror",
-]
-
-[[package]]
-name = "nakamoto-client"
-version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
-dependencies = [
- "crossbeam-channel",
- "fastrand 1.9.0",
- "log",
- "microserde",
- "nakamoto-chain",
- "nakamoto-common",
- "nakamoto-net",
- "nakamoto-p2p",
- "thiserror",
-]
-
-[[package]]
-name = "nakamoto-common"
-version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
-dependencies = [
- "bitcoin 0.29.2",
- "bitcoin_hashes 0.11.0",
- "fastrand 1.9.0",
- "log",
- "microserde",
- "nakamoto-net",
- "nonempty",
- "thiserror",
-]
-
-[[package]]
-name = "nakamoto-net"
-version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
-dependencies = [
- "crossbeam-channel",
- "fastrand 1.9.0",
- "log",
- "thiserror",
-]
-
-[[package]]
-name = "nakamoto-net-poll"
-version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
-dependencies = [
- "crossbeam-channel",
- "libc",
- "log",
- "nakamoto-net",
- "popol",
- "socket2 0.4.10",
-]
-
-[[package]]
-name = "nakamoto-p2p"
-version = "0.4.0"
-source = "git+https://github.com/vincenzopalazzo/nakamoto?branch=macros/client_model-fixes#5b44354d4e44d1625215189784c429cc0070d5d9"
-dependencies = [
- "crossbeam-channel",
- "fastrand 1.9.0",
- "log",
- "microserde",
- "nakamoto-common",
- "nakamoto-net",
- "thiserror",
+ "bitcoin",
 ]
 
 [[package]]
@@ -1435,12 +1284,6 @@ dependencies = [
  "cfg-if",
  "libc",
 ]
-
-[[package]]
-name = "nonempty"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9e591e719385e6ebaeb5ce5d3887f7d5676fceca6411d1925ccc95745f3d6f7"
 
 [[package]]
 name = "ntest"
@@ -1908,34 +1751,14 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "secp256k1"
-version = "0.24.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b1629c9c557ef9b293568b338dddfc8208c98a18c59d722a9d53f859d9c9b62"
-dependencies = [
- "bitcoin_hashes 0.11.0",
- "secp256k1-sys 0.6.1",
- "serde",
-]
-
-[[package]]
-name = "secp256k1"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25996b82292a7a57ed3508f052cfff8640d38d32018784acd714758b43da9c8f"
 dependencies = [
  "bitcoin_hashes 0.12.0",
  "rand",
- "secp256k1-sys 0.8.1",
+ "secp256k1-sys",
  "serde",
-]
-
-[[package]]
-name = "secp256k1-sys"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83080e2c2fc1006e625be82e5d1eb6a43b7fd9578b617fcc55814daf286bba4b"
-dependencies = [
- "cc",
 ]
 
 [[package]]
@@ -2040,16 +1863,6 @@ checksum = "e6ecd384b10a64542d77071bd64bd7b231f4ed5940fba55e98c3de13824cf3d7"
 
 [[package]]
 name = "socket2"
-version = "0.4.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f7916fc008ca5542385b89a3d3ce689953c143e9304a9bf8beec1de48994c0d"
-dependencies = [
- "libc",
- "winapi",
-]
-
-[[package]]
-name = "socket2"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05ffd9c0a93b7543e062e759284fcf5f5e3b098501104bfbdde4d404db792871"
@@ -2137,7 +1950,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85b77fafb263dd9d05cbeac119526425676db3784113aa9295c88498cbf8bff1"
 dependencies = [
  "cfg-if",
- "fastrand 2.0.1",
+ "fastrand",
  "rustix",
  "windows-sys 0.52.0",
 ]
@@ -2246,7 +2059,7 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.5.6",
+ "socket2",
  "windows-sys 0.48.0",
 ]
 
