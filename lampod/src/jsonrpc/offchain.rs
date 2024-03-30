@@ -1,20 +1,23 @@
 //! Offchain RPC methods
+use std::str::FromStr;
 use std::time::Duration;
 
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::ldk;
+use lampo_common::ldk::offers::offer;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
 use lampo_common::model::request::Pay;
-use lampo_common::model::response::Offer;
+use lampo_common::model::response;
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{Invoice, InvoiceInfo};
 use lampo_common::{json, model::request::DecodeInvoice};
 use lampo_jsonrpc::errors::{Error, RpcError};
 
+use crate::rpc_error;
 use crate::LampoDeamon;
 
 pub fn json_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
@@ -51,7 +54,7 @@ pub fn json_offer(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Valu
     if let Some(amount_msat) = request.amount_msat {
         offer_builder = offer_builder.amount_msats(amount_msat);
     }
-    let offer: Offer = offer_builder
+    let offer: response::Offer = offer_builder
         .build()
         // FIXME: implement display error on top of the bolt12 error
         .map_err(|err| crate::rpc_error!("{:?}", err))?
@@ -92,16 +95,15 @@ pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value,
     log::info!("call for `pay` with request `{:?}`", request);
     let request: Pay = json::from_value(request.clone())?;
     let events = ctx.handler().events();
-    ctx.offchain_manager()
-        .pay_invoice(&request.invoice_str, request.amount)
-        .map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: format!("{err}"),
-                data: None,
-            })
-        })?;
-
+    if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
+        ctx.offchain_manager()
+            .pay_offer(&request.invoice_str, request.amount)
+            .map_err(|err| rpc_error!("{err}"))?;
+    } else {
+        ctx.offchain_manager()
+            .pay_invoice(&request.invoice_str, request.amount)
+            .map_err(|err| rpc_error!("{err}"))?;
+    }
     // FIXME: this will loop when the Payment event is not generated
     loop {
         let event = events

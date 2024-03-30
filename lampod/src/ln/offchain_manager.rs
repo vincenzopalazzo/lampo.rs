@@ -10,6 +10,7 @@
 //! with the network graph. But this is not so clear yet.
 //!
 //! Author: Vincenzo Palazzo <vincenzopalazzo@member.fsf.org>
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +23,8 @@ use lampo_common::ldk;
 use lampo_common::ldk::ln::channelmanager::Retry;
 use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
 use lampo_common::ldk::ln::{PaymentHash, PaymentPreimage};
+use lampo_common::ldk::offers::offer::Amount;
+use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
 use lampo_common::ldk::sign::EntropySource;
 use lampo_common::ldk::sign::KeysManager;
@@ -84,7 +87,38 @@ impl OffchainManager {
         Ok(invoice)
     }
 
+    pub fn pay_offer(&self, offer_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
+        // check if it is an invoice or an offer
+        let offer_hash = Sha256::hash(offer_str.as_bytes());
+        let payment_id = PaymentId(*offer_hash.as_ref());
+        let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
+
+        let amount = match offer.amount() {
+            Some(Amount::Bitcoin { amount_msats }) => *amount_msats,
+            Some(_) => error::bail!(
+                "Cannot process non-Bitcoin-denominated offer value {:?}",
+                offer.amount()
+            ),
+            None => amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?,
+        };
+
+        self.channel_manager
+            .manager()
+            .pay_for_offer(
+                &offer,
+                None,
+                Some(amount),
+                None,
+                payment_id,
+                Retry::Attempts(10),
+                None,
+            )
+            .map_err(|err| error::anyhow!("{:?}", err))?;
+        Ok(())
+    }
+
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
+        // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
         let payment_id = PaymentId((*invoice.payment_hash()).to_byte_array());
         let (payment_hash, onion, route) = if invoice.amount_milli_satoshis().is_none() {
