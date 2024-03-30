@@ -74,7 +74,6 @@ impl OffchainManager {
             description.to_string(),
             expiring_in,
             None,
-            // FIXME: improve the error inside the ldk side
         )
         .map_err(|err| error::anyhow!(err))?;
         Ok(invoice)
@@ -102,13 +101,7 @@ impl OffchainManager {
         };
         self.channel_manager
             .manager()
-            .send_payment(
-                payment_hash,
-                onion,
-                payment_id,
-                route,
-                Retry::Timeout(Duration::from_secs(10)),
-            )
+            .send_payment(payment_hash, onion, payment_id, route, Retry::Attempts(10))
             .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(())
     }

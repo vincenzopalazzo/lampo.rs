@@ -15,6 +15,7 @@ use lampo_common::model::Connect;
 use lampo_common::secp256k1::PublicKey;
 use lampo_testing::prelude::bitcoincore_rpc::RpcApi;
 use lampo_testing::prelude::*;
+
 use lampo_testing::wait;
 use lampo_testing::LampoTesting;
 
@@ -469,16 +470,22 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
         )
         .unwrap();
     assert_eq!(decode["type"].as_str().unwrap(), "bolt12 offer");
-    let invoice: json::Value = cln
-        .rpc()
-        .call(
-            "fetchinvoice",
-            json::json!({
-                "offer": offer.bolt12,
-                "amount_msat": 1000000,
-            }),
-        )
-        .unwrap();
+
+    let info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
+    let result = cln.rpc().connect(&info.node_id, Some("127.0.0.1")).unwrap();
+    log::info!("cln -> connected -> lampo: `{:?}`", result);
+    let invoice: Result<json::Value, _> = cln.rpc().call(
+        "fetchinvoice",
+        json::json!({
+            "offer": offer.bolt12,
+            "amount_msat": 1000000,
+        }),
+    );
+    let Ok(invoice) = invoice else {
+        cln.print_logs().unwrap();
+        invoice.unwrap();
+        unreachable!()
+    };
     assert!(invoice["invoice"].is_string());
     async_run!(cln.stop()).unwrap();
 }

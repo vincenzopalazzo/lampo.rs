@@ -8,7 +8,9 @@ use lampo_common::ldk;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
+use lampo_common::model::request::Pay;
 use lampo_common::model::response::Offer;
+use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{Invoice, InvoiceInfo};
 use lampo_common::{json, model::request::DecodeInvoice};
 use lampo_jsonrpc::errors::{Error, RpcError};
@@ -88,10 +90,10 @@ pub fn json_decode_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<j
 
 pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `pay` with request `{:?}`", request);
-    let request: DecodeInvoice = json::from_value(request.clone())?;
+    let request: Pay = json::from_value(request.clone())?;
     let events = ctx.handler().events();
     ctx.offchain_manager()
-        .pay_invoice(&request.invoice_str, None)
+        .pay_invoice(&request.invoice_str, request.amount)
         .map_err(|err| {
             Error::Rpc(RpcError {
                 code: -1,
@@ -119,11 +121,11 @@ pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value,
             state,
         }) = event
         {
-            return Ok(json::json!({
-                "state": state,
-                "path": path,
-                "payment_hash": payment_hash,
-            }));
+            return Ok(json::to_value(PayResult {
+                state,
+                path,
+                payment_hash,
+            })?);
         }
     }
 }
