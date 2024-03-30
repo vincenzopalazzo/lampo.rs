@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -7,6 +8,7 @@ use async_trait::async_trait;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::ldk;
 use lampo_common::ldk::ln::peer_handler::MessageHandler;
 use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
 use lampo_common::ldk::net;
@@ -125,11 +127,15 @@ impl LampoPeerManager {
             error::bail!("peer manager is None, at this point this should be not None");
         };
         let peer_manager = peer_manager.clone();
+        let chan_manager = self
+            .channel_manager
+            .clone()
+            .ok_or(error::anyhow!("channel manager is None"))?;
         std::thread::spawn(move || {
             let result = async_run!(async move {
                 let bind_addr = format!("0.0.0.0:{}", listen_port);
                 log::info!(target: "lampo", "Litening for in-bound connection on {bind_addr}");
-                let listener = match tokio::net::TcpListener::bind(bind_addr).await {
+                let listener = match tokio::net::TcpListener::bind(bind_addr.clone()).await {
                     Ok(listener) => listener,
                     Err(e) => {
                         return Err::<(), _>(error::anyhow!("Error binding to address: {}", e));
@@ -138,26 +144,53 @@ impl LampoPeerManager {
 
                 loop {
                     let peer_manager = peer_manager.clone();
+                    let chan_manager = chan_manager.clone();
                     let accept = listener.accept().await;
                     let accept = accept
                         .map_err(|err| error::anyhow!("Error accepting connection: {}", err))?;
                     match accept {
                         (tcp_stream, _) => {
                             log::info!(target: "lampo", "Got new connection {}", tcp_stream.peer_addr().unwrap());
+                            let addr = bind_addr.clone();
                             let _ = tokio::spawn(async move {
                                 // Use LDK's supplied networking battery to facilitate inbound
                                 // connections.
                                 net::setup_inbound(
                                     peer_manager.clone(),
-                                    tcp_stream.into_std().unwrap(),
+                                    tcp_stream.into_std().expect("impossible to convert a tpc_stream from tokio to std"),
                                 )
                                 .await;
+
+                                // Then, update our announcement once an hour to keep it fresh but avoid unnecessary churn
+                                // in the global gossip network.
+                                // FIXME: this value should be possible to alterate from config
+                                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                                loop {
+                                    interval.tick().await;
+                                    // Don't bother trying to announce if we don't have any public channls, though our
+                                    // peers should drop such an announcement anyway. Note that announcement may not
+                                    // propagate until we have a channel with 6+ confirmations.
+                                    if chan_manager
+                                        .manager()
+                                        .list_channels()
+                                        .iter()
+                                        .any(|chan| chan.is_public)
+                                    {
+                                        peer_manager.broadcast_node_announcement(
+                                            [0; 3],
+                                            [0; 32],
+                                            vec![ldk::ln::msgs::SocketAddress::from_str(&addr)
+                                                .expect("impossible to convert an addr to ln socket addr (wire format)")],
+                                        );
+                                    }
+                                }
                             })
                             .await;
                         }
                     }
                 }
             });
+
             if let Err(err) = &result {
                 log::error!("error while try to listen on inbound connection: `{err}`");
             }
