@@ -159,6 +159,9 @@ impl Handler for LampoHandler {
                 channel_funding_txo,
                 ..
             } => {
+                if let Some(node_id) = counterparty_node_id {
+                    log::warn!("closing channels with `{node_id}`");
+                }
                 let node_id = counterparty_node_id.map(|id| id.to_string());
                 let txo = channel_funding_txo.map(|txo| txo.to_string());
                 self.emit(Event::Lightning(LightningEvent::CloseChannelEvent { channel_id: channel_id.to_string(), message: reason.to_string(), counterparty_node_id : node_id, funding_utxo : txo}));

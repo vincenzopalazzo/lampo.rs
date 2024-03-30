@@ -8,7 +8,7 @@ use std::thread::JoinHandle;
 
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::{BlockHash, Transaction};
-use lampo_common::conf::{LampoConf, UserConfig};
+use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
@@ -26,7 +26,6 @@ use lampo_common::ldk::routing::scoring::{
 };
 use lampo_common::ldk::sign::InMemorySigner;
 use lampo_common::ldk::sign::KeysManager;
-use lampo_common::ldk::util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits};
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
@@ -393,28 +392,14 @@ impl ChannelEvents for LampoChannelManager {
         &self,
         open_channel: request::OpenChannel,
     ) -> error::Result<response::OpenChannel> {
-        let config = UserConfig {
-            channel_handshake_limits: ChannelHandshakeLimits {
-                // lnd's max to_self_delay is 2016, so we want to be compatible.
-                their_to_self_delay: 2016,
-                ..Default::default()
-            },
-            channel_handshake_config: ChannelHandshakeConfig {
-                announced_channel: open_channel.public,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
         self.manager()
             .create_channel(
                 open_channel.node_id()?,
                 open_channel.amount,
                 0,
                 0,
-                // FIXME: this ia temponary channel id, we should double check this
                 None,
-                Some(config),
-                // FIXME: LDK should return a better error struct here
+                Some(self.conf.ldk_conf),
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
 

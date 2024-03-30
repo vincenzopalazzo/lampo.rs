@@ -3,14 +3,14 @@
 pub mod request {
     use serde::{Deserialize, Serialize};
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Debug)]
     pub struct GenerateInvoice {
         pub amount_msat: Option<u64>,
         pub description: String,
         pub expiring_in: Option<u32>,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Debug)]
     pub struct GenerateOffer {
         pub amount_msat: Option<u64>,
         pub description: String,
@@ -18,6 +18,12 @@ pub mod request {
 
     #[derive(Serialize, Deserialize)]
     pub struct DecodeInvoice {
+        pub invoice_str: String,
+        pub amount: Option<u64>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct Pay {
         pub invoice_str: String,
         pub amount: Option<u64>,
     }
@@ -61,6 +67,14 @@ pub mod response {
         pub hints: Vec<String>,
         pub network: String,
         pub amount_msa: Option<u64>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    pub struct PayResult {
+        pub path: Vec<PaymentHop>,
+        pub payment_hash: Option<String>,
+        pub state: PaymentState,
+        // FIXME: missing payment preimage
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]

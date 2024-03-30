@@ -50,7 +50,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let mnemonic = args.mnemonic.clone();
 
     // After this point the configuration is ready!
-    let lampo_conf: LampoConf = args.try_into()?;
+    let mut lampo_conf: LampoConf = args.try_into()?;
     log::debug!(target: "lampod-cli", "init wallet ..");
     // init the logger here
     logger::init(
@@ -62,6 +62,10 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     )
     .expect("unable to init the logger for the first time");
 
+    lampo_conf
+        .ldk_conf
+        .channel_handshake_limits
+        .force_announced_channel_preference = false;
     // Prepare the backend
     let client = lampo_conf.node.clone();
     log::debug!(target: "lampod-cli", "lampo running with `{client}` backend");

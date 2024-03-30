@@ -66,6 +66,7 @@ pub struct LampoTesting {
     pub wallet: Arc<dyn WalletManager>,
     pub mnemonic: String,
     pub btc: Arc<BtcNode>,
+    pub info: response::GetInfo,
 }
 
 impl LampoTesting {
@@ -98,7 +99,7 @@ impl LampoTesting {
             &btc.user,
             &btc.pass,
             Arc::new(false),
-            Some(5),
+            Some(1),
         )?;
         lampo.init(Arc::new(node))?;
 
@@ -131,6 +132,7 @@ impl LampoTesting {
         std::thread::spawn(move || lampo.listen().unwrap().join());
         // wait that lampo starts
         std::thread::sleep(Duration::from_secs(1));
+        let info: response::GetInfo = handler.call("getinfo", json::json!({}))?;
         log::info!("ready for integration testing!");
         Ok(Self {
             inner: handler,
@@ -139,6 +141,7 @@ impl LampoTesting {
             wallet,
             btc,
             root_path: Arc::new(dir),
+            info,
         })
     }
 

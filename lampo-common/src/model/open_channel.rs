@@ -34,7 +34,7 @@ pub mod response {
     use crate::error;
     use crate::types::NodeId;
 
-    #[derive(Serialize, Deserialize, Clone)]
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Channels {
         pub channels: Vec<Channel>,
     }
