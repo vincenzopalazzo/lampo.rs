@@ -21,6 +21,7 @@ pub struct LampoConf {
     pub channels_keys: Option<String>,
     pub log_file: Option<String>,
     pub log_level: String,
+    pub alias: Option<String>,
 }
 
 impl LampoConf {
@@ -48,6 +49,7 @@ impl LampoConf {
             channels_keys: None,
             log_level: "info".to_string(),
             log_file: None,
+            alias: None,
         }
     }
 
@@ -213,6 +215,8 @@ impl TryFrom<String> for LampoConf {
             _ => "info".to_string(),
         };
         let log_file = conf.get_conf("log-file").unwrap_or_else(|_| None);
+        let alias = conf.get_conf("alias").unwrap_or(None);
+
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -227,6 +231,7 @@ impl TryFrom<String> for LampoConf {
             channels_keys,
             log_file,
             log_level: level,
+            alias,
         })
     }
 }

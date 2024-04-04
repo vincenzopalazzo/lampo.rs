@@ -6,4 +6,5 @@ pub struct GetInfo {
     pub peers: usize,
     pub channels: usize,
     pub chain: String,
+    pub alias: String,
 }
