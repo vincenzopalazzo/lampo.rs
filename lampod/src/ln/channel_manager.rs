@@ -75,7 +75,6 @@ pub type LampoRouter = DefaultRouter<
 
 pub struct LampoChannelManager {
     monitor: Option<Arc<LampoChainMonitor>>,
-    onchain: Arc<LampoChainManager>,
     wallet_manager: Arc<dyn WalletManager>,
     persister: Arc<LampoPersistence>,
     graph: Option<Arc<LampoGraph>>,
@@ -83,6 +82,7 @@ pub struct LampoChannelManager {
     handler: RefCell<Option<Arc<LampoHandler>>>,
     router: Option<Arc<LampoRouter>>,
 
+    pub(crate) onchain: Arc<LampoChainManager>,
     pub(crate) conf: LampoConf,
     pub(crate) channeld: Option<Arc<LampoChannel>>,
     pub(crate) logger: Arc<LampoLogger>,
