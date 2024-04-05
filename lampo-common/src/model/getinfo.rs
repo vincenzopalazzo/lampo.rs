@@ -7,5 +7,5 @@ pub struct GetInfo {
     pub channels: usize,
     pub chain: String,
     pub alias: String,
-    pub blockheight: String,
+    pub blockheight: u32,
 }

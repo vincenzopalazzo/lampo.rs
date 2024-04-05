@@ -33,22 +33,11 @@ impl InventoryHandler for LampoInventoryManager {
         match event {
             InventoryCommand::GetNodeInfo(chan) => {
                 let chain = self.channel_manager.conf.network.to_string();
-                let alias = self
-                    .channel_manager
-                    .conf
-                    .alias
-                    .as_ref()
-                    .map(|alias| alias.to_string());
+                let alias = self.channel_manager.conf.alias.clone();
                 // we have to put "" in case of alias missing as cln provide us with a random alias.
-                let alias = alias.unwrap_or_else(|| "".to_string());
+                let alias = alias.unwrap_or_default();
                 let (_, height) = self.channel_manager.onchain.backend.get_best_block()?;
-                let blockheight;
-                if height.is_none() {
-                    blockheight = "Still loading...".to_string();
-                } else {
-                    // Safe to unwrap here
-                    blockheight = height.unwrap().to_string();
-                }
+                let blockheight = height.unwrap_or_default();
                 let getinfo = GetInfo {
                     node_id: self.channel_manager.manager().get_our_node_id().to_string(),
                     peers: self.peer_manager.manager().list_peers().len(),
