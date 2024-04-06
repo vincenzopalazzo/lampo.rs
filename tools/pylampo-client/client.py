@@ -42,7 +42,14 @@ class LampoClient:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
                 sock.connect(self.socket_path)
                 sock.sendall(json.dumps(request).encode())
-                response = sock.recv(1024).decode()
+
+                response = ""
+                while True:
+                    data = sock.recv(1024)
+                    if not data:
+                        break
+                    response += data.decode()
+
                 return json.loads(response)
         except Exception as e:
             raise Exception(f"Error communicating with Lampo client: {e}")
