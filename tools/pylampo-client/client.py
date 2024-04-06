@@ -1,6 +1,5 @@
 import json
 import socket
-import os
 
 
 class LampoClient:
@@ -8,19 +7,15 @@ class LampoClient:
     A simple Lampo client that communicates via a Unix socket.
     """
 
-    def __init__(self, socket_path: str = None):
+    def __init__(self, socket_path: str):
         """
         Initializes the LampoClient instance.
 
         Args:
-          socket_path: (Optional) The path to the Lampo socket.
-                      Defaults to '<home_dir>/.lampo/regtest/lampod.socket'.
+          socket_path: The path to the Lampo socket.
         """
-        if socket_path:
-            self.socket_path = socket_path
-        else:
-            home_dir = os.environ["HOME"]
-            self.socket_path = f"{home_dir}/.lampo/regtest/lampod.socket"
+
+        self.socket_path = socket_path
 
     def call(self, method: str, params: dict = None) -> dict:
         """
@@ -40,7 +35,7 @@ class LampoClient:
         request = {
             "method": method,
             "params": params if params else {},
-            "id": "",
+            "id": "pylampo-client/1",
             "jsonrpc": "2.0",
         }
         try:
