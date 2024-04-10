@@ -1,10 +1,14 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use lampo_common::backend::Backend;
-use lampo_common::bitcoin;
+use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::Transaction;
+use lampo_common::event::onchain::OnChainEvent;
+use lampo_common::event::Event;
+use lampo_common::handler::Handler;
 use lampo_common::ldk;
 use lampo_common::ldk::chain::chaininterface::{
     BroadcasterInterface, ConfirmationTarget, FeeEstimator,
@@ -12,11 +16,17 @@ use lampo_common::ldk::chain::chaininterface::{
 use lampo_common::ldk::chain::Filter;
 use lampo_common::ldk::routing::utxo::UtxoLookup;
 use lampo_common::wallet::WalletManager;
+use lampo_common::{bitcoin, error};
+
+use crate::actions::handler::LampoHandler;
 
 #[derive(Clone)]
 pub struct LampoChainManager {
     pub backend: Arc<dyn Backend>,
     pub wallet_manager: Arc<dyn WalletManager>,
+    pub current_height: RefCell<Height>,
+    pub best_height: RefCell<Height>,
+    pub handler: RefCell<Option<Arc<LampoHandler>>>,
 }
 
 /// Personal Lampo implementation
@@ -27,11 +37,57 @@ impl LampoChainManager {
         LampoChainManager {
             backend: client,
             wallet_manager,
+            handler: RefCell::new(None),
+            // Safe: 0 is a valid consensus height
+            current_height: RefCell::new(Height::from_consensus(0).unwrap()),
+            best_height: RefCell::new(Height::from_consensus(0).unwrap()),
         }
     }
 
     pub fn is_lightway(&self) -> bool {
         self.backend.is_lightway()
+    }
+
+    pub fn set_handler(&self, handler: Arc<LampoHandler>) {
+        self.handler.replace(Some(handler));
+    }
+
+    pub fn handler(&self) -> Arc<LampoHandler> {
+        self.handler.borrow().clone().unwrap()
+    }
+
+    pub fn is_syncing(&self) -> bool {
+        let current_height = self.current_height.borrow();
+        let best_height = self.best_height.borrow();
+        current_height.to_consensus_u32() != best_height.to_consensus_u32()
+    }
+
+    pub fn listen(self: Arc<Self>) -> error::Result<()> {
+        let _ = self.backend.clone().listen()?;
+        let event_listener = self.clone();
+        std::thread::spawn(move || {
+            log::info!(target: "lampo_chain_manager", "listening for chain events");
+            loop {
+                let handler = event_listener.handler();
+                let event = handler.events().recv().unwrap();
+                match event {
+                    Event::OnChain(OnChainEvent::NewBestBlock((_, height))) => {
+                        log::debug!(target: "lampo_chain_manager", "new best block height `{}`", height);
+                        *self.best_height.borrow_mut() = height;
+                    }
+                    Event::OnChain(OnChainEvent::NewBlock(block)) => {
+                        let height = block.bip34_block_height().unwrap();
+                        log::debug!(target: "lampo_chain_manager", "new block with hash `{}` at height `{}`", block.block_hash(), height);
+                        let mut current_height = self.current_height.borrow_mut();
+                        if height as u32 > current_height.to_consensus_u32() {
+                            *current_height = Height::from_consensus(height as u32).unwrap();
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        });
+        Ok(())
     }
 
     fn print_ldk_target_to_string(&self, target: ConfirmationTarget) -> String {

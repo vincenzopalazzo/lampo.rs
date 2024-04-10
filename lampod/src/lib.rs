@@ -224,6 +224,7 @@ impl LampoDeamon {
         self.init_event_handler()?;
         client.set_handler(self.handler());
         self.channel_manager().set_handler(self.handler());
+        self.onchain_manager().set_handler(self.handler());
         Ok(())
     }
 
@@ -269,7 +270,7 @@ impl LampoDeamon {
         );
 
         log::info!(target: "lampo", "Stating onchaind");
-        let _ = self.onchain_manager().backend.clone().listen();
+        let _ = self.onchain_manager().listen();
         log::info!(target: "lampo", "Starting peer manager");
         let _ = self.peer_manager().run();
         log::info!(target: "lampo", "Starting channel manager");

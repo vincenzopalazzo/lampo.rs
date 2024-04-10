@@ -7,7 +7,9 @@ pub struct GetInfo {
     pub channels: usize,
     pub chain: String,
     pub alias: String,
-    pub blockheight: u32,
+    pub block_height: u32,
+    pub best_height: u32,
+    pub is_sycning: bool,
     pub lampo_dir: String,
     pub address: Vec<NetworkInfo>,
 }
