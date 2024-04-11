@@ -8,4 +8,5 @@ pub struct GetInfo {
     pub chain: String,
     pub alias: String,
     pub blockheight: u32,
+    pub lampo_dir: String,
 }
