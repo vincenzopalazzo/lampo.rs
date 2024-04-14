@@ -131,6 +131,7 @@ impl LampoPeerManager {
             .channel_manager
             .clone()
             .ok_or(error::anyhow!("channel manager is None"))?;
+        let alias = self.conf.alias.clone().unwrap_or_default();
         std::thread::spawn(move || {
             let result = async_run!(async move {
                 let bind_addr = format!("0.0.0.0:{}", listen_port);
@@ -143,6 +144,7 @@ impl LampoPeerManager {
                 };
 
                 loop {
+                    let alias = alias.clone();
                     let peer_manager = peer_manager.clone();
                     let chan_manager = chan_manager.clone();
                     let accept = listener.accept().await;
@@ -178,7 +180,7 @@ impl LampoPeerManager {
                                     {
                                         peer_manager.broadcast_node_announcement(
                                             [0; 3],
-                                            [0; 32],
+                                            alias.as_bytes().try_into().unwrap_or([0u8; 32]),
                                             vec![ldk::ln::msgs::SocketAddress::from_str(&addr)
                                                 .expect("impossible to convert an addr to ln socket addr (wire format)")],
                                         );
