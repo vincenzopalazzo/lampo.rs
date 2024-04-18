@@ -132,10 +132,15 @@ impl LampoPeerManager {
             .clone()
             .ok_or(error::anyhow!("channel manager is None"))?;
         let alias = self.conf.alias.clone().unwrap_or_default();
+        let addr = self
+            .conf
+            .announce_addr
+            .clone()
+            .unwrap_or_else(|| "127.0.0.1".to_string());
         std::thread::spawn(move || {
             let result = async_run!(async move {
-                let bind_addr = format!("0.0.0.0:{}", listen_port);
-                log::info!(target: "lampo", "Litening for in-bound connection on {bind_addr}");
+                let bind_addr = format!("{addr}:{listen_port}");
+                log::info!(target: "lampo", "Listening for in-bound connection on {bind_addr}");
                 let listener = match tokio::net::TcpListener::bind(bind_addr.clone()).await {
                     Ok(listener) => listener,
                     Err(e) => {

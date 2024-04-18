@@ -22,6 +22,7 @@ pub struct LampoConf {
     pub log_file: Option<String>,
     pub log_level: String,
     pub alias: Option<String>,
+    pub announce_addr: Option<String>,
 }
 
 impl LampoConf {
@@ -50,6 +51,7 @@ impl LampoConf {
             log_level: "info".to_string(),
             log_file: None,
             alias: None,
+            announce_addr: None,
         }
     }
 
@@ -216,6 +218,7 @@ impl TryFrom<String> for LampoConf {
         };
         let log_file = conf.get_conf("log-file").unwrap_or_else(|_| None);
         let alias = conf.get_conf("alias").unwrap_or(None);
+        let announce_addr = conf.get_conf("announce-addr").unwrap_or_else(|_| None);
 
         Ok(Self {
             inner: Some(conf),
@@ -232,6 +235,7 @@ impl TryFrom<String> for LampoConf {
             log_file,
             log_level: level,
             alias,
+            announce_addr,
         })
     }
 }
