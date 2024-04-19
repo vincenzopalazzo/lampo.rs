@@ -111,6 +111,8 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut bitcoind_user: Option<String> = None;
     let mut bitcoind_pass: Option<String> = None;
     let mut mnemonic: Option<String> = None;
+    
+    let mut restore_wallet_flag = false;
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -148,14 +150,22 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
                 bitcoind_pass = Some(var);
             }
             Long("restore-wallet") => {
-                let var: String = parser.value()?.parse()?;
-                mnemonic = Some(var);
+                restore_wallet_flag = true;
             }
             Long("help") => {
                 let _ = print_help();
                 std::process::exit(0);
             }
             _ => return Err(arg.unexpected()),
+        }
+    }
+
+    if restore_wallet_flag {
+        println!("Enter the list of words for wallet restoration, separated by spaces:");
+        let mut var = String::new();
+        match std::io::stdin().read_line(&mut var) {
+            Ok(_) => mnemonic = Some(var.trim().to_string()),
+            Err(_) => todo!()
         }
     }
 
