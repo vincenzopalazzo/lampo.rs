@@ -2,11 +2,9 @@
 mod args;
 
 use std::env;
-use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
 use lampod::jsonrpc::channels::json_close_channel;
 use lampod::jsonrpc::channels::json_list_channels;
@@ -17,7 +15,6 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
 use lampo_core_wallet::CoreWalletManager;
-use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
 use lampod::chain::WalletManager;
 
@@ -38,15 +35,16 @@ use lampod::LampoDeamon;
 
 use crate::args::LampoCliArgs;
 
-fn main() -> error::Result<()> {
+#[tokio::main]
+async fn main() -> error::Result<()> {
     log::debug!("Started!");
     let args = args::parse_args()?;
-    run(args)?;
+    run(args).await?;
     Ok(())
 }
 
 /// Return the root directory.
-fn run(args: LampoCliArgs) -> error::Result<()> {
+async fn run(args: LampoCliArgs) -> error::Result<()> {
     let mnemonic = args.mnemonic.clone();
 
     // After this point the configuration is ready!
@@ -136,7 +134,8 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
-    let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
+    let rpc_server = run_jsonrpc(lampod.clone()).unwrap();
+    let handler = rpc_server.handler();
     rpc_handler.set_handler(handler.clone());
 
     ctrlc::set_handler(move || {
@@ -149,14 +148,12 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
 
     let workder = lampod.listen().unwrap();
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
-    let _ = workder.join();
-    let _ = jsorpc_worker.join().unwrap();
+    let _ = tokio::spawn(async { workder.join() }).await;
+    rpc_server.listen().await?;
     Ok(())
 }
 
-fn run_jsonrpc(
-    lampod: Arc<LampoDeamon>,
-) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler<LampoDeamon>>)> {
+fn run_jsonrpc(lampod: Arc<LampoDeamon>) -> error::Result<JSONRPCv2<LampoDeamon>> {
     let socket_path = format!("{}/lampod.socket", lampod.root_path());
     // we take the lock with the pid file so if we are at this point
     // we can delete the socket because there is no other process
@@ -179,6 +176,5 @@ fn run_jsonrpc(
     server.add_rpc("keysend", json_keysend).unwrap();
     server.add_rpc("fees", json_estimate_fees).unwrap();
     server.add_rpc("close", json_close_channel).unwrap();
-    let handler = server.handler();
-    Ok((server.spawn(), handler))
+    Ok(server)
 }

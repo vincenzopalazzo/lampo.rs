@@ -9,7 +9,6 @@ members = [
         "lampo-client",
         "lampo-c-ffi",
         "lampo-core-wallet",
-        "lampo-bdk-wallet",
         "lampo-testing",
         "tests/tests",
 ]

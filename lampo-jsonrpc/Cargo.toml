@@ -13,7 +13,7 @@ readme = "README.md"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-popol = "2.2.0"
+tokio = { version = "1", features = ["full"] }
 log = "0.4.17"
 
 [dev-dependencies]

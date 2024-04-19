@@ -1,41 +1,31 @@
 //! Full feature async JSON RPC 2.0 Server/client with a
 //! minimal dependencies footprint.
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, VecDeque};
-use std::io::{self, ErrorKind};
-use std::io::{Read, Write};
-use std::os::unix::net::UnixListener;
-use std::os::unix::net::{SocketAddr, UnixStream};
-use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::collections::HashMap;
+use std::io;
+use std::sync::Arc;
 
-// FIXME: use mio for a better platform support.
-use popol::{Sources, Timeout};
 use serde_json::Value;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{UnixListener, UnixStream};
 
 pub mod command;
 pub mod errors;
 pub mod json_rpc2;
 
-use command::Context;
-
+use crate::command::Context;
 use crate::errors::Error;
 use crate::json_rpc2::{Request, Response};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RPCEvent {
     Listening,
-    Connect(String),
+    Connect(i32),
 }
 
 pub struct JSONRPCv2<T: Send + Sync + 'static> {
     socket_path: String,
-    sources: Sources<RPCEvent>,
-    socket: UnixListener,
     handler: Arc<Handler<T>>,
-    // FIXME: should be not the name but the fd int as key?
-    pub(crate) conn: HashMap<String, UnixStream>,
-    conn_queue: Mutex<Cell<HashMap<String, VecDeque<Response<Value>>>>>,
 }
 
 pub struct Handler<T: Send + Sync + 'static> {
@@ -95,15 +85,9 @@ impl<T: Send + Sync + 'static> Handler<T> {
 
 impl<T: Send + Sync + 'static> JSONRPCv2<T> {
     pub fn new(ctx: Arc<dyn Context<Ctx = T>>, path: &str) -> Result<Self, Error> {
-        let listnet = UnixListener::bind(path)?;
-        let sources = Sources::<RPCEvent>::new();
         Ok(Self {
-            sources,
-            socket: listnet,
             handler: Arc::new(Handler::new(ctx)),
             socket_path: path.to_owned(),
-            conn: HashMap::new(),
-            conn_queue: Mutex::new(Cell::new(HashMap::new())),
         })
     }
 
@@ -118,204 +102,73 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         Ok(())
     }
 
-    pub fn add_connection(&mut self, key: &SocketAddr, stream: UnixStream) {
-        let path = if let Some(path) = key.as_pathname() {
-            path.to_str().unwrap()
-        } else {
-            "unnamed"
-        };
-        let res = stream.set_nonblocking(true);
-        debug_assert!(res.is_ok());
-        let event = RPCEvent::Connect(path.to_string());
-        self.sources.register(event, &stream, popol::interest::ALL);
-        self.conn.insert(path.to_owned(), stream);
-    }
-
-    pub fn send_resp(&self, key: String, resp: Response<Value>) {
-        let queue = self.conn_queue.lock().unwrap();
-
-        let mut conns = queue.take();
-        log::debug!(target: "jsonrpc", "{:?}", conns);
-        if conns.contains_key(&key) {
-            let Some(queue) = conns.get_mut(&key) else {
-                panic!("queue not found");
-            };
-            queue.push_back(resp);
-        } else {
-            let mut q = VecDeque::new();
-            q.push_back(resp);
-            conns.insert(key, q);
-        }
-        log::debug!(target: "jsonrpc", "{:?}", conns);
-        queue.set(conns);
-    }
-
-    pub fn pop_resp(&self, key: String) -> Option<Response<Value>> {
-        let queue = self.conn_queue.lock().unwrap();
-
-        let mut conns = queue.take();
-        if !conns.contains_key(&key) {
-            return None;
-        }
-        let Some(q) = conns.get_mut(&key) else {
-            return None;
-        };
-        let resp = q.pop_front();
-        queue.set(conns);
-        resp
-    }
-
     #[allow(dead_code)]
     fn ctx(&self) -> &T {
         self.handler.ctx()
     }
 
-    pub fn listen(mut self) -> io::Result<()> {
-        self.socket.set_nonblocking(true)?;
-        self.sources
-            .register(RPCEvent::Listening, &self.socket, popol::interest::READ);
+    async fn handle_connection(&self, mut socket: UnixStream) {
+        let mut buffer = vec![0; 1024];
 
-        log::info!(target: "jsonrpc", "starting server on {}", self.socket_path);
-        let mut events = vec![];
-        while !self.handler.stop.get() {
-            // Blocking while we are waiting new events!
-            self.sources.poll(&mut events, Timeout::Never)?;
+        loop {
+            let n = match socket.read(&mut buffer).await {
+                Ok(n) if n == 0 => return, // Connection was closed
+                Ok(n) => n,
+                Err(_) => return, // An error occurred
+            };
 
-            for mut event in events.drain(..) {
-                match &event.key {
-                    RPCEvent::Listening => {
-                        let conn = self.socket.accept();
-                        let Ok((stream, addr)) = conn else {
-                            if let Err(err) = &conn {
-                                if err.kind() == ErrorKind::WouldBlock {
-                                    break;
-                                }
-                            }
-                            log::error!(target: "jsonrpc", "fail to accept the connection: {:?}", conn);
-                            continue;
-                        };
-                        log::trace!(target: "jsonrpc", "new connection to unix rpc socket");
-                        self.add_connection(&addr, stream);
-                    }
-                    RPCEvent::Connect(addr) => {
-                        if event.is_hangup() {
-                            break;
-                        }
-                        if event.is_error() {
-                            log::error!(target: "jsonrpc", "an error occurs");
-                            continue;
-                        }
+            let request: Request<Value> = match serde_json::from_slice(&buffer[..n]) {
+                Ok(req) => req,
+                Err(_) => continue, // Invalid request
+            };
 
-                        if event.is_invalid() {
-                            log::info!(target: "jsonrpc", "event invalid, unregister event from the tracking one");
-                            self.sources.unregister(&event.key);
-                            break;
-                        }
-
-                        if event.is_readable() {
-                            let Some(mut stream) = self.conn.get(addr) else {
-                                log::error!(target: "jsonrpc", "connection not found `{addr}`");
-                                continue;
-                            };
-                            let mut buff = String::new();
-                            if let Err(err) = stream.read_to_string(&mut buff) {
-                                if err.kind() != ErrorKind::WouldBlock {
-                                    return Err(err);
-                                }
-                                log::info!(target: "jsonrpc", "blocking with err {:?}!", err);
-                            }
-                            if buff.is_empty() {
-                                log::warn!(target: "jsonrpc", "buffer is empty");
-                                break;
-                            }
-                            let buff = buff.trim();
-                            log::info!(target: "jsonrpc", "buffer read {buff}");
-                            let requ: Request<Value> =
-                                serde_json::from_str(&buff).map_err(|err| {
-                                    io::Error::new(io::ErrorKind::Other, format!("{err}"))
-                                })?;
-                            log::trace!(target: "jsonrpc", "request {:?}", requ);
-                            let Some(resp) = self.handler.run_callback(&requ) else {
-                                log::error!(target: "jsonrpc", "`{}` not found!", requ.method);
-                                break;
-                            };
-                            // FIXME; the id in the JSON RPC can be null!
-                            let response = match resp {
-                                Ok(result) => Response {
-                                    id: requ.id.clone().unwrap(),
-                                    jsonrpc: requ.jsonrpc.to_owned(),
-                                    result: Some(result),
-                                    error: None,
-                                },
-                                Err(err) => Response {
-                                    result: None,
-                                    error: Some(err.into()),
-                                    id: requ.id.unwrap().clone(),
-                                    jsonrpc: requ.jsonrpc.clone(),
-                                },
-                            };
-                            log::trace!(target: "jsonrpc", "send response: `{:?}`", response);
-                            self.send_resp(addr.to_string(), response);
-                        }
-
-                        if event.is_writable() {
-                            let stream = self.conn.get(addr);
-                            if stream.is_none() {
-                                log::error!(target: "jsonrpc", "connection not found `{addr}`");
-                                continue;
-                            };
-
-                            let mut stream = stream.unwrap();
-                            let Some(resp) = self.pop_resp(addr.to_string()) else {
-                                break;
-                            };
-                            let buff = serde_json::to_string(&resp).unwrap();
-                            if let Err(err) = stream.write_all(buff.as_bytes()) {
-                                if err.kind() != ErrorKind::WouldBlock {
-                                    return Err(err);
-                                }
-                            }
-                            match stream.flush() {
-                                // In this case, we've written all the data, we
-                                // are no longer interested in writing to this
-                                // socket.
-                                Ok(()) => {
-                                    event.source.unset(popol::interest::WRITE);
-                                }
-                                // In this case, the write couldn't complete. Set
-                                // our interest to `WRITE` to be notified when the
-                                // socket is ready to write again.
-                                Err(err)
-                                    if [io::ErrorKind::WouldBlock, io::ErrorKind::WriteZero]
-                                        .contains(&err.kind()) =>
-                                {
-                                    event.source.set(popol::interest::WRITE);
-                                }
-                                Err(err) => {
-                                    log::error!(target: "jsonrpc", "{}: Write error: {}", addr, err.to_string());
-                                }
-                            }
-                            stream.shutdown(std::net::Shutdown::Both)?;
-                        }
-                    }
+            let Some(rpc) = self.handler.run_callback(&request) else {
+                continue;
+            };
+            let response = if let Ok(method) = rpc {
+                Response {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: Some(method),
+                    error: None,
                 }
-            }
+            } else {
+                Response {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: None,
+                    error: Some(rpc.err().unwrap().into()),
+                }
+            };
+
+            let response = serde_json::to_vec(&response).unwrap();
+            socket.write_all(&response).await.unwrap();
+        }
+    }
+
+    pub async fn listen(self) -> io::Result<()> {
+        let path = self.socket_path.clone();
+        while !self.handler.stop.get() {
+            let listnet = UnixListener::bind(path.clone())?;
+            let (socket, _) = listnet.accept().await?;
+
+            self.handle_connection(socket).await;
         }
         Ok(())
+    }
+
+    pub fn spawn(self) -> io::Result<()> {
+        unimplemented!()
     }
 
     pub fn handler(&self) -> Arc<Handler<T>> {
         self.handler.clone()
     }
-
-    pub fn spawn(self) -> JoinHandle<io::Result<()>> {
-        std::thread::spawn(move || self.listen())
-    }
 }
 
 impl<T: Send + Sync + 'static> Drop for JSONRPCv2<T> {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.socket_path).unwrap();
+        let _ = std::fs::remove_file(&self.socket_path);
     }
 }
 
@@ -345,7 +198,6 @@ mod tests {
         }
     }
 
-    #[test]
     #[timeout(9000)]
     fn register_rpc() {
         logger::init("debug", None).unwrap();
@@ -361,7 +213,9 @@ mod tests {
         assert!(res.is_ok(), "{:?}", res);
 
         let handler = server.handler();
-        let worker = server.spawn();
+        let _ = std::thread::spawn(|| {
+            tokio::runtime::Handle::current().block_on(async move { server.listen().await })
+        });
         let request = Request::<Value> {
             id: Some(0.into()),
             jsonrpc: String::from_str("2.0").unwrap(),
@@ -382,12 +236,13 @@ mod tests {
             log::info!(target: "client", "read answer from server");
             let resp: Response<Value> = serde_json::from_reader(stream).unwrap();
             log::info!(target: "client", "msg received: {:?}", resp);
-            assert_eq!(resp.id, request.id.unwrap());
+            assert_eq!(resp.id, request.id);
             resp
         });
 
         let client_worker2 = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(3));
+
             let request = Request::<Value> {
                 id: Some(1.into()),
                 jsonrpc: String::from_str("2.0").unwrap(),
@@ -411,11 +266,9 @@ mod tests {
         });
 
         let resp = client_worker.join().unwrap();
-        assert_eq!(Id::Str("0".to_owned()), resp.id);
+        assert_eq!(Some(Id::Str("0".to_owned())), resp.id);
         let resp = client_worker2.join().unwrap();
-        assert_eq!(Id::Str("1".to_owned()), resp.id);
+        assert_eq!(Some(Id::Str("1".to_owned())), resp.id);
         handler.stop();
-
-        let _ = worker.join();
     }
 }

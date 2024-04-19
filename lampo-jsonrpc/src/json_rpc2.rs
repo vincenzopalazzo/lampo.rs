@@ -56,7 +56,7 @@ pub struct Response<T> {
     /// An error if there is one, or null
     pub error: Option<RpcError>,
     /// Identifier for this Request, which should match that of the request
-    pub id: Id,
+    pub id: Option<Id>,
     /// jsonrpc field, MUST be "2.0"
     pub jsonrpc: String,
 }
