@@ -3,6 +3,7 @@ mod args;
 
 use std::env;
 use std::io;
+use std::io::BufRead;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -181,4 +182,13 @@ fn run_jsonrpc(
     server.add_rpc("close", json_close_channel).unwrap();
     let handler = server.handler();
     Ok((server.spawn(), handler))
+}
+
+fn parse_mnemonic() -> Option<String> {
+    println!("Enter the list of words for wallet restoration, separated by spaces:");
+    let mut var = String::new();
+    match io::stdin().lock().read_line(&mut var) {
+        Ok(_) => Some(var.trim().to_string()),
+        Err(_) => None,
+    }
 }
