@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>Lampo SDK</h1>
+  <h1>Lampo</h1>
 
   <img src="https://github.com/saradurante/lampo.docs/blob/dc0dce971c3052f0e9dd668fdf0c7376b12fee7b/imgs/web/icon-512.png?raw=true"  width="150" height="150" />
 
@@ -9,11 +9,9 @@
   </p>
 
   <h4>
-    <a href="https://lampo.mintlify.app/">Project Homepage</a>
+    <a href="https://lampo.devcrew.cc">Project Homepage</a>
   </h4>
 </div>
-
-This repository contains a set of crates that are useful for working with core lightning in the Rust programming environment.
 
 ## Crates
 
