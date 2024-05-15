@@ -35,7 +35,7 @@ use lampod::LampoDeamon;
 
 use crate::args::LampoCliArgs;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> error::Result<()> {
     log::debug!("Started!");
     let args = args::parse_args()?;

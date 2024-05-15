@@ -148,8 +148,8 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
 
     pub async fn listen(self) -> io::Result<()> {
         let path = self.socket_path.clone();
+        let listnet = UnixListener::bind(path.clone())?;
         while !self.handler.stop.get() {
-            let listnet = UnixListener::bind(path.clone())?;
             let (socket, _) = listnet.accept().await?;
 
             self.handle_connection(socket).await;
