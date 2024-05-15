@@ -13,14 +13,30 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         clightning = pkgs.clightning.overrideAttrs (oldAttrs: {
-          version = "master-62dd";
+          version = "master-3c48";
           src = pkgs.fetchgit {
             url = "https://github.com/ElementsProject/lightning";
-            rev = "d1101f416f1ec959981a8ebe5639a6b267885bfd";
-            sha256 = "sha256-OFACPl6cSH+JwlcWDHUw+A2g2gp5RwTc1JZAhYs+2WI=";
+            rev = "3c484388212928f3019a3f2bb820bd75520e3581";
+            sha256 = "sha256-QIjk1Z0Vt5fx9T2CtokehZkr8Iv/orFK3h0OglzcxDA=";
             fetchSubmodules = true;
           };
           configureFlags = [ "--disable-rust" "--disable-valgrind" ];
+          # FIXME: this changes need to be reported upstream
+          buildInputs = [ pkgs.gmp pkgs.libsodium pkgs.sqlite pkgs.zlib pkgs.jq ];
+          # this causes some python trouble on a darwin host so we skip this step.
+          # also we have to tell libwally-core to use sed instead of gsed.
+          postPatch = if !pkgs.stdenv.isDarwin then ''
+              patchShebangs \
+                 tools/generate-wire.py \
+                 tools/fromschema.py \
+                 tools/update-mocks.sh \
+                 tools/mockup.sh \
+                 devtools/sql-rewrite.py \
+                 plugins/clnrest/clnrest.py
+              '' else ''
+                substituteInPlace external/libwally-core/tools/autogen.sh --replace gsed sed && \
+                substituteInPlace external/libwally-core/configure.ac --replace gsed sed
+              '';
         });
         # Our integration tests required the cln and bitcoind
         # so in this variable we declare everthin that we need
