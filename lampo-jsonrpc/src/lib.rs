@@ -1,13 +1,14 @@
 //! Full feature async JSON RPC 2.0 Server/client with a
 //! minimal dependencies footprint.
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, VecDeque};
-use std::io::{self, ErrorKind};
+use std::collections::HashMap;
+use std::io;
+use std::io::ErrorKind;
 use std::io::{Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixListener;
-use std::os::unix::net::{SocketAddr, UnixStream};
-use std::sync::{Arc, Mutex};
+use std::os::unix::net::UnixStream;
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 // FIXME: use mio for a better platform support.
@@ -35,9 +36,6 @@ pub struct JSONRPCv2<T: Send + Sync + 'static> {
     open_streams: HashMap<i32, UnixStream>,
     socket: UnixListener,
     handler: Arc<Handler<T>>,
-    // FIXME: should be not the name but the fd int as key?
-    pub(crate) conn: HashMap<String, UnixStream>,
-    conn_queue: Mutex<Cell<HashMap<String, VecDeque<Response<Value>>>>>,
 }
 
 pub struct Handler<T: Send + Sync + 'static> {
@@ -105,8 +103,6 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
             handler: Arc::new(Handler::new(ctx)),
             socket_path: path.to_owned(),
             open_streams: HashMap::new(),
-            conn: HashMap::new(),
-            conn_queue: Mutex::new(Cell::new(HashMap::new())),
         })
     }
 
@@ -121,53 +117,9 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         Ok(())
     }
 
-    pub fn add_connection(&mut self, stream: UnixStream) {
-        let res = stream.set_nonblocking(true);
-        debug_assert!(res.is_ok());
-        log::trace!("register a new connection listener");
-    }
-
-    pub fn send_resp(&self, key: String, resp: Response<Value>) {
-        let queue = self.conn_queue.lock().unwrap();
-
-        let mut conns = queue.take();
-        log::debug!(target: "jsonrpc", "{:?}", conns);
-        if conns.contains_key(&key) {
-            let Some(queue) = conns.get_mut(&key) else {
-                panic!("queue not found");
-            };
-            queue.push_back(resp);
-        } else {
-            let mut q = VecDeque::new();
-            q.push_back(resp);
-            conns.insert(key, q);
-        }
-        log::debug!(target: "jsonrpc", "{:?}", conns);
-        queue.set(conns);
-    }
-
-    pub fn pop_resp(&self, key: String) -> Option<Response<Value>> {
-        let queue = self.conn_queue.lock().unwrap();
-
-        let mut conns = queue.take();
-        if !conns.contains_key(&key) {
-            return None;
-        }
-        let Some(q) = conns.get_mut(&key) else {
-            return None;
-        };
-        let resp = q.pop_front();
-        queue.set(conns);
-        resp
-    }
-
     #[allow(dead_code)]
     fn ctx(&self) -> &T {
         self.handler.ctx()
-    }
-
-    fn write(&self, event: Event<RPCEvent>, towrite: &mut Vec<Response<Value>>) -> io::Result<()> {
-        unimplemented!()
     }
 
     fn read(&mut self, event: &mut Event<RPCEvent>) -> io::Result<()> {
