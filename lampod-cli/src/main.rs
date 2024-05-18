@@ -8,8 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use lampod::jsonrpc::channels::json_close_channel;
-use lampod::jsonrpc::channels::json_list_channels;
+use radicle_term as term;
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
@@ -20,7 +19,8 @@ use lampo_core_wallet::CoreWalletManager;
 use lampo_jsonrpc::Handler;
 use lampo_jsonrpc::JSONRPCv2;
 use lampod::chain::WalletManager;
-
+use lampod::jsonrpc::channels::json_close_channel;
+use lampod::jsonrpc::channels::json_list_channels;
 use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::offchain::json_decode_invoice;
 use lampod::jsonrpc::offchain::json_invoice;
@@ -32,7 +32,6 @@ use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
-
 use lampod::jsonrpc::CommandHandler;
 use lampod::LampoDeamon;
 
@@ -47,7 +46,16 @@ fn main() -> error::Result<()> {
 
 /// Return the root directory.
 fn run(args: LampoCliArgs) -> error::Result<()> {
-    let mnemonic = args.mnemonic.clone();
+    let mnemonic = if args.restore_wallet {
+        let inputs: String = term::input(
+            "BIP 39 Mnemonic",
+            None,
+            Some("To restore the wallet, lampo needs a BIP39 mnemonic with words separated by spaces."),
+        )?;
+        Some(inputs)
+    } else {
+        None
+    };
 
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;

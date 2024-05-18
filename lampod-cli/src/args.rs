@@ -40,7 +40,7 @@ pub struct LampoCliArgs {
     pub data_dir: Option<String>,
     pub network: Option<String>,
     pub client: Option<String>,
-    pub mnemonic: Option<String>,
+    pub restore_wallet: bool,
     pub log_level: Option<String>,
     pub log_file: Option<String>,
     pub bitcoind_url: Option<String>,
@@ -110,7 +110,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut bitcoind_url: Option<String> = None;
     let mut bitcoind_user: Option<String> = None;
     let mut bitcoind_pass: Option<String> = None;
-    let mut mnemonic: Option<String> = None;
+    let mut restore_wallet = false;
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -148,8 +148,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
                 bitcoind_pass = Some(var);
             }
             Long("restore-wallet") => {
-                let var: String = parser.value()?.parse()?;
-                mnemonic = Some(var);
+                restore_wallet = true;
             }
             Long("help") => {
                 let _ = print_help();
@@ -163,7 +162,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         data_dir,
         network,
         client,
-        mnemonic,
+        restore_wallet,
         log_file,
         bitcoind_url,
         bitcoind_pass,
