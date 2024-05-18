@@ -131,23 +131,23 @@ impl LampoChannelManager {
             self.load_channel_monitors(true).unwrap();
         }
         std::thread::spawn(move || {
-            log::info!(target: "lampo_channel_manager", "listening on chain event on the channel manager");
+            log::info!(target: "manager", "listening on chain event on the channel manager");
             let events = self.handler().events();
             loop {
                 let Ok(Event::OnChain(event)) = events.recv() else {
                     continue;
                 };
-                log::trace!(target: "lampo_channel_manager", "event received {:?}", event);
+                log::trace!(target: "channel_manager", "event received {:?}", event);
                 match event {
                     OnChainEvent::NewBestBlock((hash, height)) => {
-                        log::debug!(target: "lampo_channel_manager", "new best block with hash `{}` at height `{height}`", hash.block_hash());
+                        log::info!(target: "channel_manager", "new best block with hash `{}` at height `{height}`", hash.block_hash());
                         self.chain_monitor()
                             .best_block_updated(&hash, height.to_consensus_u32());
                         self.manager()
                             .best_block_updated(&hash, height.to_consensus_u32());
                     }
                     OnChainEvent::ConfirmedTransaction((tx, idx, header, height)) => {
-                        log::debug!(target: "lampo_channel_manager", "confirmed transaction with txid `{}` at height `{height}`", tx.txid());
+                        log::info!(target: "channel_manager", "confirmed transaction with txid `{}` at height `{height}`", tx.txid());
                         self.chain_monitor().transactions_confirmed(
                             &header,
                             &[(idx as usize, &tx)],
@@ -158,6 +158,14 @@ impl LampoChannelManager {
                             &[(idx as usize, &tx)],
                             height.to_consensus_u32(),
                         );
+                    }
+                    OnChainEvent::UnconfirmedTransaction(txid) => {
+                        log::info!(target: "channel_manager", "transaction with txid `{txid}` is still unconfirmed");
+                        self.chain_monitor().transaction_unconfirmed(&txid);
+                        self.manager().transaction_unconfirmed(&txid);
+                    }
+                    OnChainEvent::DiscardedTransaction(txid) => {
+                        log::warn!(target: "channel_manager", "transaction with txid `{txid}` discarded");
                     }
                     _ => continue,
                 }

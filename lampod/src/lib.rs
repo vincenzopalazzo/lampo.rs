@@ -270,10 +270,10 @@ impl LampoDeamon {
 
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().backend.clone().listen();
-        log::info!(target: "lampo", "Starting channel manager");
-        let _ = self.channel_manager().listen();
         log::info!(target: "lampo", "Starting peer manager");
         let _ = self.peer_manager().run();
+        log::info!(target: "lampo", "Starting channel manager");
+        let _ = self.channel_manager().listen();
         Ok(std::thread::spawn(move || {
             let _ = background_processor.join();
             Ok(())
