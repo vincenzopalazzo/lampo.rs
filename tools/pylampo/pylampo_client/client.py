@@ -50,6 +50,15 @@ class LampoClient:
                         break
                     response += data.decode()
 
-                return json.loads(response)
+                # ad this point of the execution the response looks like
+                # the following one
+                # `{'result': {'node_id': '03f37129559621cbb4f8f4d4be5dff76ec21c220d7d274a6407683eafb996d97ae', 'peers': 0, 'channels': 0, 'chain': 'regtest', 'alias': '', 'blockheight': 101, 'lampo_dir': '/tmp/lnpt-lampo-2wi7vr28/lampo'}, 'error': None, 'id': 'pylampo-client/1', 'jsonrpc': '2.0'}`
+                response = json.loads(response)
+                if "result" in response:
+                    return response["result"]
+                elif "error" in response:
+                    raise Exception(f"{response['error']}")
+                else:
+                    raise Exception("Invalid JSON RPC 2.0 response: `{response}`")
         except Exception as e:
             raise Exception(f"Error communicating with Lampo client: {e}")
