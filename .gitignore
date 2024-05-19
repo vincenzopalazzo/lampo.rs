@@ -1,1 +1,4 @@
 target
+
+# tools ignores
+tools/pylampo/pylampo_client/__pycache__
