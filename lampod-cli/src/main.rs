@@ -97,7 +97,24 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", client),
     };
 
-    let wallet = if let Some(ref _private_key) = lampo_conf.private_key {
+    let wallet = if let Some(ref priv_key) = lampo_conf.private_key {
+        #[cfg(debug_assertions)]
+        {
+            let Ok(key) = lampo_common::secp256k1::SecretKey::from_str(priv_key) else {
+                error::bail!("invalid private key `{priv_key}`");
+            };
+            let key = lampo_common::bitcoin::PrivateKey::new(key, lampo_conf.network);
+            let wallet = CoreWalletManager::try_from((
+                key,
+                lampo_conf.channels_keys.clone(),
+                Arc::new(lampo_conf.clone()),
+            ));
+            let Ok(wallet) = wallet else {
+                error::bail!("error while create the wallet: `{}`", wallet.err().unwrap());
+            };
+            wallet
+        }
+        #[cfg(not(debug_assertions))]
         unimplemented!()
     } else if mnemonic.is_none() {
         let (wallet, mnemonic) = match client.kind() {
