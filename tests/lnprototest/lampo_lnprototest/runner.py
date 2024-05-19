@@ -11,7 +11,6 @@ import os
 import tempfile
 import logging
 import socket
-import time
 
 import pyln
 import shutil
@@ -22,14 +21,16 @@ from contextlib import closing
 from concurrent import futures
 
 from lnprototest import KeySet, Conn
+from lnprototest import wait_for
 from lnprototest.backend import Bitcoind
 from lnprototest.runner import Runner
 from lnprototest.event import Event, MustNotMsg
 
-from lampo_py import LampoDaemon
+from pylampo_client import LampoClient
 
 # FIXME: move this in the Runner
 TIMEOUT = int(os.getenv("TIMEOUT", "30"))
+LIGHTNING_SRC = os.path.join(os.getcwd(), os.getenv("LIGHTNING_SRC", "../.."))
 
 
 class LampoConn(Conn):
@@ -66,17 +67,21 @@ class LampoRunner(Runner):
         self.is_fundchannel_kill = False
 
     def __lampod_config_file(self) -> None:
+        """Crete the lampo configuration file, and store it inside the proper directory"""
         self.lightning_dir = os.path.join(self.directory, "lampo")
         if not os.path.exists(self.lightning_dir):
             os.makedirs(self.lightning_dir)
+        network_dir = os.path.join(self.lightning_dir, "regtest")
+        if not os.path.exists(network_dir):
+            os.makedirs(network_dir)
         self.lightning_port = self.reserve_port()
-        f = open(f"{self.lightning_dir}/lampo.conf", "w")
+        f = open(f"{network_dir}/lampo.conf", "w")
         f.write(
             f"port={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001\ndev-force-channel-secrets={self.get_node_bitcoinkey()}/0000000000000000000000000000000000000000000000000000000000000010/0000000000000000000000000000000000000000000000000000000000000011/0000000000000000000000000000000000000000000000000000000000000012/0000000000000000000000000000000000000000000000000000000000000013/0000000000000000000000000000000000000000000000000000000000000014/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n"
         )
         # configure bitcoin core
         f.write(
-            f"backend=core\ncore-url=localhost:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest\n"
+            f"backend=core\ncore-url=localhost:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest\nlog-file={network_dir}/log.log"
         )
         f.flush()
         f.close()
@@ -125,6 +130,35 @@ class LampoRunner(Runner):
     ) -> None:
         pass
 
+    def _start_lampo(self) -> None:
+        """Running the lampo node in a way that we would like to run
+        and tore the rpc as `self.node`"""
+        import subprocess
+        import time
+
+        process = subprocess.Popen(
+            [
+                "{}/target/debug/lampod-cli".format(LIGHTNING_SRC),
+                "--network=regtest",
+                f"--data-dir={self.lightning_dir}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        def node_ready(rpc) -> bool:
+            try:
+                info = rpc.call("getinfo", None)
+                logging.info(f"{info}")
+                return True
+            except Exception as ex:
+                logging.debug(f"waiting for lampo: Exception received {ex}")
+                return False
+
+        self.node = LampoClient(f"{self.lightning_dir}/regtest/lampod.socket")
+        wait_for(lambda: node_ready(self.node), timeout=TIMEOUT)
+        logging.debug("Waited for lampo")
+
     def start(self) -> None:
         """Start the Runner."""
         self.bitcoind = Bitcoind(self.directory, with_wallet="lampo-wallet")
@@ -134,10 +168,7 @@ class LampoRunner(Runner):
             logging.debug(f"Exception with message {ex}")
         logging.debug(f"running bitcoin core on port {self.bitcoind.port}")
         self.__lampod_config_file()
-        self.node = LampoDaemon(self.lightning_dir)
-        self.node.register_unix_rpc()
-        self.node.listen()
-        time.sleep(10)
+        self._start_lampo()
 
         self.public_key = self.node.call("getinfo", {})["node_id"]
         self.running = True
