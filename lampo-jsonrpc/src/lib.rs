@@ -328,7 +328,7 @@ mod tests {
         assert!(res.is_ok(), "{:?}", res);
 
         let handler = server.handler();
-        let worker = server.spawn();
+        server.spawn();
         let request = Request::<Value> {
             id: Some(0.into()),
             jsonrpc: String::from_str("2.0").unwrap(),
@@ -382,7 +382,5 @@ mod tests {
         let resp = client_worker2.join().unwrap();
         assert_eq!(Id::Str("1".to_owned()), resp.id);
         handler.stop();
-
-        let _ = worker.join();
     }
 }
