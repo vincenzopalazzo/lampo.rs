@@ -13,7 +13,7 @@ pub use getinfo::GetInfo;
 pub mod request {
     pub use crate::model::close_channel::request::*;
     pub use crate::model::connect::Connect;
-    pub use crate::model::getinfo::GetInfo;
+    pub use crate::model::getinfo::*;
     pub use crate::model::invoice::request::*;
     pub use crate::model::keysend::request::*;
     pub use crate::model::new_addr::request::*;
@@ -25,7 +25,7 @@ pub mod request {
 pub mod response {
     pub use crate::model::close_channel::response::*;
     pub use crate::model::connect::Connect;
-    pub use crate::model::getinfo::GetInfo;
+    pub use crate::model::getinfo::*;
     pub use crate::model::invoice::response::*;
     pub use crate::model::keysend::response::*;
     pub use crate::model::new_addr::response::*;
