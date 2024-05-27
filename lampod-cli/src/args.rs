@@ -65,11 +65,6 @@ impl TryInto<LampoConf> for LampoCliArgs {
         };
 
         let path = self.data_dir.unwrap_or(conf.root_path);
-        // if the path doesn't exist, return an error
-        if !std::path::Path::new(&path).exists() {
-            error::bail!("The path {} doesn't exist", path);
-        }
-
         // FIXME: this override the full configuration, we should merge the two
         conf = LampoConf::new(Some(path), Some(conf.network), None)?;
         conf.prepare_dirs()?;
