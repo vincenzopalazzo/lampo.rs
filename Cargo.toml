@@ -11,6 +11,7 @@ members = [
         "lampo-core-wallet",
         "lampo-testing",
         "tests/tests",
+        "lampo-rgb",
 ]
 
 default-members = [
@@ -23,5 +24,6 @@ default-members = [
         "lampo-client",
         "lampo-c-ffi",
         "lampo-core-wallet",
+        "lampo-rgb",
 ]
 resolver = "2"
