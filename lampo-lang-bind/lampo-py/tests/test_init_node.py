@@ -1,5 +1,5 @@
 from threading import Thread
-from lampo_py import LampoDeamon
+from lampo_py import LampoDaemon
 
 
 def test_init_node(node):

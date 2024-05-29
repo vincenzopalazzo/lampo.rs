@@ -16,18 +16,18 @@
  * who are interested in building their own node on
  * top of the LampoDaemon.
  */
-typedef struct LampoDeamon LampoDeamon;
+typedef struct LampoDaemon LampoDaemon;
 
 /**
  * Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
  * < 0 is an error happens, or 0 is all goes well.
  */
-int64_t add_jsonrpc_on_unixsocket(struct LampoDeamon *lampod);
+int64_t add_jsonrpc_on_unixsocket(struct LampoDaemon *lampod);
 
 /**
- * Allow to create a lampo deamon from a configuration patch!
+ * Allow to create a lampo daemon from a configuration patch!
  */
-void free_lampod(struct LampoDeamon *lampod);
+void free_lampod(struct LampoDaemon *lampod);
 
 /**
  * Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
@@ -36,13 +36,13 @@ void free_lampod(struct LampoDeamon *lampod);
 const char *lampo_last_errror(void);
 
 /**
- * Allow to create a lampo deamon from a configuration patch!
+ * Allow to create a lampo daemon from a configuration patch!
  */
-void lampo_listen(struct LampoDeamon *lampod);
+void lampo_listen(struct LampoDaemon *lampod);
 
-const char *lampod_call(struct LampoDeamon *lampod, const char *method, const char *buffer);
+const char *lampod_call(struct LampoDaemon *lampod, const char *method, const char *buffer);
 
 /**
- * Allow to create a lampo deamon from a configuration patch!
+ * Allow to create a lampo daemon from a configuration patch!
  */
-struct LampoDeamon *new_lampod(const char *conf_path);
+struct LampoDaemon *new_lampod(const char *conf_path);

@@ -29,7 +29,7 @@ pub struct BitcoinCore {
     ours_txs: Mutex<RefCell<Vec<Txid>>>,
     others_txs: Mutex<RefCell<Vec<(Txid, ScriptBuf)>>>,
     // receive notification if the
-    // deamon was stop
+    // daemon was stop
     stop: Arc<bool>,
     pool_time: Duration,
     best_height: RefCell<u64>,

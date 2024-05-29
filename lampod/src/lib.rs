@@ -55,7 +55,7 @@ use crate::utils::logger::LampoLogger;
 /// who are interested in building their own node on
 /// top of the LampoDaemon.
 #[repr(C)]
-pub struct LampoDeamon {
+pub struct LampoDaemon {
     conf: LampoConf,
     peer_manager: Option<Arc<LampoPeerManager>>,
     onchain_manager: Option<Arc<LampoChainManager>>,
@@ -72,16 +72,16 @@ pub struct LampoDeamon {
     rt: Runtime,
 }
 
-unsafe impl Send for LampoDeamon {}
-unsafe impl Sync for LampoDeamon {}
+unsafe impl Send for LampoDaemon {}
+unsafe impl Sync for LampoDaemon {}
 
-impl LampoDeamon {
+impl LampoDaemon {
     pub fn new(config: LampoConf, wallet_manager: Arc<dyn WalletManager>) -> Self {
         let root_path = config.path();
         //FIXME: sync some where else
         let wallet = wallet_manager.clone();
         let _ = std::thread::spawn(move || wallet.sync().unwrap());
-        LampoDeamon {
+        LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
             persister: Arc::new(LampoPersistence::new(root_path.into())),
