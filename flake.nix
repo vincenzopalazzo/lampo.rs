@@ -33,7 +33,7 @@
       rec {
         # Set up the nix flake derivation
         packages = {
-          # build the deamon binary
+          # build the daemon binary
           lampod = naersk'.buildPackage {
             # name of the binary
             name = "lampod-cli";

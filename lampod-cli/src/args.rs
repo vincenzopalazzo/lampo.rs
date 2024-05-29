@@ -12,7 +12,7 @@ struct Help {
 
 const HELP: Help = Help {
     name: "lampod-cli",
-    description: "Lampo Deamon command line",
+    description: "Lampo Daemon command line",
     version: env!("CARGO_PKG_VERSION"),
     usage: r#"
 Usage
@@ -172,7 +172,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
 pub fn print_help() -> error::Result<()> {
     println!(
         "{}",
-        term::format::secondary("Common `lampod-cli` commands used to init the lampo deamon")
+        term::format::secondary("Common `lampod-cli` commands used to init the lampo daemon")
     );
     println!(
         "\n{} {}",

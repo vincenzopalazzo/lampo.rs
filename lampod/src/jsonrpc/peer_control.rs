@@ -4,9 +4,9 @@ use lampo_common::model::Connect;
 use lampo_jsonrpc::errors::Error;
 use lampo_jsonrpc::errors::RpcError;
 
-use crate::{ln::events::PeerEvents, LampoDeamon};
+use crate::{ln::events::PeerEvents, LampoDaemon};
 
-pub fn json_connect(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_connect(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `connect` with request `{:?}`", request);
     let input: Connect = json::from_value(request.clone())?;
     let host = input.addr();

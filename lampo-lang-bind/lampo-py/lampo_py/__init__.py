@@ -1,1 +1,1 @@
-from .lampo import LampoDeamon
+from .lampo import LampoDaemon

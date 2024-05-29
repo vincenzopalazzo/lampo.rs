@@ -9,15 +9,15 @@ use lampo_jsonrpc::errors::RpcError;
 
 use crate::ln::events::ChannelEvents;
 
-use crate::LampoDeamon;
+use crate::LampoDaemon;
 
-pub fn json_list_channels(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_list_channels(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `list_channels` with request {:?}", request);
     let resp = ctx.channel_manager().list_channel();
     Ok(json::to_value(resp)?)
 }
 
-pub fn json_close_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_close_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `closechannel` with request {:?}", request);
     let mut request: request::CloseChannel = json::from_value(request.clone())?;
     let events = ctx.handler().events();

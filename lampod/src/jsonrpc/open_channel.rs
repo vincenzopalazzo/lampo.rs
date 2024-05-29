@@ -5,9 +5,9 @@ use lampo_common::model::request;
 use lampo_jsonrpc::errors::{Error, RpcError};
 
 use crate::ln::events::ChannelEvents;
-use crate::LampoDeamon;
+use crate::LampoDaemon;
 
-pub fn json_open_channel(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `openchannel` with request {:?}", request);
     let request: request::OpenChannel = json::from_value(request.clone())?;
 

@@ -37,7 +37,7 @@ use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
 use lampod::jsonrpc::CommandHandler;
-use lampod::LampoDeamon;
+use lampod::LampoDaemon;
 
 #[macro_export]
 macro_rules! wait {
@@ -93,7 +93,7 @@ impl LampoTesting {
             .force_announced_channel_preference = false;
         let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
         let wallet = Arc::new(wallet);
-        let mut lampo = LampoDeamon::new(lampo_conf.clone(), wallet.clone());
+        let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
         let node = BitcoinCore::new(
             &format!("127.0.0.1:{}", btc.port),
             &btc.user,

@@ -8,7 +8,7 @@ use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
 use std::sync::Once;
 
-pub use lampod::LampoDeamon;
+pub use lampod::LampoDaemon;
 
 #[macro_export]
 macro_rules! null {
@@ -96,11 +96,11 @@ fn init_logger() {
     }
 }
 
-/// Allow to create a lampo deamon from a configuration patch!
+/// Allow to create a lampo daemon from a configuration patch!
 #[no_mangle]
 #[allow(unused_variables)]
 #[allow(unused_assignments)]
-pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon {
+pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDaemon {
     use lampo_common::conf::LampoConf;
     use lampo_core_wallet::CoreWalletManager;
     use lampod::chain::WalletManager;
@@ -192,7 +192,7 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDeamon
             return null!();
         }
     };
-    let mut lampod = LampoDeamon::new(conf.as_ref().clone(), Arc::new(wallet));
+    let mut lampod = LampoDaemon::new(conf.as_ref().clone(), Arc::new(wallet));
     if let Err(err) = lampod.init(client) {
         LAST_ERR
             .lock()
@@ -217,7 +217,7 @@ pub extern "C" fn lampo_last_errror() -> *const libc::c_char {
 /// Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
 /// < 0 is an error happens, or 0 is all goes well.
 #[no_mangle]
-pub extern "C" fn add_jsonrpc_on_unixsocket(lampod: *mut LampoDeamon) -> i64 {
+pub extern "C" fn add_jsonrpc_on_unixsocket(lampod: *mut LampoDaemon) -> i64 {
     use lampo_jsonrpc::JSONRPCv2;
     use lampod::jsonrpc::inventory::get_info;
     use lampod::jsonrpc::open_channel::json_open_channel;
@@ -251,7 +251,7 @@ pub extern "C" fn add_jsonrpc_on_unixsocket(lampod: *mut LampoDeamon) -> i64 {
 
 #[no_mangle]
 pub extern "C" fn lampod_call(
-    lampod: *mut LampoDeamon,
+    lampod: *mut LampoDaemon,
     method: *const libc::c_char,
     buffer: *const libc::c_char,
 ) -> *const libc::c_char {
@@ -275,9 +275,9 @@ pub extern "C" fn lampod_call(
     }
 }
 
-/// Allow to create a lampo deamon from a configuration patch!
+/// Allow to create a lampo daemon from a configuration patch!
 #[no_mangle]
-pub extern "C" fn lampo_listen(lampod: *mut LampoDeamon) {
+pub extern "C" fn lampo_listen(lampod: *mut LampoDaemon) {
     let Some(lampod) = as_rust!(lampod) else {
         panic!("errr during the convertion");
     };
@@ -286,8 +286,8 @@ pub extern "C" fn lampo_listen(lampod: *mut LampoDeamon) {
     std::thread::spawn(move || lampod.listen().map(|lampod| lampod.join()));
 }
 
-/// Allow to create a lampo deamon from a configuration patch!
+/// Allow to create a lampo daemon from a configuration patch!
 #[no_mangle]
-pub extern "C" fn free_lampod(lampod: *mut LampoDeamon) {
+pub extern "C" fn free_lampod(lampod: *mut LampoDaemon) {
     c_free!(lampod);
 }

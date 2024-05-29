@@ -26,7 +26,7 @@ from lnprototest.backend import Bitcoind
 from lnprototest.runner import Runner
 from lnprototest.event import Event, MustNotMsg
 
-from lampo_py import LampoDeamon
+from lampo_py import LampoDaemon
 
 # FIXME: move this in the Runner
 TIMEOUT = int(os.getenv("TIMEOUT", "30"))
@@ -134,7 +134,7 @@ class LampoRunner(Runner):
             logging.debug(f"Exception with message {ex}")
         logging.debug(f"running bitcoin core on port {self.bitcoind.port}")
         self.__lampod_config_file()
-        self.node = LampoDeamon(self.lightning_dir)
+        self.node = LampoDaemon(self.lightning_dir)
         self.node.register_unix_rpc()
         self.node.listen()
         time.sleep(10)

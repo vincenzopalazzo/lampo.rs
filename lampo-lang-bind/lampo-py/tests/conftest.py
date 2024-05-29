@@ -3,12 +3,12 @@ import pytest
 from typing import Any
 from threading import Thread
 
-from lampo_py import LampoDeamon
+from lampo_py import LampoDaemon
 
 
 @pytest.fixture()  # type: ignore
 def node(pytestconfig: Any) -> Any:
-    lampo = LampoDeamon("/home/vincent/.lampo/testnet")
+    lampo = LampoDaemon("/home/vincent/.lampo/testnet")
     thread = Thread(target=lampo.listen)
     thread.daemon = True
     thread.start()

@@ -22,7 +22,7 @@ LampoFFI loadLibrary() {
 
 /// Lampo Class Implementation
 class Lampo {
-  late Pointer<LampoDeamon> inner;
+  late Pointer<LampoDaemon> inner;
 
   Lampo({required String homePath}) {
     inner = ffi.new_lampod(homePath.toNativeUtf8().cast<Int8>());

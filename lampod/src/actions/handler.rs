@@ -20,7 +20,7 @@ use crate::command::Command;
 use crate::handler::external_handler::ExternalHandler;
 use crate::ln::events::PeerEvents;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::{async_run, LampoDeamon};
+use crate::{async_run, LampoDaemon};
 
 use super::{Handler, InventoryHandler};
 
@@ -40,7 +40,7 @@ unsafe impl Send for LampoHandler {}
 unsafe impl Sync for LampoHandler {}
 
 impl LampoHandler {
-    pub(crate) fn new(lampod: &LampoDeamon) -> Self {
+    pub(crate) fn new(lampod: &LampoDaemon) -> Self {
         let emitter = Emitter::default();
         let subscriber = emitter.subscriber();
         Self {

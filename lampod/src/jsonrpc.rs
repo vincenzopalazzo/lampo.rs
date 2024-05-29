@@ -16,7 +16,7 @@ use lampo_jsonrpc::command::Context;
 use lampo_jsonrpc::json_rpc2;
 use lampo_jsonrpc::Handler;
 
-use crate::{handler::external_handler::ExternalHandler, LampoDeamon};
+use crate::{handler::external_handler::ExternalHandler, LampoDaemon};
 
 #[macro_export]
 macro_rules! rpc_error {
@@ -31,7 +31,7 @@ macro_rules! rpc_error {
 
 /// JSON RPC 2.0 Command handler!
 pub struct CommandHandler {
-    pub handler: RefCell<Option<Arc<Handler<LampoDeamon>>>>,
+    pub handler: RefCell<Option<Arc<Handler<LampoDaemon>>>>,
     pub conf: LampoConf,
 }
 
@@ -47,7 +47,7 @@ impl CommandHandler {
         Ok(handler)
     }
 
-    pub fn set_handler(&self, handler: Arc<Handler<LampoDeamon>>) {
+    pub fn set_handler(&self, handler: Arc<Handler<LampoDaemon>>) {
         self.handler.replace(Some(handler));
     }
 }
@@ -74,8 +74,8 @@ impl ExternalHandler for CommandHandler {
 }
 
 /// Implementing the Context for the JSON RPC 2.0 framework
-impl Context for LampoDeamon {
-    type Ctx = LampoDeamon;
+impl Context for LampoDaemon {
+    type Ctx = LampoDaemon;
 
     fn ctx(&self) -> &Self::Ctx {
         self

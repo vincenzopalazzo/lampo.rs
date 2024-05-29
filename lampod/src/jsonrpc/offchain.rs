@@ -18,9 +18,9 @@ use lampo_common::{json, model::request::DecodeInvoice};
 use lampo_jsonrpc::errors::{Error, RpcError};
 
 use crate::rpc_error;
-use crate::LampoDeamon;
+use crate::LampoDaemon;
 
-pub fn json_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: GenerateInvoice = json::from_value(request.clone())?;
     let invoice = ctx
@@ -43,7 +43,7 @@ pub fn json_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Va
     Ok(json::to_value(&invoice)?)
 }
 
-pub fn json_offer(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `offer` with request `{:?}`", request);
     let request: GenerateOffer = json::from_value(request.clone())?;
     let manager = ctx.channel_manager().manager();
@@ -62,7 +62,7 @@ pub fn json_offer(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Valu
     Ok(json::to_value(&offer)?)
 }
 
-pub fn json_decode_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: DecodeInvoice = json::from_value(request.clone())?;
     let invoice = ctx
@@ -91,7 +91,7 @@ pub fn json_decode_invoice(ctx: &LampoDeamon, request: &json::Value) -> Result<j
     Ok(json::to_value(&invoice)?)
 }
 
-pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `pay` with request `{:?}`", request);
     let request: Pay = json::from_value(request.clone())?;
     let events = ctx.handler().events();
@@ -132,7 +132,7 @@ pub fn json_pay(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value,
     }
 }
 
-pub fn json_keysend(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::debug!("call for `keysend` with request `{:?}`", request);
     let request: KeySend = json::from_value(request.clone())?;
     ctx.offchain_manager()

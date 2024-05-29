@@ -2,9 +2,9 @@
 use lampo_common::json;
 use lampo_jsonrpc::errors::{Error, RpcError};
 
-use crate::LampoDeamon;
+use crate::LampoDaemon;
 
-pub fn get_info(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn get_info(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("calling `getinfo` with request `{:?}`", request);
     let result = ctx.call("getinfo", request.clone());
     let Ok(result) = result else {

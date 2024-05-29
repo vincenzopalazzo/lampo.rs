@@ -17,7 +17,7 @@ dev_dependencies:
 
 ffigen:
   name: 'LampoFFI'
-  description: 'Lampo Deamon FFI to write a lightning node in dart'
+  description: 'Lampo Daemon FFI to write a lightning node in dart'
   output: 'lib/src/ffi/generated_bindings.dart'
   headers:
     entry-points:

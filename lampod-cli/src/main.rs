@@ -33,7 +33,7 @@ use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
 use lampod::jsonrpc::CommandHandler;
-use lampod::LampoDeamon;
+use lampod::LampoDaemon;
 
 use crate::args::LampoCliArgs;
 
@@ -128,7 +128,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         }
     };
     log::debug!(target: "lampod-cli", "wallet created with success");
-    let mut lampod = LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet));
+    let mut lampod = LampoDaemon::new(lampo_conf.clone(), Arc::new(wallet));
 
     // Init the lampod
     lampod.init(client)?;
@@ -163,8 +163,8 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
 }
 
 fn run_jsonrpc(
-    lampod: Arc<LampoDeamon>,
-) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler<LampoDeamon>>)> {
+    lampod: Arc<LampoDaemon>,
+) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler<LampoDaemon>>)> {
     let socket_path = format!("{}/lampod.socket", lampod.root_path());
     // we take the lock with the pid file so if we are at this point
     // we can delete the socket because there is no other process

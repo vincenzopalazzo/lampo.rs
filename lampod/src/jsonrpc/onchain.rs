@@ -2,9 +2,9 @@
 use lampo_common::json;
 use lampo_jsonrpc::errors::{Error, RpcError};
 
-use crate::LampoDeamon;
+use crate::LampoDaemon;
 
-pub fn json_new_addr(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_new_addr(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `new_addr` with request {:?}", request);
     let resp = ctx.wallet_manager().get_onchain_address();
     match resp {
@@ -17,7 +17,7 @@ pub fn json_new_addr(ctx: &LampoDeamon, request: &json::Value) -> Result<json::V
     }
 }
 
-pub fn json_funds(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_funds(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `funds` with request `{:?}`", request);
     match ctx.wallet_manager().list_transactions() {
         Ok(transactions) => Ok(json::json!({
@@ -31,7 +31,7 @@ pub fn json_funds(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Valu
     }
 }
 
-pub fn json_estimate_fees(ctx: &LampoDeamon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_estimate_fees(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `estimate_fees` with request `{:?}`", request);
     let response = ctx.onchain_manager().estimated_fees();
     match json::to_value(response) {
