@@ -15,7 +15,7 @@
 
 ## Crates
 
-These are the complete list of crates supported right now:
+This is the complete list of crates supported right now:
 
 | Crate       | Description                                   | Version     |
 |:------------|:---------------------------------------------:|------------:|
@@ -24,27 +24,34 @@ These are the complete list of crates supported right now:
 
 ## How to Install
 
-To install all the requirements binary we need to 
-have rust installed, and then run the following command
+To install all the requirements and the Lampo binary, you need to
+have rust installed, and then run the following command:
 
 ```
 make install
 ```
 
-After you have `lampod-cli` and `lampo-cli` available and the following
-commands can be ran
+After you have `lampod-cli` and `lampo-cli` available, you can
+run the following command to launch Lampo in signet mode:
 
 ```
 ➜  ~ lampod-cli --network signet
-✓ Wallet Generated, please store this works in a safe way
- waller-keys  maple have fitness decide food joy flame coast stereo front grab stumble
+✓ Wallet Generated, please store these words in a safe way
+ wallet-keys  maple have fitness decide food joy flame coast stereo front grab stumble
 ```
 
-N.B: Store your wallet works, and then reuse them to restore the waller with `--restore-wallet`.
+>[!NOTE]
+Store your wallet words, and then reuse them to restore the wallet with `--restore-wallet`.
+If you do not store your words anywhere, your funds will be lost the next time Lampo starts!
 
-Please note that this need to have a `lampo.conf` in the path `~/.lampo/signet`. See an example in lampo.example.conf
+Please note that you need to have a `lampo.conf` in the path `~/.lampo/signet`. Run the
+following command to use the example config file:
 
-Then you can query the node with the following command 
+```
+cp lampo.example.conf ~/.lampo/signet/lampo.conf
+```
+
+Then you can query the node with the following command:
 
 ``` 
 ➜  ~ lampo-cli --network signet getinfo
@@ -59,7 +66,7 @@ Then you can query the node with the following command
 
 Make sure you have compiled core-lightning in developer mode. The installation guide can be found [here](https://docs.corelightning.org/docs/installation).
 
-Integration tests can be run using the following command
+Integration tests can be run using the following command:
 
 ```
 make integration

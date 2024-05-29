@@ -114,7 +114,7 @@ impl WalletManager for BDKWalletManager {
                 .map_err(|err| bdk::Error::Generic(format!("{:?}", err)))?;
         // Convert mnemonic to string
         let mnemonic_words = mnemonic.to_string();
-        log::info!("mnemonic works `{mnemonic_words}`");
+        log::info!("mnemonic words `{mnemonic_words}`");
         let (wallet, keymanager) = BDKWalletManager::build_wallet(conf.clone(), &mnemonic_words)?;
         Ok((
             Self {

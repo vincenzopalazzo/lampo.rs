@@ -109,9 +109,9 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
             }
         };
 
-        radicle_term::success!("Wallet Generated, please store this works in a safe way");
+        radicle_term::success!("Wallet Generated, please store these words in a safe way");
         radicle_term::println(
-            radicle_term::format::badge_primary("waller-keys"),
+            radicle_term::format::badge_primary("wallet-keys"),
             format!("{}", radicle_term::format::highlight(mnemonic)),
         );
         wallet
