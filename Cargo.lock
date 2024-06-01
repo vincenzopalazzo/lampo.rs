@@ -2502,7 +2502,9 @@ dependencies = [
 name = "lampo-rgb"
 version = "0.1.0"
 dependencies = [
+ "bdk 0.29.0",
  "lampo-common",
+ "rgb-lib",
 ]
 
 [[package]]
