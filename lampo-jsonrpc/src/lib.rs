@@ -191,7 +191,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
 
         log::trace!(target: "jsonrpc", "send response: `{:?}`", resp);
         self.response_queue.insert(fd, resp);
-        event.source.set(popol::interest::WRITE);
+        self.sources.register(event.key.clone(), stream, popol::interest::WRITE);
         Ok(())
     }
 
@@ -220,7 +220,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                         self.sources.register(
                             RPCEvent::Connect,
                             &stream,
-                            popol::interest::READ | popol::interest::WRITE,
+                            popol::interest::READ,
                         );
                         self.open_streams.insert(stream.as_raw_fd(), stream);
                         break;
@@ -251,8 +251,6 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                             // socket.
                             Ok(()) => {
                                 log::trace!("writing ended");
-                                event.source.unset(popol::interest::WRITE);
-                                event.source.set(popol::interest::READ);
                                 self.sources.unregister(&event.key);
                                 continue;
                             }
