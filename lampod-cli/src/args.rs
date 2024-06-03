@@ -46,6 +46,7 @@ pub struct LampoCliArgs {
     pub bitcoind_url: Option<String>,
     pub bitcoind_user: Option<String>,
     pub bitcoind_pass: Option<String>,
+    pub dev_force_poll: bool,
 }
 
 impl TryInto<LampoConf> for LampoCliArgs {
@@ -106,6 +107,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut bitcoind_user: Option<String> = None;
     let mut bitcoind_pass: Option<String> = None;
     let mut restore_wallet = false;
+    let mut dev_force_poll = false;
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -145,6 +147,8 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
             Long("restore-wallet") => {
                 restore_wallet = true;
             }
+            // FIXME: allow only in debug mode
+            Long("dev-force-poll") => dev_force_poll = true,
             Long("help") => {
                 let _ = print_help();
                 std::process::exit(0);
@@ -162,6 +166,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         bitcoind_url,
         bitcoind_pass,
         bitcoind_user,
+        dev_force_poll,
         // Default log level is info if it is not specified
         // in the command line
         log_level: level,
