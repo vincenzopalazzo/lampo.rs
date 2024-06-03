@@ -2,7 +2,7 @@
   description = "Lampo Nix Flake Shell";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "nixpkgs/release-24.05";
     flake-utils.url = "github:numtide/flake-utils";
     naersk.url = "github:nix-community/naersk";
   };
@@ -78,7 +78,7 @@
 
         devShell = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [ pkg-config ];
-          buildInputs = with pkgs; [ gnumake rustc cargo rustfmt openssl openssl.dev ] ++ cln-env-shell;
+          buildInputs = with pkgs; [ gnumake rustc cargo rustfmt openssl_3_3 openssl_3_3.dev python3 poetry ] ++ cln-env-shell;
           shellHook = ''
             export HOST_CC=gcc
             export RUST_BACKTRACE=1
