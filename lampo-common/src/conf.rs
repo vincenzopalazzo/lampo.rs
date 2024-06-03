@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fmt::format, str::FromStr};
 
 use clightningrpc_conf::{CLNConf, SyncCLNConf};
 
@@ -23,6 +23,7 @@ pub struct LampoConf {
     pub log_level: String,
     pub alias: Option<String>,
     pub announce_addr: Option<String>,
+    pub rgb: Option<bool>,
 }
 
 impl LampoConf {
@@ -52,6 +53,7 @@ impl LampoConf {
             log_file: None,
             alias: None,
             announce_addr: None,
+            rgb: None,
         }
     }
 
@@ -236,6 +238,8 @@ impl TryFrom<String> for LampoConf {
             log_level: level,
             alias,
             announce_addr,
+            // For now only be accessible by `--rgb` flag
+            rgb: None,
         })
     }
 }
@@ -243,6 +247,10 @@ impl TryFrom<String> for LampoConf {
 impl LampoConf {
     pub fn path(&self) -> String {
         format!("{}/{}", self.root_path, self.network)
+    }
+
+    pub fn rgb_path(&self) -> String {
+        format!("{}/{}/rgb/", self.root_path, self.network)
     }
 
     pub fn get_values(&self, key: &str) -> Option<Vec<String>> {

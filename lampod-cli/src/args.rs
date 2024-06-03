@@ -35,7 +35,7 @@ Options
 "#,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LampoCliArgs {
     pub data_dir: Option<String>,
     pub network: Option<String>,
@@ -46,6 +46,7 @@ pub struct LampoCliArgs {
     pub bitcoind_url: Option<String>,
     pub bitcoind_user: Option<String>,
     pub bitcoind_pass: Option<String>,
+    pub rgb: bool,
 }
 
 impl TryInto<LampoConf> for LampoCliArgs {
@@ -95,6 +96,9 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if self.log_level.is_some() {
             conf.log_level = self.log_level.unwrap();
         }
+        if self.rgb {
+            conf.rgb = Some(self.rgb);
+        }
         Ok(conf)
     }
 }
@@ -111,6 +115,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut bitcoind_user: Option<String> = None;
     let mut bitcoind_pass: Option<String> = None;
     let mut restore_wallet = false;
+    let mut rgb = false;
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -154,6 +159,9 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
                 let _ = print_help();
                 std::process::exit(0);
             }
+            Long("rgb") => {
+                rgb = true;
+            }
             _ => return Err(arg.unexpected()),
         }
     }
@@ -170,6 +178,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         // Default log level is info if it is not specified
         // in the command line
         log_level: level,
+        rgb,
     })
 }
 

@@ -50,16 +50,15 @@ impl Log for Logger {
                     Level::Trace => message.cyan().dimmed(),
                 };
 
-                // TODO: Resolve this!
-                // writeln!(
-                //     stream,
-                //     "{} {}",
-                //     DateTime<TimeZone::from_utc_datetime()>::from(SystemTime::now())
-                //         .to_rfc3339_opts(SecondsFormat::Millis, true)
-                //         .white(),
-                //     message,
-                // )
-                // .expect("write shouldn't fail");
+                writeln!(
+                    stream,
+                    "{} {}",
+                    DateTime::<Local>::from(SystemTime::now())
+                        .to_rfc3339_opts(SecondsFormat::Millis, true)
+                        .white(),
+                    message,
+                )
+                .expect("write shouldn't fail");
             }
         }
     }

@@ -2550,6 +2550,7 @@ dependencies = [
  "lampo-common",
  "lampo-core-wallet",
  "lampo-jsonrpc",
+ "lampo-rgb",
  "lampod",
  "lexopt",
  "log",
