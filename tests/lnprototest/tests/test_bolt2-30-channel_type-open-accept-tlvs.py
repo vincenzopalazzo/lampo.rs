@@ -77,6 +77,10 @@ def test_open_channel(runner: Runner, with_proposal: Any) -> None:
     runner.run(test)
 
 
+# DEBUG    root:bitcoind.py:43 Result for getblockcount call: 102
+# DEBUG    root:structure.py:49 receiving event {"event": "Connect", "file": "test_bolt2-30-channel_type-open-accept-tlvs.py", "pos": "96"}
+# INFO     root:event.py:59 # running {'event': 'Connect', 'file': 'test_bolt2-30-channel_type-open-accept-tlvs.py', 'pos': '96'}:
+@pytest.mark.skip(reason="the connection get stuck, look at the coment in the code")
 def test_open_channel_bad_type(runner: Runner, with_proposal: Any) -> None:
     """Tests for https://github.com/lightningnetwork/lightning-rfc/pull/880"""
     with_proposal(channel_type_csv)
