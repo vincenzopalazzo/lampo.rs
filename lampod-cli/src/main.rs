@@ -57,6 +57,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         None
     };
 
+    let dev_force_poll = args.dev_force_poll;
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
     log::debug!(target: "lampod-cli", "init wallet ..");
@@ -92,7 +93,8 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
                 .clone()
                 .ok_or(error::anyhow!("Miss the bitcoin password for auth"))?,
             Arc::new(false),
-            Some(60),
+            // FIXME: allow this under a dev flag
+            if dev_force_poll { Some(1) } else { Some(60) },
         )?),
         _ => error::bail!("client {:?} not supported", client),
     };
