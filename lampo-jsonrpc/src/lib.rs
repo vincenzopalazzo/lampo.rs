@@ -34,6 +34,7 @@ pub struct JSONRPCv2<T: Send + Sync + 'static> {
     socket_path: String,
     sources: Sources<RPCEvent>,
     open_streams: HashMap<i32, UnixStream>,
+    response_queue: HashMap<i32, Response<Value>>,
     socket: UnixListener,
     handler: Arc<Handler<T>>,
 }
@@ -103,6 +104,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
             handler: Arc::new(Handler::new(ctx)),
             socket_path: path.to_owned(),
             open_streams: HashMap::new(),
+            response_queue: HashMap::new(),
         })
     }
 
@@ -124,73 +126,72 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
 
     fn read(&mut self, event: &mut Event<RPCEvent>) -> io::Result<()> {
         log::trace!("read from connection");
-        let stream = self.open_streams.get_mut(&event.as_raw_fd()).unwrap();
+        let fd = event.as_raw_fd();
+        // SAFETY: in this case the socket stream should be created
+        let stream = self.open_streams.get_mut(&fd.clone()).unwrap();
         log::trace!("start reading");
-        let mut buff = vec![0; 1024]; // FIXME: make this variable
-                                      // Nb. Since `poll`, which this reactor is based on, is *level-triggered*,
-                                      // we will be notified again if there is still data to be read on the socket.
-                                      // Hence, there is no use in putting this socket read in a loop, as the second
-                                      // invocation would likely block.
-        let resp = match stream.read(&mut buff) {
-            Ok(count) => {
-                if count > 0 {
+        // Nb. Since `poll`, which this reactor is based on, is *level-triggered*,
+        // we will be notified again if there is still data to be read on the socket.
+        // Hence, there is no use in putting this socket read in a loop, as the second
+        // invocation would likely block.
+        let mut buff = vec![0; 1064];
+        let resp = loop {
+            match stream.read(&mut buff) {
+                Ok(count) => {
                     buff.truncate(count);
-                    log::info!(target: "jsonrpc", "buffer read {}", String::from_utf8(buff.to_vec()).unwrap());
-                    let requ: Request<Value> = serde_json::from_slice(&buff)
-                        .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{err}")))?;
-                    log::trace!(target: "jsonrpc", "request {:?}", requ);
-                    let Some(resp) = self.handler.run_callback(&requ) else {
-                        log::error!(target: "jsonrpc", "`{}` not found!", requ.method);
+                    if count > 0 {
+                        log::info!(target: "jsonrpc", "buffer read {}", String::from_utf8(buff.to_vec()).unwrap());
+                        // Put this inside the unfinish queue
+                        let Ok(requ) = serde_json::from_slice::<Request<Value>>(&buff) else {
+                            log::warn!(target: "jsonrpc", "looks like that the json is not fully read ` {}`", String::from_utf8(buff.to_vec()).unwrap());
+                            // Usually this mean that we was too fast in reading and the sender too low
+                            continue;
+                        };
+                        log::trace!(target: "jsonrpc", "request {:?}", requ);
+                        let Some(resp) = self.handler.run_callback(&requ) else {
+                            log::error!(target: "jsonrpc", "`{}` not found!", requ.method);
+                            return Ok(());
+                        };
+                        // FIXME; the id in the JSON RPC can be null!
+                        let response = match resp {
+                            Ok(result) => Response {
+                                id: requ.id.clone().unwrap(),
+                                jsonrpc: requ.jsonrpc.to_owned(),
+                                result: Some(result),
+                                error: None,
+                            },
+                            Err(err) => Response {
+                                result: None,
+                                error: Some(err.into()),
+                                id: requ.id.unwrap().clone(),
+                                jsonrpc: requ.jsonrpc.clone(),
+                            },
+                        };
+                        break response;
+                    } else {
+                        log::info!("Reading is not finished, so keep reading");
+                        event.source.unset(popol::interest::READ);
                         return Ok(());
-                    };
-                    // FIXME; the id in the JSON RPC can be null!
-                    let response = match resp {
-                        Ok(result) => Response {
-                            id: requ.id.clone().unwrap(),
-                            jsonrpc: requ.jsonrpc.to_owned(),
-                            result: Some(result),
-                            error: None,
-                        },
-                        Err(err) => Response {
-                            result: None,
-                            error: Some(err.into()),
-                            id: requ.id.unwrap().clone(),
-                            jsonrpc: requ.jsonrpc.clone(),
-                        },
-                    };
-                    response
-                } else {
-                    log::info!("connection close");
-                    self.open_streams.remove(&event.as_raw_fd());
-                    event.source.unset(popol::interest::READ);
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                    log::trace!("reading is blocking");
+                    // This shouldn't normally happen, since this function is only called
+                    // when there's data on the socket. We leave it here in case external
+                    // conditions change.
                     return Ok(());
                 }
-            }
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                log::trace!("reading is blocking");
-                // This shouldn't normally happen, since this function is only called
-                // when there's data on the socket. We leave it here in case external
-                // conditions change.
-                return Ok(());
-            }
-            Err(err) => {
-                log::error!("{:?}", err);
-                self.sources.unregister(&event.key);
-                return Err(err);
+                Err(err) => {
+                    log::error!("{:?}", err);
+                    self.sources.unregister(&event.key);
+                    return Err(err);
+                }
             }
         };
 
         log::trace!(target: "jsonrpc", "send response: `{:?}`", resp);
-        let buff = serde_json::to_string(&resp).unwrap();
-        if let Err(err) = stream.write_all(buff.as_bytes()) {
-            if err.kind() != ErrorKind::WouldBlock {
-                return Err(err);
-            }
-            log::info!("writing is blocking");
-            return Ok(());
-        }
+        self.response_queue.insert(fd, resp);
         event.source.set(popol::interest::WRITE);
-        self.open_streams.remove(&event.as_raw_fd());
         Ok(())
     }
 
@@ -227,15 +228,33 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                     RPCEvent::Connect if event.is_readable() => {
                         self.read(&mut event)?;
                     }
+                    // FIXME: convert all the code inside a `self.write`
                     RPCEvent::Connect if event.is_writable() => {
-                        let stream = self.open_streams.get_mut(&event.as_raw_fd()).unwrap();
+                        let fd = event.as_raw_fd();
+                        // SAFETY: we must have the response for this fd.
+                        let resp = self.response_queue.remove(&fd).unwrap();
+                        // SAFETY: we much have a stream for this fd.
+                        let mut stream = self.open_streams.remove(&event.as_raw_fd()).unwrap();
+                        // SAFETY: the resp should be a valid json.
+                        let buff = serde_json::to_string(&resp).unwrap();
+                        log::debug!("writing the response `{buff}`");
+                        if let Err(err) = stream.write_all(buff.as_bytes()) {
+                            if err.kind() != ErrorKind::WouldBlock {
+                                return Err(err);
+                            }
+                            log::info!("writing is blocking");
+                            continue;
+                        }
                         match stream.flush() {
                             // In this case, we've written all the data, we
                             // are no longer interested in writing to this
                             // socket.
                             Ok(()) => {
-                                log::trace!("reading ended");
+                                log::trace!("writing ended");
                                 event.source.unset(popol::interest::WRITE);
+                                event.source.set(popol::interest::READ);
+                                self.sources.unregister(&event.key);
+                                continue;
                             }
                             // In this case, the write couldn't complete. Set
                             // our interest to `WRITE` to be notified when the
@@ -244,7 +263,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                                 if [io::ErrorKind::WouldBlock, io::ErrorKind::WriteZero]
                                     .contains(&err.kind()) =>
                             {
-                                log::info!("reading return an error: {:?}", err);
+                                log::info!("writing return an error: {:?}", err);
                                 event.source.set(popol::interest::READ);
                                 break;
                             }
@@ -268,6 +287,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                 }
             }
         }
+        log::info!("stopping the server");
         Ok(())
     }
 
@@ -328,7 +348,7 @@ mod tests {
         assert!(res.is_ok(), "{:?}", res);
 
         let handler = server.handler();
-        server.spawn();
+        let worker = server.spawn();
         let request = Request::<Value> {
             id: Some(0.into()),
             jsonrpc: String::from_str("2.0").unwrap(),
