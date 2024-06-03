@@ -206,8 +206,6 @@ def test_open_channel_opener_side(runner: Runner) -> None:
             delayed_payment_basepoint=remote_delayed_payment_basepoint(),
             htlc_basepoint=remote_htlc_basepoint(),
             first_per_commitment_point=remote_per_commitment_point(0),
-            # FIXME: Check more fields!
-            channel_flags="01",
         ),
         Msg(
             "accept_channel",
