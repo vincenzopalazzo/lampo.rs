@@ -29,10 +29,9 @@ ENV CLIGHTNING_VERSION=master
 
 RUN git clone https://github.com/ElementsProject/lightning.git --branch=$CLIGHTNING_VERSION && \
     cd lightning && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
     ./configure --disable-rust && git submodule update --init --recursive && \
     pip3 install --upgrade pip && \
-    pip3 install mako mistune==0.8.4 mrkd && \
+    pip3 install mako mistune==0.8.4 mrkd grpcio-tools && \
     make -j$(nproc) && make install
 
 RUN echo $(lightningd --version)
