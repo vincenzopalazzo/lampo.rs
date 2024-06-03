@@ -81,7 +81,7 @@ class LampoRunner(Runner):
         )
         # configure bitcoin core
         f.write(
-            f"backend=core\ncore-url=localhost:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest\nlog-file={network_dir}/log.log"
+            f"backend=core\ncore-url=localhost:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest"
         )
         f.flush()
         f.close()
@@ -140,6 +140,8 @@ class LampoRunner(Runner):
             [
                 "{}/target/debug/lampod-cli".format(LIGHTNING_SRC),
                 "--network=regtest",
+                "--dev-force-poll",
+                f"--log-file={self.lightning_dir}/regtest/log.log",
                 f"--data-dir={self.lightning_dir}",
             ],
             stdout=subprocess.PIPE,
@@ -192,7 +194,18 @@ class LampoRunner(Runner):
         self.running = False
         for c in self.conns.values():
             cast(LampoConn, c).connection.connection.close()
-        del self.node
+        if print_logs:
+            from datetime import date
+
+            log_path = f"{self.lightning_dir}/regtest/log.log"
+            with open(log_path) as log:
+                self.logger.info("---------- lampo logs ----------------")
+                self.logger.info(log.read())
+                # now we make a backup of the log
+        #     shutil.copy(
+        #        log_path,
+        #       f'/tmp/lampo-log_{date.today().strftime("%b-%d-%Y_%H:%M:%S")}',
+        #  )
         shutil.rmtree(self.lightning_dir)
 
     def recv(self, event: Event, conn: Conn, outbuf: bytes) -> None:
