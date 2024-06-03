@@ -25,3 +25,6 @@ install:
 
 integration: default
 	 TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) $(CC) test -p tests $(ARGS)
+
+proto:
+	cd tests/lnprototest; poetry install; poetry run make check
