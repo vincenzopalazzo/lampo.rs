@@ -81,10 +81,14 @@ class LampoRunner(Runner):
         )
         # configure bitcoin core
         f.write(
-            f"backend=core\ncore-url=localhost:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest"
+            f"backend=core\ncore-url=http://127.0.0.1:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest"
         )
         f.flush()
         f.close()
+        f = open(f"{network_dir}/lampo.conf", "r")
+        logging.debug(
+            f"lampod configuration file: {f.read()} - path: {network_dir}/lampo.conf"
+        )
 
     # FIXME: move this in lnprototest runner API
     def reserve_port(self) -> int:
