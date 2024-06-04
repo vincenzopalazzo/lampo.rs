@@ -21,7 +21,6 @@ install:
 	$(CC) build --release
 	$(CC) install --locked --path ./lampo-cli 
 	$(CC) install --locked --path ./lampod-cli
-	sudo cp target/release/liblampo.so /usr/local/lib
 
 integration: default
 	 TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) $(CC) test -p tests $(ARGS)
