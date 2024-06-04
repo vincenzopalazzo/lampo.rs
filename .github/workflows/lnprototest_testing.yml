@@ -16,4 +16,4 @@ jobs:
       - name: lnprototest testing
         run: |
           docker build -f docker/Dockerfile -t lampo-ci-ubuntu .
-          docker run -e lampo-ci-ubuntu
+          docker run lampo-ci-ubuntu
