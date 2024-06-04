@@ -29,7 +29,7 @@ from lnprototest.event import Event, MustNotMsg
 from pylampo_client import LampoClient
 
 # FIXME: move this in the Runner
-TIMEOUT = int(os.getenv("TIMEOUT", "30"))
+TIMEOUT = int(os.getenv("TIMEOUT", "60"))
 LIGHTNING_SRC = os.path.join(os.getcwd(), os.getenv("LIGHTNING_SRC", "../.."))
 
 
@@ -138,8 +138,8 @@ class LampoRunner(Runner):
         """Running the lampo node in a way that we would like to run
         and tore the rpc as `self.node`"""
         import subprocess
-        import time
 
+        log_file = open(f"{self.lightning_dir}/process.log", "a")
         process = subprocess.Popen(
             [
                 "{}/target/debug/lampod-cli".format(LIGHTNING_SRC),
@@ -148,8 +148,8 @@ class LampoRunner(Runner):
                 f"--log-file={self.lightning_dir}/regtest/log.log",
                 f"--data-dir={self.lightning_dir}",
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=log_file,
+            stderr=log_file,
         )
 
         def node_ready(rpc) -> bool:
@@ -158,7 +158,12 @@ class LampoRunner(Runner):
                 logging.info(f"{info}")
                 return True
             except Exception as ex:
+                import time
+
+                log_file = open(f"{self.lightning_dir}/process.log", "r")
                 logging.debug(f"waiting for lampo: Exception received {ex}")
+                logging.info(f"while running the lampo process: `{log_file.read()}`")
+                time.sleep(1)
                 return False
 
         self.node = LampoClient(f"{self.lightning_dir}/regtest/lampod.socket")
