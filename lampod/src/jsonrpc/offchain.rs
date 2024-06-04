@@ -48,8 +48,9 @@ pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Valu
     let request: GenerateOffer = json::from_value(request.clone())?;
     let manager = ctx.channel_manager().manager();
     let mut offer_builder = manager
-        .create_offer_builder(request.description)
-        .map_err(|err| crate::rpc_error!("{:?}", err))?;
+        .create_offer_builder()
+        .map_err(|err| crate::rpc_error!("{:?}", err))?
+        .description(request.description);
 
     if let Some(amount_msat) = request.amount_msat {
         offer_builder = offer_builder.amount_msats(amount_msat);

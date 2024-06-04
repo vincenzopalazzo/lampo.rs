@@ -94,7 +94,7 @@ impl OffchainManager {
         let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
 
         let amount = match offer.amount() {
-            Some(Amount::Bitcoin { amount_msats }) => *amount_msats,
+            Some(Amount::Bitcoin { amount_msats }) => amount_msats,
             Some(_) => error::bail!(
                 "Cannot process non-Bitcoin-denominated offer value {:?}",
                 offer.amount()

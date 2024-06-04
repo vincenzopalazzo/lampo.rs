@@ -245,9 +245,11 @@ impl Handler for LampoHandler {
                 claim_deadline,
             } => {
                 let preimage = match purpose {
-                    ldk::events::PaymentPurpose::InvoicePayment {
+                    ldk::events::PaymentPurpose::Bolt11InvoicePayment  {
                         payment_preimage, ..
                     } => payment_preimage,
+                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, .. } => payment_preimage,
+                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => payment_preimage,
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
                 };
                 self.channel_manager
@@ -263,11 +265,13 @@ impl Handler for LampoHandler {
                 ..
             } => {
                 let (payment_preimage, payment_secret) = match purpose {
-                    ldk::events::PaymentPurpose::InvoicePayment {
+                    ldk::events::PaymentPurpose::Bolt11InvoicePayment {
                         payment_preimage,
                         payment_secret,
                         ..
                     } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
                 };
                 log::warn!("please note the payments are not make persistent for the moment");

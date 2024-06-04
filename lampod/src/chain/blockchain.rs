@@ -46,6 +46,7 @@ impl LampoChainManager {
             ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee => {
                 String::from("min_allowed_non_anchor_channel_remote")
             }
+            ConfirmationTarget::OutputSpendingFee => String::from("output_spending"),
         }
     }
 
@@ -57,6 +58,7 @@ impl LampoChainManager {
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
             ConfirmationTarget::AnchorChannelFee,
             ConfirmationTarget::ChannelCloseMinimum,
+            ConfirmationTarget::OutputSpendingFee,
         ];
         let mut map: HashMap<String, Option<u32>> = HashMap::new();
         for target in fees_targets {
@@ -86,6 +88,9 @@ impl FeeEstimator for LampoChainManager {
             }
             ConfirmationTarget::ChannelCloseMinimum => {
                 self.backend.fee_rate_estimation(100).unwrap_or_default()
+            }
+            ConfirmationTarget::OutputSpendingFee => {
+                self.backend.fee_rate_estimation(12).unwrap_or_default()
             }
         }
     }
