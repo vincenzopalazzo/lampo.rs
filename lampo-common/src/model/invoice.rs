@@ -32,6 +32,7 @@ pub mod request {
 pub mod response {
     use std::vec::Vec;
 
+    use bitcoin::secp256k1::PublicKey;
     use lightning::routing::router::RouteHop;
     use serde::{Deserialize, Serialize};
 
@@ -46,7 +47,7 @@ pub mod response {
     pub struct Offer {
         pub bolt12: String,
         pub metadata: Option<String>,
-        pub metadata_pubkey: String,
+        pub metadata_pubkey: Option<PublicKey>,
     }
 
     impl From<ldk::offers::offer::Offer> for Offer {
@@ -54,7 +55,7 @@ pub mod response {
             Self {
                 bolt12: value.to_string(),
                 metadata: value.metadata().map(|bytes| hex::encode(bytes)),
-                metadata_pubkey: value.signing_pubkey().to_string(),
+                metadata_pubkey: value.signing_pubkey(),
             }
         }
     }

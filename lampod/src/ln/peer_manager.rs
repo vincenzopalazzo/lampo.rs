@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::ldk;
+use lampo_common::ldk::blinded_path::EmptyNodeIdLookUp;
 use lampo_common::ldk::ln::peer_handler::MessageHandler;
 use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
 use lampo_common::ldk::net;
@@ -33,6 +34,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<KeysManager>,
     Arc<KeysManager>,
     Arc<L>,
+    EmptyNodeIdLookUp,
     Arc<LampoMsgRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<KeysManager>>>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
@@ -88,6 +90,7 @@ impl LampoPeerManager {
             wallet_manager.ldk_keys().keys_manager.clone(),
             wallet_manager.ldk_keys().keys_manager.clone(),
             self.logger.clone(),
+            EmptyNodeIdLookUp {},
             Arc::new(LampoMsgRouter::new(
                 channel_manager.graph(),
                 wallet_manager.ldk_keys().keys_manager.clone(),

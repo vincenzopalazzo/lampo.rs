@@ -3,6 +3,7 @@ use std::ops::Deref;
 
 use lampo_common::error;
 use lampo_common::ldk::blinded_path::BlindedPath;
+use lampo_common::ldk::blinded_path::IntroductionNode;
 use lampo_common::ldk::onion_message::messenger::Destination;
 use lampo_common::ldk::onion_message::messenger::MessageRouter;
 use lampo_common::ldk::onion_message::messenger::OnionMessagePath;
@@ -93,12 +94,14 @@ where
         peers: Vec<lampo_common::secp256k1::PublicKey>,
         destination: lampo_common::ldk::onion_message::messenger::Destination,
     ) -> Result<lampo_common::ldk::onion_message::messenger::OnionMessagePath, ()> {
-        let first_node = match destination {
+        let first_node = match &destination {
             Destination::Node(node_id) => node_id,
             Destination::BlindedPath(BlindedPath {
-                introduction_node_id: node_id,
-                ..
-            }) => node_id,
+                introduction_node, ..
+            }) => match introduction_node {
+                IntroductionNode::NodeId(node_id) => node_id,
+                IntroductionNode::DirectedShortChannelId(..) => return Err(()),
+            },
         };
         if peers.contains(&first_node) {
             Ok(OnionMessagePath {
