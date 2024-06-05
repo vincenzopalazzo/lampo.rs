@@ -13,11 +13,11 @@ use lampo_common::ldk;
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
 use lampo_common::types::ChannelState;
-use lampo_jsonrpc::json_rpc2::Request;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::handler::external_handler::ExternalHandler;
+use crate::json_rpc2::Request;
 use crate::ln::events::PeerEvents;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::{async_run, LampoDaemon};
