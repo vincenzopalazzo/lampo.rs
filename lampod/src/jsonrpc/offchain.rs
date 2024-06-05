@@ -15,8 +15,8 @@ use lampo_common::model::response;
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{Invoice, InvoiceInfo};
 use lampo_common::{json, model::request::DecodeInvoice};
-use lampo_jsonrpc::errors::{Error, RpcError};
 
+use crate::json_rpc2::{Error, RpcError};
 use crate::rpc_error;
 use crate::LampoDaemon;
 

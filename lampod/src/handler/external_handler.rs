@@ -3,7 +3,8 @@
 
 use lampo_common::error;
 use lampo_common::json;
-use lampo_jsonrpc::json_rpc2::Request;
+
+use crate::json_rpc2::Request;
 
 pub trait ExternalHandler {
     fn handle(&self, req: &Request<json::Value>) -> error::Result<Option<json::Value>>;

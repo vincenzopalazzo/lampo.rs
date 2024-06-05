@@ -36,6 +36,8 @@ use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
 use lampo_common::ldk::routing::gossip::P2PGossipSync;
 use lampo_common::wallet::WalletManager;
 
+pub use lampo_async_jsonrpc::json_rpc2;
+
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;

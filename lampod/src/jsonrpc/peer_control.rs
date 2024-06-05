@@ -1,9 +1,9 @@
 //! Peer Control JSON RPC Interface!
 use lampo_common::json;
 use lampo_common::model::Connect;
-use lampo_jsonrpc::errors::Error;
-use lampo_jsonrpc::errors::RpcError;
 
+use crate::json_rpc2::Error;
+use crate::json_rpc2::RpcError;
 use crate::{ln::events::PeerEvents, LampoDaemon};
 
 pub fn json_connect(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {

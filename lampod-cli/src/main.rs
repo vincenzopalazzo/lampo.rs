@@ -2,22 +2,22 @@
 mod args;
 
 use std::env;
-use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
 use radicle_term as term;
+use tokio::io;
+use tokio::task::JoinHandle;
 
+use lampo_async_jsonrpc::Handler;
+use lampo_async_jsonrpc::JSONRPCv2;
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
 use lampo_core_wallet::CoreWalletManager;
-use lampo_jsonrpc::Handler;
-use lampo_jsonrpc::JSONRPCv2;
 use lampod::chain::WalletManager;
 use lampod::jsonrpc::channels::json_close_channel;
 use lampod::jsonrpc::channels::json_list_channels;
@@ -37,15 +37,16 @@ use lampod::LampoDaemon;
 
 use crate::args::LampoCliArgs;
 
-fn main() -> error::Result<()> {
+#[tokio::main]
+async fn main() -> error::Result<()> {
     log::debug!("Started!");
     let args = args::parse_args()?;
-    run(args)?;
+    run(args).await?;
     Ok(())
 }
 
 /// Return the root directory.
-fn run(args: LampoCliArgs) -> error::Result<()> {
+async fn run(args: LampoCliArgs) -> error::Result<()> {
     let mnemonic = if args.restore_wallet {
         let inputs: String = term::input(
             "BIP 39 Mnemonic",
@@ -163,7 +164,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
-    let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
+    let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).await?;
     rpc_handler.set_handler(handler.clone());
 
     ctrlc::set_handler(move || {
@@ -177,11 +178,11 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let workder = lampod.listen().unwrap();
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     let _ = workder.join();
-    let _ = jsorpc_worker.join().unwrap();
+    let _ = jsorpc_worker.await?;
     Ok(())
 }
 
-fn run_jsonrpc(
+async fn run_jsonrpc(
     lampod: Arc<LampoDaemon>,
 ) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler<LampoDaemon>>)> {
     let socket_path = format!("{}/lampod.socket", lampod.root_path());
@@ -205,5 +206,5 @@ fn run_jsonrpc(
     server.add_rpc("fees", json_estimate_fees).unwrap();
     server.add_rpc("close", json_close_channel).unwrap();
     let handler = server.handler();
-    Ok((server.spawn(), handler))
+    Ok((server.spawn().await, handler))
 }
