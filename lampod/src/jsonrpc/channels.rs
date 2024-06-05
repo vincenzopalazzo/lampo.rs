@@ -4,12 +4,9 @@ use lampo_common::handler::Handler;
 use lampo_common::json;
 use lampo_common::model::request;
 use lampo_common::model::response;
-use lampo_jsonrpc::errors::Error;
-use lampo_jsonrpc::errors::RpcError;
 
+use crate::json_rpc2::{Error, RpcError};
 use crate::ln::events::ChannelEvents;
-
-use crate::rpc_error;
 use crate::LampoDaemon;
 
 pub fn json_list_channels(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
