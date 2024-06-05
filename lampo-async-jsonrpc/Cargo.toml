@@ -1,0 +1,19 @@
+[package]
+name = "lampo-async-jsonrpc"
+version = "0.0.1-alpha.1"
+edition = "2021"
+authors = ["Vincenzo Palazzo <vincenzopalazzodev@gmail.com>"]
+description = "JSON RPC 2.0 Framework to implement Simple Severs"
+license = "Apache-2.0"
+homepage = "https://git.hedwing.dev/dev-crew/lampo.rs"
+repository = "https://git.hedwing.dev/dev-crew/lampo.rs"
+keywords = [ "jsonrpc", "json-rpc-v2", "json-rpc-server" ]
+readme = "README.md"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+log = "0.4.17"
+tokio = { version = "1.38.0", features = ["net", "io-util"] }
+
+[dev-dependencies]
