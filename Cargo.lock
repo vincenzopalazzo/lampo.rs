@@ -2440,12 +2440,8 @@ dependencies = [
 name = "lampo-common"
 version = "0.1.0"
 dependencies = [
- "aluvm",
- "amplify",
- "amplify_num",
  "anyhow",
  "bitcoin 0.30.2",
- "bp-core",
  "chrono",
  "clightningrpc-conf",
  "colored",
@@ -2460,16 +2456,8 @@ dependencies = [
  "lightning-persister",
  "lightning-rapid-gossip-sync",
  "log",
- "rgb-core",
- "rgb-invoice",
- "rgb-lib",
- "rgb-psbt",
- "rgb-runtime",
- "rgb-std",
  "serde",
  "serde_json",
- "strict_encoding",
- "strict_types",
  "time",
 ]
 

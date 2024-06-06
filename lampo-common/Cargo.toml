@@ -6,14 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", features = ["max_level_trace"], optional = true }
-lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-invoice = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-bitcoin = { version = "0.30.2", features = ["serde"] }
+lightning = { package = "lightning", git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", features = ["max_level_trace"], optional = true }
+lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-invoice = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+bitcoin = { version = "0.30.2", features = ["serde"], optional = true }
 clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
 crossbeam-channel = "0.5.8"
 anyhow = "1.0.70"
@@ -28,23 +28,7 @@ time = { version = "0.3.36", features = ["std"] }
 # RGB dependencies
 rgb-lightning = { package = "lightning", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
 
-# RGB-related deps
-amplify = { version = "=4.6.0", default-features = false }
-bp-core = { version = "=0.11.0-beta.5", default-features = false }
-rgb-invoice = { version = "=0.11.0-beta.5", default-features = false }
-rgb-psbt = { version = "=0.11.0-beta.5", default-features = false }
-rgb-std = { version = "=0.11.0-beta.5", default-features = false }
-rgb-runtime = { version = "=0.11.0-beta.5", default-features = false }
-rgb-core = { version = "=0.11.0-beta.5", default-features = false, features = [
-    "stl",
-] }
-rgb-lib = { version = "0.3.0-alpha.2" }
-strict_encoding = { version = "=2.7.0-beta.1", default-features = false }
-strict_types = { version = "=2.7.0-beta.2", default-features = false }
-
-amplify_num = "=0.5.2" # temporary dependency pin
-aluvm = "=0.11.0-beta.5" # temporary dependency pin
-
 [features]
-default = ["lightning"]
+default = []
+vanilla = ["lightning", "lightning-block-sync", "lightning-persister", "lightning-background-processor", "lightning-net-tokio", "lightning-rapid-gossip-sync", "lightning-invoice", "bitcoin"]
 rgb = ["rgb-lightning" ]

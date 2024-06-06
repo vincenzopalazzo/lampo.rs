@@ -10,7 +10,5 @@ rgb-lib = { version = "0.3.0-alpha.2", features = [
     "electrum",
     "esplora",
 ] }
-# The error occurs here if we put `default-features = false` as all the code inside `lampo-common` is made on top of
-# lightning and we are not importing the vanilla-lightning here.
-lampo-common = { path = "../lampo-common", features = ["rgb"] }
-bdk = "0.29.0"
+lampo-common = { path = "../lampo-common", default-features = false, features = ["rgb"] }
+bdk = "0.29.0" # FIXME: why do you need this?

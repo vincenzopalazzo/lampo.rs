@@ -5,15 +5,25 @@ edition = "2021"
 
 
 [dependencies]
-lampod = { path = "../lampod" }
-lampo-common = { path = "../lampo-common" }
-lampo-bitcoind = { path = "../lampo-bitcoind" }
-lampo-jsonrpc = { path = "../lampo-jsonrpc" }
-lampo-core-wallet = { path = "../lampo-core-wallet" }
 tokio = { version = "1.22.0", features = ["rt"] }
 lexopt = { version = "0.3" }
 filelock-rs = "0.1.0-beta.2"
 log = { version = "0.4", features = ["std"] }
 radicle-term = { git = "https://github.com/radicle-dev/heartwood.git" }
 ctrlc = "3.4.0"
-lampo-rgb = { path = "../lampo-rgb" }
+
+lampod = { package = "lampod", optional = true, path = "../lampod" }
+lampo-common = { package = "lampo-common", optional = true, path = "../lampo-common" }
+lampo-bitcoind = { path = "../lampo-bitcoind", optional = true }
+lampo-jsonrpc = { path = "../lampo-jsonrpc", optional = true }
+lampo-core-wallet = { path = "../lampo-core-wallet", optional = true }
+
+# FIXME: rename to lampo-rgb-wallet
+lampo-rgb = { path = "../lampo-rgb", optional = true }
+rgb-lampod = { package = "lampod", optional = true, path = "../lampod",default-features = false, features = ["rgb"] }
+rgb-lampo-common = { package = "lampo-common", optional = true, path = "../lampo-common", default-features = false, features = ["rgb"] }
+
+[features]
+default = []
+vanilla = ["lampod", "lampo-common", "lampo-bitcoind", "lampo-jsonrpc", "lampo-core-wallet"]
+rgb = ["rgb-lampod", "rgb-lampo-common", "lampo-rgb"]
