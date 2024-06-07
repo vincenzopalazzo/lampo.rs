@@ -13,6 +13,7 @@ lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rus
 lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
 lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
 lightning-invoice = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+
 bitcoin = { version = "0.30.2", features = ["serde"], optional = true }
 clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
 crossbeam-channel = "0.5.8"
@@ -27,8 +28,10 @@ time = { version = "0.3.36", features = ["std"] }
 
 # RGB dependencies
 rgb-lightning = { package = "lightning", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
+rgb-lightning-background-processor = { package = "lightning-background-processor", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
+rgb-lightning-block-sync = { package = "lightning-block-sync", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
 
 [features]
 default = []
 vanilla = ["lightning", "lightning-block-sync", "lightning-persister", "lightning-background-processor", "lightning-net-tokio", "lightning-rapid-gossip-sync", "lightning-invoice", "bitcoin"]
-rgb = ["rgb-lightning" ]
+rgb = ["rgb-lightning", "rgb-lightning-block-sync", "bitcoin" ]

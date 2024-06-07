@@ -1,3 +1,4 @@
+
 pub mod backend;
 pub mod chacha20;
 pub mod conf;
@@ -9,12 +10,21 @@ pub mod model;
 pub mod types;
 pub mod wallet;
 
+#[cfg(feature = "vanilla")]
 pub mod ldk {
     pub use lightning::*;
     pub use lightning_background_processor as processor;
+    pub use lightning_block_sync as sycn;
     pub use lightning_invoice as invoice;
     pub use lightning_net_tokio as net;
     pub use lightning_persister as persister;
+    pub use lightning_block_sync as sync;
+}
+
+#[cfg(feature = "rgb")]
+pub mod ldk {
+    pub use rgb_lightning::*;
+    pub use rgb_lightning_block_sync as sync;
 }
 
 pub mod error {

@@ -6,18 +6,18 @@ use std::thread::JoinHandle;
 
 use bitcoin::absolute::Height;
 use bitcoin::block::Header as BlockHeader;
+use serde::{Deserialize, Serialize};
 
 pub use bitcoin::consensus::{deserialize, serialize};
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
-pub use lightning::chain::WatchedOutput;
-pub use lightning::routing::utxo::UtxoResult;
-pub use lightning_block_sync::{
-    AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult,
-};
-use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::handler::Handler;
+pub use crate::ldk::chain::WatchedOutput;
+pub use crate::ldk::routing::utxo::UtxoResult;
+pub use crate::ldk::sync::{
+    AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult,
+};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TxResult {

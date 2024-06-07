@@ -2449,12 +2449,14 @@ dependencies = [
  "hex",
  "lightning 0.0.118",
  "lightning 0.0.121",
- "lightning-background-processor",
- "lightning-block-sync",
+ "lightning-background-processor 0.0.118",
+ "lightning-background-processor 0.0.121",
+ "lightning-block-sync 0.0.118",
+ "lightning-block-sync 0.0.121",
  "lightning-invoice",
  "lightning-net-tokio",
  "lightning-persister",
- "lightning-rapid-gossip-sync",
+ "lightning-rapid-gossip-sync 0.0.121",
  "log",
  "serde",
  "serde_json",
@@ -2668,12 +2670,31 @@ dependencies = [
 
 [[package]]
 name = "lightning-background-processor"
+version = "0.0.118"
+source = "git+https://github.com/RGB-tools/rust-lightning?rev=deb9485ddcbf49820ff3a36f4a5f31d701eb83e8#deb9485ddcbf49820ff3a36f4a5f31d701eb83e8"
+dependencies = [
+ "bitcoin 0.29.2",
+ "lightning 0.0.118",
+ "lightning-rapid-gossip-sync 0.0.118",
+]
+
+[[package]]
+name = "lightning-background-processor"
 version = "0.0.121"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=macros/allow-to-inject-channels-keys#4a28d1b63746f2c9e38f941fe2d9ffe04c408ff1"
 dependencies = [
  "bitcoin 0.30.2",
  "lightning 0.0.121",
- "lightning-rapid-gossip-sync",
+ "lightning-rapid-gossip-sync 0.0.121",
+]
+
+[[package]]
+name = "lightning-block-sync"
+version = "0.0.118"
+source = "git+https://github.com/RGB-tools/rust-lightning?rev=deb9485ddcbf49820ff3a36f4a5f31d701eb83e8#deb9485ddcbf49820ff3a36f4a5f31d701eb83e8"
+dependencies = [
+ "bitcoin 0.29.2",
+ "lightning 0.0.118",
 ]
 
 [[package]]
@@ -2716,6 +2737,15 @@ dependencies = [
  "bitcoin 0.30.2",
  "lightning 0.0.121",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "lightning-rapid-gossip-sync"
+version = "0.0.118"
+source = "git+https://github.com/RGB-tools/rust-lightning?rev=deb9485ddcbf49820ff3a36f4a5f31d701eb83e8#deb9485ddcbf49820ff3a36f4a5f31d701eb83e8"
+dependencies = [
+ "bitcoin 0.29.2",
+ "lightning 0.0.118",
 ]
 
 [[package]]

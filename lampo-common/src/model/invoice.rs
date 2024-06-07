@@ -32,10 +32,10 @@ pub mod request {
 pub mod response {
     use std::vec::Vec;
 
-    use lightning::routing::router::RouteHop;
     use serde::{Deserialize, Serialize};
 
     use crate::ldk;
+    use crate::ldk::routing::router::RouteHop;
 
     #[derive(Serialize, Deserialize, Debug)]
     pub struct Invoice {
