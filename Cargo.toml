@@ -24,6 +24,5 @@ default-members = [
         "lampo-client",
         "lampo-c-ffi",
         "lampo-core-wallet",
-        "lampo-rgb",
 ]
 resolver = "2"
