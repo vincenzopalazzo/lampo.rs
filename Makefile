@@ -2,6 +2,7 @@ CC=cargo
 FMT=fmt
 
 ARGS=
+TEST_LOG_LEVEL=
 
 default: fmt
 	$(CC) build
@@ -22,4 +23,4 @@ install:
 	sudo cp target/release/liblampo.so /usr/local/lib
 
 integration: default
-	$(CC) test -p tests $(ARGS)
+	 TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) $(CC) test -p tests $(ARGS)
