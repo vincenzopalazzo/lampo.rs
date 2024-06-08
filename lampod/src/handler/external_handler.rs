@@ -1,8 +1,8 @@
 //! External Handler are the core part of the Lampo Implementation
 //! becauuse it can be really anythings.
 
-use lampo_common::error;
-use lampo_common::json;
+use crate::common::error;
+use crate::common::json;
 use lampo_jsonrpc::json_rpc2::Request;
 
 pub trait ExternalHandler {

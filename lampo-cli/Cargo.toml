@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lampo-common = { path = "../lampo-common" }
-lampo-client = { path = "../lampo-client" }
+lampo-common = { path = "../lampo-common", features = ["vanilla"], default-features = false }
+lampo-client = { path = "../lampo-client", features = ["vanilla"], default-features = false }
 log = { version = "0.4", features = ["std"] }
 lexopt = { version = "0.3" }
 radicle-term = { git = "https://github.com/radicle-dev/heartwood.git" }

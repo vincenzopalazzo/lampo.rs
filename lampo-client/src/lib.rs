@@ -2,7 +2,10 @@ pub use clightningrpc_common::errors;
 
 use clightningrpc_common::client;
 use clightningrpc_common::errors::Error;
+#[cfg(feature = "vanilla")]
 use lampo_common::error;
+#[cfg(feature = "rgb")]
+use rgb_lampo_common::error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -40,8 +43,17 @@ mod tests {
 
     use serde_json::Value;
 
-    use lampo_common::logger;
-    use lampo_common::model::Connect;
+    #[cfg(feature = "vanilla")]
+    pub use {
+        lampo_common::logger,
+        lampo_common::model::Connect,
+    };
+
+    #[cfg(feature = "rgb")]
+    pub use {
+        rgb_lampo_common::logger,
+        rgb_lampo_common::model::Connect,
+    };
 
     use crate::UnixClient;
 

@@ -1,17 +1,37 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use lampo_common::backend::Backend;
-use lampo_common::bitcoin;
-use lampo_common::bitcoin::blockdata::constants::ChainHash;
-use lampo_common::bitcoin::Transaction;
-use lampo_common::ldk;
-use lampo_common::ldk::chain::chaininterface::{
-    BroadcasterInterface, ConfirmationTarget, FeeEstimator,
+#[cfg(feature = "vanilla")]
+pub use {
+    lampo_common::backend::Backend,
+    lampo_common::bitcoin,
+    lampo_common::bitcoin::blockdata::constants::ChainHash,
+    lampo_common::bitcoin::Transaction,
+    lampo_common::ldk,
+    lampo_common::ldk::chain::chaininterface::{
+        BroadcasterInterface, ConfirmationTarget, FeeEstimator,
+    },
+    lampo_common::ldk::chain::Filter,
+    lampo_common::ldk::routing::utxo::UtxoLookup,
+    lampo_common::wallet::WalletManager,
+    lampo_common::backend,
 };
-use lampo_common::ldk::chain::Filter;
-use lampo_common::ldk::routing::utxo::UtxoLookup;
-use lampo_common::wallet::WalletManager;
+
+#[cfg(feature = "rgb")]
+pub use {
+    rgb_lampo_common::backend::Backend,
+    rgb_lampo_common::bitcoin,
+    rgb_lampo_common::bitcoin::blockdata::constants::ChainHash,
+    rgb_lampo_common::bitcoin::Transaction,
+    rgb_lampo_common::ldk,
+    rgb_lampo_common::ldk::chain::chaininterface::{
+        BroadcasterInterface, ConfirmationTarget, FeeEstimator,
+    },
+    rgb_lampo_common::ldk::chain::Filter,
+    rgb_lampo_common::ldk::routing::utxo::UtxoLookup,
+    rgb_lampo_common::wallet::WalletManager,
+    rgb_lampo_common::backend,
+};
 
 #[derive(Clone)]
 pub struct LampoChainManager {
@@ -110,7 +130,7 @@ impl Filter for LampoChainManager {
 }
 
 impl UtxoLookup for LampoChainManager {
-    fn get_utxo(&self, _: &ChainHash, _: u64) -> lampo_common::backend::UtxoResult {
+    fn get_utxo(&self, _: &ChainHash, _: u64) -> backend::UtxoResult {
         todo!()
     }
 }

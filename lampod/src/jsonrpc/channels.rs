@@ -1,9 +1,22 @@
-use lampo_common::event::ln::LightningEvent;
-use lampo_common::event::Event;
-use lampo_common::handler::Handler;
-use lampo_common::json;
-use lampo_common::model::request;
-use lampo_common::model::response;
+#[cfg(feature = "vanilla")]
+pub use {
+    lampo_common::event::ln::LightningEvent,
+    lampo_common::event::Event,
+    lampo_common::handler::Handler,
+    lampo_common::json,
+    lampo_common::model::request,
+    lampo_common::model::response,
+};
+
+#[cfg(feature = "rgb")]
+pub use {
+    rgb_lampo_common::event::ln::LightningEvent,
+    rgb_lampo_common::event::Event,
+    rgb_lampo_common::handler::Handler,
+    rgb_lampo_common::json,
+    rgb_lampo_common::model::request,
+    rgb_lampo_common::model::response,
+};
 use lampo_jsonrpc::errors::Error;
 use lampo_jsonrpc::errors::RpcError;
 

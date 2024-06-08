@@ -1,9 +1,12 @@
 //! Inventory Manager Implementation
 use std::sync::Arc;
 
-use lampo_common::error;
-use lampo_common::json;
-use lampo_common::model::response::NetworkInfo;
+use crate::common::error;
+use crate::common::json;
+
+
+// FIXME: Find a better way to handle this.
+use crate::common::response::NetworkInfo;
 
 use super::{LampoChannelManager, LampoPeerManager};
 use crate::actions::InventoryHandler;
@@ -29,7 +32,10 @@ impl LampoInventoryManager {
 impl InventoryHandler for LampoInventoryManager {
     fn handle(&self, event: command::InventoryCommand) -> error::Result<()> {
         use command::InventoryCommand;
+        #[cfg(feature = "vanilla")]
         use lampo_common::model::GetInfo;
+        #[cfg(feature = "rgb")]
+        use rgb_lampo_common::model::GetInfo;
 
         match event {
             InventoryCommand::GetNodeInfo(chan) => {

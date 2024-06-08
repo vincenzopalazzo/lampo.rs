@@ -30,8 +30,12 @@ time = { version = "0.3.36", features = ["std"] }
 rgb-lightning = { package = "lightning", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
 rgb-lightning-background-processor = { package = "lightning-background-processor", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
 rgb-lightning-block-sync = { package = "lightning-block-sync", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
+rgb-lightning-persister = { package = "lightning-persister", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
+rgb-lightning-net-tokio = { package = "lightning-net-tokio", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
+rgb-lightning-rapid-gossip-sync = { package = "lightning-rapid-gossip-sync", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
+rgb-lightning-invoice = { package = "lightning-invoice", git = "https://github.com/RGB-tools/rust-lightning", rev = "deb9485ddcbf49820ff3a36f4a5f31d701eb83e8", optional = true }
 
 [features]
 default = []
 vanilla = ["lightning", "lightning-block-sync", "lightning-persister", "lightning-background-processor", "lightning-net-tokio", "lightning-rapid-gossip-sync", "lightning-invoice", "bitcoin"]
-rgb = ["rgb-lightning", "rgb-lightning-block-sync", "bitcoin" ]
+rgb = ["rgb-lightning", "rgb-lightning-block-sync", "rgb-lightning-persister", "rgb-lightning-net-tokio", "rgb-lightning-background-processor", "rgb-lightning-invoice", "bitcoin", "rgb-lightning-rapid-gossip-sync" ]

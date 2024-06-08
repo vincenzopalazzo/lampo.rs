@@ -3,7 +3,8 @@ use std::net::SocketAddr;
 
 use crossbeam_channel as chan;
 
-use lampo_common::{model::Connect, types::NodeId};
+use crate::common::Connect;
+use crate::common::NodeId;
 
 #[derive(Debug, Clone)]
 pub enum PeerCommand {

@@ -2,39 +2,75 @@
 
 use std::ops::Deref;
 
-use lampo_common::error;
-use lampo_common::ldk::blinded_path::payment::ForwardNode;
-use lampo_common::ldk::blinded_path::payment::ForwardTlvs;
-use lampo_common::ldk::blinded_path::payment::PaymentConstraints;
-use lampo_common::ldk::blinded_path::payment::PaymentRelay;
-use lampo_common::ldk::blinded_path::payment::ReceiveTlvs;
-use lampo_common::ldk::blinded_path::BlindedPath;
-use lampo_common::ldk::ln::channelmanager::ChannelDetails;
-use lampo_common::ldk::ln::channelmanager::MIN_FINAL_CLTV_EXPIRY_DELTA;
-use lampo_common::ldk::ln::features::BlindedHopFeatures;
-use lampo_common::ldk::ln::msgs::LightningError;
-use lampo_common::ldk::offers::invoice::BlindedPayInfo;
-use lampo_common::ldk::onion_message::messenger::MessageRouter;
-use lampo_common::ldk::routing::gossip::NodeId;
-use lampo_common::ldk::routing::router::find_route;
-use lampo_common::ldk::routing::router::InFlightHtlcs;
-use lampo_common::ldk::routing::router::Route;
-use lampo_common::ldk::routing::router::RouteParameters;
-use lampo_common::ldk::routing::router::Router;
-use lampo_common::ldk::routing::router::ScorerAccountingForInFlightHtlcs;
-use lampo_common::secp256k1;
-
-use crate::ln::route::secp256k1::PublicKey;
-use crate::ln::route::secp256k1::Secp256k1;
-
-use lampo_common::ldk::{
-    routing::{
-        gossip::NetworkGraph,
-        scoring::{LockableScore, ScoreLookUp},
+#[cfg(feature = "vanilla")]
+pub use {
+    lampo_common::error,
+    lampo_common::ldk::blinded_path::payment::ForwardNode,
+    lampo_common::ldk::blinded_path::payment::ForwardTlvs,
+    lampo_common::ldk::blinded_path::payment::PaymentConstraints,
+    lampo_common::ldk::blinded_path::payment::PaymentRelay,
+    lampo_common::ldk::blinded_path::payment::ReceiveTlvs,
+    lampo_common::ldk::blinded_path::BlindedPath,
+    lampo_common::ldk::ln::channelmanager::ChannelDetails,
+    lampo_common::ldk::ln::channelmanager::MIN_FINAL_CLTV_EXPIRY_DELTA,
+    lampo_common::ldk::ln::features::BlindedHopFeatures,
+    lampo_common::ldk::ln::msgs::LightningError,
+    lampo_common::ldk::offers::invoice::BlindedPayInfo,
+    lampo_common::ldk::onion_message::messenger::MessageRouter,
+    lampo_common::ldk::routing::gossip::NodeId,
+    lampo_common::ldk::routing::router::find_route,
+    lampo_common::ldk::routing::router::InFlightHtlcs,
+    lampo_common::ldk::routing::router::Route,
+    lampo_common::ldk::routing::router::RouteParameters,
+    lampo_common::ldk::routing::router::Router,
+    lampo_common::ldk::routing::router::ScorerAccountingForInFlightHtlcs,
+    lampo_common::secp256k1,
+    lampo_common::ldk::onion_message::messenger,
+    crate::ln::route::secp256k1::Secp256k1,
+    lampo_common::ldk::{
+        routing::{
+            gossip::NetworkGraph,
+            scoring::{LockableScore, ScoreLookUp},
+        },
+        sign::EntropySource,
+        util::logger::Logger,
     },
-    sign::EntropySource,
-    util::logger::Logger,
 };
+
+#[cfg(feature = "rgb")]
+pub use {
+    rgb_lampo_common::error,
+    rgb_lampo_common::ldk::blinded_path::payment::ForwardNode,
+    rgb_lampo_common::ldk::blinded_path::payment::ForwardTlvs,
+    rgb_lampo_common::ldk::blinded_path::payment::PaymentConstraints,
+    rgb_lampo_common::ldk::blinded_path::payment::PaymentRelay,
+    rgb_lampo_common::ldk::blinded_path::payment::ReceiveTlvs,
+    rgb_lampo_common::ldk::blinded_path::BlindedPath,
+    rgb_lampo_common::ldk::ln::channelmanager::ChannelDetails,
+    rgb_lampo_common::ldk::ln::channelmanager::MIN_FINAL_CLTV_EXPIRY_DELTA,
+    rgb_lampo_common::ldk::ln::features::BlindedHopFeatures,
+    rgb_lampo_common::ldk::ln::msgs::LightningError,
+    rgb_lampo_common::ldk::offers::invoice::BlindedPayInfo,
+    rgb_lampo_common::ldk::onion_message::messenger::MessageRouter,
+    rgb_lampo_common::ldk::routing::gossip::NodeId,
+    rgb_lampo_common::ldk::routing::router::find_route,
+    rgb_lampo_common::ldk::routing::router::InFlightHtlcs,
+    rgb_lampo_common::ldk::routing::router::Route,
+    rgb_lampo_common::ldk::routing::router::RouteParameters,
+    rgb_lampo_common::ldk::routing::router::Router,
+    rgb_lampo_common::ldk::routing::router::ScorerAccountingForInFlightHtlcs,
+    rgb_lampo_common::secp256k1,
+    rgb_lampo_common::ldk::onion_message::messenger,
+    rgb_lampo_common::ldk::{
+        routing::{
+            gossip::NetworkGraph,
+            scoring::{LockableScore, ScoreLookUp},
+        },
+        sign::EntropySource,
+        util::logger::Logger,
+    },
+};
+use crate::ln::route::secp256k1::PublicKey;
 
 use super::onion_message::LampoMsgRouter;
 
@@ -126,6 +162,8 @@ where
         )
     }
 
+    // Not present inside `lightning`` the RGB guys are using
+    #[cfg(feature = "vanilla")]
     fn create_blinded_payment_paths<T: secp256k1::Signing + secp256k1::Verification>(
         &self,
         recipient: PublicKey,
@@ -234,23 +272,23 @@ where
     ES::Target: EntropySource,
 {
     fn create_blinded_paths<
-        T: lampo_common::secp256k1::Signing + lampo_common::secp256k1::Verification,
+        T: secp256k1::Signing + secp256k1::Verification,
     >(
         &self,
-        recipient: lampo_common::secp256k1::PublicKey,
-        peers: Vec<lampo_common::secp256k1::PublicKey>,
-        secp_ctx: &lampo_common::secp256k1::Secp256k1<T>,
-    ) -> Result<Vec<lampo_common::ldk::blinded_path::BlindedPath>, ()> {
+        recipient: secp256k1::PublicKey,
+        peers: Vec<secp256k1::PublicKey>,
+        secp_ctx: &secp256k1::Secp256k1<T>,
+    ) -> Result<Vec<BlindedPath>, ()> {
         self.message_router
             .create_blinded_paths(recipient, peers, secp_ctx)
     }
 
     fn find_path(
         &self,
-        sender: lampo_common::secp256k1::PublicKey,
-        peers: Vec<lampo_common::secp256k1::PublicKey>,
-        destination: lampo_common::ldk::onion_message::messenger::Destination,
-    ) -> Result<lampo_common::ldk::onion_message::messenger::OnionMessagePath, ()> {
+        sender: secp256k1::PublicKey,
+        peers: Vec<secp256k1::PublicKey>,
+        destination: messenger::Destination,
+    ) -> Result<messenger::OnionMessagePath, ()> {
         self.message_router.find_path(sender, peers, destination)
     }
 }

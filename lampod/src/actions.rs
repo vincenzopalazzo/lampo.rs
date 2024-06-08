@@ -3,8 +3,8 @@ pub mod handler;
 
 use crossbeam_channel as chan;
 
-use lampo_common::error;
-use lampo_common::ldk::events::Event;
+use crate::common::error;
+use crate::common::Event;
 
 use crate::command::{Command, InventoryCommand};
 

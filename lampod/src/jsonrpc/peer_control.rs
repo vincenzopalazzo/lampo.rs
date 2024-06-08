@@ -1,6 +1,17 @@
 //! Peer Control JSON RPC Interface!
-use lampo_common::json;
-use lampo_common::model::Connect;
+
+#[cfg(feature = "vanilla")]
+pub use {
+    lampo_common::json,
+    lampo_common::model::Connect,
+};
+
+#[cfg(feature = "rgb")]
+pub use {
+    rgb_lampo_common::json,
+    rgb_lampo_common::model::Connect,
+};
+
 use lampo_jsonrpc::errors::Error;
 use lampo_jsonrpc::errors::RpcError;
 

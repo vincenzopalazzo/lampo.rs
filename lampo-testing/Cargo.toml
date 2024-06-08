@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 lampod = { path = "../lampod" }
-lampo-common = { path = "../lampo-common" }
+lampo-common = { path = "../lampo-common", features = ["vanilla"], default-features = false }
 lampo-bitcoind = { path = "../lampo-bitcoind" }
 lampo-core-wallet = { path = "../lampo-core-wallet" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }

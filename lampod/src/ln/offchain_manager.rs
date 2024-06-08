@@ -14,20 +14,23 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
-use lampo_common::bitcoin::hashes::Hash;
-use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
-use lampo_common::conf::LampoConf;
-use lampo_common::error;
-use lampo_common::ldk;
-use lampo_common::ldk::ln::channelmanager::Retry;
-use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
-use lampo_common::ldk::ln::{PaymentHash, PaymentPreimage};
-use lampo_common::ldk::offers::offer::Amount;
-use lampo_common::ldk::offers::offer::Offer;
-use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
-use lampo_common::ldk::sign::EntropySource;
-use lampo_common::ldk::sign::KeysManager;
+use crate::common::Sha256;
+use crate::common::Hash;
+use crate::common::pubkey;
+use crate::common::LampoConf;
+use crate::common::error;
+use crate::common::Retry;
+use crate::common::PaymentId;
+use crate::common::RecipientOnionFields;
+use crate::common::PaymentHash;
+use crate::common::PaymentPreimage;
+use crate::common::Amount;
+use crate::common::Offer;
+use crate::common::PaymentParameters;
+use crate::common::RouteParameters;
+use crate::common::EntropySource;
+use crate::common::KeysManager;
+use crate::ldk;
 
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
@@ -117,6 +120,8 @@ impl OffchainManager {
         Ok(())
     }
 
+    //FIXME: Find a better way to do this for rgb, as it contains payment::pay_invoice
+    #[cfg(feature = "vanilla")]
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;

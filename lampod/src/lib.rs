@@ -37,8 +37,39 @@ pub mod common {
     pub use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
     pub use lampo_common::ldk::routing::gossip::P2PGossipSync;
     pub use lampo_common::wallet::WalletManager;
+    pub use lampo_common::backend::BlockData;
+    pub use lampo_common::ldk::util::logger::{Logger, Record};
+    pub use lampo_common::ldk::persister::fs_store::FilesystemStore;
+    pub use lampo_common::ldk::sign::EntropySource;
+    pub use lampo_common::ldk;
+    pub use lampo_common::ldk::ln::peer_handler::MessageHandler;
+    pub use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
+    pub use lampo_common::ldk::net;
+    pub use lampo_common::ldk::net::SocketDescriptor;
+    pub use lampo_common::ldk::onion_message::messenger::OnionMessenger;
+    pub use lampo_common::ldk::sign::KeysManager;
+    pub use lampo_common::model::Connect;
+    pub use lampo_common::types::NodeId;
+    pub use lampo_common::ldk::blinded_path::BlindedPath;
+    pub use lampo_common::ldk::onion_message::messenger::Destination;
+    pub use lampo_common::ldk::onion_message::messenger::MessageRouter;
+    pub use lampo_common::ldk::onion_message::messenger::OnionMessagePath;
+    pub use lampo_common::ldk::routing::gossip;
+    pub use lampo_common::secp256k1;
+    pub use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
+    pub use lampo_common::bitcoin::hashes::Hash;
+    pub use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
+    pub use lampo_common::ldk::ln::channelmanager::Retry;
+    pub use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
+    pub use lampo_common::ldk::ln::{PaymentHash, PaymentPreimage};
+    pub use lampo_common::ldk::offers::offer::Amount;
+    pub use lampo_common::ldk::offers::offer::Offer;
+    pub use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
+    pub use lampo_common::ldk::ln::features::ChannelTypeFeatures;
+    pub use lampo_common::model::request;
+    pub use lampo_common::model::response;
+    pub use lampo_common::types::{ChannelId, ChannelState};
 }
-
 #[cfg(feature = "rgb")]
 pub mod common {
     pub use rgb_lampo_common::backend::Backend;
@@ -50,8 +81,41 @@ pub mod common {
     pub use rgb_lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
     pub use rgb_lampo_common::ldk::routing::gossip::P2PGossipSync;
     pub use rgb_lampo_common::wallet::WalletManager;
+    pub use rgb_lampo_common::backend::BlockData;
+    pub use rgb_lampo_common::ldk::util::logger::{Logger, Record};
+    pub use rgb_lampo_common::ldk::persister::fs_store::FilesystemStore;
+    pub use rgb_lampo_common::ldk::sign::EntropySource;
+    pub use rgb_lampo_common::ldk;
+    pub use rgb_lampo_common::ldk::ln::peer_handler::MessageHandler;
+    pub use rgb_lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
+    pub use rgb_lampo_common::ldk::net;
+    pub use rgb_lampo_common::ldk::net::SocketDescriptor;
+    // pub use rgb_lampo_common::ldk::onion_message::messenger::OnionMessenger;
+    pub use rgb_lampo_common::ldk::sign::KeysManager;
+    pub use rgb_lampo_common::model::Connect;
+    pub use rgb_lampo_common::types::NodeId;
+    pub use rgb_lampo_common::ldk::blinded_path::BlindedPath;
+    pub use rgb_lampo_common::ldk::onion_message::Destination;
+    pub use rgb_lampo_common::ldk::onion_message::MessageRouter;
+    // pub use rgb_lampo_common::ldk::onion_message::messenger::OnionMessagePath;
+    pub use rgb_lampo_common::ldk::routing::gossip;
+    pub use rgb_lampo_common::secp256k1;
+    pub use rgb_lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
+    pub use rgb_lampo_common::bitcoin::hashes::Hash;
+    pub use rgb_lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
+    pub use rgb_lampo_common::ldk::ln::channelmanager::Retry;
+    pub use rgb_lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
+    pub use rgb_lampo_common::ldk::ln::{PaymentHash, PaymentPreimage};
+    pub use rgb_lampo_common::ldk::offers::offer::Amount;
+    pub use rgb_lampo_common::ldk::offers::offer::Offer;
+    pub use rgb_lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
+    pub use rgb_lampo_common::ldk::ln::features::ChannelTypeFeatures;
+    pub use rgb_lampo_common::model::request;
+    pub use rgb_lampo_common::model::response;
+    pub use rgb_lampo_common::types::{ChannelId, ChannelState};
 }
 
+use crate::common::*;
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
@@ -144,8 +208,8 @@ impl LampoDeamon {
         let (block_hash, height) = self.onchain_manager().backend.get_best_block()?;
         let block = self.onchain_manager().backend.get_block(&block_hash)?;
         let timestamp = match block {
-            lampo_common::backend::BlockData::FullBlock(block) => block.header.time,
-            lampo_common::backend::BlockData::HeaderOnly(header) => header.time,
+            BlockData::FullBlock(block) => block.header.time,
+            BlockData::HeaderOnly(header) => header.time,
         };
 
         let height = height.ok_or(error::anyhow!("height not present"))?;

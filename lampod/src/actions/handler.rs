@@ -2,18 +2,39 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use lampo_common::chan;
-use lampo_common::error;
-use lampo_common::error::Ok;
-use lampo_common::event::ln::LightningEvent;
-use lampo_common::event::{Emitter, Event, Subscriber};
-use lampo_common::handler::Handler as EventHandler;
-use lampo_common::json;
-use lampo_common::ldk;
-use lampo_common::model::response::PaymentHop;
-use lampo_common::model::response::PaymentState;
-use lampo_common::types::ChannelState;
-use lampo_jsonrpc::json_rpc2::Request;
+#[cfg(feature = "vanilla")]
+pub use {
+    lampo_common::chan,
+    lampo_common::error,
+    lampo_common::error::Ok,
+    lampo_common::event::ln::LightningEvent,
+    lampo_common::event::{Emitter, Event, Subscriber},
+    lampo_common::handler::Handler as EventHandler,
+    lampo_common::json,
+    lampo_common::ldk,
+    lampo_common::model::response::PaymentHop,
+    lampo_common::model::response::PaymentState,
+    lampo_common::types::ChannelState,
+    lampo_jsonrpc::json_rpc2::Request,
+    lampo_common::bitcoin::consensus::encode,
+};
+
+#[cfg(feature = "rgb")]
+pub use {
+    rgb_lampo_common::chan,
+    rgb_lampo_common::error,
+    rgb_lampo_common::error::Ok,
+    rgb_lampo_common::event::ln::LightningEvent,
+    rgb_lampo_common::event::{Emitter, Event, Subscriber},
+    rgb_lampo_common::handler::Handler as EventHandler,
+    rgb_lampo_common::json,
+    rgb_lampo_common::ldk,
+    rgb_lampo_common::model::response::PaymentHop,
+    rgb_lampo_common::model::response::PaymentState,
+    rgb_lampo_common::types::ChannelState,
+    lampo_jsonrpc::json_rpc2::Request,
+    rgb_lampo_common::bitcoin::consensus::encode,
+};
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
@@ -197,7 +218,7 @@ impl Handler for LampoHandler {
                 log::info!("funding transaction created `{}`", transaction.txid());
                 log::info!(
                     "transaction hex `{}`",
-                    lampo_common::bitcoin::consensus::encode::serialize_hex(&transaction)
+                    encode::serialize_hex(&transaction)
                 );
                 self.emit(Event::Lightning(LightningEvent::FundingChannelEnd {
                     counterparty_node_id,

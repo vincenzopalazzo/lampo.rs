@@ -2,20 +2,41 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use lampo_common::event::ln::LightningEvent;
-use lampo_common::event::Event;
-use lampo_common::handler::Handler;
-use lampo_common::ldk;
-use lampo_common::ldk::offers::offer;
-use lampo_common::model::request::GenerateInvoice;
-use lampo_common::model::request::GenerateOffer;
-use lampo_common::model::request::KeySend;
-use lampo_common::model::request::Pay;
-use lampo_common::model::response;
-use lampo_common::model::response::PayResult;
-use lampo_common::model::response::{Invoice, InvoiceInfo};
-use lampo_common::{json, model::request::DecodeInvoice};
-use lampo_jsonrpc::errors::{Error, RpcError};
+#[cfg(feature = "vanilla")] 
+pub use {
+    lampo_common::event::ln::LightningEvent,
+    lampo_common::event::Event,
+    lampo_common::handler::Handler,
+    lampo_common::ldk,
+    lampo_common::ldk::offers::offer,
+    lampo_common::model::request::GenerateInvoice,
+    lampo_common::model::request::GenerateOffer,
+    lampo_common::model::request::KeySend,
+    lampo_common::model::request::Pay,
+    lampo_common::model::response,
+    lampo_common::model::response::PayResult,
+    lampo_common::model::response::{Invoice, InvoiceInfo},
+    lampo_common::{json, model::request::DecodeInvoice},
+    lampo_jsonrpc::errors::{Error, RpcError},
+};
+
+#[cfg(feature = "rgb")] 
+pub use {
+    rgb_lampo_common::event::ln::LightningEvent,
+    rgb_lampo_common::event::Event,
+    rgb_lampo_common::handler::Handler,
+    rgb_lampo_common::ldk,
+    rgb_lampo_common::ldk::offers::offer,
+    rgb_lampo_common::model::request::GenerateInvoice,
+    rgb_lampo_common::model::request::GenerateOffer,
+    rgb_lampo_common::model::request::KeySend,
+    rgb_lampo_common::model::request::Pay,
+    rgb_lampo_common::model::response,
+    rgb_lampo_common::model::response::PayResult,
+    rgb_lampo_common::model::response::{Invoice, InvoiceInfo},
+    rgb_lampo_common::{json, model::request::DecodeInvoice},
+    lampo_jsonrpc::errors::{Error, RpcError},
+};
 
 use crate::rpc_error;
 use crate::LampoDeamon;

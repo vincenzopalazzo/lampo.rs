@@ -12,7 +12,7 @@ log = { version = "0.4", features = ["std"] }
 radicle-term = { git = "https://github.com/radicle-dev/heartwood.git" }
 ctrlc = "3.4.0"
 
-lampod = { package = "lampod", optional = true, path = "../lampod" }
+lampod = { package = "lampod", features = ["vanilla"], optional = true, path = "../lampod" }
 lampo-common = { package = "lampo-common", optional = true, path = "../lampo-common" }
 lampo-bitcoind = { path = "../lampo-bitcoind", optional = true }
 lampo-jsonrpc = { path = "../lampo-jsonrpc", optional = true }
@@ -20,7 +20,7 @@ lampo-core-wallet = { path = "../lampo-core-wallet", optional = true }
 
 # FIXME: rename to lampo-rgb-wallet
 lampo-rgb = { path = "../lampo-rgb", optional = true }
-rgb-lampod = { package = "lampod", optional = true, path = "../lampod",default-features = false, features = ["rgb"] }
+rgb-lampod = { package = "lampod", optional = true, path = "../lampod", features = ["rgb"], default-features = false }
 rgb-lampo-common = { package = "lampo-common", optional = true, path = "../lampo-common", default-features = false, features = ["rgb"] }
 
 [features]

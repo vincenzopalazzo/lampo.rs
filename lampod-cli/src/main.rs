@@ -9,6 +9,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+#[cfg(feature = "rgb")]
 use lampo_rgb::wallet::LampoRgbWallet;
 use radicle_term as term;
 
@@ -48,6 +49,7 @@ fn main() -> error::Result<()> {
 
 pub enum WalletType {
     CoreWallet(CoreWalletManager),
+    #[cfg(feature = "rgb")]
     RgbWallet(LampoRgbWallet),
 }
 
@@ -106,17 +108,6 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
 
     let wallet_result = if let Some(ref _private_key) = lampo_conf.private_key {
         unimplemented!()
-    } else if args.rgb {
-        // Spin up the rgb-wallet only when we provide the rgb flag.
-        let (wallet, mnemonic) =
-            lampo_rgb::wallet::LampoRgbWallet::new(Arc::new(lampo_conf.clone())).unwrap();
-        let (walletres, mnemonic) = (WalletType::RgbWallet(wallet), mnemonic);
-        radicle_term::success!("RGB Wallet Generated, please store this works in a safe way");
-        radicle_term::println(
-            radicle_term::format::badge_primary("waller-keys"),
-            format!("{}", radicle_term::format::highlight(mnemonic)),
-        );
-        walletres
     } else if mnemonic.is_none() {
         let (wallet, mnemonic) = match client.kind() {
             lampo_common::backend::BackendKind::Core => {
@@ -138,15 +129,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         );
         wallet
     } else {
-        if args.rgb {
-            let wallet = lampo_rgb::wallet::LampoRgbWallet::restore(
-                Arc::new(lampo_conf.clone()),
-                &mnemonic.clone().unwrap(),
-            )
-            .unwrap();
-            let (walletres, _) = (WalletType::RgbWallet(wallet), mnemonic);
-            walletres
-        } else {
+
             match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
                     // SAFETY: It is safe to unwrap the mnemonic because we check it
@@ -160,12 +143,12 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
                 lampo_common::backend::BackendKind::Nakamoto => {
                     error::bail!("wallet is not implemented for nakamoto")
                 }
-            }
         }
     };
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = match wallet_result {
         WalletType::CoreWallet(wallet) => LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet)),
+        #[cfg(feature = "rgb")]
         WalletType::RgbWallet(wallet) => LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet)),
     };
 

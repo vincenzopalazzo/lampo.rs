@@ -6,30 +6,62 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use lampo_common::bitcoin::absolute::Height;
-use lampo_common::bitcoin::{BlockHash, Transaction};
-use lampo_common::conf::LampoConf;
-use lampo_common::error;
-use lampo_common::event::onchain::OnChainEvent;
-use lampo_common::event::Event;
-use lampo_common::handler::Handler;
-use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
-use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
-use lampo_common::ldk::chain::{BestBlock, Confirm, Filter, Watch};
-use lampo_common::ldk::ln::channelmanager::{
-    ChainParameters, ChannelManager, ChannelManagerReadArgs,
+#[cfg(feature = "vanilla")]
+pub use {
+    lampo_common::bitcoin::absolute::Height,
+    lampo_common::bitcoin::{BlockHash, Transaction}, //
+    lampo_common::conf::LampoConf,
+    lampo_common::error,
+    lampo_common::event::onchain::OnChainEvent, // 
+    lampo_common::event::Event,
+    lampo_common::handler::Handler,
+    lampo_common::ldk::chain::chainmonitor::ChainMonitor, //
+    lampo_common::ldk::chain::channelmonitor::ChannelMonitor, // 
+    lampo_common::ldk::chain::{BestBlock, Confirm, Filter, Watch}, //
+    lampo_common::ldk::ln::channelmanager::{
+        ChainParameters, ChannelManager, ChannelManagerReadArgs,  //
+    },
+    lampo_common::ldk::persister::fs_store::FilesystemStore,
+    lampo_common::ldk::routing::gossip::NetworkGraph,
+    lampo_common::ldk::routing::scoring::{
+        ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters, //
+    },
+    lampo_common::ldk::sign::InMemorySigner,
+    lampo_common::ldk::sign::KeysManager,
+    lampo_common::ldk::util::persist::read_channel_monitors, //
+    lampo_common::ldk::util::ser::ReadableArgs, //
+    lampo_common::model::request,
+    lampo_common::model::response::{self, Channel, Channels},
 };
-use lampo_common::ldk::persister::fs_store::FilesystemStore;
-use lampo_common::ldk::routing::gossip::NetworkGraph;
-use lampo_common::ldk::routing::scoring::{
-    ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
+
+
+#[cfg(feature = "rgb")]
+pub use {
+    rgb_lampo_common::bitcoin::absolute::Height,
+    rgb_lampo_common::bitcoin::{BlockHash, Transaction},
+    rgb_lampo_common::conf::LampoConf,
+    rgb_lampo_common::error,
+    rgb_lampo_common::event::onchain::OnChainEvent,
+    rgb_lampo_common::event::Event,
+    rgb_lampo_common::handler::Handler,
+    rgb_lampo_common::ldk::chain::chainmonitor::ChainMonitor,
+    rgb_lampo_common::ldk::chain::channelmonitor::ChannelMonitor,
+    rgb_lampo_common::ldk::chain::{BestBlock, Confirm, Filter, Watch},
+    rgb_lampo_common::ldk::ln::channelmanager::{
+        ChainParameters, ChannelManager, ChannelManagerReadArgs,
+    },
+    rgb_lampo_common::ldk::persister::fs_store::FilesystemStore,
+    rgb_lampo_common::ldk::routing::gossip::NetworkGraph,
+    rgb_lampo_common::ldk::routing::scoring::{
+        ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
+    },
+    rgb_lampo_common::ldk::sign::InMemorySigner,
+    rgb_lampo_common::ldk::sign::KeysManager,
+    rgb_lampo_common::ldk::util::persist::read_channel_monitors,
+    rgb_lampo_common::ldk::util::ser::ReadableArgs,
+    rgb_lampo_common::model::request,
+    rgb_lampo_common::model::response::{self, Channel, Channels},
 };
-use lampo_common::ldk::sign::InMemorySigner;
-use lampo_common::ldk::sign::KeysManager;
-use lampo_common::ldk::util::persist::read_channel_monitors;
-use lampo_common::ldk::util::ser::ReadableArgs;
-use lampo_common::model::request;
-use lampo_common::model::response::{self, Channel, Channels};
 
 use crate::actions::handler::LampoHandler;
 use crate::chain::{LampoChainManager, WalletManager};

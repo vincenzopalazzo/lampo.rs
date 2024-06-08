@@ -6,18 +6,37 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 
-use lampo_common::conf::LampoConf;
-use lampo_common::error;
-use lampo_common::ldk;
-use lampo_common::ldk::ln::peer_handler::MessageHandler;
-use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
-use lampo_common::ldk::net;
-use lampo_common::ldk::net::SocketDescriptor;
-use lampo_common::ldk::onion_message::messenger::OnionMessenger;
-use lampo_common::ldk::routing::gossip::P2PGossipSync;
-use lampo_common::ldk::sign::KeysManager;
-use lampo_common::model::Connect;
-use lampo_common::types::NodeId;
+#[cfg(feature = "vanilla")]
+pub use {
+    lampo_common::conf::LampoConf,
+    lampo_common::error,
+    lampo_common::ldk,
+    lampo_common::ldk::ln::peer_handler::MessageHandler,
+    lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager},
+    lampo_common::ldk::net,
+    lampo_common::ldk::net::SocketDescriptor,
+    lampo_common::ldk::onion_message::messenger::OnionMessenger,
+    lampo_common::ldk::routing::gossip::P2PGossipSync,
+    lampo_common::ldk::sign::KeysManager,
+    lampo_common::model::Connect,
+    lampo_common::types::NodeId,
+};
+
+#[cfg(feature = "rgb")]
+pub use {
+    rgb_lampo_common::conf::LampoConf,
+    rgb_lampo_common::error,
+    rgb_lampo_common::ldk,
+    rgb_lampo_common::ldk::ln::peer_handler::MessageHandler,
+    rgb_lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager},
+    rgb_lampo_common::ldk::net,
+    rgb_lampo_common::ldk::net::SocketDescriptor,
+    rgb_lampo_common::ldk::onion_message::messenger::OnionMessenger,
+    rgb_lampo_common::ldk::routing::gossip::P2PGossipSync,
+    rgb_lampo_common::ldk::sign::KeysManager,
+    rgb_lampo_common::model::Connect,
+    rgb_lampo_common::types::NodeId,
+};
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};

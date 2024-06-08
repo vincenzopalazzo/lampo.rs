@@ -1,14 +1,34 @@
 //! Onion Messages feature implementation for Lampo.
 use std::ops::Deref;
 
-use lampo_common::error;
-use lampo_common::ldk::blinded_path::BlindedPath;
-use lampo_common::ldk::onion_message::messenger::Destination;
-use lampo_common::ldk::onion_message::messenger::MessageRouter;
-use lampo_common::ldk::onion_message::messenger::OnionMessagePath;
-use lampo_common::ldk::routing::gossip::{NetworkGraph, NodeId};
-use lampo_common::ldk::sign::EntropySource;
-use lampo_common::ldk::util::logger::Logger;
+#[cfg(feature = "vanilla")]
+pub use {
+    lampo_common::error,
+    lampo_common::ldk::blinded_path::BlindedPath,
+    lampo_common::ldk::onion_message::messenger::Destination,
+    lampo_common::ldk::onion_message::messenger::MessageRouter,
+    lampo_common::ldk::onion_message::messenger::OnionMessagePath,
+    lampo_common::ldk::routing::gossip::{NetworkGraph, NodeId},
+    lampo_common::ldk::sign::EntropySource,
+    lampo_common::ldk::util::logger::Logger,
+    lampo_common::secp256k1,
+    lampo_common::ldk::onion_message::messenger,
+};
+
+#[cfg(feature = "rgb")]
+pub use {
+    rgb_lampo_common::error,
+    rgb_lampo_common::ldk::blinded_path::BlindedPath,
+    // rgb_lampo_common::ldk::onion_message::messenger::Destination,
+    rgb_lampo_common::ldk::onion_message::Destination,
+    rgb_lampo_common::ldk::onion_message::MessageRouter,
+    rgb_lampo_common::ldk::onion_message::messenger::OnionMessagePath,
+    rgb_lampo_common::ldk::routing::gossip::{NetworkGraph, NodeId},
+    rgb_lampo_common::ldk::sign::EntropySource,
+    rgb_lampo_common::ldk::util::logger::Logger,
+    rgb_lampo_common::secp256k1,
+    rgb_lampo_common::ldk::onion_message::messenger,
+};
 
 pub struct LampoMsgRouter<G: Deref<Target = NetworkGraph<L>> + Clone, L: Deref, ES: Deref>
 where
@@ -35,14 +55,17 @@ where
     L::Target: Logger,
     ES::Target: EntropySource,
 {
+
+    // Not present inside rgb-lightning
+    #[cfg(feature = "vanilla")]
     fn create_blinded_paths<
-        T: lampo_common::secp256k1::Signing + lampo_common::secp256k1::Verification,
+        T: secp256k1::Signing + secp256k1::Verification,
     >(
         &self,
-        recipient: lampo_common::secp256k1::PublicKey,
-        peers: Vec<lampo_common::secp256k1::PublicKey>,
-        secp_ctx: &lampo_common::secp256k1::Secp256k1<T>,
-    ) -> Result<Vec<lampo_common::ldk::blinded_path::BlindedPath>, ()> {
+        recipient: secp256k1::PublicKey,
+        peers: Vec<secp256k1::PublicKey>,
+        secp_ctx: &secp256k1::Secp256k1<T>,
+    ) -> Result<Vec<BlindedPath>, ()> {
         // Limit the number of blinded paths that are computed.
         const MAX_PATHS: usize = 3;
 
@@ -89,10 +112,10 @@ where
 
     fn find_path(
         &self,
-        _sender: lampo_common::secp256k1::PublicKey,
-        peers: Vec<lampo_common::secp256k1::PublicKey>,
-        destination: lampo_common::ldk::onion_message::messenger::Destination,
-    ) -> Result<lampo_common::ldk::onion_message::messenger::OnionMessagePath, ()> {
+        _sender: secp256k1::PublicKey,
+        peers: Vec<secp256k1::PublicKey>,
+        destination: messenger::Destination,
+    ) -> Result<messenger::OnionMessagePath, ()> {
         let first_node = match destination {
             Destination::Node(node_id) => node_id,
             Destination::BlindedPath(BlindedPath {
