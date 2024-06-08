@@ -1,11 +1,11 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 
+use lampo_common::bitcoin;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::ldk;
@@ -14,8 +14,8 @@ use lampo_common::ldk::ln::peer_handler::MessageHandler;
 use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
 use lampo_common::ldk::net;
 use lampo_common::ldk::net::SocketDescriptor;
-use lampo_common::ldk::onion_message::messenger::OnionMessenger;
-use lampo_common::ldk::routing::gossip::P2PGossipSync;
+use lampo_common::ldk::onion_message::messenger::{MessageRouter, OnionMessenger};
+use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::ldk::sign::KeysManager;
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
@@ -25,17 +25,41 @@ use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
-use super::channel_manager::{LampoArcChannelManager, LampoChainMonitor, LampoGraph};
+use super::channel_manager::{LampoArcChannelManager, LampoChainMonitor};
 use super::events::PeerEvents;
-use super::onion_message::LampoMsgRouter;
 use super::peer_event;
+
+pub struct FakeMsgRouter;
+
+impl MessageRouter for FakeMsgRouter {
+    fn find_path(
+        &self,
+        _: bitcoin::secp256k1::PublicKey,
+        _: Vec<bitcoin::secp256k1::PublicKey>,
+        _: ldk::onion_message::messenger::Destination,
+    ) -> Result<ldk::onion_message::messenger::OnionMessagePath, ()> {
+        log::warn!("ingoring the find path in the message router");
+        Err(())
+    }
+
+    fn create_blinded_paths<
+        T: lampo_common::secp256k1::Signing + lampo_common::secp256k1::Verification,
+    >(
+        &self,
+        _recipient: lampo_common::secp256k1::PublicKey,
+        _peers: Vec<lampo_common::secp256k1::PublicKey>,
+        _secp_ctx: &lampo_common::secp256k1::Secp256k1<T>,
+    ) -> Result<Vec<ldk::blinded_path::BlindedPath>, ()> {
+        unimplemented!()
+    }
+}
 
 pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<KeysManager>,
     Arc<KeysManager>,
     Arc<L>,
     EmptyNodeIdLookUp,
-    Arc<LampoMsgRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<KeysManager>>>,
+    Arc<FakeMsgRouter>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
 >;
@@ -43,7 +67,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
 pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     SocketDescriptor,
     Arc<LampoArcChannelManager<M, T, T, L>>,
-    Arc<P2PGossipSync<Arc<LampoGraph>, Arc<T>, Arc<L>>>,
+    Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, Arc<T>, Arc<L>>>,
     Arc<LampoArcOnionMessenger<L>>,
     Arc<L>,
     IgnoringMessageHandler,
@@ -91,10 +115,7 @@ impl LampoPeerManager {
             wallet_manager.ldk_keys().keys_manager.clone(),
             self.logger.clone(),
             EmptyNodeIdLookUp {},
-            Arc::new(LampoMsgRouter::new(
-                channel_manager.graph(),
-                wallet_manager.ldk_keys().keys_manager.clone(),
-            )?),
+            Arc::new(FakeMsgRouter {}),
             IgnoringMessageHandler {},
             IgnoringMessageHandler {},
         ));
