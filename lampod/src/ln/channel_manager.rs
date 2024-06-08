@@ -21,6 +21,7 @@ use lampo_common::ldk::ln::channelmanager::{
 };
 use lampo_common::ldk::persister::fs_store::FilesystemStore;
 use lampo_common::ldk::routing::gossip::NetworkGraph;
+use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
@@ -62,7 +63,7 @@ type LampoChannel =
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
 pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
-pub type LampoRouter = super::route::LampoRouter<
+pub type LampoRouter = DefaultRouter<
     Arc<LampoGraph>,
     Arc<LampoLogger>,
     Arc<KeysManager>,
@@ -248,8 +249,21 @@ impl LampoChannelManager {
         self.score.clone().unwrap()
     }
 
-    pub fn network_graph(&mut self) -> Arc<LampoRouter> {
+    // FIXME: Step 11: Optional: Initialize the NetGraphMsgHandler
+    pub fn network_graph(
+        &mut self,
+    ) -> Arc<
+        DefaultRouter<
+            Arc<LampoGraph>,
+            Arc<LampoLogger>,
+            Arc<KeysManager>,
+            Arc<Mutex<LampoScorer>>,
+            ProbabilisticScoringFeeParameters,
+            LampoScorer,
+        >,
+    > {
         if self.router.is_none() {
+            // Step 9: Initialize routing ProbabilisticScorer
             let network_graph_path = format!("{}/network_graph", self.conf.path());
             let network_graph = self.read_network(Path::new(&network_graph_path));
 
@@ -260,17 +274,13 @@ impl LampoChannelManager {
 
             self.graph = Some(network_graph.clone());
             self.score = Some(scorer.clone());
-            self.router = Some(Arc::new(
-                LampoRouter::new(
-                    network_graph,
-                    self.logger.clone(),
-                    self.wallet_manager.ldk_keys().keys_manager.clone(),
-                    scorer,
-                    ProbabilisticScoringFeeParameters::default(),
-                    // FIXME: remove the unwrap
-                )
-                .unwrap(),
-            ))
+            self.router = Some(Arc::new(DefaultRouter::new(
+                network_graph,
+                self.logger.clone(),
+                self.wallet_manager.ldk_keys().keys_manager.clone(),
+                scorer,
+                ProbabilisticScoringFeeParameters::default(),
+            )))
         }
         self.router.clone().unwrap()
     }
