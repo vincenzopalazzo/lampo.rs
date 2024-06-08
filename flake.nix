@@ -15,11 +15,20 @@
         clightning = pkgs.clightning.overrideAttrs (oldAttrs: {
           version = "master-62dd";
           src = pkgs.fetchgit {
-            url = "https://github.com/ElementsProject/lightning";
-            rev = "d1101f416f1ec959981a8ebe5639a6b267885bfd";
-            sha256 = "sha256-OFACPl6cSH+JwlcWDHUw+A2g2gp5RwTc1JZAhYs+2WI=";
+            url = "https://github.com/vincenzopalazzo/lightning";
+            rev = "0fb1c5bed871e6471f4a19be6e4af57ade4a4e21";
+            sha256 = "sha256-/XtdXgwE6QKuJDggsIw00kt6Ur7gpiWobpa0eJh5c+M=";
             fetchSubmodules = true;
           };
+          buildInputs = with pkgs; [ gmp libsodium sqlite zlib jq ];
+          postPatch = ''
+                    patchShebangs \
+                      tools/generate-wire.py \
+                      tools/update-mocks.sh \
+                      tools/mockup.sh \
+                      tools/fromschema.py \
+                      devtools/sql-rewrite.py
+                      '';
           configureFlags = [ "--disable-rust" "--disable-valgrind" ];
         });
         # Our integration tests required the cln and bitcoind
