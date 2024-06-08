@@ -26,15 +26,31 @@ use std::thread::JoinHandle;
 
 use tokio::runtime::Runtime;
 
-use lampo_common::backend::Backend;
-use lampo_common::bitcoin::absolute::Height;
-use lampo_common::conf::LampoConf;
-use lampo_common::error;
-use lampo_common::json;
-use lampo_common::ldk::events::Event;
-use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
-use lampo_common::ldk::routing::gossip::P2PGossipSync;
-use lampo_common::wallet::WalletManager;
+#[cfg(feature = "vanilla")]
+pub mod common {
+    pub use lampo_common::backend::Backend;
+    pub use lampo_common::bitcoin::absolute::Height;
+    pub use lampo_common::conf::LampoConf;
+    pub use lampo_common::error;
+    pub use lampo_common::json;
+    pub use lampo_common::ldk::events::Event;
+    pub use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
+    pub use lampo_common::ldk::routing::gossip::P2PGossipSync;
+    pub use lampo_common::wallet::WalletManager;
+}
+
+#[cfg(feature = "rgb")]
+pub mod common {
+    pub use rgb_lampo_common::backend::Backend;
+    pub use rgb_lampo_common::bitcoin::absolute::Height;
+    pub use rgb_lampo_common::conf::LampoConf;
+    pub use rgb_lampo_common::error;
+    pub use rgb_lampo_common::json;
+    pub use rgb_lampo_common::ldk::events::Event;
+    pub use rgb_lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
+    pub use rgb_lampo_common::ldk::routing::gossip::P2PGossipSync;
+    pub use rgb_lampo_common::wallet::WalletManager;
+}
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
