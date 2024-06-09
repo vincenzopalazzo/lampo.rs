@@ -260,7 +260,6 @@ pub fn payinvoice_to_lampo() {
 }
 
 #[test]
-#[ignore]
 pub fn decode_cln_offer_from_lampo() {
     init();
 
