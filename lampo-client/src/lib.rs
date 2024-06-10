@@ -1,13 +1,11 @@
-pub use clightningrpc_common::errors;
-
 use clightningrpc_common::client;
 use clightningrpc_common::errors::Error;
-#[cfg(feature = "vanilla")]
-use lampo_common::error;
-#[cfg(feature = "rgb")]
-use rgb_lampo_common::error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+
+pub use clightningrpc_common::errors;
+
+use lampo_common::error;
 
 pub struct UnixClient {
     #[allow(dead_code)]
@@ -43,17 +41,12 @@ mod tests {
 
     use serde_json::Value;
 
-    #[cfg(feature = "vanilla")]
-    pub use {
-        lampo_common::logger,
-        lampo_common::model::Connect,
-    };
-
-    #[cfg(feature = "rgb")]
-    pub use {
-        rgb_lampo_common::logger,
-        rgb_lampo_common::model::Connect,
-    };
+    // REVIEW: I do not understand why you are putting pub everywhere
+    // I think you are following the monkey suggestion of cargo, as
+    // result you did a monkey thing. In Italy there is a way to say:
+    // Monkey see, Monkey do.
+    pub use lampo_common::logger;
+    pub use lampo_common::model::Connect;
 
     use crate::UnixClient;
 

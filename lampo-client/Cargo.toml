@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lampo-common = { path = "../lampo-common", features = ["vanilla"], optional = true }
-rgb-lampo-common = { package = "lampo-common", path = "../lampo-common", features = ["rgb"], optional = true }
+lampo-common = { path = "../lampo-common", default-features = false }
 clightningrpc-common = { version = "0.3.0-beta.3" }
 serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -15,5 +14,7 @@ log = "0.4.17"
 # and rgb-lampo-common.
 [features]
 default = []
-rgb = ["rgb-lampo-common"]
-vanilla = ["lampo-common"]
+# REVIEW: this is all what we need, we do not need
+# to change the code.
+rgb = ["lampo-common/rgb"]
+vanilla = ["lampo-common/vanilla"]
