@@ -1,17 +1,11 @@
 //! Open Channel RPC Method implementation
 
 #[cfg(feature = "vanilla")]
-pub use {
-    lampo_common::json,
-    lampo_common::model::request,
-};
+pub use {lampo_common::json, lampo_common::model::request};
 
-#[cfg(feature = "rgb")]
-pub use {
-    rgb_lampo_common::json,
-    rgb_lampo_common::model::request,
-};
 use lampo_jsonrpc::errors::{Error, RpcError};
+#[cfg(feature = "rgb")]
+pub use {rgb_lampo_common::json, rgb_lampo_common::model::request};
 
 use crate::ln::events::ChannelEvents;
 use crate::LampoDeamon;

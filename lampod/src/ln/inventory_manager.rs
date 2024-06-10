@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::common::error;
 use crate::common::json;
 
-
 // FIXME: Find a better way to handle this.
 use crate::common::response::NetworkInfo;
 

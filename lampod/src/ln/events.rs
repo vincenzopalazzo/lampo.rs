@@ -4,9 +4,9 @@ use std::net::SocketAddr;
 use async_trait::async_trait;
 
 use crate::common::error;
-use crate::ChannelTypeFeatures;
 use crate::request;
 use crate::response;
+use crate::ChannelTypeFeatures;
 use crate::{ChannelId, ChannelState, NodeId};
 
 use super::peer_event;

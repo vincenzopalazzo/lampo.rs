@@ -5,6 +5,7 @@ use std::ops::Deref;
 pub use {
     lampo_common::error,
     lampo_common::ldk::blinded_path::BlindedPath,
+    lampo_common::ldk::onion_message::messenger,
     lampo_common::ldk::onion_message::messenger::Destination,
     lampo_common::ldk::onion_message::messenger::MessageRouter,
     lampo_common::ldk::onion_message::messenger::OnionMessagePath,
@@ -12,22 +13,21 @@ pub use {
     lampo_common::ldk::sign::EntropySource,
     lampo_common::ldk::util::logger::Logger,
     lampo_common::secp256k1,
-    lampo_common::ldk::onion_message::messenger,
 };
 
 #[cfg(feature = "rgb")]
 pub use {
     rgb_lampo_common::error,
     rgb_lampo_common::ldk::blinded_path::BlindedPath,
+    rgb_lampo_common::ldk::onion_message::messenger,
+    rgb_lampo_common::ldk::onion_message::messenger::OnionMessagePath,
     // rgb_lampo_common::ldk::onion_message::messenger::Destination,
     rgb_lampo_common::ldk::onion_message::Destination,
     rgb_lampo_common::ldk::onion_message::MessageRouter,
-    rgb_lampo_common::ldk::onion_message::messenger::OnionMessagePath,
     rgb_lampo_common::ldk::routing::gossip::{NetworkGraph, NodeId},
     rgb_lampo_common::ldk::sign::EntropySource,
     rgb_lampo_common::ldk::util::logger::Logger,
     rgb_lampo_common::secp256k1,
-    rgb_lampo_common::ldk::onion_message::messenger,
 };
 
 pub struct LampoMsgRouter<G: Deref<Target = NetworkGraph<L>> + Clone, L: Deref, ES: Deref>
@@ -55,12 +55,9 @@ where
     L::Target: Logger,
     ES::Target: EntropySource,
 {
-
     // Not present inside rgb-lightning
     #[cfg(feature = "vanilla")]
-    fn create_blinded_paths<
-        T: secp256k1::Signing + secp256k1::Verification,
-    >(
+    fn create_blinded_paths<T: secp256k1::Signing + secp256k1::Verification>(
         &self,
         recipient: secp256k1::PublicKey,
         peers: Vec<secp256k1::PublicKey>,

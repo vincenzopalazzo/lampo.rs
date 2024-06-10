@@ -4,6 +4,7 @@ use std::ops::Deref;
 
 #[cfg(feature = "vanilla")]
 pub use {
+    crate::ln::route::secp256k1::Secp256k1,
     lampo_common::error,
     lampo_common::ldk::blinded_path::payment::ForwardNode,
     lampo_common::ldk::blinded_path::payment::ForwardTlvs,
@@ -16,6 +17,7 @@ pub use {
     lampo_common::ldk::ln::features::BlindedHopFeatures,
     lampo_common::ldk::ln::msgs::LightningError,
     lampo_common::ldk::offers::invoice::BlindedPayInfo,
+    lampo_common::ldk::onion_message::messenger,
     lampo_common::ldk::onion_message::messenger::MessageRouter,
     lampo_common::ldk::routing::gossip::NodeId,
     lampo_common::ldk::routing::router::find_route,
@@ -24,9 +26,6 @@ pub use {
     lampo_common::ldk::routing::router::RouteParameters,
     lampo_common::ldk::routing::router::Router,
     lampo_common::ldk::routing::router::ScorerAccountingForInFlightHtlcs,
-    lampo_common::secp256k1,
-    lampo_common::ldk::onion_message::messenger,
-    crate::ln::route::secp256k1::Secp256k1,
     lampo_common::ldk::{
         routing::{
             gossip::NetworkGraph,
@@ -35,8 +34,10 @@ pub use {
         sign::EntropySource,
         util::logger::Logger,
     },
+    lampo_common::secp256k1,
 };
 
+use crate::ln::route::secp256k1::PublicKey;
 #[cfg(feature = "rgb")]
 pub use {
     rgb_lampo_common::error,
@@ -51,6 +52,7 @@ pub use {
     rgb_lampo_common::ldk::ln::features::BlindedHopFeatures,
     rgb_lampo_common::ldk::ln::msgs::LightningError,
     rgb_lampo_common::ldk::offers::invoice::BlindedPayInfo,
+    rgb_lampo_common::ldk::onion_message::messenger,
     rgb_lampo_common::ldk::onion_message::messenger::MessageRouter,
     rgb_lampo_common::ldk::routing::gossip::NodeId,
     rgb_lampo_common::ldk::routing::router::find_route,
@@ -59,8 +61,6 @@ pub use {
     rgb_lampo_common::ldk::routing::router::RouteParameters,
     rgb_lampo_common::ldk::routing::router::Router,
     rgb_lampo_common::ldk::routing::router::ScorerAccountingForInFlightHtlcs,
-    rgb_lampo_common::secp256k1,
-    rgb_lampo_common::ldk::onion_message::messenger,
     rgb_lampo_common::ldk::{
         routing::{
             gossip::NetworkGraph,
@@ -69,8 +69,8 @@ pub use {
         sign::EntropySource,
         util::logger::Logger,
     },
+    rgb_lampo_common::secp256k1,
 };
-use crate::ln::route::secp256k1::PublicKey;
 
 use super::onion_message::LampoMsgRouter;
 
@@ -271,9 +271,7 @@ where
     S::Target: for<'a> LockableScore<'a, ScoreLookUp = Sc>,
     ES::Target: EntropySource,
 {
-    fn create_blinded_paths<
-        T: secp256k1::Signing + secp256k1::Verification,
-    >(
+    fn create_blinded_paths<T: secp256k1::Signing + secp256k1::Verification>(
         &self,
         recipient: secp256k1::PublicKey,
         peers: Vec<secp256k1::PublicKey>,

@@ -9,11 +9,7 @@ pub mod peer_control;
 use std::cell::RefCell;
 use std::sync::Arc;
 
-pub use {
-    crate::common::LampoConf,
-    crate::common::error,
-    crate::common::json,
-};
+pub use {crate::common::error, crate::common::json, crate::common::LampoConf};
 
 use lampo_jsonrpc::command::Context;
 use lampo_jsonrpc::json_rpc2;

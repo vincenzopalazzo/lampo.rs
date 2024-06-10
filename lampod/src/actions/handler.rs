@@ -2,8 +2,12 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
+
+// REVIEW: What about if we have 10 different version of ldk?
+// you make two pages of conditional compilation?
 #[cfg(feature = "vanilla")]
 pub use {
+    lampo_common::bitcoin::consensus::encode,
     lampo_common::chan,
     lampo_common::error,
     lampo_common::error::Ok,
@@ -16,11 +20,12 @@ pub use {
     lampo_common::model::response::PaymentState,
     lampo_common::types::ChannelState,
     lampo_jsonrpc::json_rpc2::Request,
-    lampo_common::bitcoin::consensus::encode,
 };
 
 #[cfg(feature = "rgb")]
 pub use {
+    lampo_jsonrpc::json_rpc2::Request,
+    rgb_lampo_common::bitcoin::consensus::encode,
     rgb_lampo_common::chan,
     rgb_lampo_common::error,
     rgb_lampo_common::error::Ok,
@@ -32,8 +37,6 @@ pub use {
     rgb_lampo_common::model::response::PaymentHop,
     rgb_lampo_common::model::response::PaymentState,
     rgb_lampo_common::types::ChannelState,
-    lampo_jsonrpc::json_rpc2::Request,
-    rgb_lampo_common::bitcoin::consensus::encode,
 };
 
 use crate::chain::{LampoChainManager, WalletManager};

@@ -4,12 +4,11 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "^1.29.1", features = ["rt-multi-thread", "parking_lot"] }
-rgb-lampo-common = { package = "lampo-common", path = "../lampo-common", features = ["rgb"], optional = true }
-lampo-common = { path = "../lampo-common", features = ["vanilla"], optional = true }
+lampo-common = { path = "../lampo-common", default-features = false, optional = true }
 lampo-jsonrpc = { path = "../lampo-jsonrpc", optional = true }
-lampo-client = { path = "../lampo-client", features = ["vanilla"], optional = true }
-rgb-lampo-client = { package ="lampo-client", path = "../lampo-client", features = ["rgb"], optional = true }
+lampo-client = { path = "../lampo-client", default-features = false, optional = true }
+
+tokio = { version = "^1.29.1", features = ["rt-multi-thread", "parking_lot"] }
 log = "0.4.17"
 time = "0.3.13"
 futures = "0.3.28"
@@ -19,5 +18,5 @@ async-trait = "0.1.68"
 
 [features]
 default = []
-vanilla = ["lampo-common", "lampo-client", "lampo-jsonrpc"]
-rgb = ["rgb-lampo-common", "lampo-jsonrpc"]
+vanilla = ["lampo-common/vanilla", "lampo-client/vanilla", "lampo-jsonrpc"]
+rgb = ["lampo-common/rgb", "lampo-jsonrpc"]

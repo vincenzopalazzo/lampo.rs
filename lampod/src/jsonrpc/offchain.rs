@@ -2,7 +2,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-#[cfg(feature = "vanilla")] 
+#[cfg(feature = "vanilla")]
 pub use {
     lampo_common::event::ln::LightningEvent,
     lampo_common::event::Event,
@@ -20,8 +20,9 @@ pub use {
     lampo_jsonrpc::errors::{Error, RpcError},
 };
 
-#[cfg(feature = "rgb")] 
+#[cfg(feature = "rgb")]
 pub use {
+    lampo_jsonrpc::errors::{Error, RpcError},
     rgb_lampo_common::event::ln::LightningEvent,
     rgb_lampo_common::event::Event,
     rgb_lampo_common::handler::Handler,
@@ -35,7 +36,6 @@ pub use {
     rgb_lampo_common::model::response::PayResult,
     rgb_lampo_common::model::response::{Invoice, InvoiceInfo},
     rgb_lampo_common::{json, model::request::DecodeInvoice},
-    lampo_jsonrpc::errors::{Error, RpcError},
 };
 
 use crate::rpc_error;

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 #[cfg(feature = "vanilla")]
 pub use {
+    lampo_common::backend,
     lampo_common::backend::Backend,
     lampo_common::bitcoin,
     lampo_common::bitcoin::blockdata::constants::ChainHash,
@@ -14,11 +15,11 @@ pub use {
     lampo_common::ldk::chain::Filter,
     lampo_common::ldk::routing::utxo::UtxoLookup,
     lampo_common::wallet::WalletManager,
-    lampo_common::backend,
 };
 
 #[cfg(feature = "rgb")]
 pub use {
+    rgb_lampo_common::backend,
     rgb_lampo_common::backend::Backend,
     rgb_lampo_common::bitcoin,
     rgb_lampo_common::bitcoin::blockdata::constants::ChainHash,
@@ -30,7 +31,6 @@ pub use {
     rgb_lampo_common::ldk::chain::Filter,
     rgb_lampo_common::ldk::routing::utxo::UtxoLookup,
     rgb_lampo_common::wallet::WalletManager,
-    rgb_lampo_common::backend,
 };
 
 #[derive(Clone)]
