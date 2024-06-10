@@ -9,10 +9,19 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+// REVIEW: Ok, This is the only things that can be under
+// the rgb feature. If you look down there at line
 #[cfg(feature = "rgb")]
 use lampo_rgb::wallet::LampoRgbWallet;
 use radicle_term as term;
 
+// REVIEW: you can avoid to change this package,
+// as far I understand our experiment will deal just
+// with lampo-common, lampod, lampo-testing and then you
+// can test your code inside the integration testing.
+//
+// See lampo-testing, to know that we are not using lampod-cli
+// inside it :)
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
@@ -129,25 +138,25 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         );
         wallet
     } else {
-
-            match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    // SAFETY: It is safe to unwrap the mnemonic because we check it
-                    // before.
-                    let result = CoreWalletManager::restore(
-                        Arc::new(lampo_conf.clone()),
-                        &mnemonic.unwrap(),
-                    )?;
-                    WalletType::CoreWallet(result)
-                }
-                lampo_common::backend::BackendKind::Nakamoto => {
-                    error::bail!("wallet is not implemented for nakamoto")
-                }
+        match client.kind() {
+            lampo_common::backend::BackendKind::Core => {
+                // SAFETY: It is safe to unwrap the mnemonic because we check it
+                // before.
+                let result =
+                    CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic.unwrap())?;
+                WalletType::CoreWallet(result)
+            }
+            lampo_common::backend::BackendKind::Nakamoto => {
+                error::bail!("wallet is not implemented for nakamoto")
+            }
         }
     };
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = match wallet_result {
         WalletType::CoreWallet(wallet) => LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet)),
+        // REVIEW: This is the wrong place, look at this code https://github.com/vincenzopalazzo/lampo.rs/pull/227/files#diff-691135e1f021a46f33eb1e041a71f8a6d33a2ed6dea097fc6785ef5310bb391fR103
+        // This is an example that review code it is important because you can
+        // learn things.
         #[cfg(feature = "rgb")]
         WalletType::RgbWallet(wallet) => LampoDeamon::new(lampo_conf.clone(), Arc::new(wallet)),
     };
