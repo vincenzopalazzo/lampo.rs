@@ -2,8 +2,8 @@ use std::{fmt::format, str::FromStr};
 
 use clightningrpc_conf::{CLNConf, SyncCLNConf};
 
-pub use bitcoin::Network;
 pub use crate::ldk::util::config::UserConfig;
+pub use bitcoin::Network;
 
 #[derive(Clone, Debug)]
 pub struct LampoConf {

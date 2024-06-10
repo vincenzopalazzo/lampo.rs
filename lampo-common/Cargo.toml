@@ -37,5 +37,23 @@ rgb-lightning-invoice = { package = "lightning-invoice", git = "https://github.c
 
 [features]
 default = []
-vanilla = ["lightning", "lightning-block-sync", "lightning-persister", "lightning-background-processor", "lightning-net-tokio", "lightning-rapid-gossip-sync", "lightning-invoice", "bitcoin"]
-rgb = ["rgb-lightning", "rgb-lightning-block-sync", "rgb-lightning-persister", "rgb-lightning-net-tokio", "rgb-lightning-background-processor", "rgb-lightning-invoice", "bitcoin", "rgb-lightning-rapid-gossip-sync" ]
+vanilla = [
+        "lightning",
+        "lightning-block-sync",
+        "lightning-persister",
+        "lightning-background-processor",
+        "lightning-net-tokio",
+        "lightning-rapid-gossip-sync",
+        "lightning-invoice",
+        "bitcoin"
+]
+rgb = [
+    "rgb-lightning",
+    "rgb-lightning-block-sync",
+    "rgb-lightning-persister",
+    "rgb-lightning-net-tokio",
+    "rgb-lightning-background-processor",
+    "rgb-lightning-invoice",
+    "bitcoin",
+    "rgb-lightning-rapid-gossip-sync"
+]

@@ -15,9 +15,7 @@ use crate::error;
 use crate::handler::Handler;
 pub use crate::ldk::chain::WatchedOutput;
 pub use crate::ldk::routing::utxo::UtxoResult;
-pub use crate::ldk::sync::{
-    AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult,
-};
+pub use crate::ldk::sync::{AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TxResult {

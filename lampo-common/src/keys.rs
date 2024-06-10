@@ -4,8 +4,8 @@ use crate::ldk::sign::KeysManager;
 
 #[cfg(feature = "rgb")]
 pub use {
-    std::{path::PathBuf, str::FromStr},
     crate::conf::LampoConf,
+    std::{path::PathBuf, str::FromStr},
 };
 
 /// Lampo keys implementations
@@ -14,7 +14,6 @@ pub struct LampoKeys {
 }
 
 impl LampoKeys {
-    
     #[cfg(feature = "vanilla")]
     pub fn new(seed: [u8; 32]) -> Self {
         // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.
