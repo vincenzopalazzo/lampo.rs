@@ -9,9 +9,9 @@ use bitcoin::block::Header as BlockHeader;
 
 pub use bitcoin::consensus::{deserialize, serialize};
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
-pub use lightning::chain::WatchedOutput;
-pub use lightning::routing::utxo::UtxoResult;
-pub use lightning_block_sync::{
+pub use crate::ldk::chain::WatchedOutput;
+pub use crate::ldk::routing::utxo::UtxoResult;
+pub use crate::ldk::sync::{
     AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult,
 };
 use serde::{Deserialize, Serialize};

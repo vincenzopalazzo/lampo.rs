@@ -50,10 +50,22 @@ impl Log for Logger {
                     Level::Trace => message.cyan().dimmed(),
                 };
 
+                #[cfg(feature = "vanilla")]
                 writeln!(
                     stream,
                     "{} {}",
                     DateTime::from(SystemTime::now())
+                        .to_rfc3339_opts(SecondsFormat::Millis, true)
+                        .white(),
+                    message,
+                )
+                .expect("write shouldn't fail");
+
+                #[cfg(feature = "rgb")]
+                writeln!(
+                    stream,
+                    "{} {}",
+                    DateTime::<Local>::from(SystemTime::now())
                         .to_rfc3339_opts(SecondsFormat::Millis, true)
                         .white(),
                     message,

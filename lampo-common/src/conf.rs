@@ -3,7 +3,7 @@ use std::str::FromStr;
 use clightningrpc_conf::{CLNConf, SyncCLNConf};
 
 pub use bitcoin::Network;
-pub use lightning::util::config::UserConfig;
+pub use crate::ldk::util::config::UserConfig;
 
 #[derive(Clone, Debug)]
 pub struct LampoConf {
