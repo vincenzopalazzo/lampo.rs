@@ -6,14 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", features = ["max_level_trace"] }
-lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-lightning-invoice = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys" }
-bitcoin = { version = "0.30.2", features = ["serde"] }
+lightning = { package = "lightning", git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", features = ["max_level_trace"], optional = true }
+lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+lightning-invoice = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "macros/allow-to-inject-channels-keys", optional = true }
+
+bitcoin = { version = "0.30.2", features = ["serde"], optional = true }
 clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
 crossbeam-channel = "0.5.8"
 anyhow = "1.0.70"
@@ -23,3 +24,36 @@ chrono = { version = "0.4", features = ["std"], default-features = false }
 serde_json = "1.0"
 serde = "1.0"
 hex = "0.4.3"
+time = { version = "0.3.36", features = ["std"] }
+
+# RGB dependencies
+rgb-lightning = { package = "lightning", git = "https://github.com/RGB-tools/rust-lightning", rev = "c36fd7417cb5e8861378f222152392e968efc22f", optional = true }
+rgb-lightning-background-processor = { package = "lightning-background-processor", git = "https://github.com/RGB-tools/rust-lightning", rev = "c36fd7417cb5e8861378f222152392e968efc22f", optional = true }
+rgb-lightning-block-sync = { package = "lightning-block-sync", git = "https://github.com/RGB-tools/rust-lightning", rev = "c36fd7417cb5e8861378f222152392e968efc22f", optional = true }
+rgb-lightning-persister = { package = "lightning-persister", git = "https://github.com/RGB-tools/rust-lightning", rev = "c36fd7417cb5e8861378f222152392e968efc22f", optional = true }
+rgb-lightning-net-tokio = { package = "lightning-net-tokio", git = "https://github.com/RGB-tools/rust-lightning", rev = "c36fd7417cb5e8861378f222152392e968efc22f", optional = true }
+rgb-lightning-rapid-gossip-sync = { package = "lightning-rapid-gossip-sync", git = "https://github.com/RGB-tools/rust-lightning", rev = "c36fd7417cb5e8861378f222152392e968efc22f", optional = true }
+rgb-lightning-invoice = { package = "lightning-invoice", git = "https://github.com/RGB-tools/rust-lightning", rev = "c36fd7417cb5e8861378f222152392e968efc22f", optional = true }
+
+[features]
+default = []
+vanilla = [
+        "lightning",
+        "lightning-block-sync",
+        "lightning-persister",
+        "lightning-background-processor",
+        "lightning-net-tokio",
+        "lightning-rapid-gossip-sync",
+        "lightning-invoice",
+        "bitcoin"
+]
+rgb = [
+    "rgb-lightning",
+    "rgb-lightning-block-sync",
+    "rgb-lightning-persister",
+    "rgb-lightning-net-tokio",
+    "rgb-lightning-background-processor",
+    "rgb-lightning-invoice",
+    "bitcoin",
+    "rgb-lightning-rapid-gossip-sync",
+]
