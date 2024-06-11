@@ -4,8 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lampo-common = { path = "../lampo-common" }
+lampo-common = { path = "../lampo-common", default-features = false }
 clightningrpc-common = { version = "0.3.0-beta.3" }
 serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 log = "0.4.17"
+
+# We need two features here as lampo-client used lampo-common and lampod uses lampo-client with both lampo-common
+# and rgb-lampo-common.
+[features]
+default = []
+rgb = ["lampo-common/rgb"]
+vanilla = ["lampo-common/vanilla"]

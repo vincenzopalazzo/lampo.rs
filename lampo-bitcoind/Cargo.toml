@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lampo-common = { path = "../lampo-common" }
+lampo-common = { path = "../lampo-common", features = ["vanilla"] }
 bitcoincore-rpc = { version = "0.17.0", features = [] }
 log = "0.4.17"
