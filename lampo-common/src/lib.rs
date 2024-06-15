@@ -21,6 +21,13 @@ pub mod error {
     pub use anyhow::*;
 }
 
+pub mod vls {
+    pub use lightning_signer as signer;
+    pub use triggered;
+    pub use url;
+    pub use vls_proxy as proxy;
+}
+
 pub mod json {
     pub use serde::de::DeserializeOwned;
     pub use serde::{Deserialize, Serialize};
