@@ -1,23 +1,15 @@
-use lampo_common::{
-    bitcoin::Address,
-    vls::{
-        proxy::{
-            vls_protocol_client::{Error, Transport},
-            vls_protocol_signer::{
-                handler::{Handler, HandlerBuilder, RootHandler},
-                vls_protocol::{model::PubKey, msgs},
-            },
-        },
-        signer::{
-            bitcoin::Network,
-            node::NodeServices,
-            persist::DummyPersister,
-            policy::simple_validator::{make_simple_policy, SimpleValidatorFactory},
-            signer::ClockStartingTimeFactory,
-            util::{clock::StandardClock, crypto_utils::generate_seed},
-        },
-    },
-};
+use lampo_common::vls::proxy::vls_protocol_client::{Error, Transport};
+use lampo_common::vls::proxy::vls_protocol_signer::handler::Handler;
+use lampo_common::vls::proxy::vls_protocol_signer::handler::{HandlerBuilder, RootHandler};
+use lampo_common::vls::proxy::vls_protocol_signer::vls_protocol::{model::PubKey, msgs};
+use lampo_common::vls::signer::bitcoin::{Address, Network};
+use lampo_common::vls::signer::node::NodeServices;
+use lampo_common::vls::signer::persist::DummyPersister;
+use lampo_common::vls::signer::policy::simple_validator::make_simple_policy;
+use lampo_common::vls::signer::policy::simple_validator::SimpleValidatorFactory;
+use lampo_common::vls::signer::signer::ClockStartingTimeFactory;
+use lampo_common::vls::signer::util::{clock::StandardClock, crypto_utils::generate_seed};
+
 use std::sync::Arc;
 
 #[allow(dead_code)]
@@ -37,7 +29,7 @@ impl Transport for LampoVLSInProcess {
         Ok(result.as_vec())
     }
 
-    // Perform a call for the channel API
+    // Perform a call for the Channel Protocol API
     fn call(&self, db_id: u64, peer_id: PubKey, msg: Vec<u8>) -> Result<Vec<u8>, Error> {
         let message = msgs::from_vec(msg)?;
         // Creating a ChannelHandler

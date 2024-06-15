@@ -22,6 +22,8 @@ pub mod error {
 }
 
 pub mod vls {
+    pub use anyhow;
+    pub use async_trait;
     pub use lightning_signer as signer;
     pub use triggered;
     pub use url;
