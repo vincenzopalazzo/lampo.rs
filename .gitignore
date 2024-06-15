@@ -1,3 +1,9 @@
+# IDE ignores
+.idea/
+
+# macOS ignores
+.DS_Store
+
 target
 
 # tools ignores
