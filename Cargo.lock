@@ -1602,6 +1602,7 @@ dependencies = [
  "bitcoin_hashes 0.12.0",
  "bitcoincore-rpc",
  "lampo-common",
+ "lampo-vls",
  "log",
  "serde",
 ]
