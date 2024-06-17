@@ -937,10 +937,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clightning-testing",
+ "lampo-async-jsonrpc",
  "lampo-bitcoind",
  "lampo-common",
  "lampo-core-wallet",
- "lampo-jsonrpc",
  "lampod",
  "log",
  "port-selector",

@@ -12,24 +12,24 @@ use std::time::Duration;
 
 use clightning_testing::btc::BtcNode;
 use clightning_testing::prelude::*;
-use lampo_common::json;
-use lampo_common::model::response;
-use lampo_common::model::response::NewAddress;
-use lampod::jsonrpc::channels::json_close_channel;
-use lampod::jsonrpc::offchain::json_keysend;
 use tempfile::TempDir;
 
+use lampo_async_jsonrpc::JSONRPCv2;
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::json;
+use lampo_common::model::response;
+use lampo_common::model::response::NewAddress;
 use lampo_core_wallet::CoreWalletManager;
-use lampo_jsonrpc::JSONRPCv2;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
+use lampod::jsonrpc::channels::json_close_channel;
 use lampod::jsonrpc::channels::json_list_channels;
 use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::offchain::json_decode_invoice;
 use lampod::jsonrpc::offchain::json_invoice;
+use lampod::jsonrpc::offchain::json_keysend;
 use lampod::jsonrpc::offchain::json_offer;
 use lampod::jsonrpc::offchain::json_pay;
 use lampod::jsonrpc::onchain::json_funds;
@@ -106,6 +106,7 @@ impl LampoTesting {
         // Configuring the JSON RPC over unix
         let lampo = Arc::new(lampo);
         let socket_path = format!("{}/lampod.socket", lampo.root_path());
+        // FIXME: This can be an InMemory Handler without any problem
         let server = JSONRPCv2::new(lampo.clone(), &socket_path)?;
         server.add_rpc("getinfo", get_info).unwrap();
         server.add_rpc("connect", json_connect).unwrap();
@@ -125,6 +126,7 @@ impl LampoTesting {
         let handler = server.handler();
         let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
         rpc_handler.set_handler(handler);
+
         lampo.add_external_handler(rpc_handler)?;
 
         // run lampo and take the handler over to run commands
@@ -132,6 +134,7 @@ impl LampoTesting {
         std::thread::spawn(move || lampo.listen().unwrap().join());
         // wait that lampo starts
         std::thread::sleep(Duration::from_secs(1));
+
         let info: response::GetInfo = handler.call("getinfo", json::json!({}))?;
         log::info!("ready for integration testing!");
         Ok(Self {
