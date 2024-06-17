@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::ldk;
+#[cfg(feature = "vanilla")]
 use lampo_common::ldk::blinded_path::EmptyNodeIdLookUp;
 use lampo_common::ldk::ln::peer_handler::MessageHandler;
 use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};

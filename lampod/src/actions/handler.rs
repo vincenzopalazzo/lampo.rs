@@ -151,6 +151,17 @@ impl Handler for LampoHandler {
                 }));
                 Ok(())
             },
+            /* 
+            error[E0026]: variant `ChannelClosed` does not have a field named `channel_funding_txo`
+               --> lampod/src/actions/handler.rs:159:17
+                |
+            159 |                 channel_funding_txo,
+                |                 ^^^^^^^^^^^^^^^^^^^
+                |                 |
+                |                 variant `ChannelClosed` does not have this field
+                |                 help: `ChannelClosed` has a field named `channel_capacity_sats`
+            */
+            #[cfg(feature = "vanilla")]
             ldk::events::Event::ChannelClosed {
                 channel_id,
                 user_channel_id,
@@ -189,30 +200,40 @@ impl Handler for LampoHandler {
                     err
                 })?;
                 log::info!("fee estimated {:?} sats", fee);
-                let transaction = self.wallet_manager.create_transaction(
-                    output_script,
-                    channel_value_satoshis,
-                    fee,
-                )?;
-                log::info!("funding transaction created `{}`", transaction.txid());
-                log::info!(
-                    "transaction hex `{}`",
-                    lampo_common::bitcoin::consensus::encode::serialize_hex(&transaction)
-                );
-                self.emit(Event::Lightning(LightningEvent::FundingChannelEnd {
-                    counterparty_node_id,
-                    temporary_channel_id,
-                    channel_value_satoshis,
-                    funding_transaction: transaction.clone(),
-                }));
-                self.channel_manager
-                    .manager()
-                    .funding_transaction_generated(
-                        &temporary_channel_id,
-                        &counterparty_node_id,
-                        transaction,
-                    )
-                    .map_err(|err| error::anyhow!("{:?}", err))?;
+                // In bitcoin 0.30, they use `ScriptBuf` as the output script but inside 
+                // v0.29.0 they use `Script`
+                // FIXME: Find a way to convert `ScriptBuf` to `Script`.
+                #[cfg(feature = "vanilla")]
+                {
+                    let transaction = self.wallet_manager.create_transaction(
+                        output_script,
+                        channel_value_satoshis,
+                        fee,
+                    )?;
+                    log::info!("funding transaction created `{}`", transaction.txid());
+                    log::info!(
+                        "transaction hex `{}`",
+                        lampo_common::btc::bitcoin::consensus::encode::serialize_hex(&transaction)
+                    );
+                    self.emit(Event::Lightning(LightningEvent::FundingChannelEnd {
+                        counterparty_node_id,
+                        temporary_channel_id,
+                        channel_value_satoshis,
+                        funding_transaction: transaction.clone(),
+                    }));
+                    self.channel_manager
+                        .manager()
+                        .funding_transaction_generated(
+                            &temporary_channel_id,
+                            &counterparty_node_id,
+                            transaction,
+                        )
+                        .map_err(|err| error::anyhow!("{:?}", err))?;
+                }
+                #[cfg(feature = "rgb")]
+                {
+                    todo!()
+                }
                 Ok(())
             }
             ldk::events::Event::ChannelPending {
@@ -244,17 +265,47 @@ impl Handler for LampoHandler {
                 via_user_channel_id,
                 claim_deadline,
             } => {
-                let preimage = match purpose {
-                    ldk::events::PaymentPurpose::Bolt11InvoicePayment  {
-                        payment_preimage, ..
-                    } => payment_preimage,
-                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, .. } => payment_preimage,
-                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => payment_preimage,
-                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
-                };
-                self.channel_manager
+                /* 
+                error[E0599]: no variant named `Bolt12OfferPayment` found for enum `PaymentPurpose`
+                --> lampod/src/actions/handler.rs:272:50
+                 |
+             272 |                     ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, .. } => payment_preimage,
+                 |                                                  ^^^^^^^^^^^^^^^^^^ variant not found in `PaymentPurpose`
+             
+             error[E0599]: no variant named `Bolt12RefundPayment` found for enum `PaymentPurpose`
+                --> lampod/src/actions/handler.rs:273:50
+                 |
+             273 |                     ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => payment_preimage,
+                 |                                                  ^^^^^^^^^^^^^^^^^^^ variant not found in `PaymentPurpose`
+                */
+
+                #[cfg(feature = "vanilla")]
+                {
+                    let preimage = match purpose {
+                        ldk::events::PaymentPurpose::Bolt11InvoicePayment  {
+                            payment_preimage, ..
+                        } => payment_preimage,
+                        ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, .. } => payment_preimage,
+                        ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => payment_preimage,
+                        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                    };
+                    self.channel_manager
                     .manager()
                     .claim_funds(preimage.unwrap());
+                }
+                #[cfg(feature = "rgb")]
+                {
+                    let preimage = match purpose {
+                        ldk::events::PaymentPurpose::InvoicePayment  {
+                            payment_preimage, ..
+                        } => payment_preimage,
+                        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                    };
+                    self.channel_manager
+                    .manager()
+                    .claim_funds(preimage.unwrap());
+                }
+                
                 Ok(())
             }
             ldk::events::Event::PaymentClaimed {
@@ -264,16 +315,39 @@ impl Handler for LampoHandler {
                 purpose,
                 ..
             } => {
-                let (payment_preimage, payment_secret) = match purpose {
-                    ldk::events::PaymentPurpose::Bolt11InvoicePayment {
-                        payment_preimage,
-                        payment_secret,
-                        ..
-                    } => (payment_preimage, Some(payment_secret)),
-                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
-                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
-                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
-                };
+                /*
+                error[E0599]: no variant named `Bolt11InvoicePayment` found for enum `PaymentPurpose`
+                --> lampod/src/actions/handler.rs:269:50
+                 |
+             269 |                     ldk::events::PaymentPurpose::Bolt11InvoicePayment  {
+                 |                                                  ^^^^^^^^^^^^^^^^^^^^ help: there is a variant with a similar name: `InvoicePayment`
+                */
+                #[cfg(feature = "vanilla")]
+                {
+                    let (payment_preimage, payment_secret) = match purpose {
+                        ldk::events::PaymentPurpose::Bolt11InvoicePayment {
+                            payment_preimage,
+                            payment_secret,
+                            ..
+                        } => (payment_preimage, Some(payment_secret)),
+                        ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
+                        ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
+                        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
+                    };
+                }
+
+                #[cfg(feature = "rgb")]
+                {
+                    let (payment_preimage, payment_secret) = match purpose {
+                        ldk::events::PaymentPurpose::InvoicePayment {
+                            payment_preimage,
+                            payment_secret,
+                            ..
+                        } => (payment_preimage, Some(payment_secret)),
+                        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
+                    };
+
+                }              
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristant these information
                 Ok(())

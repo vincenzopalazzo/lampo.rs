@@ -52,8 +52,24 @@ impl LampoLogger {
     }
 }
 
+#[cfg(feature = "vanilla")]
 impl Logger for LampoLogger {
     fn log(&self, record: Record) {
+        let raw_log = record.args.to_string();
+        let level = record.level.to_string();
+
+        let log = format!(
+            "{}:{} {} {}",
+            record.module_path, record.line, level, raw_log
+        );
+
+        self.log(LogLevel::from_str(level.as_str()).unwrap(), log.as_str());
+    }
+}
+
+#[cfg(feature = "rgb")]
+impl Logger for LampoLogger {
+    fn log(&self, record: &Record) {
         let raw_log = record.args.to_string();
         let level = record.level.to_string();
 

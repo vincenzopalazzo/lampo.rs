@@ -14,9 +14,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
-use lampo_common::bitcoin::hashes::Hash;
-use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
+use lampo_common::btc::bitcoin::hashes::sha256::Hash as Sha256;
+use lampo_common::btc::bitcoin::hashes::Hash;
+use lampo_common::btc::bitcoin::secp256k1::PublicKey as pubkey;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::ldk;
@@ -61,6 +61,9 @@ impl OffchainManager {
 
     /// Generate an invoice with a specific amount and a specific
     /// description.
+    
+    // DIfferent implementation of invoice inside rgb.
+    #[cfg(feature = "vanilla")]
     pub fn generate_invoice(
         &self,
         amount_msat: Option<u64>,
@@ -87,6 +90,7 @@ impl OffchainManager {
         Ok(invoice)
     }
 
+    #[cfg(feature = "vanilla")]
     pub fn pay_offer(&self, offer_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         // check if it is an invoice or an offer
         let offer_hash = Sha256::hash(offer_str.as_bytes());
@@ -117,6 +121,9 @@ impl OffchainManager {
         Ok(())
     }
 
+    //`PayInvoice` implementation inside v0.0.118 is different as we do now.
+    // FIXME: Implement a pay_invoice for rgb.
+    #[cfg(feature = "vanilla")]
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
@@ -140,6 +147,7 @@ impl OffchainManager {
         Ok(())
     }
 
+    #[cfg(feature = "vanilla")]
     pub fn keysend(&self, destination: pubkey, amount_msat: u64) -> error::Result<PaymentHash> {
         let payment_preimage = PaymentPreimage(
             self.chain_manager

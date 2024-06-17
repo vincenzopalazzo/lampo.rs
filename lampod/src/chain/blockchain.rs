@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lampo_common::backend::Backend;
-use lampo_common::bitcoin;
-use lampo_common::bitcoin::blockdata::constants::ChainHash;
-use lampo_common::bitcoin::Transaction;
+use lampo_common::btc::bitcoin;
+use lampo_common::btc::bitcoin::blockdata::constants::ChainHash;
+use lampo_common::btc::bitcoin::Transaction;
 use lampo_common::ldk;
 use lampo_common::ldk::chain::chaininterface::{
     BroadcasterInterface, ConfirmationTarget, FeeEstimator,
@@ -46,6 +46,14 @@ impl LampoChainManager {
             ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee => {
                 String::from("min_allowed_non_anchor_channel_remote")
             }
+            /* 
+            error[E0599]: no variant or associated item named `OutputSpendingFee` found for enum `ConfirmationTarget` in the current scope
+            --> lampod/src/chain/blockchain.rs:49:33
+             |
+          49 |             ConfirmationTarget::OutputSpendingFee => String::from("output_spending"),
+             |                                 ^^^^^^^^^^^^^^^^^ variant or associated item not found in `ConfirmationTarget`
+            */
+            #[cfg(feature = "vanilla")]
             ConfirmationTarget::OutputSpendingFee => String::from("output_spending"),
         }
     }
@@ -58,6 +66,7 @@ impl LampoChainManager {
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
             ConfirmationTarget::AnchorChannelFee,
             ConfirmationTarget::ChannelCloseMinimum,
+            #[cfg(feature = "vanilla")]
             ConfirmationTarget::OutputSpendingFee,
         ];
         let mut map: HashMap<String, Option<u32>> = HashMap::new();
@@ -89,6 +98,7 @@ impl FeeEstimator for LampoChainManager {
             ConfirmationTarget::ChannelCloseMinimum => {
                 self.backend.fee_rate_estimation(100).unwrap_or_default()
             }
+            #[cfg(feature = "vanilla")]
             ConfirmationTarget::OutputSpendingFee => {
                 self.backend.fee_rate_estimation(12).unwrap_or_default()
             }

@@ -2,12 +2,18 @@
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use lampo_common::bitcoin::absolute::Height;
-use lampo_common::bitcoin::{BlockHash, Transaction};
+#[cfg(feature = "vanilla")]
+use lampo_common::btc::bitcoin::absolute::Height;
+#[cfg(feature = "rgb")]
+pub use {
+    lampo_common::btc::bitcoin::blockdata::locktime::Height,
+    lampo_common::ldk::sign::EntropySource,
+};
+use lampo_common::btc::bitcoin::{BlockHash, Transaction};
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
@@ -63,10 +69,20 @@ type LampoChannel =
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
 pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
+#[cfg(feature = "vanilla")]
 pub type LampoRouter = DefaultRouter<
     Arc<LampoGraph>,
     Arc<LampoLogger>,
     Arc<KeysManager>,
+    Arc<Mutex<LampoScorer>>,
+    ProbabilisticScoringFeeParameters,
+    LampoScorer,
+>;
+
+#[cfg(feature = "rgb")]
+pub type LampoRouter = DefaultRouter<
+    Arc<LampoGraph>,
+    Arc<LampoLogger>,
     Arc<Mutex<LampoScorer>>,
     ProbabilisticScoringFeeParameters,
     LampoScorer,
@@ -215,9 +231,16 @@ impl LampoChannelManager {
 
     pub fn load_channel_monitors(&self, watch: bool) -> error::Result<()> {
         let keys = self.wallet_manager.ldk_keys().inner();
+        #[cfg(feature = "vanilla")]
         let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
+        //FIXME: see if the root_path is correct.
+        #[cfg(feature = "rgb")]
+        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys, PathBuf::from(self.conf.root_path))?;
         for (_, chan_mon) in monitors.drain(..) {
+            #[cfg(feature = "vanilla")]
             chan_mon.load_outputs_to_watch(&self.onchain, &self.logger);
+            #[cfg(feature = "rgb")]
+            chan_mon.load_outputs_to_watch(&self.onchain);
             if watch {
                 let monitor = self
                     .monitor
@@ -234,7 +257,11 @@ impl LampoChannelManager {
 
     pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
         let keys = self.wallet_manager.ldk_keys().inner();
+        #[cfg(feature = "vanilla")]
         let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
+        //FIXME: See the root_path
+        #[cfg(feature = "rgb")]
+        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys, PathBuf::from(self.conf.root_path))?;
         let mut channel_monitors = Vec::new();
         for (_, monitor) in monitors.drain(..) {
             channel_monitors.push(monitor);
@@ -252,16 +279,8 @@ impl LampoChannelManager {
     // FIXME: Step 11: Optional: Initialize the NetGraphMsgHandler
     pub fn network_graph(
         &mut self,
-    ) -> Arc<
-        DefaultRouter<
-            Arc<LampoGraph>,
-            Arc<LampoLogger>,
-            Arc<KeysManager>,
-            Arc<Mutex<LampoScorer>>,
-            ProbabilisticScoringFeeParameters,
-            LampoScorer,
-        >,
-    > {
+    ) -> Arc<LampoRouter>
+      {
         if self.router.is_none() {
             // Step 9: Initialize routing ProbabilisticScorer
             let network_graph_path = format!("{}/network_graph", self.conf.path());
@@ -274,13 +293,26 @@ impl LampoChannelManager {
 
             self.graph = Some(network_graph.clone());
             self.score = Some(scorer.clone());
-            self.router = Some(Arc::new(DefaultRouter::new(
-                network_graph,
-                self.logger.clone(),
-                self.wallet_manager.ldk_keys().keys_manager.clone(),
-                scorer,
-                ProbabilisticScoringFeeParameters::default(),
-            )))
+            #[cfg(feature = "vanilla")]
+            {
+                self.router = Some(Arc::new(DefaultRouter::new(
+                    network_graph,
+                    self.logger.clone(),
+                    self.wallet_manager.ldk_keys().keys_manager.clone(),
+                    scorer,
+                    ProbabilisticScoringFeeParameters::default(),
+                )))
+            }
+            #[cfg(feature = "rgb")]
+            {
+                self.router = Some(Arc::new(DefaultRouter::new(
+                    network_graph,
+                    self.logger.clone(),
+                    self.wallet_manager.ldk_keys().keys_manager.clone().get_secure_random_bytes(),
+                    scorer,
+                    ProbabilisticScoringFeeParameters::default(),
+                )))
+            }
         }
         self.router.clone().unwrap()
     }
@@ -322,18 +354,41 @@ impl LampoChannelManager {
         let _ = self.network_graph();
         let mut monitors = self.get_channel_monitors()?;
         let monitors = monitors.iter_mut().collect::<Vec<_>>();
-        let read_args = ChannelManagerReadArgs::new(
-            self.wallet_manager.ldk_keys().keys_manager.clone(),
-            self.wallet_manager.ldk_keys().keys_manager.clone(),
-            self.wallet_manager.ldk_keys().keys_manager.clone(),
-            self.onchain.clone(),
-            self.chain_monitor(),
-            self.onchain.clone(),
-            self.router.clone().unwrap(),
-            self.logger.clone(),
-            self.conf.ldk_conf,
-            monitors,
-        );
+        let read_args;
+
+        #[cfg(feature = "vanilla")]
+        {
+            read_args = ChannelManagerReadArgs::new(
+                self.wallet_manager.ldk_keys().keys_manager.clone(),
+                self.wallet_manager.ldk_keys().keys_manager.clone(),
+                self.wallet_manager.ldk_keys().keys_manager.clone(),
+                self.onchain.clone(),
+                self.chain_monitor(),
+                self.onchain.clone(),
+                self.router.clone().unwrap(),
+                self.logger.clone(),
+                self.conf.ldk_conf,
+                monitors,
+            );
+        }
+        // TODO: See if the root_path corresponds to the actual ldk_data_dir
+        #[cfg(feature = "rgb")]
+        {
+            let ldk_data_dir_path = self.conf.root_path;
+            read_args = ChannelManagerReadArgs::new(
+                self.wallet_manager.ldk_keys().keys_manager.clone(),
+                self.wallet_manager.ldk_keys().keys_manager.clone(),
+                self.wallet_manager.ldk_keys().keys_manager.clone(),
+                self.onchain.clone(),
+                self.chain_monitor(),
+                self.onchain.clone(),
+                self.router.clone().unwrap(),
+                self.logger.clone(),
+                self.conf.ldk_conf,
+                monitors,
+                PathBuf::from(&ldk_data_dir_path)
+            );
+        }
         let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
         let (_, channel_manager) =
             <(BlockHash, LampoChannel)>::read(&mut channel_manager_file, read_args)
@@ -343,25 +398,27 @@ impl LampoChannelManager {
     }
 
     pub fn resume_channels(&self) -> error::Result<()> {
-        let mut relevant_txids_one = self
-            .channeld
-            .clone()
-            .unwrap()
-            .get_relevant_txids()
-            .iter()
-            .map(|(txid, _, _)| txid.clone())
-            .collect::<Vec<_>>();
-        let mut relevant_txids_two = self
-            .chain_monitor()
-            .get_relevant_txids()
-            .iter()
-            .map(|(txid, _, _)| txid.clone())
-            .collect::<Vec<_>>();
-        log::debug!(
-            "transactions {:?} {:?}",
-            relevant_txids_one,
-            relevant_txids_two
-        );
+        #[cfg(feature = "vanilla")]
+        {
+            let mut relevant_txids_one = self
+                .channeld
+                .clone()
+                .unwrap()
+                .get_relevant_txids()
+                .iter()
+                .map(|(txid, _, _)| txid.clone())
+                .collect::<Vec<_>>();
+            let mut relevant_txids_two = self
+                .chain_monitor()
+                .get_relevant_txids()
+                .iter()
+                .map(|(txid, _, _)| txid.clone())
+                .collect::<Vec<_>>();
+            log::debug!(
+                "transactions {:?} {:?}",
+                relevant_txids_one,
+                relevant_txids_two
+            );
         // FIXME: check if some of these transaction are out of chain
         self.onchain
             .backend
@@ -369,6 +426,37 @@ impl LampoChannelManager {
         self.onchain
             .backend
             .manage_transactions(&mut relevant_txids_two)?;
+        }
+        #[cfg(feature = "rgb")]
+        {
+            let mut relevant_txids_one = self
+                .channeld
+                .clone()
+                .unwrap()
+                .get_relevant_txids()
+                .iter()
+                .map(|(txid, _)| txid.clone())
+                .collect::<Vec<_>>();
+            let mut relevant_txids_two = self
+                .chain_monitor()
+                .get_relevant_txids()
+                .iter()
+                .map(|(txid, _)| txid.clone())
+                .collect::<Vec<_>>();
+            log::debug!(
+                "transactions {:?} {:?}",
+                relevant_txids_one,
+                relevant_txids_two
+            );
+        // FIXME: check if some of these transaction are out of chain
+        self.onchain
+            .backend
+            .manage_transactions(&mut relevant_txids_one)?;
+        self.onchain
+            .backend
+            .manage_transactions(&mut relevant_txids_two)?;
+        }
+
         self.onchain.backend.process_transactions()?;
         Ok(())
     }
@@ -388,24 +476,54 @@ impl LampoChannelManager {
         self.monitor = Some(Arc::new(monitor));
 
         let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
-        self.channeld = Some(Arc::new(LampoArcChannelManager::new(
-            self.onchain.clone(),
-            self.monitor.clone().unwrap(),
-            self.onchain.clone(),
-            self.network_graph(),
-            self.logger.clone(),
-            keymanagers.clone(),
-            keymanagers.clone(),
-            keymanagers,
-            self.conf.ldk_conf,
-            chain_params,
-            block_timestamp,
-        )));
+        #[cfg(feature = "vanilla")]
+        {
+            self.channeld = Some(Arc::new(LampoArcChannelManager::new(
+                self.onchain.clone(),
+                self.monitor.clone().unwrap(),
+                self.onchain.clone(),
+                self.network_graph(),
+                self.logger.clone(),
+                keymanagers.clone(),
+                keymanagers.clone(),
+                keymanagers,
+                self.conf.ldk_conf,
+                chain_params,
+                block_timestamp,
+            )));
+        }
+
+        #[cfg(feature = "rgb")]
+        {
+            let ldk_data_dir_path = self.conf.root_path;
+            self.channeld = Some(Arc::new(LampoArcChannelManager::new(
+                self.onchain.clone(),
+                self.monitor.clone().unwrap(),
+                self.onchain.clone(),
+                self.network_graph(),
+                self.logger.clone(),
+                keymanagers.clone(),
+                keymanagers.clone(),
+                keymanagers,
+                self.conf.ldk_conf,
+                chain_params,
+                block_timestamp,
+                PathBuf::from(&ldk_data_dir_path),
+            )));
+        }
         Ok(())
     }
 }
 
+#[cfg(feature = "vanilla")]
 impl ChannelEvents for LampoChannelManager {
+    // This is the type of open_channel we use for vanilla `lightning`.
+    // What `rgb-lightning-node` is using is rgb-enabled channels.
+    // What they do is if the payload of asset is specified inside the request
+    // then the channel is `rgb-enabled`, if not then it is only a vanilla channel
+    // is opened. I think we should not deal with the core request/response part
+    // of lampo and make other specific method for `rgb` related things.
+    // Implementation: https://github.com/RGB-Tools/rgb-lightning-node/blob/25d873d4d2a9260fee26ff2fff55580bf3ce8171/src/routes.rs#L2150
     fn open_channel(
         &self,
         open_channel: request::OpenChannel,
