@@ -1,4 +1,4 @@
-use crate::bitcoin::{OutPoint, Transaction};
+use crate::btc::bitcoin::{OutPoint, Transaction};
 use crate::ldk::ln::features::ChannelTypeFeatures;
 use crate::model::response::{PaymentHop, PaymentState};
 use crate::types::{ChannelId, ChannelState, NodeId};

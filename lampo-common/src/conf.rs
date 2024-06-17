@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use clightningrpc_conf::{CLNConf, SyncCLNConf};
 
-pub use bitcoin::Network;
+pub use crate::btc::bitcoin::Network;
 pub use crate::ldk::util::config::UserConfig;
 
 #[derive(Clone, Debug)]

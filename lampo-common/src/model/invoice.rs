@@ -32,7 +32,7 @@ pub mod request {
 pub mod response {
     use std::vec::Vec;
 
-    use bitcoin::secp256k1::PublicKey;
+    use crate::btc::bitcoin::secp256k1::PublicKey;
     use crate::ldk::routing::router::RouteHop;
     use serde::{Deserialize, Serialize};
 

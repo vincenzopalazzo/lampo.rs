@@ -18,8 +18,8 @@ use bitcoincore_rpc::{Auth, Client, RpcApi};
 #[cfg(debug_assertions)]
 use crate::bitcoin::PrivateKey;
 
-use lampo_common::bitcoin;
-use lampo_common::bitcoin::consensus::Decodable;
+use lampo_common::btc::bitcoin;
+use lampo_common::btc::bitcoin::consensus::Decodable;
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::error;
 use lampo_common::json;
@@ -69,7 +69,7 @@ impl CoreWalletManager {
 
     #[cfg(debug_assertions)]
     fn build_from_private_key(
-        xprv: lampo_common::bitcoin::PrivateKey,
+        xprv: lampo_common::btc::bitcoin::PrivateKey,
         channel_keys: Option<String>,
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
         use bdk::bitcoin::bip32::Xpriv;

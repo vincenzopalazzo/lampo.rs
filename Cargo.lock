@@ -1089,6 +1089,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "chunked_transfer"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4de3bc4ea267985becf712dc6d9eed8b04c953b3fcfb339ebc87acd9804901"
+
+[[package]]
 name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2442,6 +2448,7 @@ name = "lampo-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitcoin 0.29.2",
  "bitcoin 0.30.2",
  "chrono",
  "clightningrpc-conf",
@@ -2677,7 +2684,10 @@ version = "0.0.118"
 source = "git+https://github.com/RGB-tools/rust-lightning?rev=c36fd7417cb5e8861378f222152392e968efc22f#c36fd7417cb5e8861378f222152392e968efc22f"
 dependencies = [
  "bitcoin 0.29.2",
+ "chunked_transfer",
  "lightning 0.0.118",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

@@ -4,11 +4,17 @@
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use bitcoin::absolute::Height;
-use bitcoin::block::Header as BlockHeader;
+#[cfg(feature = "vanilla")]
+use crate::btc::bitcoin::absolute::Height;
+#[cfg(feature = "rgb")]
+use crate::btc::bitcoin::blockdata::locktime::Height;
+#[cfg(feature = "vanilla")]
+use crate::btc::bitcoin::block::Header as BlockHeader;
+#[cfg(feature = "rgb")]
+use crate::btc::bitcoin::blockdata::block::BlockHeader as BlockHeader;
 
-pub use bitcoin::consensus::{deserialize, serialize};
-pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
+pub use crate::btc::bitcoin::consensus::{deserialize, serialize};
+pub use crate::btc::bitcoin::{Block, BlockHash, Script, Transaction, Txid};
 pub use crate::ldk::chain::WatchedOutput;
 pub use crate::ldk::routing::utxo::UtxoResult;
 pub use crate::ldk::sync::{

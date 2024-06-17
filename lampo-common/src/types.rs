@@ -1,5 +1,5 @@
 //! Lampo Common Types
-use crate::bitcoin::secp256k1::PublicKey;
+use crate::btc::bitcoin::secp256k1::PublicKey;
 use crate::ldk;
 
 pub type NodeId = PublicKey;

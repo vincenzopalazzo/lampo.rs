@@ -30,7 +30,7 @@ pub mod response {
 
     use serde::{Deserialize, Serialize};
 
-    use crate::bitcoin::Transaction;
+    use crate::btc::bitcoin::Transaction;
     use crate::error;
     use crate::types::NodeId;
 

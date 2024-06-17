@@ -15,8 +15,8 @@ use bitcoincore_rpc::RpcApi;
 use lampo_common::backend::{deserialize, serialize};
 use lampo_common::backend::{Backend, TxResult};
 use lampo_common::backend::{Block, BlockData, BlockHash};
-use lampo_common::bitcoin::absolute::Height;
-use lampo_common::bitcoin::{Transaction, Txid};
+use lampo_common::btc::bitcoin::absolute::Height;
+use lampo_common::btc::bitcoin::{Transaction, Txid};
 use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
@@ -153,7 +153,7 @@ impl Backend for BitcoinCore {
         // FIXME: check the result.
         let result: bitcoincore_rpc::Result<json::Value> = self.inner.call(
             "sendrawtransaction",
-            &[lampo_common::bitcoin::consensus::encode::serialize_hex(&tx).into()],
+            &[lampo_common::btc::bitcoin::consensus::encode::serialize_hex(&tx).into()],
         );
         log::info!(target: "bitcoind", "broadcast transaction return {:?}", result);
         if result.is_ok() {
@@ -293,7 +293,7 @@ impl Backend for BitcoinCore {
         let _ = self.process_transactions();
     }
 
-    fn get_transaction(&self, txid: &lampo_common::bitcoin::Txid) -> error::Result<TxResult> {
+    fn get_transaction(&self, txid: &lampo_common::btc::bitcoin::Txid) -> error::Result<TxResult> {
         log::debug!(target: "bitcoind", "call get_transaction");
         let tx = self.inner.get_transaction(
             &bitcoincore_rpc::bitcoin::Txid::from_str(txid.to_string().as_str())?,
@@ -329,8 +329,8 @@ impl Backend for BitcoinCore {
 
     fn get_utxo_by_txid(
         &self,
-        txid: &lampo_common::bitcoin::Txid,
-        script: &lampo_common::bitcoin::Script,
+        txid: &lampo_common::btc::bitcoin::Txid,
+        script: &lampo_common::btc::bitcoin::Script,    
     ) -> error::Result<TxResult> {
         let tx: bitcoincore_rpc::bitcoincore_rpc_json::GetRawTransactionResult = self
             .inner

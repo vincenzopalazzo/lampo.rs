@@ -1,7 +1,7 @@
 //! keysend model
 
 pub mod request {
-    use bitcoin::secp256k1::PublicKey;
+    use crate::btc::bitcoin::secp256k1::PublicKey;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize)]

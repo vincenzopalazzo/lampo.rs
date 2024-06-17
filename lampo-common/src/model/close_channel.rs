@@ -2,7 +2,7 @@ pub mod request {
     use std::num::ParseIntError;
     use std::str::FromStr;
 
-    use bitcoin::secp256k1::PublicKey;
+    use crate::btc::bitcoin::secp256k1::PublicKey;
     use serde::{Deserialize, Serialize};
 
     use crate::error;

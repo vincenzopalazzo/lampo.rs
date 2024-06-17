@@ -48,8 +48,17 @@ pub mod chan {
     pub use crossbeam_channel::*;
 }
 
-pub use bitcoin;
-pub use bitcoin::secp256k1;
+#[cfg(feature = "vanilla")]
+pub mod btc {
+    pub use bitcoin;
+    pub use bitcoin::secp256k1;
+}
+
+#[cfg(feature = "rgb")]
+pub mod btc {
+    pub use bitcoin_29 as bitcoin;
+    pub use bitcoin::secp256k1;
+}
 
 pub mod btc_rpc {
     use serde::{Deserialize, Serialize};
