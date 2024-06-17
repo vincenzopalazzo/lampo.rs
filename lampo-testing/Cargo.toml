@@ -8,7 +8,7 @@ lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 lampo-bitcoind = { path = "../lampo-bitcoind" }
 lampo-core-wallet = { path = "../lampo-core-wallet" }
-lampo-jsonrpc = { path = "../lampo-jsonrpc" }
+lampo-async-jsonrpc = { path = "../lampo-async-jsonrpc" }
 clightning-testing = { git = "https://github.com/laanwj/cln4rust.git" }
 log = "0.4.18"
 tempfile = "3.6.0"
