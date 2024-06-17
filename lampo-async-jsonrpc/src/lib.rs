@@ -15,7 +15,7 @@ pub struct JSONRPCv2<T: Sync + Send + 'static> {
 
 impl<T: Sync + Send + 'static> JSONRPCv2<T> {
     pub fn new(ctx: Arc<T>, path: &str) -> anyhow::Result<Self> {
-        Ok(Self {
+       Ok(Self {
             inner: RpcModule::new(ctx),
         })
     }
