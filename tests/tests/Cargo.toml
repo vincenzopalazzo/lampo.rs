@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tokio = { version = "1.22.0", features = ["rt", "macros"] }
 lampo-common = { path = "../../lampo-common" }
 lampo-testing = { path = "../../lampo-testing" }
-tokio = { version = "1.22.0", features = ["rt"] }
 ntest = "0.9.0"
 serde_json = "1"
 log = "0.4"
