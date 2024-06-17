@@ -16,7 +16,7 @@ pub struct JSONRPCv2<T: Sync + Send + 'static> {
 impl<T: Sync + Send + 'static> JSONRPCv2<T> {
     pub fn new(ctx: Arc<T>, path: &str) -> anyhow::Result<Self> {
        Ok(Self {
-            inner: RpcModule::new(ctx),
+           inner: RpcModule::new(ctx),
         })
     }
 
@@ -31,7 +31,7 @@ impl<T: Sync + Send + 'static> JSONRPCv2<T> {
             let request: serde_json::Value = params.parse().unwrap();
             callback(ctx.as_ref().clone(), request)
         })?;
-        Ok(())
+       Ok(())
     }
 
     pub async fn listen(self) -> std::io::Result<()> {

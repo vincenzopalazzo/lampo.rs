@@ -7,10 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use radicle_term as term;
-use tokio::io;
-use tokio::task::JoinHandle;
 
-use lampo_async_jsonrpc::Handler;
 use lampo_async_jsonrpc::JSONRPCv2;
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
@@ -164,34 +161,33 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
-    let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).await?;
-    rpc_handler.set_handler(handler.clone());
+    // Create a RPC handler inside the jsonrpc :)
+    run_jsonrpc(lampod.clone()).await?;
+    //rpc_handler.set_handler(handler.clone());
 
     ctrlc::set_handler(move || {
         use std::time::Duration;
         log::info!("Shutdown...");
-        handler.stop();
-        std::thread::sleep(Duration::from_secs(5));
+        std::thread::sleep(Duration::from_secs(1));
         std::process::exit(0);
     })?;
 
-    let workder = lampod.listen().unwrap();
+    let workder = lampod.listen().await?;
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     let _ = workder.join();
-    let _ = jsorpc_worker.await?;
+    // We should killthe json rpc worker
+    //let _ = jsorpc_worker.await?;
     Ok(())
 }
 
-async fn run_jsonrpc(
-    lampod: Arc<LampoDaemon>,
-) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler<LampoDaemon>>)> {
+async fn run_jsonrpc(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     let socket_path = format!("{}/lampod.socket", lampod.root_path());
     // we take the lock with the pid file so if we are at this point
     // we can delete the socket because there is no other process
     // that it is running.
     let _ = std::fs::remove_file(socket_path.clone());
     env::set_var("LAMPO_UNIX", socket_path.clone());
-    let server = JSONRPCv2::new(lampod, &socket_path)?;
+    let mut server = JSONRPCv2::new(lampod, &socket_path)?;
     server.add_rpc("getinfo", get_info).unwrap();
     server.add_rpc("connect", json_connect).unwrap();
     server.add_rpc("fundchannel", json_open_channel).unwrap();
@@ -205,6 +201,5 @@ async fn run_jsonrpc(
     server.add_rpc("keysend", json_keysend).unwrap();
     server.add_rpc("fees", json_estimate_fees).unwrap();
     server.add_rpc("close", json_close_channel).unwrap();
-    let handler = server.handler();
-    Ok((server.spawn().await, handler))
+    Ok(())
 }

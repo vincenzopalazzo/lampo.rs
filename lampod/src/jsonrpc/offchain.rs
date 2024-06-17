@@ -1,5 +1,6 @@
 //! Offchain RPC methods
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use lampo_common::conf::Network;
@@ -18,11 +19,10 @@ use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{Invoice, InvoiceInfo};
 use lampo_common::{json, model::request::DecodeInvoice};
 
-use crate::json_rpc2::{Error, RpcError};
-use crate::rpc_error;
+use crate::jsonrpc::{Result, RpcError};
 use crate::LampoDaemon;
 
-pub fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_invoice(ctx: Arc<LampoDaemon>, request: json::Value) -> Result<json::Value> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: GenerateInvoice = json::from_value(request.clone())?;
     let invoice = ctx.offchain_manager().generate_invoice(
@@ -36,7 +36,7 @@ pub fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Va
     Ok(json::to_value(&invoice)?)
 }
 
-pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_offer(ctx: Arc<LampoDaemon>, request: json::Value) -> Result<json::Value> {
     log::info!("call for `offer` with request `{:?}`", request);
     let request: GenerateOffer = json::from_value(request.clone())?;
     let manager = ctx.channel_manager().manager();
@@ -60,7 +60,10 @@ pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Valu
     Ok(json::to_value(&offer)?)
 }
 
-pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_decode_invoice(
+    ctx: Arc<LampoDaemon>,
+    request: json::Value,
+) -> Result<json::Value> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: DecodeInvoice = json::from_value(request.clone())?;
 
@@ -117,7 +120,7 @@ pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<j
     Ok(json::to_value(&invoice)?)
 }
 
-pub fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_pay(ctx: Arc<LampoDaemon>, request: json::Value) -> Result<json::Value> {
     log::info!("call for `pay` with request `{:?}`", request);
     let request: Pay = json::from_value(request.clone())?;
     let events = ctx.handler().events();
@@ -130,16 +133,7 @@ pub fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value,
     }
     // FIXME: this will loop when the Payment event is not generated
     loop {
-        let event = events
-            .recv_timeout(Duration::from_secs(30))
-            // FIXME: this should be avoided, the `?` should be used here
-            .map_err(|err| {
-                Error::Rpc(RpcError {
-                    code: -1,
-                    message: format!("{err}"),
-                    data: None,
-                })
-            })?;
+        let event = events.recv_timeout(Duration::from_secs(30))?;
 
         if let Event::Lightning(LightningEvent::PaymentEvent {
             payment_hash,
@@ -156,7 +150,7 @@ pub fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value,
     }
 }
 
-pub fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_keysend(ctx: Arc<LampoDaemon>, request: json::Value) -> Result<json::Value> {
     log::debug!("call for `keysend` with request `{:?}`", request);
     let request: KeySend = json::from_value(request.clone())?;
     ctx.offchain_manager()

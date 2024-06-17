@@ -24,19 +24,16 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use tokio::runtime::Runtime;
-
 use lampo_common::backend::Backend;
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::ldk::events::Event;
+use lampo_common::ldk::events::EventHandler;
 use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
 use lampo_common::ldk::routing::gossip::P2PGossipSync;
 use lampo_common::wallet::WalletManager;
-
-pub use lampo_async_jsonrpc::json_rpc2;
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
@@ -69,9 +66,6 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
-
-    // FIXME: remove this
-    rt: Runtime,
 }
 
 unsafe impl Send for LampoDaemon {}
@@ -95,7 +89,6 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
-            rt: Runtime::new().unwrap(),
         }
     }
 
@@ -235,7 +228,10 @@ impl LampoDaemon {
     /// Additionally, the registered handler serves as the entry point for
     /// the Chain of Responsibility pattern that handles all unsupported commands that the Lampod daemon
     /// may receive from external sources (assuming the user has defined a handler for them).
-    pub fn add_external_handler(&self, ext_handler: Arc<dyn ExternalHandler>) -> error::Result<()> {
+    pub fn add_external_handler(
+        &self,
+        ext_handler: Arc<dyn ExternalHandler + Send + Sync>,
+    ) -> error::Result<()> {
         let Some(ref handler) = self.handler else {
             error::bail!("Initial handler is None");
         };
@@ -243,21 +239,13 @@ impl LampoDaemon {
         Ok(())
     }
 
-    pub fn listen(self: Arc<Self>) -> error::Result<JoinHandle<std::io::Result<()>>> {
+    pub async fn listen(self: Arc<Self>) -> error::Result<JoinHandle<std::io::Result<()>>> {
         log::info!(target: "lampod", "Starting lightning node version `{}`", env!("CARGO_PKG_VERSION"));
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<LampoChainManager>>,
             self.logger.clone(),
         ));
-
-        let handler = self.handler();
-        let event_handler = move |event: Event| {
-            log::info!(target: "lampo", "ldk event {:?}", event);
-            if let Err(err) = handler.handle(event) {
-                log::error!("{err}");
-            }
-        };
 
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().backend.clone().listen();
@@ -268,7 +256,7 @@ impl LampoDaemon {
 
         let background_processor = BackgroundProcessor::start(
             self.persister.clone(),
-            event_handler,
+            self.clone(),
             self.channel_manager().chain_monitor(),
             self.channel_manager().manager(),
             GossipSync::p2p(gossip_sync),
@@ -290,10 +278,22 @@ impl LampoDaemon {
     /// Welcome to the third design pattern in under 300 lines of code. The code will clarify the
     /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
     /// at some point.
-    pub fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
+    pub async fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
         let Some(ref handler) = self.handler else {
             error::bail!("at this point the handler should be not None");
         };
-        handler.call::<json::Value, json::Value>(method, args)
+        handler.call::<json::Value, json::Value>(method, args).await
+    }
+}
+
+impl EventHandler for LampoDaemon {
+    fn handle_event(&self, event: Event) {
+        log::info!(target: "lampo", "ldk event {:?}", event);
+        let handler = self.handler().clone();
+        tokio::spawn(async move {
+            if let Err(err) = handler.handle(event).await {
+                log::error!("{err}");
+            }
+        });
     }
 }

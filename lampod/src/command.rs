@@ -1,10 +1,10 @@
 //! All the Lampo Node Events that the node is able to react to
-use crossbeam_channel as chan;
 
-use lampo_async_jsonrpc::json_rpc2::Request;
+use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::json;
 
+use crate::jsonrpc::Request;
 use crate::ln::peer_event::PeerCommand;
 
 /// All the event that are supported by the

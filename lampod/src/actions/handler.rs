@@ -2,6 +2,8 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+
 use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::error::Ok;
@@ -17,10 +19,10 @@ use lampo_common::types::ChannelState;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::handler::external_handler::ExternalHandler;
-use crate::json_rpc2::Request;
+use crate::jsonrpc::Request;
 use crate::ln::events::PeerEvents;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::{async_run, LampoDaemon};
+use crate::LampoDaemon;
 
 use super::{Handler, InventoryHandler};
 
@@ -30,7 +32,7 @@ pub struct LampoHandler {
     inventory_manager: Arc<LampoInventoryManager>,
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
-    external_handlers: RefCell<Vec<Arc<dyn ExternalHandler>>>,
+    external_handlers: RefCell<Vec<Arc<dyn ExternalHandler + Send + Sync>>>,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
     subscriber: Subscriber<Event>,
@@ -55,7 +57,10 @@ impl LampoHandler {
         }
     }
 
-    pub fn add_external_handler(&self, handler: Arc<dyn ExternalHandler>) -> error::Result<()> {
+    pub fn add_external_handler(
+        &self,
+        handler: Arc<dyn ExternalHandler + Send + Sync>,
+    ) -> error::Result<()> {
         let mut vect = self.external_handlers.borrow_mut();
         vect.push(handler);
         Ok(())
@@ -64,7 +69,11 @@ impl LampoHandler {
     /// Call any method supported by the lampod configuration. This includes
     /// a lot of handler code. This function serves as a broker pattern in some ways,
     /// but it may also function as a chain of responsibility pattern in certain cases.
-    pub fn call<T: json::Serialize, R: json::DeserializeOwned>(
+    ///
+    /// Welcome to the third design pattern in under 300 lines of code. The code will clarify the
+    /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
+    /// at some point.
+    pub async fn call<T: json::Serialize, R: json::DeserializeOwned>(
         &self,
         method: &str,
         args: T,
@@ -74,7 +83,7 @@ impl LampoHandler {
         let (sender, receiver) = chan::bounded::<json::Value>(1);
         let command = Command::from_req(&request, &sender)?;
         log::info!("received {:?}", command);
-        self.react(command)?;
+        self.react(command).await?;
         let result = receiver.recv()?;
         Ok(json::from_value::<R>(result)?)
     }
@@ -92,26 +101,23 @@ impl EventHandler for LampoHandler {
     }
 }
 
-#[allow(unused_variables)]
+#[async_trait]
 impl Handler for LampoHandler {
-    fn react(&self, event: crate::command::Command) -> error::Result<()> {
+    async fn react(&self, event: crate::command::Command) -> error::Result<()> {
         match event {
             Command::LNCommand => unimplemented!(),
             Command::OnChainCommand => unimplemented!(),
-            Command::PeerEvent(event) => {
-                async_run!(self.peer_manager.handle(event))
-            }
+            Command::PeerEvent(event) => self.peer_manager.handle(event).await,
             Command::InventoryEvent(event) => {
                 self.inventory_manager.handle(event)?;
                 Ok(())
             }
             Command::ExternalCommand(req, chan) => {
-                log::info!(
-                    "external handler size {}",
-                    self.external_handlers.borrow().len()
-                );
-                for handler in self.external_handlers.borrow().iter() {
-                    if let Some(resp) = handler.handle(&req)? {
+                // FIXME: remove the clone
+                let handlers = self.external_handlers.clone().into_inner();
+                log::info!("external handler size {}", handlers.len());
+                for handler in handlers.into_iter() {
+                    if let Some(resp) = handler.handle(&req).await? {
                         chan.send(resp)?;
                         return Ok(());
                     }
@@ -122,7 +128,7 @@ impl Handler for LampoHandler {
     }
 
     /// method used to handle the incoming event from ldk
-    fn handle(&self, event: ldk::events::Event) -> error::Result<()> {
+    async fn handle(&self, event: ldk::events::Event) -> error::Result<()> {
         match event {
             ldk::events::Event::OpenChannelRequest {
                 temporary_channel_id,

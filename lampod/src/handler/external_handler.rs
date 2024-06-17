@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use lampo_common::error;
 use lampo_common::json;
 
-use crate::json_rpc2::Request;
+use crate::jsonrpc::Request;
 
 #[async_trait]
 pub trait ExternalHandler {

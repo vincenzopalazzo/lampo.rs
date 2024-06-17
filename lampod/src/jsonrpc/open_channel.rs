@@ -1,15 +1,17 @@
 //! Open Channel RPC Method implementation
+use std::sync::Arc;
+
 use lampo_common::json;
 use lampo_common::model::request;
 
-use crate::json_rpc2::{Error, RpcError};
+use crate::jsonrpc::Result;
 use crate::ln::events::ChannelEvents;
 use crate::LampoDaemon;
 
-pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_open_channel(ctx: Arc<LampoDaemon>, request: json::Value) -> Result<json::Value> {
     log::info!("call for `openchannel` with request {:?}", request);
     let request: request::OpenChannel = json::from_value(request.clone())?;
-
+    let handler = ctx.handler();
     // LDK's `create_channel()` doesn't check if you are currently connected
     // to the given peer so we need to check ourselves
     // FIXME: remove unwrap!
@@ -18,10 +20,11 @@ pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
         .is_connected_with(request.node_id().unwrap())
     {
         log::trace!("we are not connected with the peer {}", request.node_id);
+
         let conn = request::Connect::try_from(request.clone())?;
         let conn = json::to_value(conn)?;
-        let _ = ctx.rt.enter();
-        ctx.call("connect", conn)?;
+        let result: json::Value = handler.call("connect", conn).await?;
+        log::info!("connecting succided with the node `{result}`");
     }
 
     // FIXME: there are use case there need to be covered, like
