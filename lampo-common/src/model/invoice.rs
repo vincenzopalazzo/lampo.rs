@@ -13,7 +13,7 @@ pub mod request {
     #[derive(Serialize, Deserialize, Debug)]
     pub struct GenerateOffer {
         pub amount_msat: Option<u64>,
-        pub description: String,
+        pub description: Option<String>,
     }
 
     #[derive(Serialize, Deserialize)]
