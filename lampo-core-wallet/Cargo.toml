@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 log = "0.4.17"
 lampo-common = { path = "../lampo-common" }
+lampo-vls = { path = "../lampo-vls" }
 bitcoincore-rpc = { version = "0.17.0", features = [] }
 bitcoin-bech32 = "0.12"
 bitcoin_hashes = "0.12.0"

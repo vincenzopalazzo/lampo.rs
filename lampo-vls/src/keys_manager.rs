@@ -80,7 +80,7 @@ impl EntropySource for LampoKeysManager {
     }
 }
 
-// Cryptographic operations at the scope level of a node
+// Cryptographic operations at the scope level of the Signer
 impl NodeSigner for LampoKeysManager {
     fn get_inbound_payment_key_material(&self) -> KeyMaterial {
         self.client.get_inbound_payment_key_material()
@@ -122,7 +122,7 @@ impl NodeSigner for LampoKeysManager {
     }
 }
 
-// Manages spending from descriptors that define how outputs are spent in transactions (Not Sure!!)
+/// Makes the Wallet capable of creating a spending Transaction from a set of SpendableOutputDescriptors.
 impl SpendableKeysInterface for LampoKeysManager {
     fn spend_spendable_outputs(
         &self,
