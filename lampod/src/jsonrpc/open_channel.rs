@@ -26,7 +26,6 @@ pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
             })
         })?;
         let conn = json::to_value(conn)?;
-        let _ = ctx.rt.enter();
         ctx.call("connect", conn).map_err(|err| {
             Error::Rpc(RpcError {
                 code: -1,

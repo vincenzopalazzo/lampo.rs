@@ -4,7 +4,8 @@ use lampo_common::model::Connect;
 
 use crate::json_rpc2::Error;
 use crate::json_rpc2::RpcError;
-use crate::{ln::events::PeerEvents, LampoDaemon};
+use crate::ln::events::PeerEvents;
+use crate::LampoDaemon;
 
 pub fn json_connect(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `connect` with request `{:?}`", request);
@@ -31,13 +32,7 @@ pub fn json_connect(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Va
             Err(rpc_error)
         }
         Ok(host_value) => {
-            ctx.rt
-                .block_on(ctx.peer_manager().connect(node_id, host_value))
-                .map_err(|err| RpcError {
-                    code: -1,
-                    message: format!("{err}"),
-                    data: None,
-                })?;
+            let _ = ctx.peer_manager().connect(node_id, host_value);
             Ok(request.clone())
         }
     };

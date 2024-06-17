@@ -24,8 +24,6 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use tokio::runtime::Runtime;
-
 use lampo_common::backend::Backend;
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::conf::LampoConf;
@@ -69,9 +67,6 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
-
-    // FIXME: remove this
-    rt: Runtime,
 }
 
 unsafe impl Send for LampoDaemon {}
@@ -95,7 +90,6 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
-            rt: Runtime::new().unwrap(),
         }
     }
 
@@ -243,7 +237,7 @@ impl LampoDaemon {
         Ok(())
     }
 
-    pub fn listen(self: Arc<Self>) -> error::Result<JoinHandle<std::io::Result<()>>> {
+    pub async fn listen(self: Arc<Self>) -> error::Result<JoinHandle<std::io::Result<()>>> {
         log::info!(target: "lampod", "Starting lightning node version `{}`", env!("CARGO_PKG_VERSION"));
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
@@ -252,11 +246,16 @@ impl LampoDaemon {
         ));
 
         let handler = self.handler();
+        // FIXME: This does not compile because there is a problem
+        // to handle an async function inside the ldk callback
         let event_handler = move |event: Event| {
             log::info!(target: "lampo", "ldk event {:?}", event);
-            if let Err(err) = handler.handle(event) {
-                log::error!("{err}");
-            }
+            tokio::spawn(async {
+                let handler = handler.clone();
+                if let Err(err) = handler.handle(event).await {
+                    log::error!("{err}");
+                }
+            });
         };
 
         let background_processor = BackgroundProcessor::start(
@@ -289,10 +288,10 @@ impl LampoDaemon {
     /// Welcome to the third design pattern in under 300 lines of code. The code will clarify the
     /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
     /// at some point.
-    pub fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
+    pub async fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
         let Some(ref handler) = self.handler else {
             error::bail!("at this point the handler should be not None");
         };
-        handler.call::<json::Value, json::Value>(method, args)
+        handler.call::<json::Value, json::Value>(method, args).await
     }
 }

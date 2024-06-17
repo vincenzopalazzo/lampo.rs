@@ -16,7 +16,8 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
 
-use crate::{handler::external_handler::ExternalHandler, LampoDaemon};
+use crate::handler::external_handler::ExternalHandler;
+use crate::LampoDaemon;
 
 #[macro_export]
 macro_rules! rpc_error {
@@ -47,6 +48,8 @@ impl CommandHandler {
         Ok(handler)
     }
 
+    // FIXME: the handler should be a generic one, and not the
+    // jsonrpc one.
     pub fn set_handler(&self, handler: Arc<Handler<LampoDaemon>>) {
         self.handler.replace(Some(handler));
     }
