@@ -15,9 +15,9 @@
         clightning = pkgs.clightning.overrideAttrs (oldAttrs: {
           version = "master-62dd";
           src = pkgs.fetchgit {
-            url = "https://github.com/vincenzopalazzo/lightning";
-            rev = "0fb1c5bed871e6471f4a19be6e4af57ade4a4e21";
-            sha256 = "sha256-/XtdXgwE6QKuJDggsIw00kt6Ur7gpiWobpa0eJh5c+M=";
+            url = "https://github.com/ElementsProject/lightning";
+            rev = "f2551091ca3cc2e7b03a6d3766a851a025dbfd4d";
+            sha256 = "sha256-PdbHtMIc35zqv8dDX5TXWyzhcu2h1G/LzIyS9S1TCAQ=";
             fetchSubmodules = true;
           };
           buildInputs = with pkgs; [ gmp libsodium sqlite zlib jq ];
