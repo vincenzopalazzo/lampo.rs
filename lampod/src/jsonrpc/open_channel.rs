@@ -20,8 +20,13 @@ pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
         log::trace!("we are not connected with the peer {}", request.node_id);
         let conn = request::Connect::try_from(request.clone())?;
         let conn = json::to_value(conn)?;
-        let _ = ctx.rt.enter();
-        ctx.call("connect", conn)?;
+        ctx.call("connect", conn).map_err(|err| {
+            Error::Rpc(RpcError {
+                code: -1,
+                message: format!("connect fails with: {err}"),
+                data: None,
+            })
+        })?;
     }
 
     // FIXME: there are use case there need to be covered, like
