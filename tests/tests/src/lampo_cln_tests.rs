@@ -22,10 +22,10 @@ use lampo_testing::LampoTesting;
 use crate::init;
 use crate::utils::*;
 
-#[test]
-pub fn init_connection_test() -> error::Result<()> {
+#[tokio::test]
+pub async fn init_connection_test() -> error::Result<()> {
     init();
-    let cln = async_run!(cln::Node::with_params("--developer", "regtest"))?;
+    let mut cln = cln::Node::with_params("--developer", "regtest").await?;
     let lampo = LampoTesting::new(cln.btc())?;
     let info = cln.rpc().getinfo()?;
     log::debug!("core lightning info {:?}", info);
@@ -38,6 +38,7 @@ pub fn init_connection_test() -> error::Result<()> {
         },
     )?;
     log::debug!("lampo connected with cln {:?}", response);
+    cln.stop().await?;
     Ok(())
 }
 
