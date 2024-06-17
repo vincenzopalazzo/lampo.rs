@@ -49,12 +49,16 @@ pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Valu
     let manager = ctx.channel_manager().manager();
     let mut offer_builder = manager
         .create_offer_builder()
-        .map_err(|err| crate::rpc_error!("{:?}", err))?
-        .description(request.description);
+        .map_err(|err| crate::rpc_error!("{:?}", err))?;
+
+    if let Some(description) = request.description {
+        offer_builder = offer_builder.description(description);
+    }
 
     if let Some(amount_msat) = request.amount_msat {
         offer_builder = offer_builder.amount_msats(amount_msat);
     }
+
     let offer: response::Offer = offer_builder
         .build()
         // FIXME: implement display error on top of the bolt12 error
