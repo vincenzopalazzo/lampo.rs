@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::blinded_path::EmptyNodeIdLookUp;
 use lampo_common::ldk::ln::peer_handler::MessageHandler;
@@ -15,7 +16,6 @@ use lampo_common::ldk::net;
 use lampo_common::ldk::net::SocketDescriptor;
 use lampo_common::ldk::onion_message::messenger::{DefaultMessageRouter, OnionMessenger};
 use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
-use lampo_common::ldk::sign::KeysManager;
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
 
@@ -29,11 +29,11 @@ use super::events::PeerEvents;
 use super::peer_event;
 
 pub type LampoArcOnionMessenger<L> = OnionMessenger<
-    Arc<KeysManager>,
-    Arc<KeysManager>,
+    Arc<LampoKeysManager>,
+    Arc<LampoKeysManager>,
     Arc<L>,
     EmptyNodeIdLookUp,
-    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<KeysManager>>>,
+    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<LampoKeysManager>>>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
 >;
@@ -45,7 +45,7 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<LampoArcOnionMessenger<L>>,
     Arc<L>,
     IgnoringMessageHandler,
-    Arc<KeysManager>,
+    Arc<LampoKeysManager>,
 >;
 
 type InnerLampoPeerManager =

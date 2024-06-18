@@ -13,6 +13,7 @@ use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
+use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
 use lampo_common::ldk::chain::{BestBlock, Confirm, Filter, Watch};
@@ -26,7 +27,6 @@ use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
 use lampo_common::ldk::sign::InMemorySigner;
-use lampo_common::ldk::sign::KeysManager;
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
@@ -50,9 +50,9 @@ pub type LampoChainMonitor = ChainMonitor<
 pub type LampoArcChannelManager<M, T, F, L> = ChannelManager<
     Arc<M>,
     Arc<T>,
-    Arc<KeysManager>,
-    Arc<KeysManager>,
-    Arc<KeysManager>,
+    Arc<LampoKeysManager>,
+    Arc<LampoKeysManager>,
+    Arc<LampoKeysManager>,
     Arc<F>,
     Arc<LampoRouter>,
     Arc<L>,
@@ -66,7 +66,7 @@ pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
 pub type LampoRouter = DefaultRouter<
     Arc<LampoGraph>,
     Arc<LampoLogger>,
-    Arc<KeysManager>,
+    Arc<LampoKeysManager>,
     Arc<Mutex<LampoScorer>>,
     ProbabilisticScoringFeeParameters,
     LampoScorer,
@@ -256,7 +256,7 @@ impl LampoChannelManager {
         DefaultRouter<
             Arc<LampoGraph>,
             Arc<LampoLogger>,
-            Arc<KeysManager>,
+            Arc<LampoKeysManager>,
             Arc<Mutex<LampoScorer>>,
             ProbabilisticScoringFeeParameters,
             LampoScorer,
