@@ -432,6 +432,8 @@ impl ChannelEvents for LampoChannelManager {
             }
         };
 
+        let txid = tx.as_ref().map(|tx| tx.txid());
+
         Ok(response::OpenChannel {
             node_id: open_channel.node_id,
             amount: open_channel.amount,
@@ -439,6 +441,7 @@ impl ChannelEvents for LampoChannelManager {
             push_mst: 0,
             to_self_delay: 2016,
             tx,
+            txid,
         })
     }
 
