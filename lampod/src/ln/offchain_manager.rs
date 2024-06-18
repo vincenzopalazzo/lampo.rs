@@ -19,6 +19,7 @@ use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::ln::channelmanager::Retry;
 use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
@@ -27,7 +28,6 @@ use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
 use lampo_common::ldk::sign::EntropySource;
-use lampo_common::ldk::sign::KeysManager;
 
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
@@ -35,7 +35,7 @@ use crate::utils::logger::LampoLogger;
 
 pub struct OffchainManager {
     channel_manager: Arc<LampoChannelManager>,
-    keys_manager: Arc<KeysManager>,
+    keys_manager: Arc<LampoKeysManager>,
     logger: Arc<LampoLogger>,
     lampo_conf: Arc<LampoConf>,
     chain_manager: Arc<LampoChainManager>,
@@ -44,7 +44,7 @@ pub struct OffchainManager {
 impl OffchainManager {
     // FIXME: use the build pattern here
     pub fn new(
-        keys_manager: Arc<KeysManager>,
+        keys_manager: Arc<LampoKeysManager>,
         channel_manager: Arc<LampoChannelManager>,
         logger: Arc<LampoLogger>,
         lampo_conf: Arc<LampoConf>,
