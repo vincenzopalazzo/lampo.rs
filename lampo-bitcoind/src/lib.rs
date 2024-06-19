@@ -101,7 +101,7 @@ impl BitcoinCore {
             .lock()
             .unwrap()
             .borrow_mut()
-            .push((txid.clone(), script.clone()));
+            .push((*txid, script.clone()));
         Ok(())
     }
 
@@ -132,10 +132,10 @@ impl BitcoinCore {
                     tx.clone(),
                     idx as u32,
                     block.header,
-                    Height::from_consensus(self.best_height.borrow().clone() as u32)?,
+                    Height::from_consensus(*self.best_height.borrow() as u32)?,
                 ))));
             } else {
-                still_unconfirmed.push((utxo.clone(), script.clone()));
+                still_unconfirmed.push((*utxo, script.clone()));
             }
         }
         utxos.clear();
@@ -226,7 +226,7 @@ impl Backend for BitcoinCore {
         let fee: MinimumMempoolFee = self.inner.call("getmempoolinfo", &[])?;
         // FIXME: adds the trait for conversion from and to BTC
         let fee = fee.mempoolminfee;
-        Ok((fee * 10000 as f32) as u32)
+        Ok((fee * 10000_f32) as u32)
     }
 
     fn get_best_block(&self) -> error::Result<(lampo_common::backend::BlockHash, Option<u32>)> {
@@ -393,9 +393,9 @@ impl Backend for BitcoinCore {
                         tx.txid(),
                     )));
                 }
-                TxResult::Discarded => handler.emit(Event::OnChain(
-                    OnChainEvent::UnconfirmedTransaction(txid.clone()),
-                )),
+                TxResult::Discarded => {
+                    handler.emit(Event::OnChain(OnChainEvent::UnconfirmedTransaction(*txid)))
+                }
             }
         }
         txs.clear();
@@ -437,7 +437,7 @@ impl Backend for BitcoinCore {
                 };
 
                 if !self.others_txs.lock().unwrap().borrow().is_empty() {
-                    let start: u64 = self.best_height.borrow().clone().into();
+                    let start: u64 = *self.best_height.borrow();
                     let end: u64 = height.into();
                     log::trace!(target: "bitcoind", "Scan blocks in range [{start}..{end}]");
                     for height in start..end + 1 {
@@ -449,8 +449,8 @@ impl Backend for BitcoinCore {
                             log::warn!(target: "bitcoind", "Impossible retrieval the block information with hash `{block_hash}`");
                             continue;
                         };
-                        if self.best_height.borrow().lt(&height.into()) {
-                            *self.best_height.borrow_mut() = height.into();
+                        if self.best_height.borrow().lt(&height) {
+                            *self.best_height.borrow_mut() = height;
                             *self.last_bloch_hash.borrow_mut() = Some(block_hash);
                             log::trace!(target: "bitcoind", "new best block with hash `{block_hash}` at height `{height}`");
                             handler.emit(Event::OnChain(OnChainEvent::NewBestBlock((

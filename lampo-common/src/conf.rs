@@ -25,9 +25,8 @@ pub struct LampoConf {
     pub announce_addr: Option<String>,
 }
 
-impl LampoConf {
-    // Create a new LampoConf with default values (This is used if the user doesn't specify a path)
-    pub fn default() -> Self {
+impl Default for LampoConf {
+    fn default() -> Self {
         // default path for the configuration file
         // (use deprecated std::env::home_dir() to avoid a dependency on dirs)
         #[allow(deprecated)]
@@ -54,7 +53,9 @@ impl LampoConf {
             announce_addr: None,
         }
     }
+}
 
+impl LampoConf {
     pub fn prepare_dirs(&self) -> Result<(), anyhow::Error> {
         Self::prepare_directories(&self.root_path, Some(self.network))
     }
@@ -97,10 +98,10 @@ impl LampoConf {
                 // so it is safe unwrap here otherwise we are hiding a bug
                 // and we must crash.
                 .or_else(|| root_path.strip_suffix(&suffix_without_slash))
-                .expect(&format!("path: {root_path} - network: {network}"))
+                .unwrap_or_else(|| panic!("path: {root_path} - network: {network}"))
                 .to_owned()
         } else {
-            format!("{root_path}")
+            root_path.to_owned()
         };
         log::trace!("normalize root path {root} for network {network}");
         root
@@ -216,9 +217,9 @@ impl TryFrom<String> for LampoConf {
             Ok(Some(level)) => level,
             _ => "info".to_string(),
         };
-        let log_file = conf.get_conf("log-file").unwrap_or_else(|_| None);
+        let log_file = conf.get_conf("log-file").unwrap_or(None);
         let alias = conf.get_conf("alias").unwrap_or(None);
-        let announce_addr = conf.get_conf("announce-addr").unwrap_or_else(|_| None);
+        let announce_addr = conf.get_conf("announce-addr").unwrap_or(None);
 
         Ok(Self {
             inner: Some(conf),
@@ -246,10 +247,7 @@ impl LampoConf {
     }
 
     pub fn get_values(&self, key: &str) -> Option<Vec<String>> {
-        match self.inner {
-            Some(ref conf) => Some(conf.get_confs(key)),
-            None => None,
-        }
+        self.inner.as_ref().map(|conf| conf.get_confs(key))
     }
 
     pub fn get_value(&self, key: &str) -> Result<Option<String>, anyhow::Error> {

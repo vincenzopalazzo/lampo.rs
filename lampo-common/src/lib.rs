@@ -1,5 +1,4 @@
 pub mod backend;
-pub mod chacha20;
 pub mod conf;
 pub mod event;
 pub mod handler;

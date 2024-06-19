@@ -110,7 +110,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         let data_dir = data_dir
             .or_else(|| {
                 #[allow(deprecated)]
-                std::env::home_dir().and_then(|path| Some(path.to_string_lossy().to_string()))
+                std::env::home_dir().map(|path| path.to_string_lossy().to_string())
             })
             .unwrap();
         let data_dir = format!("{data_dir}/.lampo");
