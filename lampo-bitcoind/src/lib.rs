@@ -110,6 +110,38 @@ impl BitcoinCore {
         Ok(block_hash)
     }
 
+    fn handler(&self) -> error::Result<Arc<dyn Handler>> {
+        self.handler
+            .borrow()
+            .clone()
+            .ok_or(error::anyhow!("handler is not set"))
+    }
+
+    fn emit_transaction_status(
+        &self,
+        txid: &lampo_common::backend::Txid,
+        wallet_tx: bool,
+    ) -> error::Result<bool> {
+        let handler = self.handler()?;
+        match self.get_transaction(txid, wallet_tx)? {
+            TxResult::Confirmed((tx, idx, header, height)) => {
+                handler.emit(Event::OnChain(OnChainEvent::ConfirmedTransaction((
+                    tx, idx, header, height,
+                ))));
+                return Ok(true);
+            }
+            TxResult::Unconfirmed(tx) => {
+                handler.emit(Event::OnChain(OnChainEvent::UnconfirmedTransaction(
+                    tx.txid(),
+                )));
+            }
+            TxResult::Discarded => handler.emit(Event::OnChain(
+                OnChainEvent::UnconfirmedTransaction(txid.clone()),
+            )),
+        }
+        Ok(false)
+    }
+
     pub fn find_tx_in_block(&self, block: &Block) -> error::Result<()> {
         log::debug!(target: "bitcoin", "looking the tx inside the new block");
         let utxos = self.others_txs.lock().unwrap();
@@ -155,22 +187,33 @@ impl Backend for BitcoinCore {
             "sendrawtransaction",
             &[lampo_common::bitcoin::consensus::encode::serialize_hex(&tx).into()],
         );
-        log::info!(target: "bitcoind", "broadcast transaction return {:?}", result);
-        if result.is_ok() {
+        let Ok(handler) = self.handler() else {
+            return;
+        };
+        if let Ok(_) = result {
             self.ours_txs.lock().unwrap().borrow_mut().push(tx.txid());
             self.others_txs
                 .lock()
                 .unwrap()
                 .borrow_mut()
                 .retain(|(txid, _)| txid.to_string() == tx.txid().to_string());
-            let handler = self.handler.borrow();
-            let Some(handler) = handler.as_ref() else {
-                return;
-            };
             handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
-        } else {
-            log::error!(target: "bitcoind", "broadcast transaction return {:?}", result);
+            return;
+        } else if let Err(bitcoincore_rpc::Error::JsonRpc(ref err)) = result {
+            if let bitcoincore_rpc::jsonrpc::Error::Rpc(rpc_err) = err {
+                log::warn!(target: "bitcoind", "{:?}", result);
+                // RpcError { code: -27, message: "Transaction already in block chain", data: None }
+                if rpc_err.code == -27 {
+                    // FIXME: we should make sure that we are able to look inside
+                    // a transaction that it is not inside the wallet.
+                    // e.g: unilateral closing tx
+                    let Err(_) = self.emit_transaction_status(&tx.txid(), false) else {
+                        return;
+                    };
+                }
+            }
         }
+        log::error!(target: "bitcoind", "broadcast transaction return {:?}", result);
     }
 
     /// Returning the fee rate estimation in sats.
@@ -293,35 +336,69 @@ impl Backend for BitcoinCore {
         let _ = self.process_transactions();
     }
 
-    fn get_transaction(&self, txid: &lampo_common::bitcoin::Txid) -> error::Result<TxResult> {
-        log::debug!(target: "bitcoind", "call get_transaction");
-        let tx = self.inner.get_transaction(
-            &bitcoincore_rpc::bitcoin::Txid::from_str(txid.to_string().as_str())?,
-            None,
-        )?;
-        // SAFETY: the transaction should contains always the first.
-        //
-        // FIXME: we are looking at the first is always a good ide?
-        if let Some(true) = tx.details.first().unwrap().abandoned {
-            return Ok(TxResult::Discarded);
-        }
-        let raw_tx: Transaction = deserialize(&tx.hex)?;
-        if tx.info.confirmations > 0 {
+    fn get_transaction(
+        &self,
+        txid: &lampo_common::bitcoin::Txid,
+        wallet_tx: bool,
+    ) -> error::Result<TxResult> {
+        log::debug!(target: "bitcoind", "call get_transaction `{txid}` for a wallet tx `{wallet_tx}`");
+        let txid = bitcoincore_rpc::bitcoin::Txid::from_str(txid.to_string().as_str())?;
+        let (raw_tx, blockhash, blockindex, confirmations) = if wallet_tx {
+            let tx = self.inner.get_transaction(&txid, None)?;
+            // SAFETY: the transaction should contains always the first.
+            //
+            // FIXME: we are looking at the first is always a good ide?
+            if let Some(true) = tx.details.first().unwrap().abandoned {
+                return Ok(TxResult::Discarded);
+            }
+            let raw_tx: Transaction = deserialize(&tx.hex)?;
             // SAFETY: if it is confirmed, the block hash is not null.
-            let block_hash = tx.info.blockhash.unwrap().to_string();
+            (
+                raw_tx,
+                tx.info.blockhash.unwrap(),
+                Some(tx.info.blockindex.unwrap()),
+                tx.info.confirmations,
+            )
+        } else {
+            let tx = self.inner.get_raw_transaction_info(&txid, None)?;
+            let raw_tx: Transaction = deserialize(&tx.hex)?;
+            // SAFETY: the transaction should contains always the first.
+            //
+            // FIXME: we are looking at the first is always a good ide?
+            if tx.confirmations.unwrap_or(0) == 0 {
+                return Ok(TxResult::Unconfirmed(raw_tx));
+            }
+            (
+                raw_tx,
+                tx.blockhash.unwrap(),
+                None,
+                tx.confirmations.unwrap() as i32,
+            )
+        };
+
+        if confirmations > 0 {
+            let block_hash = blockhash.to_string();
             let BlockData::FullBlock(block) = self.get_block(&BlockHash::from_str(&block_hash)?)?
             else {
                 unreachable!()
             };
-            // SAFETY: if it is confirmed the block height should be not null.
-            let height = tx.info.blockheight.unwrap();
+            let blockindex = if let Some(idx) = blockindex {
+                idx
+            } else {
+                // FIXME: if we are not able to find the tx this mean that it is a bug
+                block
+                    .txdata
+                    .clone()
+                    .into_iter()
+                    .position(|tx| tx.txid() == txid)
+                    .unwrap()
+            };
+            let height = block.bip34_block_height()?;
             return Ok(TxResult::Confirmed((
                 raw_tx,
-                // SAFETY: this is safe to do because it is confirmed
-                // and will be never null.
-                tx.info.blockindex.unwrap() as u32,
+                blockindex as u32,
                 block.header,
-                Height::from_consensus(height)?,
+                Height::from_consensus(height as u32)?,
             )));
         }
         Ok(TxResult::Unconfirmed(raw_tx))
@@ -370,32 +447,15 @@ impl Backend for BitcoinCore {
     }
 
     fn process_transactions(&self) -> lampo_common::error::Result<()> {
-        let handler = self
-            .handler
-            .borrow()
-            .clone()
-            .ok_or(error::anyhow!("handler is not set"))?;
         let txs = self.ours_txs.lock().unwrap();
         let mut txs = txs.borrow_mut();
         let mut confirmed_txs: Vec<Txid> = Vec::new();
         let mut unconfirmed_txs: Vec<Txid> = Vec::new();
         for txid in txs.iter() {
-            match self.get_transaction(txid)? {
-                TxResult::Confirmed((tx, idx, header, height)) => {
-                    confirmed_txs.push(tx.txid());
-                    handler.emit(Event::OnChain(OnChainEvent::ConfirmedTransaction((
-                        tx, idx, header, height,
-                    ))))
-                }
-                TxResult::Unconfirmed(tx) => {
-                    unconfirmed_txs.push(tx.txid());
-                    handler.emit(Event::OnChain(OnChainEvent::UnconfirmedTransaction(
-                        tx.txid(),
-                    )));
-                }
-                TxResult::Discarded => handler.emit(Event::OnChain(
-                    OnChainEvent::UnconfirmedTransaction(txid.clone()),
-                )),
+            if self.emit_transaction_status(txid, true)? {
+                confirmed_txs.push(txid.clone());
+            } else {
+                unconfirmed_txs.push(txid.clone());
             }
         }
         txs.clear();
@@ -415,12 +475,7 @@ impl Backend for BitcoinCore {
     }
 
     fn listen(self: Arc<Self>) -> error::Result<JoinHandle<()>> {
-        let handler = self
-            .handler
-            .borrow()
-            .clone()
-            .ok_or(error::anyhow!("handler is not set"))?
-            .clone();
+        let handler = self.handler()?;
         log::info!(target: "lampo_bitcoind", "Starting bitcoind polling ...");
         Ok(std::thread::spawn(move || {
             while !self.stop.as_ref() {
