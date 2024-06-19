@@ -51,13 +51,19 @@ pub mod chan {
 #[cfg(feature = "vanilla")]
 pub mod btc {
     pub use bitcoin;
+    pub use bitcoin::absolute::Height;
     pub use bitcoin::secp256k1;
+    pub use bitcoin::block::Header;
+    pub use bitcoin::{ScriptBuf, Transaction};
 }
 
 #[cfg(feature = "rgb")]
 pub mod btc {
     pub use bitcoin_29 as bitcoin;
-    pub use bitcoin::secp256k1;
+    pub use bitcoin_29::secp256k1;
+    pub use bitcoin_29::blockdata::locktime::Height;
+    pub use bitcoin_29::blockdata::block::BlockHeader as Header;
+    pub use bitcoin_29::{Script as ScriptBuf, Transaction};
 }
 
 pub mod btc_rpc {

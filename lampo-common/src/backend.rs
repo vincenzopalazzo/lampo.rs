@@ -4,14 +4,8 @@
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-#[cfg(feature = "vanilla")]
-use crate::btc::bitcoin::absolute::Height;
-#[cfg(feature = "rgb")]
-use crate::btc::bitcoin::blockdata::locktime::Height;
-#[cfg(feature = "vanilla")]
-use crate::btc::bitcoin::block::Header as BlockHeader;
-#[cfg(feature = "rgb")]
-use crate::btc::bitcoin::blockdata::block::BlockHeader as BlockHeader;
+use crate::btc::Height;
+use crate::btc::Header;
 
 pub use crate::btc::bitcoin::consensus::{deserialize, serialize};
 pub use crate::btc::bitcoin::{Block, BlockHash, Script, Transaction, Txid};
@@ -27,7 +21,7 @@ use crate::handler::Handler;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TxResult {
-    Confirmed((Transaction, u32, BlockHeader, Height)),
+    Confirmed((Transaction, u32, Header, Height)),
     Unconfirmed(Transaction),
     Discarded,
 }

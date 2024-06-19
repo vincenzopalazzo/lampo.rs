@@ -6,13 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-#[cfg(feature = "vanilla")]
-use lampo_common::btc::bitcoin::absolute::Height;
+use lampo_common::btc::Height;
 #[cfg(feature = "rgb")]
-pub use {
-    lampo_common::btc::bitcoin::blockdata::locktime::Height,
-    lampo_common::ldk::sign::EntropySource,
-};
+pub use lampo_common::ldk::sign::EntropySource;
 use lampo_common::btc::bitcoin::{BlockHash, Transaction};
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
@@ -69,6 +65,7 @@ type LampoChannel =
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
 pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
+
 #[cfg(feature = "vanilla")]
 pub type LampoRouter = DefaultRouter<
     Arc<LampoGraph>,

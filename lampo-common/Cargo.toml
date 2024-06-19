@@ -57,7 +57,4 @@ rgb = [
     "rgb-lightning-invoice",
     "bitcoin_29",
     "rgb-lightning-rapid-gossip-sync",
-    # FIXME: We should apparantely use one version of bitcoin (or maybe two?) as some of the functions in lampod
-    # is based on bitcoin version 0.30.0
-    "bitcoin",
 ]
