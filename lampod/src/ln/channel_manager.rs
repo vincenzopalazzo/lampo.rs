@@ -232,7 +232,7 @@ impl LampoChannelManager {
         let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
         //FIXME: see if the root_path is correct.
         #[cfg(feature = "rgb")]
-        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys, PathBuf::from(self.conf.root_path))?;
+        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys, PathBuf::from(self.conf.root_path.clone()))?;
         for (_, chan_mon) in monitors.drain(..) {
             #[cfg(feature = "vanilla")]
             chan_mon.load_outputs_to_watch(&self.onchain, &self.logger);
@@ -258,7 +258,7 @@ impl LampoChannelManager {
         let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
         //FIXME: See the root_path
         #[cfg(feature = "rgb")]
-        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys, PathBuf::from(self.conf.root_path))?;
+        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys, PathBuf::from(self.conf.root_path.clone()))?;
         let mut channel_monitors = Vec::new();
         for (_, monitor) in monitors.drain(..) {
             channel_monitors.push(monitor);
@@ -371,7 +371,7 @@ impl LampoChannelManager {
         // TODO: See if the root_path corresponds to the actual ldk_data_dir
         #[cfg(feature = "rgb")]
         {
-            let ldk_data_dir_path = self.conf.root_path;
+            let ldk_data_dir_path = &self.conf.root_path;
             read_args = ChannelManagerReadArgs::new(
                 self.wallet_manager.ldk_keys().keys_manager.clone(),
                 self.wallet_manager.ldk_keys().keys_manager.clone(),
@@ -492,7 +492,7 @@ impl LampoChannelManager {
 
         #[cfg(feature = "rgb")]
         {
-            let ldk_data_dir_path = self.conf.root_path;
+            let ldk_data_dir_path = self.conf.root_path.clone();
             self.channeld = Some(Arc::new(LampoArcChannelManager::new(
                 self.onchain.clone(),
                 self.monitor.clone().unwrap(),
@@ -512,6 +512,7 @@ impl LampoChannelManager {
     }
 }
 
+//Maybe we should implement this trait for rgb?
 #[cfg(feature = "vanilla")]
 impl ChannelEvents for LampoChannelManager {
     // This is the type of open_channel we use for vanilla `lightning`.

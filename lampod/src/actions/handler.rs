@@ -200,40 +200,31 @@ impl Handler for LampoHandler {
                     err
                 })?;
                 log::info!("fee estimated {:?} sats", fee);
-                // In bitcoin 0.30, they use `ScriptBuf` as the output script but inside 
-                // v0.29.0 they use `Script`
-                // FIXME: Find a way to convert `ScriptBuf` to `Script`.
-                #[cfg(feature = "vanilla")]
-                {
-                    let transaction = self.wallet_manager.create_transaction(
-                        output_script,
-                        channel_value_satoshis,
-                        fee,
-                    )?;
-                    log::info!("funding transaction created `{}`", transaction.txid());
-                    log::info!(
-                        "transaction hex `{}`",
-                        lampo_common::btc::bitcoin::consensus::encode::serialize_hex(&transaction)
-                    );
-                    self.emit(Event::Lightning(LightningEvent::FundingChannelEnd {
-                        counterparty_node_id,
-                        temporary_channel_id,
-                        channel_value_satoshis,
-                        funding_transaction: transaction.clone(),
-                    }));
-                    self.channel_manager
-                        .manager()
-                        .funding_transaction_generated(
-                            &temporary_channel_id,
-                            &counterparty_node_id,
-                            transaction,
-                        )
-                        .map_err(|err| error::anyhow!("{:?}", err))?;
-                }
-                #[cfg(feature = "rgb")]
-                {
-                    todo!()
-                }
+
+                let transaction = self.wallet_manager.create_transaction(
+                    output_script,
+                    channel_value_satoshis,
+                    fee,
+                )?;
+                log::info!("funding transaction created `{}`", transaction.txid());
+                log::info!(
+                    "transaction hex `{}`",
+                    lampo_common::btc::bitcoin::consensus::encode::serialize_hex(&transaction)
+                );
+                self.emit(Event::Lightning(LightningEvent::FundingChannelEnd {
+                    counterparty_node_id,
+                    temporary_channel_id,
+                    channel_value_satoshis,
+                    funding_transaction: transaction.clone(),
+                }));
+                self.channel_manager
+                    .manager()
+                    .funding_transaction_generated(
+                        &temporary_channel_id,
+                        &counterparty_node_id,
+                        transaction,
+                    )
+                    .map_err(|err| error::anyhow!("{:?}", err))?;
                 Ok(())
             }
             ldk::events::Event::ChannelPending {

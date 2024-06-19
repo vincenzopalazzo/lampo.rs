@@ -55,6 +55,8 @@ impl LampoChainManager {
             */
             #[cfg(feature = "vanilla")]
             ConfirmationTarget::OutputSpendingFee => String::from("output_spending"),
+            #[cfg(feature = "rgb")]
+            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee => String::from("max_allowed_non_anchor_channel_remote")
         }
     }
 
@@ -101,6 +103,10 @@ impl FeeEstimator for LampoChainManager {
             #[cfg(feature = "vanilla")]
             ConfirmationTarget::OutputSpendingFee => {
                 self.backend.fee_rate_estimation(12).unwrap_or_default()
+            }
+            #[cfg(feature = "rgb")]
+            ConfirmationTarget::MaxAllowedNonAnchorChannelRemoteFee => {
+                todo!()
             }
         }
     }

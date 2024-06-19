@@ -52,9 +52,17 @@ impl InventoryHandler for LampoInventoryManager {
                     };
                     address_vec.push(address_info);
                 }
+
+                // We don't have `list_peers` for rgb version of lightning.
+                #[cfg(feature = "rgb")]
+                let peers: usize = self.peer_manager.manager().get_peer_node_ids().len();
+
+                #[cfg(feature = "vanilla")]
+                let peers = self.peer_manager.manager().list_peers().len();
+
                 let getinfo = GetInfo {
                     node_id: self.channel_manager.manager().get_our_node_id().to_string(),
-                    peers: self.peer_manager.manager().list_peers().len(),
+                    peers: peers,
                     channels: self.channel_manager.manager().list_channels().len(),
                     chain,
                     alias,

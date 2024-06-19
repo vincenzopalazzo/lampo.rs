@@ -14,11 +14,18 @@ use lampo_common::ldk::ln::peer_handler::MessageHandler;
 use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
 use lampo_common::ldk::net;
 use lampo_common::ldk::net::SocketDescriptor;
+#[cfg(feature = "vanilla")]
 use lampo_common::ldk::onion_message::messenger::{DefaultMessageRouter, OnionMessenger};
 use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::ldk::sign::KeysManager;
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
+#[cfg(feature = "rgb")]
+pub use  {
+    lampo_common::ldk::onion_message::{DefaultMessageRouter, SimpleArcOnionMessenger, OnionMessenger},
+    lampo_common::ldk::sync::rpc::RpcClient,
+    lampo_common::ldk::sync::gossip::TokioSpawner,
+};
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
@@ -29,12 +36,23 @@ use super::channel_manager::{LampoArcChannelManager, LampoChainMonitor, LampoGra
 use super::events::PeerEvents;
 use super::peer_event;
 
+#[cfg(feature = "vanilla")]
 pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<KeysManager>,
     Arc<KeysManager>,
     Arc<L>,
     EmptyNodeIdLookUp,
     Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<KeysManager>>>,
+    IgnoringMessageHandler,
+    IgnoringMessageHandler,
+>;
+
+#[cfg(feature = "rgb")]
+pub type LampoArcOnionMessenger<L> = OnionMessenger<
+    Arc<KeysManager>,
+    Arc<KeysManager>,
+    Arc<L>,
+    Arc<DefaultMessageRouter>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
 >;
@@ -49,6 +67,8 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<KeysManager>,
 >;
 
+// We only use this! But this uses SimpleArcPeerManager which uses LampoArcOnionMessenger
+// #[cfg(feature = "vanilla")]
 type InnerLampoPeerManager =
     SimpleArcPeerManager<LampoChainMonitor, LampoChainManager, LampoLogger>;
 
@@ -87,12 +107,23 @@ impl LampoPeerManager {
 
         let keys = wallet_manager.ldk_keys().keys_manager.clone();
         let graph = channel_manager.graph();
+        #[cfg(feature = "vanilla")]
         let onion_messenger = Arc::new(OnionMessenger::new(
             keys.clone(),
             keys.clone(),
             self.logger.clone(),
             EmptyNodeIdLookUp {},
             Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone())),
+            IgnoringMessageHandler {},
+            IgnoringMessageHandler {},
+        ));
+
+        #[cfg(feature = "rgb")]
+        let onion_messenger = Arc::new(LampoArcOnionMessenger::new(
+            Arc::clone(&keys),
+            Arc::clone(&keys),
+            Arc::clone(&self.logger.clone()),
+            Arc::new(DefaultMessageRouter {}),
             IgnoringMessageHandler {},
             IgnoringMessageHandler {},
         ));
@@ -110,6 +141,7 @@ impl LampoPeerManager {
             custom_message_handler: IgnoringMessageHandler {},
         };
 
+        #[cfg(feature = "vanilla")]
         let peer_manager = InnerLampoPeerManager::new(
             lightning_msg_handler,
             current_time.try_into().unwrap(),
@@ -117,6 +149,16 @@ impl LampoPeerManager {
             channel_manager.logger.clone(),
             wallet_manager.ldk_keys().keys_manager.clone(),
         );
+
+        #[cfg(feature = "rgb")]
+        let peer_manager = InnerLampoPeerManager::new(
+            lightning_msg_handler,
+            current_time.try_into().unwrap(),
+            &ephemeral_bytes,
+            channel_manager.logger.clone(),
+            Arc::clone(&wallet_manager.ldk_keys().keys_manager.clone(),),
+        );
+
         self.peer_manager = Some(Arc::new(peer_manager));
         self.channel_manager = Some(channel_manager.clone());
         Ok(())
@@ -211,6 +253,17 @@ impl LampoPeerManager {
         let Some(ref manager) = self.peer_manager else {
             panic!("at this point the peer manager should be known");
         };
+        #[cfg(feature = "rgb")]
+        {
+            for (node_id, _) in manager.get_peer_node_ids() {
+                if node_id == peer_id {
+                    return true;
+                }
+            }
+            false
+        }
+
+        #[cfg(feature = "vanilla")]
         manager.peer_by_node_id(&peer_id).is_some()
     }
 }
@@ -248,19 +301,48 @@ impl PeerEvents for LampoPeerManager {
                 std::task::Poll::Pending => {}
             }
             // Avoid blocking the tokio context by sleeping a bit
-            match manager.peer_by_node_id(&node_id) {
-                Some(_) => return Ok(()),
-                None => tokio::time::sleep(Duration::from_millis(10)).await,
+
+
+            #[cfg(feature = "rgb")]
+
+            {
+                match manager
+                    .get_peer_node_ids()
+                    .iter()
+                    .find(|(id, _)| *id == node_id)
+                {
+                    Some(_) => return Ok(()),
+                    None => tokio::time::sleep(Duration::from_millis(10)).await,
+                }
+
+            }
+
+            #[cfg(feature = "vanilla")]
+            {
+                match manager.peer_by_node_id(&node_id) {
+                    Some(_) => return Ok(()),
+                    None => tokio::time::sleep(Duration::from_millis(10)).await,
+                }
             }
         }
     }
 
     async fn disconnect(&self, node_id: NodeId) -> error::Result<()> {
         //check the pubkey matches a valid connected peer
-        if self.manager().peer_by_node_id(&node_id).is_none() {
-            error::bail!("Error: Could not find peer `{node_id}`");
+        #[cfg(feature = "rgb")]
+        {
+            let peers = self.manager().get_peer_node_ids();
+            if !peers.iter().any(|(pk, _)| &node_id == pk) {
+                error::bail!("Error: Could not find peer `{node_id}`");
+            }
         }
 
+        #[cfg(feature = "vanilla")]
+        {
+            if self.manager().peer_by_node_id(&node_id).is_none() {
+                error::bail!("Error: Could not find peer `{node_id}`");
+            }
+        }
         self.manager().disconnect_by_node_id(node_id);
         Ok(())
     }
