@@ -9,6 +9,7 @@ use lampo_jsonrpc::errors::RpcError;
 
 use crate::ln::events::ChannelEvents;
 
+use crate::rpc_error;
 use crate::LampoDaemon;
 
 pub fn json_list_channels(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
@@ -22,30 +23,18 @@ pub fn json_close_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     let mut request: request::CloseChannel = json::from_value(request.clone())?;
     let events = ctx.handler().events();
     // This gives all the channels with associated peer
-    let channels: response::Channels = ctx
-        .handler()
-        .call(
-            "channels",
-            json::json!({
+    let channels: response::Channels = ctx.handler().call(
+        "channels",
+        json::json!({
             "peer_id": request.node_id,
-            }),
-        )
-        .map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: format!("{err}"),
-                data: None,
-            })
-        })?;
+        }),
+    )?;
+
     let res = if channels.channels.len() > 1 {
         // check the channel_id if it is not none, if it is return an error
         // and if it is not none then we need to have the channel_id that needs to be shut
         if request.channel_id.is_none() {
-            return Err(Error::Rpc(RpcError {
-                code: -1,
-                message: format!("Channels > 1, provide `channel_id`"),
-                data: None,
-            }));
+            return Err(rpc_error!("Channels > 1, provide `channel_id`"));
         } else {
             request
         }
@@ -57,24 +46,15 @@ pub fn json_close_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         request
     } else {
         // No channels with the given peer.
-        return Err(Error::Rpc(RpcError {
-            code: -1,
-            message: format!("No channels with associated peer"),
-            data: None,
-        }));
+        return Err(rpc_error!("No channels with associated peer"));
     };
-    match ctx.channel_manager().close_channel(res) {
-        Err(err) => {
-            return Err(Error::Rpc(RpcError {
-                code: -1,
-                message: format!("{err}"),
-                data: None,
-            }))
-        }
-        Ok(_) => {}
-    };
+    ctx.channel_manager().close_channel(res)?;
+
+    // FIXME: would be good to have some sort of macros, because
+    // this is a common patter across lampo
     let (message, channel_id, node_id, funding_utxo) = loop {
         let event = events
+            // FIXME: find a way to map this error
             .recv_timeout(std::time::Duration::from_secs(30))
             .map_err(|err| {
                 Error::Rpc(RpcError {
@@ -93,6 +73,8 @@ pub fn json_close_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<js
             break (message, channel_id, counterparty_node_id, funding_utxo);
         }
     };
+
+    // FIXME: wrap this under a struct
     Ok(json::json!({
         "message" : message,
         "channel_id" : channel_id,
