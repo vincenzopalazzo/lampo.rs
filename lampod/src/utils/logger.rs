@@ -22,7 +22,7 @@ impl FromStr for LogLevel {
         match s {
             "debug" => Ok(LogLevel::Debug),
             "info" => Ok(LogLevel::Info),
-            "warning" => Ok(LogLevel::Warn),
+            "warn" => Ok(LogLevel::Warn),
             "error" => Ok(LogLevel::Error),
             "trace" => Ok(LogLevel::Trace),
             _ => Err(format!("Unknown {} level", s)),
