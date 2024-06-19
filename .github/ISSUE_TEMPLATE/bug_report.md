@@ -1,3 +1,12 @@
+---
+name: Bug report
+about: Create a report to help us improve
+title: "[BUG] "
+labels: P-waiting
+assignees: ''
+
+---
+
 <!--
 ## Issue Template for lampo.rs
 
