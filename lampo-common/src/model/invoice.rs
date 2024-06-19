@@ -54,7 +54,7 @@ pub mod response {
         fn from(value: ldk::offers::offer::Offer) -> Self {
             Self {
                 bolt12: value.to_string(),
-                metadata: value.metadata().map(|bytes| hex::encode(bytes)),
+                metadata: value.metadata().map(hex::encode),
                 metadata_pubkey: value.signing_pubkey(),
             }
         }

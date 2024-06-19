@@ -85,7 +85,7 @@ pub struct RpcError {
 impl From<Error> for RpcError {
     fn from(value: Error) -> Self {
         match value {
-            Error::Rpc(rpc) => return rpc.clone(),
+            Error::Rpc(rpc) => rpc.clone(),
             _ => RpcError {
                 code: -1,
                 message: format!("{value}"),

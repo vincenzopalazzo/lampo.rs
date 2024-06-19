@@ -74,8 +74,8 @@ impl CoreWalletManager {
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
         use bdk::bitcoin::bip32::Xpriv;
 
-        let ldk_keys = if channel_keys.is_some() {
-            LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
+        let ldk_keys = if let Some(channel_keys) = channel_keys {
+            LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys)
         } else {
             LampoKeys::new(xprv.inner.secret_bytes())
         };
@@ -104,7 +104,7 @@ impl CoreWalletManager {
         if !rpc
             .list_wallets()?
             .iter()
-            .any(|wallet| &wallet == &&name_wallet)
+            .any(|wallet| wallet == &name_wallet)
         {
             let result: Result<json::Value, bitcoincore_rpc::Error> = rpc.call(
                 "createwallet",
@@ -230,7 +230,7 @@ impl WalletManager for CoreWalletManager {
         fee_rate: u32,
     ) -> error::Result<bitcoin::Transaction> {
         let addr = bitcoin_bech32::WitnessProgram::from_scriptpubkey(
-            &script.as_bytes(),
+            script.as_bytes(),
             match self.network {
                 Network::Bitcoin => bitcoin_bech32::constants::Network::Bitcoin,
                 Network::Testnet => bitcoin_bech32::constants::Network::Testnet,

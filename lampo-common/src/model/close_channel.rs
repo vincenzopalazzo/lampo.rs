@@ -27,7 +27,7 @@ pub mod request {
                 .channel_id
                 .as_ref()
                 .ok_or(error::anyhow!("`channel_id` not found"))?;
-            let result = self.decode_hex(&id)?;
+            let result = self.decode_hex(id)?;
             let mut result_array: [u8; 32] = [0; 32];
             result_array.copy_from_slice(&result);
             Ok(ChannelId::from_bytes(result_array))
