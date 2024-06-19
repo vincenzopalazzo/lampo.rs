@@ -79,7 +79,7 @@ pub trait Backend {
     /// the listener through the handler.
     fn listen(self: Arc<Self>) -> error::Result<JoinHandle<()>>;
     /// Get the information of a transaction inside the blockchain.
-    fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;
+    fn get_transaction(&self, txid: &Txid, wallet_tx: bool) -> error::Result<TxResult>;
     /// Process the transactions
     fn process_transactions(&self) -> error::Result<()>;
 }
