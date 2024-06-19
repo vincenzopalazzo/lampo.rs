@@ -1,5 +1,4 @@
-use std::io;
-use std::{error, fmt};
+use std::{error, fmt, io};
 
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -36,6 +35,16 @@ impl From<io::Error> for Error {
 impl From<RpcError> for Error {
     fn from(e: RpcError) -> Error {
         Error::Rpc(e)
+    }
+}
+
+impl From<anyhow::Error> for Error {
+    fn from(e: anyhow::Error) -> Error {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("{e}"),
+            data: None,
+        })
     }
 }
 

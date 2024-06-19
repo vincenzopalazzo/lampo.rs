@@ -2,7 +2,7 @@
 
 use lampo_common::json;
 use lampo_common::model::request;
-use lampo_jsonrpc::errors::{Error, RpcError};
+use lampo_jsonrpc::errors::Error;
 
 use crate::ln::events::ChannelEvents;
 use crate::LampoDaemon;
@@ -19,36 +19,16 @@ pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
         .is_connected_with(request.node_id().unwrap())
     {
         log::trace!("we are not connected with the peer {}", request.node_id);
-        let conn = request::Connect::try_from(request.clone()).map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: format!("{err}"),
-                data: None,
-            })
-        })?;
+        let conn = request::Connect::try_from(request.clone())?;
         let conn = json::to_value(conn)?;
         let _ = ctx.rt.enter();
-        ctx.call("connect", conn).map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: format!("connect fails with: {err}"),
-                data: None,
-            })
-        })?;
+        ctx.call("connect", conn)?;
     }
 
     // FIXME: there are use case there need to be covered, like
     // - When there is an error how we return back to the user?
     // - In this case there is some feedback that ldk need to give us
     // before return the message, so we should design a solution for this.
-    let resp = ctx.channel_manager().open_channel(request);
-    let resp = match resp {
-        Ok(resp) => Ok(resp),
-        Err(err) => Err(Error::Rpc(RpcError {
-            code: -1,
-            message: format!("{err}"),
-            data: None,
-        })),
-    };
-    Ok(json::to_value(resp?)?)
+    let resp = ctx.channel_manager().open_channel(request)?;
+    Ok(json::to_value(resp)?)
 }

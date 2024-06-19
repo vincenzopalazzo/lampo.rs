@@ -17,26 +17,16 @@ use lampo_common::model::response::{Invoice, InvoiceInfo};
 use lampo_common::{json, model::request::DecodeInvoice};
 use lampo_jsonrpc::errors::{Error, RpcError};
 
-use crate::rpc_error;
 use crate::LampoDaemon;
 
 pub fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: GenerateInvoice = json::from_value(request.clone())?;
-    let invoice = ctx
-        .offchain_manager()
-        .generate_invoice(
-            request.amount_msat,
-            &request.description,
-            request.expiring_in.unwrap_or(10000),
-        )
-        .map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: format!("{err}"),
-                data: None,
-            })
-        })?;
+    let invoice = ctx.offchain_manager().generate_invoice(
+        request.amount_msat,
+        &request.description,
+        request.expiring_in.unwrap_or(10000),
+    )?;
     let invoice = Invoice {
         bolt11: invoice.to_string(),
     };
@@ -72,14 +62,7 @@ pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<j
     let request: DecodeInvoice = json::from_value(request.clone())?;
     let invoice = ctx
         .offchain_manager()
-        .decode_invoice(&request.invoice_str)
-        .map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: format!("{err}"),
-                data: None,
-            })
-        })?;
+        .decode_invoice(&request.invoice_str)?;
     let invoice = InvoiceInfo {
         amount_msa: invoice.amount_milli_satoshis(),
         network: invoice.network().to_string(),
@@ -102,12 +85,10 @@ pub fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value,
     let events = ctx.handler().events();
     if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
         ctx.offchain_manager()
-            .pay_offer(&request.invoice_str, request.amount)
-            .map_err(|err| rpc_error!("{err}"))?;
+            .pay_offer(&request.invoice_str, request.amount)?;
     } else {
         ctx.offchain_manager()
-            .pay_invoice(&request.invoice_str, request.amount)
-            .map_err(|err| rpc_error!("{err}"))?;
+            .pay_invoice(&request.invoice_str, request.amount)?;
     }
     // FIXME: this will loop when the Payment event is not generated
     loop {
@@ -141,13 +122,7 @@ pub fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Va
     log::debug!("call for `keysend` with request `{:?}`", request);
     let request: KeySend = json::from_value(request.clone())?;
     ctx.offchain_manager()
-        .keysend(request.destination, request.amount_msat)
-        .map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: format!("{err}"),
-                data: None,
-            })
-        })?;
+        .keysend(request.destination, request.amount_msat)?;
+    // FIXME: return a better response
     Ok(json::json!({}))
 }
