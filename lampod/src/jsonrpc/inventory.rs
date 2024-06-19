@@ -1,6 +1,7 @@
 //! Inventory method implementation
 use lampo_common::json;
-use lampo_jsonrpc::errors::{Error, RpcError};
+
+use crate::json_rpc2::{Error, RpcError};
 
 use crate::LampoDaemon;
 

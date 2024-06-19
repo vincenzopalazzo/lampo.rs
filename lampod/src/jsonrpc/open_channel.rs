@@ -1,9 +1,8 @@
 //! Open Channel RPC Method implementation
-
 use lampo_common::json;
 use lampo_common::model::request;
-use lampo_jsonrpc::errors::{Error, RpcError};
 
+use crate::json_rpc2::{Error, RpcError};
 use crate::ln::events::ChannelEvents;
 use crate::LampoDaemon;
 
@@ -27,7 +26,6 @@ pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
             })
         })?;
         let conn = json::to_value(conn)?;
-        let _ = ctx.rt.enter();
         ctx.call("connect", conn).map_err(|err| {
             Error::Rpc(RpcError {
                 code: -1,
