@@ -73,7 +73,7 @@ impl SignerProvider for LampoKeysManager {
     }
 }
 
-// Source of entropy.
+/// Source of entropy.
 impl EntropySource for LampoKeysManager {
     fn get_secure_random_bytes(&self) -> [u8; 32] {
         self.client.get_secure_random_bytes()
