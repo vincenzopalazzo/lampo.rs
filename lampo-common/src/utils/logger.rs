@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use log::{debug, error, info, trace, warn};
 
-use lampo_common::ldk::util::logger::{Logger, Record};
+use crate::ldk::util::logger::{Logger, Record};
 
 enum LogLevel {
     Info,

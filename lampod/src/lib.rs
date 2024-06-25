@@ -18,7 +18,6 @@ pub mod handler;
 pub mod jsonrpc;
 pub mod ln;
 pub mod persistence;
-pub mod utils;
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -34,6 +33,7 @@ use lampo_common::json;
 use lampo_common::ldk::events::Event;
 use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
 use lampo_common::ldk::routing::gossip::P2PGossipSync;
+use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
 
 use crate::actions::handler::LampoHandler;
