@@ -87,6 +87,13 @@ impl OffchainManager {
         Ok(invoice)
     }
 
+    pub fn decode<T: FromStr>(&self, invoice_str: &str) -> error::Result<T> {
+        let invoice = invoice_str
+            .parse::<T>()
+            .map_err(|_| error::anyhow!("Impossible decode the invoice `{invoice_str}`"))?;
+        Ok(invoice)
+    }
+
     pub fn pay_offer(&self, offer_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         // check if it is an invoice or an offer
         let offer_hash = Sha256::hash(offer_str.as_bytes());

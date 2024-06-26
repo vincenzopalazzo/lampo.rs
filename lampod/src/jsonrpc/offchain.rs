@@ -2,11 +2,13 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+use lampo_common::conf::Network;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::ldk;
 use lampo_common::ldk::offers::offer;
+use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
@@ -60,22 +62,55 @@ pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Valu
 pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: DecodeInvoice = json::from_value(request.clone())?;
-    let invoice = ctx
+
+    let invoice = if let Ok(invoice) = ctx
         .offchain_manager()
-        .decode_invoice(&request.invoice_str)?;
-    let invoice = InvoiceInfo {
-        amount_msa: invoice.amount_milli_satoshis(),
-        network: invoice.network().to_string(),
-        description: match invoice.description() {
-            ldk::invoice::Bolt11InvoiceDescription::Direct(dec) => dec.to_string(),
-            ldk::invoice::Bolt11InvoiceDescription::Hash(_) => {
-                "description hash provided".to_string()
-            }
-        },
-        routes: Vec::new(),
-        hints: Vec::new(),
-        expiry_time: invoice.expiry_time().as_millis() as u64,
+        .decode::<ldk::invoice::Bolt11Invoice>(&request.invoice_str)
+    {
+        InvoiceInfo {
+            amount_msa: invoice.amount_milli_satoshis(),
+            network: invoice.network().to_string(),
+            description: match invoice.description() {
+                ldk::invoice::Bolt11InvoiceDescription::Direct(dec) => Some(dec.to_string()),
+                ldk::invoice::Bolt11InvoiceDescription::Hash(_) => {
+                    Some("description hash provided".to_string())
+                }
+            },
+            routes: Vec::new(),
+            hints: Vec::new(),
+            expiry_time: Some(invoice.expiry_time().as_millis() as u64),
+        }
+    } else if let Ok(offer) = ctx
+        .offchain_manager()
+        .decode::<ldk::offers::offer::Offer>(&request.invoice_str)
+    {
+        // FIXME: semplify this chain;
+        let network = offer
+            .chains()
+            .iter()
+            .map(|chain| Network::from_chain_hash(chain.clone()).unwrap().to_string())
+            .collect::<Vec<String>>()
+            .first()
+            .unwrap_or(&Network::Bitcoin.to_string())
+            .clone();
+        InvoiceInfo {
+            amount_msa: offer.amount().map(|a| {
+                if let Amount::Bitcoin { amount_msats } = a {
+                    amount_msats.clone()
+                } else {
+                    unimplemented!()
+                }
+            }),
+            network: network.to_string(),
+            description: offer.description().map(|str| str.to_string()),
+            routes: Vec::new(),
+            hints: Vec::new(),
+            expiry_time: offer.absolute_expiry().map(|a| a.as_millis() as u64),
+        }
+    } else {
+        unreachable!()
     };
+
     Ok(json::to_value(&invoice)?)
 }
 

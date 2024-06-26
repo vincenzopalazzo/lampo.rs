@@ -62,8 +62,8 @@ pub mod response {
 
     #[derive(Serialize, Deserialize)]
     pub struct InvoiceInfo {
-        pub expiry_time: u64,
-        pub description: String,
+        pub expiry_time: Option<u64>,
+        pub description: Option<String>,
         pub routes: Vec<String>,
         pub hints: Vec<String>,
         pub network: String,
