@@ -74,7 +74,7 @@ make integration
 
 ## Contributing guidelines
 
-Please read our [Hacking guide](/docs/MAINTAINERS.md).
+Please read our [Contributing guide](/CONTRIBUTING.md).
 
 ## Community
 
