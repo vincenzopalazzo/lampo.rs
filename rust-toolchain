@@ -1,1 +1,4 @@
-1.72
+[toolchain]
+channel = "stable"
+components = [ "rustfmt" ]
+profile = "minimal"
