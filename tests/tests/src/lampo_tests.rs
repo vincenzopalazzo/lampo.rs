@@ -411,3 +411,101 @@ pub fn pay_offer_minimal_offer() -> error::Result<()> {
     log::info!(target: &node1.info.node_id, "payment made `{:?}`", pay);
     Ok(())
 }
+
+#[test]
+pub fn decode_offer() -> error::Result<()> {
+    init();
+    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
+    let btc = Arc::new(btc);
+    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
+    let node2 = Arc::new(LampoTesting::new(btc.clone())?);
+
+    let events = node1.lampod().events();
+    let _ = node1.fund_wallet(101)?;
+    wait!(|| {
+        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
+            events.recv_timeout(Duration::from_millis(100))
+        else {
+            return Err(());
+        };
+        if height.to_consensus_u32() == 101 {
+            return Ok(());
+        }
+        Err(())
+    });
+
+    let response: json::Value = node1
+        .lampod()
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: node2.info.node_id.clone(),
+                amount: 1_000_000,
+                public: true,
+                addr: Some("127.0.0.1".to_owned()),
+                port: Some(node2.port),
+            },
+        )
+        .unwrap();
+    assert!(response.get("tx").is_some());
+
+    wait!(|| {
+        while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
+            node2.fund_wallet(6).unwrap();
+            if let Event::Lightning(LightningEvent::ChannelReady {
+                counterparty_node_id,
+                ..
+            }) = event
+            {
+                if counterparty_node_id.to_string() == node1.info.node_id {
+                    return Err(());
+                }
+                return Ok(());
+            };
+            // check if lampo see the channel
+            let channels: response::Channels =
+                node2.lampod().call("channels", json::json!({})).unwrap();
+            if channels.channels.is_empty() {
+                return Err(());
+            }
+
+            if !channels.channels.first().unwrap().ready {
+                return Err(());
+            }
+
+            let channels: response::Channels =
+                node1.lampod().call("channels", json::json!({})).unwrap();
+
+            if channels.channels.is_empty() {
+                return Err(());
+            }
+
+            if channels.channels.first().unwrap().ready {
+                return Ok(());
+            }
+        }
+        node2.fund_wallet(6).unwrap();
+        Err(())
+    });
+
+    let offer: response::Offer = node2.lampod().call(
+        "offer",
+        request::GenerateOffer {
+            description: None,
+            amount_msat: None,
+        },
+    )?;
+
+    log::info!(target: &node2.info.node_id, "offer generated `{:?}`", offer);
+
+    let decode: response::InvoiceInfo = node2.lampod().call(
+        "decode",
+        request::DecodeInvoice {
+            invoice_str: offer.bolt12,
+        },
+    )?;
+
+    assert_eq!(decode.issuer_id, Some(node2.info.node_id.clone()));
+    log::info!(target: &node2.info.node_id, "decode offer `{:?}`", decode);
+    Ok(())
+}

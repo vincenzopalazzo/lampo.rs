@@ -632,7 +632,10 @@ pub fn decode_invoice_from_cln() {
             }),
         )
         .unwrap();
-    assert_eq!(decode.description, "need to be decoded by lampo");
+    assert_eq!(
+        decode.description,
+        Some("need to be decoded by lampo".to_owned())
+    );
     async_run!(cln.stop()).unwrap();
 }
 
