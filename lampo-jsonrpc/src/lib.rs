@@ -206,6 +206,9 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
             self.sources.poll(&mut events, Timeout::Never)?;
             for mut event in events.drain(..) {
                 match &event.key {
+                    // FIXME: this is just for the moment because
+                    // we are moving to https://github.com/vincenzopalazzo/lampo.rs/pull/246
+                    #[allow(clippy::never_loop)]
                     RPCEvent::Accept => loop {
                         let accept = self.socket.accept();
                         if let Err(err) = accept {
