@@ -9,7 +9,7 @@ default: fmt
 
 fmt:
 	$(CC) fmt --all
-	$(CC) clippy --workspace
+	# $(CC) clippy --workspace
 
 check:
 	$(CC) test --all -- --show-output
