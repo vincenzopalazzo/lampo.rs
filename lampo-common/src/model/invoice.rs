@@ -16,10 +16,9 @@ pub mod request {
         pub description: Option<String>,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct DecodeInvoice {
         pub invoice_str: String,
-        pub amount: Option<u64>,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -60,8 +59,9 @@ pub mod response {
         }
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct InvoiceInfo {
+        pub issuer_id: Option<String>,
         pub expiry_time: Option<u64>,
         pub description: Option<String>,
         pub routes: Vec<String>,
