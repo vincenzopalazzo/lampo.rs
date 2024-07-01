@@ -44,7 +44,7 @@ pub mod response {
         pub node_id: String,
         pub amount: u64,
         pub public: bool,
-        pub push_mst: u64,
+        pub push_msat: u64,
         pub to_self_delay: u64,
         pub tx: Option<Transaction>,
         pub txid: Option<Txid>,
