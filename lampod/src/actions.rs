@@ -26,7 +26,7 @@ impl Handler for DummyHandler {
     }
 }
 
-/// The Handler that need to implement for handle
+/// The Handler that need to be implemented to handle
 /// inventory event
 ///
 /// This is necessary because ldk does not have any
