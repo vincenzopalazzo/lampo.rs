@@ -203,7 +203,7 @@ impl LampoChannelManager {
                 peer_id: channel.counterparty.node_id.to_string(),
                 peer_alias: None,
                 ready: channel.is_channel_ready,
-                amount_satoshis: channel.channel_value_satoshis,
+                amount: channel.channel_value_satoshis,
                 amount_msat: channel.next_outbound_htlc_limit_msat,
                 public: channel.is_public,
                 available_balance_for_send_msat: channel.outbound_capacity_msat,
