@@ -64,10 +64,6 @@ impl LampoHandler {
     /// Call any method supported by the lampod configuration. This includes
     /// a lot of handler code. This function serves as a broker pattern in some ways,
     /// but it may also function as a chain of responsibility pattern in certain cases.
-    ///
-    /// Welcome to the third design pattern in under 300 lines of code. The code will clarify the
-    /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
-    /// at some point.
     pub fn call<T: json::Serialize, R: json::DeserializeOwned>(
         &self,
         method: &str,
