@@ -75,7 +75,7 @@ pub trait Backend {
     /// Ask to the backend to watch the following UTXO and notify you
     /// when somethings changes
     fn manage_transactions(&self, txs: &mut Vec<Txid>) -> error::Result<()>;
-    /// Spawn a thread and start to polling the backend and notify
+    /// Spawn a thread and start polling the backend and notify
     /// the listener through the handler.
     fn listen(self: Arc<Self>) -> error::Result<JoinHandle<()>>;
     /// Get the information of a transaction inside the blockchain.
