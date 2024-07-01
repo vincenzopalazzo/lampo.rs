@@ -438,7 +438,7 @@ impl ChannelEvents for LampoChannelManager {
             node_id: open_channel.node_id,
             amount: open_channel.amount,
             public: open_channel.public,
-            push_mst: 0,
+            push_msat: 0,
             to_self_delay: 2016,
             tx,
             txid,
