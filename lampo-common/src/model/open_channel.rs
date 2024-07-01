@@ -65,7 +65,7 @@ pub mod response {
         pub peer_id: String,
         pub peer_alias: Option<String>,
         pub ready: bool,
-        pub amount_satoshis: u64,
+        pub amount: u64,
         pub amount_msat: u64,
         pub public: bool,
         pub available_balance_for_send_msat: u64,
