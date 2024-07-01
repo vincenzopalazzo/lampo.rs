@@ -22,7 +22,7 @@ pub enum Command {
     /// handle.
     ///
     /// An external handler can be any kind of method
-    /// that lampod do not know nothing about.
+    /// that lampod know nothing about.
     ///
     /// Core Lightning Plugins works this way and we want
     /// keep this freedom, but we do not want people
