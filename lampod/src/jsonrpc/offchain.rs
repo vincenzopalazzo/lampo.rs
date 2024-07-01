@@ -69,7 +69,7 @@ pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<j
     {
         InvoiceInfo {
             issuer_id: invoice.payee_pub_key().map(|id| id.to_string()),
-            amount_msa: invoice.amount_milli_satoshis(),
+            amount_msat: invoice.amount_milli_satoshis(),
             network: invoice.network().to_string(),
             description: match invoice.description() {
                 ldk::invoice::Bolt11InvoiceDescription::Direct(dec) => Some(dec.to_string()),
@@ -96,7 +96,7 @@ pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<j
             .clone();
         InvoiceInfo {
             issuer_id: offer.issuer().map(|id| id.to_string()),
-            amount_msa: offer.amount().map(|a| {
+            amount_msat: offer.amount().map(|a| {
                 if let Amount::Bitcoin { amount_msats } = a {
                     amount_msats.clone()
                 } else {

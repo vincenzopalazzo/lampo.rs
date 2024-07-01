@@ -67,7 +67,7 @@ pub mod response {
         pub routes: Vec<String>,
         pub hints: Vec<String>,
         pub network: String,
-        pub amount_msa: Option<u64>,
+        pub amount_msat: Option<u64>,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
