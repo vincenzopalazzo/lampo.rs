@@ -236,7 +236,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                         let fd = event.as_raw_fd();
                         // SAFETY: we must have the response for this fd.
                         let resp = self.response_queue.remove(&fd).unwrap();
-                        // SAFETY: we much have a stream for this fd.
+                        // SAFETY: we must have a stream for this fd.
                         let mut stream = self.open_streams.remove(&event.as_raw_fd()).unwrap();
                         // SAFETY: the resp should be a valid json.
                         let buff = serde_json::to_string(&resp).unwrap();
