@@ -29,7 +29,7 @@ pub struct BitcoinCore {
     ours_txs: Mutex<RefCell<Vec<Txid>>>,
     others_txs: Mutex<RefCell<Vec<(Txid, ScriptBuf)>>>,
     // receive notification if the
-    // daemon was stop
+    // daemon was stoped
     stop: Arc<bool>,
     pool_time: Duration,
     best_height: RefCell<u64>,
@@ -70,7 +70,7 @@ impl BitcoinCore {
             handler: RefCell::new(None),
             ours_txs: Mutex::new(RefCell::new(Vec::new())),
             others_txs: Mutex::new(RefCell::new(Vec::new())),
-            // by default the we pool bitcoind each 2 minutes
+            // by default we pool bitcoind each 2 minutes
             pool_time: Duration::from_secs(pool_time.unwrap_or(120) as u64),
             stop,
             last_bloch_hash: None.into(),
@@ -299,9 +299,9 @@ impl Backend for BitcoinCore {
             &bitcoincore_rpc::bitcoin::Txid::from_str(txid.to_string().as_str())?,
             None,
         )?;
-        // SAFETY: the transaction should contains always the first.
+        // SAFETY: the details should always contain the first entry.
         //
-        // FIXME: we are looking at the first is always a good ide?
+        // FIXME: we are looking at the first is always a good idea?
         if let Some(true) = tx.details.first().unwrap().abandoned {
             return Ok(TxResult::Discarded);
         }
@@ -399,8 +399,8 @@ impl Backend for BitcoinCore {
             }
         }
         txs.clear();
-        // FIXME: if we want remember this we should put in a separate vector maybe?
-        // or make it persistan.
+        // FIXME: if we want to remember this we should put in a separate vector maybe?
+        // or make it persistant.
         //
         // txs.append(&mut confirmed_txs);
         txs.append(&mut unconfirmed_txs);
@@ -462,14 +462,14 @@ impl Backend for BitcoinCore {
                             let _ = self.find_tx_in_block(&block);
                         }
                     }
-                    // ok when the wallet is full in sync with the blockchain, we can query the
-                    // bitcoind wallet for ours transaction.
+                    // ok when the wallet is in full sync with the blockchain, we can query the
+                    // bitcoind wallet for our transaction.
                     //
                     // This is the only place where we can query because otherwise we can
                     // confuse ldk when we send a new best block with height X and a Confirmed transaction
                     // event at height Y, where Y > X. In this way ldk think that a reorgs happens.
                     //
-                    // The reorgs do not happens commonly, it is only that the bitcoind wallet is able
+                    // The reorgs do not happen commonly, it is only that the bitcoind wallet is able
                     // to answer quickly while the lampo wallet is still looking
                     // for external transaction inside the blocks.
                     let _ = self.process_transactions();
