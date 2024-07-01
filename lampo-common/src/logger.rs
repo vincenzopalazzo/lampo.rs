@@ -13,7 +13,7 @@ use colored::*;
 
 pub use log::{Level, Log, Metadata, Record, SetLoggerError};
 
-struct Logger {
+pub struct Logger {
     level: Level,
     file: Option<File>,
 }
