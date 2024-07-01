@@ -85,7 +85,7 @@ pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<j
         .offchain_manager()
         .decode::<ldk::offers::offer::Offer>(&request.invoice_str)
     {
-        // FIXME: semplify this chain;
+        // FIXME: simplify this chain;
         let network = offer
             .chains()
             .iter()
