@@ -226,7 +226,7 @@ impl WalletManager for BDKWalletManager {
                 )
             })
             .collect();
-        log::info!("bdk stert to sync");
+        log::info!("bdk start to sync");
 
         let (update_graph, last_active_indices) =
             client.scan_txs_with_keychains(spks, None, None, 50, 2)?;
