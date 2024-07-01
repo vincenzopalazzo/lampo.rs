@@ -271,7 +271,7 @@ impl Handler for LampoHandler {
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
                 };
                 log::warn!("please note the payments are not make persistent for the moment");
-                // FIXME: make peristant these information
+                // FIXME: make peristent these information
                 Ok(())
             }
             ldk::events::Event::PaymentSent { .. } => {
