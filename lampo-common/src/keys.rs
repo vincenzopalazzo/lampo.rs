@@ -80,7 +80,7 @@ impl LampoKeysManager {
         }
     }
 
-    // FIXME: put this under a debug a feature flag like `unsafa_channel_keys`
+    // FIXME: put this under a debug a feature flag like `unsafe_channel_keys`
     #[cfg(debug_assertions)]
     pub fn set_channels_keys(
         &mut self,
