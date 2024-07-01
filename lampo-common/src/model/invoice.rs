@@ -82,7 +82,7 @@ pub mod response {
     pub enum PaymentState {
         Success,
         Pending,
-        Faulure,
+        Failure,
     }
 
     #[derive(Clone, Serialize, Deserialize, Debug)]
