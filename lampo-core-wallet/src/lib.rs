@@ -35,7 +35,7 @@ pub struct CoreWalletManager {
 }
 
 impl CoreWalletManager {
-    /// from mnemonic_words build or bkd::Wallet or return an bdk::Error
+    /// Build from mnemonic_words and return bkd::Wallet or bdk::Error
     fn build_wallet(
         conf: Arc<LampoConf>,
         mnemonic_words: &str,
@@ -56,7 +56,7 @@ impl CoreWalletManager {
             .into_xprv(network)
             .ok_or(error::anyhow!("impossible cast the private key"))?;
 
-        let ldk_kesy = LampoKeys::new(xprv.private_key.secret_bytes());
+        let ldk_keys = LampoKeys::new(xprv.private_key.secret_bytes());
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
         let wallet = bdk::Wallet::new(
             Bip84(xprv, KeychainKind::External),
@@ -64,7 +64,7 @@ impl CoreWalletManager {
             (),
             network,
         )?;
-        Ok((wallet, ldk_kesy))
+        Ok((wallet, ldk_keys))
     }
 
     #[cfg(debug_assertions)]
@@ -98,7 +98,7 @@ impl CoreWalletManager {
         conf: Arc<LampoConf>,
         wallet: bdk::Wallet,
     ) -> error::Result<String> {
-        // FIXME: allow to support multiple wallet for the same chain, so
+        // FIXME: allow to support multiple wallets for the same chain, so
         // we should make a suffix in the following name
         let name_wallet = "lampo-wallet".to_owned();
         if !rpc
@@ -151,7 +151,7 @@ impl CoreWalletManager {
                 ];
 
                 let rpc = Self::build_bitcoin_rpc(conf.clone(), Some(&name_wallet))?;
-                log::trace!(target: "core", "impot descriptor options: {:?}", options);
+                log::trace!(target: "core", "import descriptor options: {:?}", options);
                 let _: json::Value = rpc.call("importdescriptors", &[json::json!(options)])?;
             }
         };
