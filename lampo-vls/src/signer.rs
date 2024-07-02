@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use lampo_common::vls::async_trait::async_trait;
-use lampo_common::vls::proxy::vls_protocol_client::{Error, SignerPort, Transport};
+use async_trait::async_trait;
+use vls_proxy::vls_protocol_client::{Error, SignerPort, Transport};
 
 #[allow(dead_code)]
 pub struct LampoVLSSignerPort {

@@ -1,18 +1,20 @@
-use lampo_common::vls::anyhow::anyhow;
-use lampo_common::vls::anyhow::Result;
-use lampo_common::vls::proxy::vls_protocol_signer::vls_protocol::serde_bolt::bitcoin::Sequence;
-use lampo_common::vls::signer::bitcoin::PackedLockTime;
-use lampo_common::vls::signer::bitcoin::{Script, Transaction, TxIn, TxOut, Witness};
-use lampo_common::vls::signer::lightning::sign::{
+use lampo_common::anyhow::{anyhow, Result};
+use lampo_common::bitcoin::absolute::LockTime;
+use lampo_common::bitcoin::{ScriptBuf, Transaction, TxIn, TxOut, Witness};
+use lampo_common::ldk::sign::{
     DelayedPaymentOutputDescriptor, SpendableOutputDescriptor, StaticPaymentOutputDescriptor,
 };
-use lampo_common::vls::signer::util::transaction_utils::{maybe_add_change_output, MAX_VALUE_MSAT};
+
+use vls_proxy::vls_protocol_signer::vls_protocol::serde_bolt::bitcoin::Sequence;
+use lightning_signer::util::transaction_utils::{maybe_add_change_output, MAX_VALUE_MSAT};
+
 use std::collections::HashSet;
+
 
 pub(crate) fn create_spending_transaction(
     descriptors: &[&SpendableOutputDescriptor],
     outputs: Vec<TxOut>,
-    change_destination_script: Box<Script>,
+    change_destination_script: Box<ScriptBuf>,
     feerate_sats_per_1000_weight: u32,
 ) -> Result<Transaction> {
     let mut input = Vec::new();
@@ -24,7 +26,7 @@ pub(crate) fn create_spending_transaction(
             SpendableOutputDescriptor::StaticPaymentOutput(descriptor) => {
                 input.push(TxIn {
                     previous_output: descriptor.outpoint.into_bitcoin_outpoint(),
-                    script_sig: Script::new(),
+                    script_sig: ScriptBuf::new(),
                     sequence: Sequence::ZERO,
                     witness: Witness::new(),
                 });
@@ -38,7 +40,7 @@ pub(crate) fn create_spending_transaction(
             SpendableOutputDescriptor::DelayedPaymentOutput(descriptor) => {
                 input.push(TxIn {
                     previous_output: descriptor.outpoint.into_bitcoin_outpoint(),
-                    script_sig: Script::new(),
+                    script_sig: ScriptBuf::new(),
                     sequence: Sequence(descriptor.to_self_delay as u32),
                     witness: Witness::default(),
                 });
@@ -52,10 +54,11 @@ pub(crate) fn create_spending_transaction(
             SpendableOutputDescriptor::StaticOutput {
                 ref outpoint,
                 ref output,
+                channel_keys_id: _,
             } => {
                 input.push(TxIn {
                     previous_output: outpoint.into_bitcoin_outpoint(),
-                    script_sig: Script::new(),
+                    script_sig: ScriptBuf::new(),
                     sequence: Sequence::ZERO,
                     witness: Witness::default(),
                 });
@@ -74,7 +77,7 @@ pub(crate) fn create_spending_transaction(
 
     let mut spend_tx = Transaction {
         version: 2,
-        lock_time: PackedLockTime(0),
+        lock_time: LockTime::ZERO,
         input,
         output: outputs,
     };

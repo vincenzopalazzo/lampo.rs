@@ -1,14 +1,14 @@
-use lampo_common::vls::proxy::vls_protocol_client::{Error, Transport};
-use lampo_common::vls::proxy::vls_protocol_signer::handler::Handler;
-use lampo_common::vls::proxy::vls_protocol_signer::handler::{HandlerBuilder, RootHandler};
-use lampo_common::vls::proxy::vls_protocol_signer::vls_protocol::{model::PubKey, msgs};
-use lampo_common::vls::signer::bitcoin::{Address, Network};
-use lampo_common::vls::signer::node::NodeServices;
-use lampo_common::vls::signer::persist::DummyPersister;
-use lampo_common::vls::signer::policy::simple_validator::make_simple_policy;
-use lampo_common::vls::signer::policy::simple_validator::SimpleValidatorFactory;
-use lampo_common::vls::signer::signer::ClockStartingTimeFactory;
-use lampo_common::vls::signer::util::clock::StandardClock;
+use vls_proxy::vls_protocol_client::{Error, Transport};
+use vls_proxy::vls_protocol_signer::handler::Handler;
+use vls_proxy::vls_protocol_signer::handler::{HandlerBuilder, RootHandler};
+use vls_proxy::vls_protocol_signer::vls_protocol::{model::PubKey, msgs};
+use lampo_common::bitcoin::{Address, Network};
+use lightning_signer::node::NodeServices;
+use lightning_signer::persist::DummyPersister;
+use lightning_signer::policy::simple_validator::make_simple_policy;
+use lightning_signer::policy::simple_validator::SimpleValidatorFactory;
+use lightning_signer::signer::ClockStartingTimeFactory;
+use lightning_signer::util::clock::StandardClock;
 
 use std::sync::Arc;
 
@@ -61,7 +61,6 @@ impl LampoVLSInProcess {
             starting_time_factory,
             persister,
             clock,
-            trusted_oracle_pubkeys: vec![],
         };
         let (root_handler_builder, _) = HandlerBuilder::new(network, 0, services, seed)
             .allowlist(allowlist)

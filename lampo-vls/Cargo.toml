@@ -7,3 +7,15 @@ edition = "2021"
 
 [dependencies]
 lampo-common = { path = "../lampo-common" }
+triggered = "0.1.2"
+url = "2.5.0"
+async-trait = "0.1"
+
+[dependencies.vls-core]
+git = "https://gitlab.com/Vanshul/validating-lightning-signer/"
+branch = "macros/ldk-upgrade-123"
+
+[dependencies.vls-proxy]
+git = "https://gitlab.com/Vanshul/validating-lightning-signer/"
+branch = "macros/ldk-upgrade-123"
+

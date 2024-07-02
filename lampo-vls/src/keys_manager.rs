@@ -1,19 +1,19 @@
-use lampo_common::vls::proxy::vls_protocol_client::SpendableKeysInterface;
-use lampo_common::vls::proxy::vls_protocol_client::{DynSigner, KeysManagerClient};
-use lampo_common::vls::signer::bitcoin::secp256k1::ecdh::SharedSecret;
-use lampo_common::vls::signer::bitcoin::secp256k1::ecdsa::RecoverableSignature;
-use lampo_common::vls::signer::bitcoin::secp256k1::ecdsa::Signature as EcdsaSignature;
-use lampo_common::vls::signer::bitcoin::secp256k1::schnorr::Signature;
-use lampo_common::vls::signer::bitcoin::secp256k1::{All, Secp256k1};
-use lampo_common::vls::signer::bitcoin::secp256k1::{PublicKey, Scalar};
-use lampo_common::vls::signer::bitcoin::{bech32::u5, Address, Script};
-use lampo_common::vls::signer::bitcoin::{Transaction, TxOut, Witness};
-use lampo_common::vls::signer::invoice::bolt12::UnsignedBolt12Invoice;
-use lampo_common::vls::signer::lightning::ln::{msgs, script::ShutdownScript};
-use lampo_common::vls::signer::lightning::offers::invoice_request::UnsignedInvoiceRequest;
-use lampo_common::vls::signer::lightning::sign::SpendableOutputDescriptor;
-use lampo_common::vls::signer::lightning::sign::{EntropySource, NodeSigner, SignerProvider};
-use lampo_common::vls::signer::lightning::sign::{KeyMaterial, Recipient};
+use vls_proxy::vls_protocol_client::{DynSigner, KeysManagerClient, SpendableKeysInterface};
+use lampo_common::anyhow;
+use lampo_common::bitcoin::secp256k1::ecdh::SharedSecret;
+use lampo_common::bitcoin::secp256k1::ecdsa::{RecoverableSignature, Signature as EcdsaSignature};
+use lampo_common::bitcoin::secp256k1::schnorr::Signature;
+use lampo_common::bitcoin::secp256k1::{All, Secp256k1};
+use lampo_common::bitcoin::secp256k1::{PublicKey, Scalar};
+use lampo_common::bitcoin::{bech32::u5, Address, Script};
+use lampo_common::bitcoin::{ScriptBuf, Transaction, TxOut, Witness};
+use lightning_signer::invoice::bolt12::UnsignedBolt12Invoice;
+use lampo_common::ldk::ln::{msgs, script::ShutdownScript};
+use lampo_common::ldk::offers::invoice_request::UnsignedInvoiceRequest;
+use lampo_common::ldk::sign::SpendableOutputDescriptor;
+use lampo_common::ldk::sign::{EntropySource, NodeSigner, SignerProvider};
+use lampo_common::ldk::sign::{KeyMaterial, Recipient};
+
 
 use crate::util::create_spending_transaction;
 
@@ -37,7 +37,7 @@ impl LampoKeysManager {
 
 // To get signer instances for individual channels.
 impl SignerProvider for LampoKeysManager {
-    type Signer = DynSigner;
+    type EcdsaSigner = DynSigner;
 
     fn generate_channel_keys_id(
         &self,
@@ -53,19 +53,19 @@ impl SignerProvider for LampoKeysManager {
         &self,
         channel_value_satoshis: u64,
         channel_keys_id: [u8; 32],
-    ) -> Self::Signer {
+    ) -> Self::EcdsaSigner {
         let client = self
             .client
             .derive_channel_signer(channel_value_satoshis, channel_keys_id);
         DynSigner::new(client)
     }
 
-    fn read_chan_signer(&self, reader: &[u8]) -> Result<Self::Signer, msgs::DecodeError> {
+    fn read_chan_signer(&self, reader: &[u8]) -> Result<Self::EcdsaSigner, msgs::DecodeError> {
         let signer = self.client.read_chan_signer(reader)?;
         Ok(DynSigner::new(signer))
     }
 
-    fn get_destination_script(&self) -> Result<Script, ()> {
+    fn get_destination_script(&self) -> Result<ScriptBuf, ()> {
         self.client.get_destination_script()
     }
     fn get_shutdown_scriptpubkey(&self) -> Result<ShutdownScript, ()> {
@@ -122,29 +122,31 @@ impl NodeSigner for LampoKeysManager {
     }
 }
 
-/// Makes the Wallet capable of creating a spending Transaction from a set of SpendableOutputDescriptors.
-impl SpendableKeysInterface for LampoKeysManager {
-    fn spend_spendable_outputs(
-        &self,
-        descriptors: &[&SpendableOutputDescriptor],
-        outputs: Vec<TxOut>,
-        change_destination_script: Script,
-        feerate_sat_per_1000_weight: u32,
-        _secp_ctx: &Secp256k1<All>,
-    ) -> lampo_common::vls::anyhow::Result<Transaction> {
-        let mut tx = create_spending_transaction(
-            descriptors,
-            outputs,
-            Box::new(change_destination_script),
-            feerate_sat_per_1000_weight,
-        )?;
-        let witnesses = self.client.sign_onchain_tx(&tx, descriptors);
-        for (idx, w) in witnesses.into_iter().enumerate() {
-            tx.input[idx].witness = Witness::from_vec(w);
-        }
-        Ok(tx)
-    }
-    fn get_sweep_address(&self) -> Address {
-        self.sweep_address.clone()
-    }
-}
+// Makes the Wallet capable of creating a spending Transaction from a set of SpendableOutputDescriptors.
+// impl SpendableKeysInterface for LampoKeysManager {
+//     fn spend_spendable_outputs(
+//         &self,
+//         descriptors: &[&SpendableOutputDescriptor],
+//         outputs: Vec<TxOut>,
+//         change_destination_script: Script,
+//         feerate_sat_per_1000_weight: u32,
+//         _secp_ctx: &Secp256k1<All>,
+//     ) -> anyhow::Result<Transaction> {
+//         let mut tx = create_spending_transaction(
+//             descriptors,
+//             outputs,
+//             Box::new(change_destination_script),
+//             feerate_sat_per_1000_weight,
+//         )?;
+//         let witnesses = self.client.sign_onchain_tx(&tx, descriptors);
+//         for (idx, w) in witnesses.into_iter().enumerate() {
+//             tx.input[idx].witness = Witness::from_vec(w);
+//         }
+//         Ok(tx)
+//     }
+//     fn get_sweep_address(&self) -> Address {
+//         self.sweep_address.clone()
+//     }
+// }
+
+
