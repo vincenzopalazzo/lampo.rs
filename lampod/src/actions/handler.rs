@@ -96,6 +96,7 @@ impl EventHandler for LampoHandler {
     }
 }
 
+#[cfg(feature = "vanilla")]
 #[allow(unused_variables)]
 impl Handler for LampoHandler {
     fn react(&self, event: crate::command::Command) -> error::Result<()> {
@@ -151,17 +152,6 @@ impl Handler for LampoHandler {
                 }));
                 Ok(())
             },
-            /* 
-            error[E0026]: variant `ChannelClosed` does not have a field named `channel_funding_txo`
-               --> lampod/src/actions/handler.rs:159:17
-                |
-            159 |                 channel_funding_txo,
-                |                 ^^^^^^^^^^^^^^^^^^^
-                |                 |
-                |                 variant `ChannelClosed` does not have this field
-                |                 help: `ChannelClosed` has a field named `channel_capacity_sats`
-            */
-            #[cfg(feature = "vanilla")]
             ldk::events::Event::ChannelClosed {
                 channel_id,
                 user_channel_id,
@@ -256,46 +246,213 @@ impl Handler for LampoHandler {
                 via_user_channel_id,
                 claim_deadline,
             } => {
-                /* 
-                error[E0599]: no variant named `Bolt12OfferPayment` found for enum `PaymentPurpose`
-                --> lampod/src/actions/handler.rs:272:50
-                 |
-             272 |                     ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, .. } => payment_preimage,
-                 |                                                  ^^^^^^^^^^^^^^^^^^ variant not found in `PaymentPurpose`
-             
-             error[E0599]: no variant named `Bolt12RefundPayment` found for enum `PaymentPurpose`
-                --> lampod/src/actions/handler.rs:273:50
-                 |
-             273 |                     ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => payment_preimage,
-                 |                                                  ^^^^^^^^^^^^^^^^^^^ variant not found in `PaymentPurpose`
-                */
+                let preimage = match purpose {
+                    ldk::events::PaymentPurpose::Bolt11InvoicePayment  {
+                        payment_preimage, ..
+                    } => payment_preimage,
+                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, .. } => payment_preimage,
+                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => payment_preimage,
+                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                };
+                self.channel_manager
+                .manager()
+                .claim_funds(preimage.unwrap());
+                Ok(())
+            }
+            ldk::events::Event::PaymentClaimed {
+                receiver_node_id,
+                payment_hash,
+                amount_msat,
+                purpose,
+                ..
+            } => {
+                let (payment_preimage, payment_secret) = match purpose {
+                    ldk::events::PaymentPurpose::Bolt11InvoicePayment {
+                        payment_preimage,
+                        payment_secret,
+                        ..
+                    } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
+                };
+                log::warn!("please note the payments are not make persistent for the moment");
+                // FIXME: make peristant these information
+                Ok(())
+            }
+            ldk::events::Event::PaymentSent { .. } => {
+                log::info!("payment sent: `{:?}`", event);
+                Ok(())
+            },
+            ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
+                let path = path.hops.iter().map(|hop| PaymentHop::from(hop.clone())).collect::<Vec<PaymentHop>>();
+                let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path };
+                self.emit(Event::Lightning(hop));
+                Ok(())
+            },
+            _ => Err(error::anyhow!("unexpected ldk event: {:?}", event)),
+        }
+    }
+}
 
-                #[cfg(feature = "vanilla")]
-                {
-                    let preimage = match purpose {
-                        ldk::events::PaymentPurpose::Bolt11InvoicePayment  {
-                            payment_preimage, ..
-                        } => payment_preimage,
-                        ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, .. } => payment_preimage,
-                        ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => payment_preimage,
-                        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
-                    };
-                    self.channel_manager
-                    .manager()
-                    .claim_funds(preimage.unwrap());
+// Handler for rgb
+#[cfg(feature = "rgb")]
+impl Handler for LampoHandler {
+    fn react(&self, event: crate::command::Command) -> error::Result<()> {
+        match event {
+            Command::LNCommand => unimplemented!(),
+            Command::OnChainCommand => unimplemented!(),
+            Command::PeerEvent(event) => {
+                async_run!(self.peer_manager.handle(event))
+            }
+            Command::InventoryEvent(event) => {
+                self.inventory_manager.handle(event)?;
+                Ok(())
+            }
+            Command::ExternalCommand(req, chan) => {
+                log::info!(
+                    "external handler size {}",
+                    self.external_handlers.borrow().len()
+                );
+                for handler in self.external_handlers.borrow().iter() {
+                    if let Some(resp) = handler.handle(&req)? {
+                        chan.send(resp)?;
+                        return Ok(());
+                    }
                 }
-                #[cfg(feature = "rgb")]
-                {
-                    let preimage = match purpose {
-                        ldk::events::PaymentPurpose::InvoicePayment  {
-                            payment_preimage, ..
-                        } => payment_preimage,
-                        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
-                    };
-                    self.channel_manager
-                    .manager()
-                    .claim_funds(preimage.unwrap());
+                error::bail!("method `{}` not found", req.method);
+            }
+        }
+    }
+
+    fn handle(&self, event: ldk::events::Event) -> error::Result<()> {
+        match event {
+            ldk::events::Event::OpenChannelRequest {
+                temporary_channel_id,
+                counterparty_node_id,
+                funding_satoshis,
+                push_msat,
+                channel_type,
+            } => {
+                Err(error::anyhow!("Request for open a channel received, unfortunatly we do not support this feature yet."))
+            }
+            ldk::events::Event::ChannelReady {
+                channel_id,
+                user_channel_id,
+                counterparty_node_id,
+                channel_type,
+            } => {
+                log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
+                self.emit(Event::Lightning(LightningEvent::ChannelReady {
+                    counterparty_node_id,
+                    channel_id,
+                    channel_type,
+                }));
+                Ok(())
+            },
+            ldk::events::Event::ChannelClosed {
+                channel_id,
+                user_channel_id,
+                reason,
+                counterparty_node_id,
+                channel_capacity_sats,
+                ..
+            } => {
+                if let Some(node_id) = counterparty_node_id {
+                    log::warn!("closing channels with `{node_id}`");
                 }
+                let node_id = counterparty_node_id.map(|id| id.to_string());
+                let capacity_sats = channel_capacity_sats.map(|sats| sats.to_string());
+                self.emit(Event::Lightning(LightningEvent::CloseChannelEvent { channel_id: channel_id.to_string(), message: reason.to_string(), counterparty_node_id : node_id, channel_capacity_sats : capacity_sats}));
+                log::info!("channel `{user_channel_id}` closed with reason: `{reason}`");
+                Ok(())
+            }
+            ldk::events::Event::FundingGenerationReady {
+                temporary_channel_id,
+                counterparty_node_id,
+                channel_value_satoshis,
+                output_script,
+                ..
+            } => {
+                self.emit(Event::Lightning(LightningEvent::FundingChannelStart {
+                    counterparty_node_id,
+                    temporary_channel_id,
+                    channel_value_satoshis,
+                }));
+
+                log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
+                // FIXME: estimate the fee rate with a callback
+                let fee = self.chain_manager.backend.fee_rate_estimation(6).map_err(|err| {
+                    let msg = format!("Channel Opening Error: {err}");
+                    self.emit(Event::Lightning(LightningEvent::ChannelEvent { state: ChannelState::OpeningError, message : msg}));
+                    err
+                })?;
+                log::info!("fee estimated {:?} sats", fee);
+
+                let transaction = self.wallet_manager.create_transaction(
+                    output_script,
+                    channel_value_satoshis,
+                    fee,
+                )?;
+                log::info!("funding transaction created `{}`", transaction.txid());
+                log::info!(
+                    "transaction hex `{}`",
+                    lampo_common::btc::bitcoin::consensus::encode::serialize_hex(&transaction)
+                );
+                self.emit(Event::Lightning(LightningEvent::FundingChannelEnd {
+                    counterparty_node_id,
+                    temporary_channel_id,
+                    channel_value_satoshis,
+                    funding_transaction: transaction.clone(),
+                }));
+                self.channel_manager
+                    .manager()
+                    .funding_transaction_generated(
+                        &temporary_channel_id,
+                        &counterparty_node_id,
+                        transaction,
+                    )
+                    .map_err(|err| error::anyhow!("{:?}", err))?;
+                Ok(())
+            }
+            ldk::events::Event::ChannelPending {
+                counterparty_node_id,
+                funding_txo,
+                ..
+            } => {
+                log::info!(
+                    "channel pending with node `{}` with funding `{funding_txo}`",
+                    counterparty_node_id.to_string()
+                );
+                self.emit(Event::Lightning(LightningEvent::ChannelPending { counterparty_node_id, funding_transaction: funding_txo }));
+                Ok(())
+            }
+            ldk::events::Event::PendingHTLCsForwardable { time_forwardable } => {
+                self.channel_manager
+                    .manager()
+                    .process_pending_htlc_forwards();
+                Ok(())
+            }
+            ldk::events::Event::PaymentClaimable {
+                receiver_node_id,
+                payment_hash,
+                onion_fields,
+                amount_msat,
+                counterparty_skimmed_fee_msat,
+                purpose,
+                via_channel_id,
+                via_user_channel_id,
+                claim_deadline,
+            } => {
+                let preimage = match purpose {
+                    ldk::events::PaymentPurpose::InvoicePayment  {
+                        payment_preimage, ..
+                    } => payment_preimage,
+                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+                };
+                self.channel_manager
+                .manager()
+                .claim_funds(preimage.unwrap());
                 
                 Ok(())
             }
@@ -306,41 +463,16 @@ impl Handler for LampoHandler {
                 purpose,
                 ..
             } => {
-                /*
-                error[E0599]: no variant named `Bolt11InvoicePayment` found for enum `PaymentPurpose`
-                --> lampod/src/actions/handler.rs:269:50
-                 |
-             269 |                     ldk::events::PaymentPurpose::Bolt11InvoicePayment  {
-                 |                                                  ^^^^^^^^^^^^^^^^^^^^ help: there is a variant with a similar name: `InvoicePayment`
-                */
-                #[cfg(feature = "vanilla")]
-                {
-                    let (payment_preimage, payment_secret) = match purpose {
-                        ldk::events::PaymentPurpose::Bolt11InvoicePayment {
-                            payment_preimage,
-                            payment_secret,
-                            ..
-                        } => (payment_preimage, Some(payment_secret)),
-                        ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
-                        ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
-                        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
-                    };
-                }
+                let (payment_preimage, payment_secret) = match purpose {
+                    ldk::events::PaymentPurpose::InvoicePayment {
+                        payment_preimage,
+                        payment_secret,
+                        ..
+                    } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
+                };
 
-                #[cfg(feature = "rgb")]
-                {
-                    let (payment_preimage, payment_secret) = match purpose {
-                        ldk::events::PaymentPurpose::InvoicePayment {
-                            payment_preimage,
-                            payment_secret,
-                            ..
-                        } => (payment_preimage, Some(payment_secret)),
-                        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
-                    };
-
-                }              
                 log::warn!("please note the payments are not make persistent for the moment");
-                // FIXME: make peristant these information
                 Ok(())
             }
             ldk::events::Event::PaymentSent { .. } => {

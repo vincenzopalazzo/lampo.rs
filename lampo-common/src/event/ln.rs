@@ -38,10 +38,19 @@ pub enum LightningEvent {
         state: ChannelState,
         message: String,
     },
+    // rgb-lightning does not have funding_utxo.
+    #[cfg(feature = "vanilla")]
     CloseChannelEvent {
         channel_id: String,
         message: String,
         counterparty_node_id: Option<String>,
         funding_utxo: Option<String>,
+    },
+    #[cfg(feature = "rgb")]
+    CloseChannelEvent {
+        channel_id: String,
+        message: String,
+        counterparty_node_id: Option<String>,
+        channel_capacity_sats: Option<String>,
     },
 }

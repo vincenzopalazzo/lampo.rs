@@ -155,24 +155,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e999941b234f3131b00bc13c22d06e8c5ff726d1b6318ac7eb276997bbb4fef0"
 
 [[package]]
-name = "android_log-sys"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85965b6739a430150bdd138e2374a98af0c3ee0d030b3bb7fc3bddff58d0102e"
-
-[[package]]
-name = "android_logger"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8619b80c242aa7bd638b5c7ddd952addeecb71f69c75e33f1d47b2804f8f883a"
-dependencies = [
- "android_log-sys",
- "env_logger",
- "log",
- "once_cell",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1552,16 +1534,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_logger"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
-dependencies = [
- "log",
- "regex",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2408,20 +2380,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lampo-c-ffi"
-version = "0.1.0"
-dependencies = [
- "android_logger",
- "lampo-bitcoind",
- "lampo-common",
- "lampo-core-wallet",
- "lampo-jsonrpc",
- "lampod",
- "libc",
- "log",
-]
-
-[[package]]
 name = "lampo-cli"
 version = "0.1.0"
 dependencies = [
@@ -2498,6 +2456,15 @@ dependencies = [
  "popol",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lampo-rgb"
+version = "0.1.0"
+dependencies = [
+ "lampo-common",
+ "lampod",
+ "log",
 ]
 
 [[package]]
