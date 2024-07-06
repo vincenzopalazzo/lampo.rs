@@ -156,7 +156,7 @@ impl LampoPeerManager {
             current_time.try_into().unwrap(),
             &ephemeral_bytes,
             channel_manager.logger.clone(),
-            Arc::clone(&wallet_manager.ldk_keys().keys_manager.clone(),),
+            Arc::clone(&wallet_manager.ldk_keys().keys_manager.clone()),
         );
 
         self.peer_manager = Some(Arc::new(peer_manager));

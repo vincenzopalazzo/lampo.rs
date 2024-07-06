@@ -26,7 +26,7 @@ use lampod::jsonrpc::offchain::json_decode_invoice;
 use lampod::jsonrpc::offchain::json_invoice;
 use lampod::jsonrpc::offchain::json_keysend;
 use lampod::jsonrpc::offchain::json_offer;
-use lampod::jsonrpc::offchain::json_pay;
+// use lampod::jsonrpc::offchain::json_pay;
 use lampod::jsonrpc::onchain::json_estimate_fees;
 use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
@@ -34,6 +34,9 @@ use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
 use lampod::jsonrpc::CommandHandler;
 use lampod::LampoDaemon;
+use lampod::jsonrpc::offchain::PayDispath;
+use lampod::jsonrpc::offchain::VanillaPayVisitor;
+use lampod::jsonrpc::offchain::PayTrait;
 
 use crate::args::LampoCliArgs;
 
@@ -171,6 +174,8 @@ fn run_jsonrpc(
     // that it is running.
     let _ = std::fs::remove_file(socket_path.clone());
     env::set_var("LAMPO_UNIX", socket_path.clone());
+    let vanilla_visitor = VanillaPayVisitor::new();
+    let res = PayDispath::create(vanilla_visitor);
     let server = JSONRPCv2::new(lampod, &socket_path)?;
     server.add_rpc("getinfo", get_info).unwrap();
     server.add_rpc("connect", json_connect).unwrap();
@@ -183,7 +188,7 @@ fn run_jsonrpc(
     server
         .add_rpc("decode_invoice", json_decode_invoice)
         .unwrap();
-    server.add_rpc("pay", json_pay).unwrap();
+    server.add_rpc("pay", res.json_pay).unwrap();
     server.add_rpc("keysend", json_keysend).unwrap();
     server.add_rpc("fees", json_estimate_fees).unwrap();
     server.add_rpc("close", json_close_channel).unwrap();

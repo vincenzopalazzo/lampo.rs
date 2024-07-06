@@ -61,8 +61,6 @@ impl OffchainManager {
 
     /// Generate an invoice with a specific amount and a specific
     /// description.
-    
-    // DIfferent implementation of invoice inside rgb.
     #[cfg(feature = "vanilla")]
     pub fn generate_invoice(
         &self,
@@ -121,8 +119,6 @@ impl OffchainManager {
         Ok(())
     }
 
-    //`PayInvoice` implementation inside v0.0.118 is different as we do now.
-    // FIXME: Implement a pay_invoice for rgb.
     #[cfg(feature = "vanilla")]
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         // check if it is an invoice or an offer
