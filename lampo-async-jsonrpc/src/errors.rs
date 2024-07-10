@@ -39,6 +39,16 @@ impl From<RpcError> for Error {
     }
 }
 
+impl From<anyhow::Error> for Error {
+    fn from(e: anyhow::Error) -> Error {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("{e}"),
+            data: None,
+        })
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {

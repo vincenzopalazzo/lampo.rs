@@ -19,7 +19,6 @@ use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
 
-use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
@@ -137,7 +136,8 @@ impl LampoPeerManager {
             .announce_addr
             .clone()
             .unwrap_or_else(|| "127.0.0.1".to_string());
-        std::thread::spawn(move || {
+        // FIXME this need to be async
+        tokio::spawn(move || {
             let result = async_run!(async move {
                 let bind_addr = format!("{addr}:{listen_port}");
                 log::info!(target: "lampo", "Listening for in-bound connection on {bind_addr}");

@@ -846,6 +846,7 @@ dependencies = [
 name = "lampo-async-jsonrpc"
 version = "0.0.1-alpha.1"
 dependencies = [
+ "anyhow",
  "log",
  "serde",
  "serde_json",

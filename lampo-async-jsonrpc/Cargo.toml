@@ -15,5 +15,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 log = "0.4.17"
 tokio = { version = "1.38.0", features = ["net", "io-util"] }
+anyhow = "1.0.70"
 
 [dev-dependencies]
