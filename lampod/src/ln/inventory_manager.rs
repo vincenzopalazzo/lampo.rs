@@ -54,6 +54,9 @@ impl InventoryHandler for LampoInventoryManager {
                 }
 
                 // We don't have `list_peers` for rgb version of lightning.
+                // self.api.size_list_peers();
+                // You need to see self.api as a ldk wrapper!
+                
                 #[cfg(feature = "rgb")]
                 let peers: usize = self.peer_manager.manager().get_peer_node_ids().len();
 

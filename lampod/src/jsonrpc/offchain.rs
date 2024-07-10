@@ -4,11 +4,18 @@ use std::borrow::BorrowMut;
 use std::str::FromStr;
 use std::time::Duration;
 
+use lampo_common::btc::bitcoin::hashes::Hash;
+use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
+use lampo_common::handler::APIStrategy;
 use lampo_common::handler::Handler;
 use lampo_common::ldk;
+use lampo_common::ldk::invoice::payment;
+use lampo_common::ldk::ln::channelmanager::PaymentId;
+use lampo_common::ldk::ln::channelmanager::Retry;
 use lampo_common::ldk::offers::offer;
+use lampo_common::ldk::util::errors::APIError;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
@@ -18,17 +25,48 @@ use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{Invoice, InvoiceInfo};
 use lampo_common::{json, model::request::DecodeInvoice};
 use lampo_jsonrpc::errors::{Error, RpcError};
-use lampo_common::error;
-use lampo_common::ldk::ln::channelmanager::PaymentId;
-use lampo_common::ldk::ln::channelmanager::Retry;
-use lampo_common::ldk::invoice::payment;
-use lampo_common::btc::bitcoin::hashes::Hash;
-
 
 use crate::rpc_error;
 use crate::LampoDaemon;
 
-#[cfg(feature = "vanilla")]
+pub fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+        log::info!("call for `pay` with request `{:?}`", request);
+        let request: Pay = json::from_value(request.clone())?;
+        let events = ctx.handler().events();
+        if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
+            ctx.api.pay_offer(&request.invoice_str, request.amount);
+        } else {
+            ctx.api
+                .pay_invoice(ctx.clone(), &request.invoice_str, request.amount);
+        }
+        // FIXME: this will loop when the Payment event is not generated
+        loop {
+            let event = events
+                .recv_timeout(Duration::from_secs(30))
+                // FIXME: this should be avoided, the `?` should be used here
+                .map_err(|err| {
+                    Error::Rpc(RpcError {
+                        code: -1,
+                        message: format!("{err}"),
+                        data: None,
+                    })
+                })?;
+
+            if let Event::Lightning(LightningEvent::PaymentEvent {
+                payment_hash,
+                path,
+                state,
+            }) = event
+            {
+                return Ok(json::to_value(PayResult {
+                    state,
+                    path,
+                    payment_hash,
+                })?);
+            }
+        }
+    }
+
 pub fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: GenerateInvoice = json::from_value(request.clone())?;
@@ -52,7 +90,6 @@ pub fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Va
     Ok(json::to_value(&invoice)?)
 }
 
-#[cfg(feature = "vanilla")]
 pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `offer` with request `{:?}`", request);
     let request: GenerateOffer = json::from_value(request.clone())?;
@@ -105,84 +142,28 @@ pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<j
 pub struct VanillaPayVisitor;
 
 impl VanillaPayVisitor {
-    pub fn new() -> VanillaPayVisitor { VanillaPayVisitor }
+    pub fn new() -> VanillaPayVisitor {
+        VanillaPayVisitor
+    }
 }
 
-// This trait is helps to implement the underlying functions under `json_pay` for both
-// the RGB and vanilla versions of `rust-lightning` as both of their implementation is different.
-pub trait LampoVisitor {
-    fn pay_invoice(&self, ctx: &LampoDaemon, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()>;
-    fn pay_offer(&self, offer_str: &str, amount_msat: Option<u64>) -> error::Result<()>;
-}
-
-// This is the main trait which is used is implemented by both the Vanilla and RGB versions.
-pub trait PayTrait<T: LampoVisitor> {
-    fn create(visitor: T) -> Self;
-    fn json_pay(&self, ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error>;
-}
-
-#[cfg(feature = "vanilla")]
-impl LampoVisitor for VanillaPayVisitor {
-    fn pay_invoice(&self, ctx: &LampoDaemon, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
-        ctx.offchain_manager.clone().unwrap().pay_invoice(invoice_str, amount_msat);
+impl APIStrategy<LampoDaemon> for VanillaPayVisitor {
+    fn pay_invoice(
+        &self,
+        ctx: &LampoDaemon,
+        invoice_str: &str,
+        amount_msat: Option<u64>,
+    ) -> error::Result<()> {
+        ctx.offchain_manager()
+            .pay_invoice(invoice_str, amount_msat)?;
         Ok(())
     }
-    
+
     fn pay_offer(&self, offer_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
-        todo!()
+        unimplemented!("Bolt 12 is not supported for Vanilla")
     }
 }
 
-// Entry point of visitor!
-pub struct PayDispath<T: LampoVisitor>{
-    visitor: T,
-}
-
-// Common dispatch for both vanilla and lightning
-impl<T: LampoVisitor> PayTrait<T> for PayDispath<T> {
-    fn create(visitor: T) -> Self {
-        Self { visitor }
-    }
-
-    fn json_pay(&self, ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
-        log::info!("call for `pay` with request `{:?}`", request);
-        let request: Pay = json::from_value(request.clone())?;
-        let events = ctx.handler().events();
-        if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
-            self.visitor.pay_offer( &request.invoice_str, request.amount);
-        } else {
-            self.visitor.pay_invoice(ctx.clone(), &request.invoice_str, request.amount);
-        }
-        // FIXME: this will loop when the Payment event is not generated
-        loop {
-            let event = events
-                .recv_timeout(Duration::from_secs(30))
-                // FIXME: this should be avoided, the `?` should be used here
-                .map_err(|err| {
-                    Error::Rpc(RpcError {
-                        code: -1,
-                        message: format!("{err}"),
-                        data: None,
-                    })
-                })?;
-
-            if let Event::Lightning(LightningEvent::PaymentEvent {
-                payment_hash,
-                path,
-                state,
-            }) = event
-            {
-                return Ok(json::to_value(PayResult {
-                    state,
-                    path,
-                    payment_hash,
-                })?);
-            }
-        }
-    }
-}
-
-#[cfg(feature = "vanilla")]
 pub fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::debug!("call for `keysend` with request `{:?}`", request);
     let request: KeySend = json::from_value(request.clone())?;

@@ -26,6 +26,7 @@ use std::thread::JoinHandle;
 
 use tokio::runtime::Runtime;
 
+use lampo_common::handler::APIStrategy;
 use lampo_common::backend::Backend;
 use lampo_common::btc::Height;
 use lampo_common::conf::LampoConf;
@@ -67,6 +68,10 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
+    /// API Strategy is a way to work with different ldk version
+    /// handle inside the Strategy implementation the ldk specifc 
+    /// logic.
+    api: Arc<dyn APIStrategy<LampoDaemon>>, 
 
     // FIXME: remove this
     rt: Runtime,
@@ -76,7 +81,7 @@ unsafe impl Send for LampoDaemon {}
 unsafe impl Sync for LampoDaemon {}
 
 impl LampoDaemon {
-    pub fn new(config: LampoConf, wallet_manager: Arc<dyn WalletManager>) -> Self {
+    pub fn new(config: LampoConf, wallet_manager: Arc<dyn WalletManager>, api: Arc<dyn APIStrategy<LampoDaemon>>) -> Self {
         let root_path = config.path();
         //FIXME: sync some where else
         let wallet = wallet_manager.clone();
@@ -93,6 +98,7 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
+            api,
             rt: Runtime::new().unwrap(),
         }
     }

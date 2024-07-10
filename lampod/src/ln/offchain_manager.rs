@@ -39,6 +39,7 @@ pub struct OffchainManager {
     logger: Arc<LampoLogger>,
     lampo_conf: Arc<LampoConf>,
     chain_manager: Arc<LampoChainManager>,
+    api: Arc<dyn APIStrategy<LampoDaemon>>,
 }
 
 impl OffchainManager {
@@ -49,6 +50,7 @@ impl OffchainManager {
         logger: Arc<LampoLogger>,
         lampo_conf: Arc<LampoConf>,
         chain_manager: Arc<LampoChainManager>,
+        api: Arc<dyn APIStrategy<LampoDaemon>>,
     ) -> error::Result<Self> {
         Ok(Self {
             channel_manager,
@@ -56,12 +58,12 @@ impl OffchainManager {
             logger,
             lampo_conf,
             chain_manager,
+            api,
         })
     }
 
     /// Generate an invoice with a specific amount and a specific
     /// description.
-    #[cfg(feature = "vanilla")]
     pub fn generate_invoice(
         &self,
         amount_msat: Option<u64>,
@@ -88,7 +90,6 @@ impl OffchainManager {
         Ok(invoice)
     }
 
-    #[cfg(feature = "vanilla")]
     pub fn pay_offer(&self, offer_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         // check if it is an invoice or an offer
         let offer_hash = Sha256::hash(offer_str.as_bytes());
@@ -119,7 +120,6 @@ impl OffchainManager {
         Ok(())
     }
 
-    #[cfg(feature = "vanilla")]
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
@@ -143,7 +143,6 @@ impl OffchainManager {
         Ok(())
     }
 
-    #[cfg(feature = "vanilla")]
     pub fn keysend(&self, destination: pubkey, amount_msat: u64) -> error::Result<PaymentHash> {
         let payment_preimage = PaymentPreimage(
             self.chain_manager
