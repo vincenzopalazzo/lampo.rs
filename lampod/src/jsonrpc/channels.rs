@@ -7,7 +7,7 @@ use lampo_common::model::response;
 
 use crate::json_rpc2::{Error, RpcError};
 use crate::ln::events::ChannelEvents;
-use crate::LampoDaemon;
+use crate::{rpc_error, LampoDaemon};
 
 pub fn json_list_channels(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `list_channels` with request {:?}", request);
@@ -45,7 +45,7 @@ pub fn json_close_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         // No channels with the given peer.
         return Err(rpc_error!("No channels with associated peer"));
     };
-    ctx.channel_manager().close_channel(res)?;
+    ctx.channel_manager().close_channel(res);
 
     // FIXME: would be good to have some sort of macros, because
     // this is a common patter across lampo

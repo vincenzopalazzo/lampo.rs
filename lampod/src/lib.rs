@@ -30,6 +30,7 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::ldk::events::Event;
+use lampo_common::ldk::events::EventHandler;
 use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
 use lampo_common::ldk::routing::gossip::P2PGossipSync;
 use lampo_common::wallet::WalletManager;
@@ -245,19 +246,6 @@ impl LampoDaemon {
             self.logger.clone(),
         ));
 
-        let handler = self.handler();
-        // FIXME: This does not compile because there is a problem
-        // to handle an async function inside the ldk callback
-        let event_handler = move |event: Event| {
-            log::info!(target: "lampo", "ldk event {:?}", event);
-            tokio::spawn(async {
-                let handler = handler.clone();
-                if let Err(err) = handler.handle(event).await {
-                    log::error!("{err}");
-                }
-            });
-        };
-
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().backend.clone().listen();
         log::info!(target: "lampo", "Starting peer manager");
@@ -267,7 +255,7 @@ impl LampoDaemon {
 
         let background_processor = BackgroundProcessor::start(
             self.persister.clone(),
-            event_handler,
+            self.clone(),
             self.channel_manager().chain_monitor(),
             self.channel_manager().manager(),
             GossipSync::p2p(gossip_sync),
@@ -294,5 +282,17 @@ impl LampoDaemon {
             error::bail!("at this point the handler should be not None");
         };
         handler.call::<json::Value, json::Value>(method, args).await
+    }
+}
+
+impl EventHandler for LampoDaemon {
+    fn handle_event(&self, event: Event) {
+        log::info!(target: "lampo", "ldk event {:?}", event);
+        let handler = self.handler().clone();
+        tokio::spawn(async move {
+            if let Err(err) = handler.handle(event).await {
+                log::error!("{err}");
+            }
+        });
     }
 }
