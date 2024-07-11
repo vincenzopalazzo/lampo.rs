@@ -1,3 +1,5 @@
+use lampo_common::chan;
+use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
@@ -9,33 +11,35 @@ use crate::json_rpc2::{Error, RpcError};
 use crate::ln::events::ChannelEvents;
 use crate::{rpc_error, LampoDaemon};
 
-pub async fn json_list_channels(
-    ctx: &LampoDaemon,
-    request: &json::Value,
-) -> Result<json::Value, Error> {
+pub fn json_list_channels(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `list_channels` with request {:?}", request);
     let resp = ctx.channel_manager().list_channel();
     Ok(json::to_value(resp)?)
 }
 
-pub async fn json_close_channel(
-    ctx: &LampoDaemon,
-    request: &json::Value,
-) -> Result<json::Value, Error> {
+pub fn json_close_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `closechannel` with request {:?}", request);
     let mut request: request::CloseChannel = json::from_value(request.clone())?;
-    let events = ctx.handler().events();
-    // This gives all the channels with associated peer
-    let channels: response::Channels = ctx
-        .handler()
-        .call(
-            "channels",
-            json::json!({
-                "peer_id": request.node_id,
-            }),
-        )
-        .await?;
+    let handler = ctx.handler();
+    let events = handler.events();
 
+    // This gives all the channels with associated peer
+    let node_id = request.node_id.clone();
+    let (inchan, outchan) = chan::unbounded::<error::Result<response::Channels>>();
+    tokio::spawn(async move {
+        let channels: error::Result<response::Channels> = handler
+            .call(
+                "channels",
+                json::json!({
+                    "peer_id": node_id,
+                }),
+            )
+            .await;
+        // FIXME: remove the unwrap
+        inchan.send(channels).unwrap();
+    });
+    // FIXME: remove the unwrap at some point
+    let channels = outchan.recv().unwrap()?;
     let res = if channels.channels.len() > 1 {
         // check the channel_id if it is not none, if it is return an error
         // and if it is not none then we need to have the channel_id that needs to be shut
@@ -54,7 +58,7 @@ pub async fn json_close_channel(
         // No channels with the given peer.
         return Err(rpc_error!("No channels with associated peer"));
     };
-    ctx.channel_manager().close_channel(res);
+    ctx.channel_manager().close_channel(res)?;
 
     // FIXME: would be good to have some sort of macros, because
     // this is a common patter across lampo

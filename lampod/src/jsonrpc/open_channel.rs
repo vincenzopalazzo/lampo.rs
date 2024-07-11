@@ -1,15 +1,17 @@
 //! Open Channel RPC Method implementation
+use lampo_common::chan;
+use lampo_common::error;
 use lampo_common::json;
 use lampo_common::model::request;
 
-use crate::json_rpc2::{Error, RpcError};
+use crate::json_rpc2::Error;
 use crate::ln::events::ChannelEvents;
 use crate::LampoDaemon;
 
 pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `openchannel` with request {:?}", request);
     let request: request::OpenChannel = json::from_value(request.clone())?;
-
+    let handler = ctx.handler();
     // LDK's `create_channel()` doesn't check if you are currently connected
     // to the given peer so we need to check ourselves
     // FIXME: remove unwrap!
@@ -18,15 +20,17 @@ pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
         .is_connected_with(request.node_id().unwrap())
     {
         log::trace!("we are not connected with the peer {}", request.node_id);
+
         let conn = request::Connect::try_from(request.clone())?;
         let conn = json::to_value(conn)?;
-        ctx.call("connect", conn).map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: format!("connect fails with: {err}"),
-                data: None,
-            })
-        })?;
+        let (inchan, outchan) = chan::unbounded::<error::Result<json::Value>>();
+        tokio::spawn(async move {
+            let result = handler.call("connect", conn).await;
+            inchan.send(result);
+        });
+        // FIXME: find a way to remove the unwrap
+        let result = outchan.recv().unwrap()?;
+        log::info!("connecting succided with the node `{result}`");
     }
 
     // FIXME: there are use case there need to be covered, like

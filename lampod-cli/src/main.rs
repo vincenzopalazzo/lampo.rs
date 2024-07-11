@@ -175,7 +175,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         std::process::exit(0);
     })?;
 
-    let workder = lampod.listen().unwrap();
+    let workder = lampod.listen().await?;
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     let _ = workder.join();
     let _ = jsorpc_worker.await?;
