@@ -13,6 +13,7 @@ use lampo_common::model::response::InvoiceInfo;
 use lampo_common::model::response::Offer;
 use lampo_common::model::Connect;
 use lampo_common::secp256k1::PublicKey;
+use lampo_testing::async_wait;
 use lampo_testing::prelude::bitcoincore_rpc::RpcApi;
 use lampo_testing::prelude::*;
 
@@ -26,34 +27,38 @@ use crate::utils::*;
 pub async fn init_connection_test() -> error::Result<()> {
     init();
     let mut cln = cln::Node::with_params("--developer", "regtest").await?;
-    let lampo = LampoTesting::new(cln.btc())?;
+    let lampo = LampoTesting::new(cln.btc()).await?;
     let info = cln.rpc().getinfo()?;
     log::debug!("core lightning info {:?}", info);
-    let response: json::Value = lampo.lampod().call(
-        "connect",
-        Connect {
-            node_id: info.id,
-            addr: "127.0.0.1".to_owned(),
-            port: cln.port.into(),
-        },
-    )?;
+    let response: json::Value = lampo
+        .lampod()
+        .call(
+            "connect",
+            Connect {
+                node_id: info.id,
+                addr: "127.0.0.1".to_owned(),
+                port: cln.port.into(),
+            },
+        )
+        .await?;
     log::debug!("lampo connected with cln {:?}", response);
     cln.stop().await?;
     Ok(())
 }
 
-#[test]
-pub fn fund_a_simple_channel_from_lampo() {
+#[tokio::test]
+pub async fn fund_a_simple_channel_from_lampo() {
     init();
 
-    let mut cln = async_run!(cln::Node::with_params(
+    let mut cln = cln::Node::with_params(
         "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
-        "regtest"
-    ))
+        "regtest",
+    )
+    .await
     .unwrap();
     std::thread::sleep(Duration::from_secs(1));
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).await.unwrap();
     let lampo = lampo_manager.lampod();
     let info = cln.rpc().getinfo().unwrap();
     let _: json::Value = lampo
@@ -65,11 +70,12 @@ pub fn fund_a_simple_channel_from_lampo() {
                 port: cln.port.into(),
             },
         )
+        .await
         .unwrap();
 
     let events = lampo.events();
     let address = lampo_manager.fund_wallet(101).unwrap();
-    wait!(|| {
+    async_wait!(async {
         let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
             events.recv_timeout(Duration::from_millis(100))
         else {
@@ -92,10 +98,11 @@ pub fn fund_a_simple_channel_from_lampo() {
                 addr: Some("127.0.0.1".to_owned()),
             },
         )
+        .await
         .unwrap();
     assert!(response.get("tx").is_some());
 
-    wait!(|| {
+    async_wait!(async {
         while let Ok(event) = events.recv_timeout(Duration::from_millis(100)) {
             log::trace!("{:?}", event);
             let Event::Lightning(LightningEvent::ChannelReady { .. }) = event else {
@@ -105,7 +112,8 @@ pub fn fund_a_simple_channel_from_lampo() {
             };
             log::info!(target: "tests", "channel ready event received");
             // check if lampo see the channel
-            let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+            let channels: response::Channels =
+                lampo.call("channels", json::json!({})).await.unwrap();
             if channels.channels.is_empty() {
                 return Err(());
             }
@@ -130,20 +138,21 @@ pub fn fund_a_simple_channel_from_lampo() {
 
     // looks like that rust is too fast and cln is not able to
     // index all the tx, so this will accept some errors
-    async_run!(cln.stop()).unwrap();
+    cln.stop().await.unwrap();
 }
 
-#[test]
-pub fn fund_a_simple_channel_to_lampo() {
+#[tokio::test]
+pub async fn fund_a_simple_channel_to_lampo() {
     init();
 
-    let mut cln = async_run!(cln::Node::with_params(
+    let mut cln = cln::Node::with_params(
         "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
-        "regtest"
-    ))
+        "regtest",
+    )
+    .await
     .unwrap();
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).await.unwrap();
     let lampo = lampo_manager.lampod();
     let info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
     let response = cln
@@ -170,7 +179,7 @@ pub fn fund_a_simple_channel_to_lampo() {
 
     // looks like that rust is too fast and cln is not able to
     // index all the tx, so this will accept some errors
-    wait!(|| {
+    async_wait!(async {
         let mut channels = cln.rpc().listfunds().unwrap().channels;
         let origin_size = channels.len();
         channels.retain(|chan| chan.state == "CHANNELD_NORMAL");
@@ -183,20 +192,21 @@ pub fn fund_a_simple_channel_to_lampo() {
         crate::wait_cln_sync!(cln);
         Err(())
     });
-    async_run!(cln.stop()).unwrap();
+    cln.stop().await.unwrap();
 }
 
-#[test]
+#[tokio::test]
 pub fn payinvoice_to_lampo() {
     init();
 
-    let mut cln = async_run!(cln::Node::with_params(
+    let mut cln = cln::Node::with_params(
         "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
-        "regtest"
-    ))
+        "regtest",
+    )
+    .await
     .unwrap();
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).await.unwrap();
     let lampo = lampo_manager.lampod();
     let info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
     let response = cln
@@ -223,7 +233,7 @@ pub fn payinvoice_to_lampo() {
 
     // looks like that rust is too fast and cln is not able to
     // index all the tx, so this will accept some errors
-    wait!(|| {
+    async_wait!(async {
         let mut channels = cln.rpc().listfunds().unwrap().channels;
         let origin_size = channels.len();
         channels.retain(|chan| chan.state == "CHANNELD_NORMAL");
@@ -247,6 +257,7 @@ pub fn payinvoice_to_lampo() {
                 "description": "integration_test",
             }),
         )
+        .await
         .unwrap();
     let _: json::Value = cln
         .rpc()
@@ -257,25 +268,24 @@ pub fn payinvoice_to_lampo() {
             }),
         )
         .unwrap();
-    async_run!(cln.stop()).unwrap();
+    cln.stop().await.unwrap();
 }
 
-#[test]
-pub fn decode_cln_offer_from_lampo() {
+#[tokio::test]
+pub async fn decode_cln_offer_from_lampo() {
     init();
 
-    let mut cln = async_run!(cln::Node::with_params(
+    let mut cln = cln::Node::with_params(
         "--developer --experimental-onion-messages --experimental-offers --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
-    ))
-    .unwrap();
-    std::thread::sleep(Duration::from_secs(1));
+    ).await.unwrap();
+
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).await.unwrap();
     let lampo = lampo_manager.lampod();
 
     let events = lampo.events();
-    let address = lampo_manager.fund_wallet(101).unwrap();
+    let address = lampo_manager.fund_wallet(101).await.unwrap();
     wait!(|| {
         let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
             events.recv_timeout(Duration::from_millis(100))
@@ -300,6 +310,7 @@ pub fn decode_cln_offer_from_lampo() {
                 addr: Some("127.0.0.1".to_owned()),
             },
         )
+        .await
         // Wait a little bit that the open channel will finish!
         .unwrap();
 
@@ -321,7 +332,7 @@ pub fn decode_cln_offer_from_lampo() {
         Err(())
     });
 
-    wait!(|| {
+    async_wait!(async {
         let channels = cln.rpc().listfunds().unwrap().channels;
         if channels.is_empty() {
             return Err(());
@@ -334,7 +345,7 @@ pub fn decode_cln_offer_from_lampo() {
             return Ok(());
         }
 
-        let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+        let channels: response::Channels = lampo.call("channels", json::json!({})).await.unwrap();
         if !channels.channels.first().unwrap().ready {
             return Err(());
         }
@@ -351,6 +362,7 @@ pub fn decode_cln_offer_from_lampo() {
                 "description": "for cln",
             }),
         )
+        .await
         .unwrap();
 
     log::info!("{:?}", offer);
@@ -364,25 +376,25 @@ pub fn decode_cln_offer_from_lampo() {
         )
         .unwrap();
     assert_eq!(decode["type"].as_str().unwrap(), "bolt12 offer");
-    async_run!(cln.stop()).unwrap();
+    cln.stop().await.unwrap();
 }
 
-#[test]
-pub fn decode_cln_offer_from_lampo_minimal_offer() {
+#[tokio::test]
+pub async fn decode_cln_offer_from_lampo_minimal_offer() {
     init();
 
-    let mut cln = async_run!(cln::Node::with_params(
+    let mut cln = cln::Node::with_params(
         "--developer --experimental-onion-messages --experimental-offers --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
-    ))
+    ).await
     .unwrap();
     std::thread::sleep(Duration::from_secs(1));
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).await.unwrap();
     let lampo = lampo_manager.lampod();
 
     let events = lampo.events();
-    let address = lampo_manager.fund_wallet(101).unwrap();
+    let address = lampo_manager.fund_wallet(101).await.unwrap();
     wait!(|| {
         let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
             events.recv_timeout(Duration::from_millis(100))
@@ -407,6 +419,7 @@ pub fn decode_cln_offer_from_lampo_minimal_offer() {
                 addr: Some("127.0.0.1".to_owned()),
             },
         )
+        .await
         // Wait a little bit that the open channel will finish!
         .unwrap();
 
@@ -428,7 +441,7 @@ pub fn decode_cln_offer_from_lampo_minimal_offer() {
         Err(())
     });
 
-    wait!(|| {
+    async_wait!(async {
         let channels = cln.rpc().listfunds().unwrap().channels;
         if channels.is_empty() {
             return Err(());
@@ -441,7 +454,7 @@ pub fn decode_cln_offer_from_lampo_minimal_offer() {
             return Ok(());
         }
 
-        let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+        let channels: response::Channels = lampo.call("channels", json::json!({})).await.unwrap();
         if !channels.channels.first().unwrap().ready {
             return Err(());
         }
@@ -451,7 +464,7 @@ pub fn decode_cln_offer_from_lampo_minimal_offer() {
         Err(())
     });
 
-    let offer: Offer = lampo.call("offer", json::json!({})).unwrap();
+    let offer: Offer = lampo.call("offer", json::json!({})).await.unwrap();
 
     log::info!("{:?}", offer);
     let decode: json::Value = cln
@@ -464,26 +477,26 @@ pub fn decode_cln_offer_from_lampo_minimal_offer() {
         )
         .unwrap();
     assert_eq!(decode["type"].as_str().unwrap(), "bolt12 offer");
-    async_run!(cln.stop()).unwrap();
+    cln.stop().await;
 }
 
-#[test]
+#[tokio::test]
 #[ignore]
-pub fn fetchinvoice_cln_offer_from_lampo() {
+pub async fn fetchinvoice_cln_offer_from_lampo() {
     init();
 
-    let mut cln = async_run!(cln::Node::with_params(
+    let mut cln = cln::Node::with_params(
         "--developer --experimental-onion-messages --experimental-offers --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
-    ))
+    ).await
     .unwrap();
     std::thread::sleep(Duration::from_secs(1));
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).await.unwrap();
     let lampo = lampo_manager.lampod();
 
     let events = lampo.events();
-    let address = lampo_manager.fund_wallet(101).unwrap();
+    let address = lampo_manager.fund_wallet(101).await.unwrap();
     wait!(|| {
         let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
             events.recv_timeout(Duration::from_millis(100))
@@ -508,6 +521,7 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
                 addr: Some("127.0.0.1".to_owned()),
             },
         )
+        .await
         // Wait a little bit that the open channel will finish!
         .unwrap();
 
@@ -529,7 +543,7 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
         Err(())
     });
 
-    wait!(|| {
+    async_wait!(async {
         let channels = cln.rpc().listfunds().unwrap().channels;
         if channels.is_empty() {
             return Err(());
@@ -542,7 +556,7 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
             return Ok(());
         }
 
-        let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+        let channels: response::Channels = lampo.call("channels", json::json!({})).await.unwrap();
         if !channels.channels.first().unwrap().ready {
             return Err(());
         }
@@ -558,7 +572,7 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
             json::json!({
                 "description": "for cln",
             }),
-        )
+        ).await
         .unwrap();
 
     log::info!("{:?}", offer);
@@ -573,7 +587,7 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
         .unwrap();
     assert_eq!(decode["type"].as_str().unwrap(), "bolt12 offer");
 
-    let info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
+    let info: response::GetInfo = lampo.call("getinfo", json::json!({})).await.unwrap();
     let result = cln.rpc().connect(&info.node_id, Some("127.0.0.1")).unwrap();
     log::info!("cln -> connected -> lampo: `{:?}`", result);
     let invoice: Result<json::Value, _> = cln.rpc().call(
@@ -589,21 +603,21 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
         unreachable!()
     };
     assert!(invoice["invoice"].is_string());
-    async_run!(cln.stop()).unwrap();
+    cln.stop().await.unwrap();
 }
 
-#[test]
-pub fn decode_invoice_from_cln() {
+#[tokio::test]
+pub async fn decode_invoice_from_cln() {
     init();
 
-    let mut cln = async_run!(cln::Node::with_params(
+    let mut cln = cln::Node::with_params(
         "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
-    ))
+    ).await
     .unwrap();
     std::thread::sleep(Duration::from_secs(1));
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).await.unwrap();
     let lampo = lampo_manager.lampod();
     let info: response::GetInfo = lampo.call("getinfo", json::json!({})).unwrap();
     let response = cln
@@ -631,13 +645,13 @@ pub fn decode_invoice_from_cln() {
             json::json!({
                 "invoice_str": invoce.bolt11,
             }),
-        )
+        ).await
         .unwrap();
     assert_eq!(
         decode.description,
         Some("need to be decoded by lampo".to_owned())
     );
-    async_run!(cln.stop()).unwrap();
+    cln.stop().await.unwrap();
 }
 
 #[test]

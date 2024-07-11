@@ -3,7 +3,6 @@ pub mod prelude {
     pub use clightning_testing::prelude::*;
     pub use clightning_testing::*;
     pub use lampod;
-    pub use lampod::async_run;
 }
 
 use std::str::FromStr;
@@ -59,6 +58,28 @@ macro_rules! wait {
     };
 }
 
+#[macro_export]
+macro_rules! async_wait {
+    ($callback:tt, $timeout:expr) => {
+        async {
+            let mut success = false;
+            for _ in 0..4 {
+                let result = $callback.await;
+                if let Err(_) = result {
+                    std::thread::sleep(std::time::Duration::from_secs($timeout));
+                    continue;
+                }
+                success = true;
+                break;
+            }
+            assert!(success, "callback got a timeout");
+        }
+        .await
+    };
+    ($callback:expr) => {
+        $crate::async_wait!($callback, 5);
+    };
+}
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     root_path: Arc<TempDir>,
@@ -70,7 +91,7 @@ pub struct LampoTesting {
 }
 
 impl LampoTesting {
-    pub fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
+    pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -131,11 +152,11 @@ impl LampoTesting {
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
-        std::thread::spawn(move || lampo.listen().unwrap().join());
+        tokio::spawn(async move { lampo.listen().await.unwrap().join() });
         // wait that lampo starts
         std::thread::sleep(Duration::from_secs(1));
 
-        let info: response::GetInfo = handler.call("getinfo", json::json!({}))?;
+        let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
         log::info!("ready for integration testing!");
         Ok(Self {
             inner: handler,
@@ -148,11 +169,18 @@ impl LampoTesting {
         })
     }
 
-    pub fn fund_wallet(&self, blocks: u64) -> error::Result<bitcoincore_rpc::bitcoin::Address> {
+    pub async fn fund_wallet(
+        &self,
+        blocks: u64,
+    ) -> error::Result<bitcoincore_rpc::bitcoin::Address> {
         use clightning_testing::prelude::bitcoincore_rpc::RpcApi;
 
         // mine some bitcoin inside the lampo address
-        let address: NewAddress = self.lampod().call("newaddr", json::json!({})).unwrap();
+        let address: NewAddress = self
+            .lampod()
+            .call("newaddr", json::json!({}))
+            .await
+            .unwrap();
         let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
             .unwrap()
             .assume_checked();
@@ -162,8 +190,8 @@ impl LampoTesting {
             .generate_to_address(blocks, &address)
             .unwrap();
 
-        wait!(|| {
-            let funds: response::Utxos = self.inner.call("funds", json::json!({})).unwrap();
+        async_wait!(async {
+            let funds: response::Utxos = self.inner.call("funds", json::json!({})).await.unwrap();
             if !funds.transactions.is_empty() {
                 return Ok(());
             }
