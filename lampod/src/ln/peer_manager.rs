@@ -146,6 +146,8 @@ impl LampoPeerManager {
             }
         };
 
+        let _: error::Result<()> = tokio::spawn(async move {
+
         loop {
             let alias = alias.clone();
             let peer_manager = peer_manager.clone();
@@ -194,6 +196,8 @@ impl LampoPeerManager {
                 }
             }
         }
+        }).await?;
+        Ok(())
     }
 
     pub fn is_connected_with(&self, peer_id: NodeId) -> bool {
