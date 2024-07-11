@@ -12,19 +12,20 @@ use lampo_common::handler::Handler;
 use lampo_common::json;
 use lampo_common::model::{request, response};
 
+use lampo_testing::async_wait;
 use lampo_testing::prelude::*;
 use lampo_testing::wait;
 use lampo_testing::LampoTesting;
 
 use crate::init;
 
-#[test]
-pub fn init_connection_test_between_lampo() -> error::Result<()> {
+#[tokio::test]
+pub async fn init_connection_test_between_lampo() -> error::Result<()> {
     init();
-    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
+    let btc = btc::BtcNode::tmp("regtest").await?;
     let btc = Arc::new(btc);
-    let node1 = LampoTesting::new(btc.clone())?;
-    let node2 = LampoTesting::new(btc.clone())?;
+    let node1 = LampoTesting::new(btc.clone()).await?;
+    let node2 = LampoTesting::new(btc.clone()).await?;
     let response: response::Connect = node2
         .lampod()
         .call(
@@ -35,18 +36,18 @@ pub fn init_connection_test_between_lampo() -> error::Result<()> {
                 port: node1.port,
             },
         )
-        .unwrap();
+        .await?;
     log::debug!("node 1 -> connected with node 2 {:?}", response);
     Ok(())
 }
 
-#[test]
-pub fn fund_a_simple_channel_from() -> error::Result<()> {
+#[tokio::test]
+pub async fn fund_a_simple_channel_from() -> error::Result<()> {
     init();
-    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
+    let btc = btc::BtcNode::tmp("regtest").await?;
     let btc = Arc::new(btc);
-    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
-    let node2 = Arc::new(LampoTesting::new(btc.clone())?);
+    let node1 = Arc::new(LampoTesting::new(btc.clone()).await?);
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
     let response: response::Connect = node2
         .lampod()
         .call(
@@ -57,11 +58,11 @@ pub fn fund_a_simple_channel_from() -> error::Result<()> {
                 port: node1.port,
             },
         )
-        .unwrap();
+        .await?;
     log::debug!("node 1 -> connected with node 2 {:?}", response);
 
     let events = node1.lampod().events();
-    let _ = node1.fund_wallet(101).unwrap();
+    let _ = node1.fund_wallet(101).await?;
     wait!(|| {
         let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
             events.recv_timeout(Duration::from_millis(100))
@@ -86,13 +87,13 @@ pub fn fund_a_simple_channel_from() -> error::Result<()> {
                 addr: None,
             },
         )
-        .unwrap();
+        .await?;
     assert!(response.get("tx").is_some());
 
     let events = node2.lampod().events();
-    wait!(|| {
+    async_wait!(async {
         while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
-            node2.fund_wallet(1).unwrap();
+            node2.fund_wallet(1).await.unwrap();
             if let Event::Lightning(LightningEvent::ChannelReady {
                 counterparty_node_id,
                 ..
@@ -104,8 +105,11 @@ pub fn fund_a_simple_channel_from() -> error::Result<()> {
                 return Ok(());
             };
             // check if lampo see the channel
-            let channels: response::Channels =
-                node2.lampod().call("channels", json::json!({})).unwrap();
+            let channels: response::Channels = node2
+                .lampod()
+                .call("channels", json::json!({}))
+                .await
+                .unwrap();
             if !channels.channels.is_empty() {
                 return Ok(());
             }
@@ -114,22 +118,22 @@ pub fn fund_a_simple_channel_from() -> error::Result<()> {
                 return Ok(());
             }
         }
-        node2.fund_wallet(6).unwrap();
+        node2.fund_wallet(6).await.unwrap();
         Err(())
     });
     Ok(())
 }
 
-#[test]
-pub fn pay_invoice_simple_case_lampo() -> error::Result<()> {
+#[tokio::test]
+pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
     init();
-    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
+    let btc = btc::BtcNode::tmp("regtest").await?;
     let btc = Arc::new(btc);
-    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
-    let node2 = Arc::new(LampoTesting::new(btc.clone())?);
+    let node1 = Arc::new(LampoTesting::new(btc.clone()).await?);
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
 
     let events = node1.lampod().events();
-    let _ = node1.fund_wallet(101)?;
+    let _ = node1.fund_wallet(101).await?;
     wait!(|| {
         let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
             events.recv_timeout(Duration::from_millis(100))
@@ -154,12 +158,12 @@ pub fn pay_invoice_simple_case_lampo() -> error::Result<()> {
                 port: Some(node2.port),
             },
         )
-        .unwrap();
+        .await?;
     assert!(response.get("tx").is_some());
 
-    wait!(|| {
+    async_wait!(async {
         while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
-            node2.fund_wallet(6).unwrap();
+            node2.fund_wallet(6).await.unwrap();
             if let Event::Lightning(LightningEvent::ChannelReady {
                 counterparty_node_id,
                 ..
@@ -171,8 +175,11 @@ pub fn pay_invoice_simple_case_lampo() -> error::Result<()> {
                 return Ok(());
             };
             // check if lampo see the channel
-            let channels: response::Channels =
-                node2.lampod().call("channels", json::json!({})).unwrap();
+            let channels: response::Channels = node2
+                .lampod()
+                .call("channels", json::json!({}))
+                .await
+                .unwrap();
             if channels.channels.is_empty() {
                 return Err(());
             }
@@ -181,8 +188,11 @@ pub fn pay_invoice_simple_case_lampo() -> error::Result<()> {
                 return Err(());
             }
 
-            let channels: response::Channels =
-                node1.lampod().call("channels", json::json!({})).unwrap();
+            let channels: response::Channels = node1
+                .lampod()
+                .call("channels", json::json!({}))
+                .await
+                .unwrap();
 
             if channels.channels.is_empty() {
                 return Err(());
@@ -192,42 +202,48 @@ pub fn pay_invoice_simple_case_lampo() -> error::Result<()> {
                 return Ok(());
             }
         }
-        node2.fund_wallet(6).unwrap();
+        node2.fund_wallet(6).await.unwrap();
         Err(())
     });
 
-    let invoice: response::Invoice = node2.lampod().call(
-        "invoice",
-        request::GenerateInvoice {
-            description: "making sure that we can work betwen lampo version".to_owned(),
-            amount_msat: Some(100_000_000),
-            expiring_in: None,
-        },
-    )?;
+    let invoice: response::Invoice = node2
+        .lampod()
+        .call(
+            "invoice",
+            request::GenerateInvoice {
+                description: "making sure that we can work betwen lampo version".to_owned(),
+                amount_msat: Some(100_000_000),
+                expiring_in: None,
+            },
+        )
+        .await?;
 
     log::info!(target: &node2.info.node_id, "invoice generated `{:?}`", invoice);
 
-    let pay: response::PayResult = node1.lampod().call(
-        "pay",
-        request::Pay {
-            invoice_str: invoice.bolt11,
-            amount: None,
-        },
-    )?;
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: invoice.bolt11,
+                amount: None,
+            },
+        )
+        .await?;
     log::info!(target: &node1.info.node_id, "payment made `{:?}`", pay);
     Ok(())
 }
 
-#[test]
-pub fn pay_offer_simple_case_lampo() -> error::Result<()> {
+#[tokio::test]
+pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
     init();
-    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
+    let btc = btc::BtcNode::tmp("regtest").await?;
     let btc = Arc::new(btc);
-    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
-    let node2 = Arc::new(LampoTesting::new(btc.clone())?);
+    let node1 = Arc::new(LampoTesting::new(btc.clone()).await?);
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
 
     let events = node1.lampod().events();
-    let _ = node1.fund_wallet(101)?;
+    let _ = node1.fund_wallet(101).await?;
     wait!(|| {
         let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
             events.recv_timeout(Duration::from_millis(100))
@@ -252,12 +268,12 @@ pub fn pay_offer_simple_case_lampo() -> error::Result<()> {
                 port: Some(node2.port),
             },
         )
-        .unwrap();
+        .await?;
     assert!(response.get("tx").is_some());
 
-    wait!(|| {
+    async_wait!(async {
         while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
-            node2.fund_wallet(6).unwrap();
+            node2.fund_wallet(6).await.unwrap();
             if let Event::Lightning(LightningEvent::ChannelReady {
                 counterparty_node_id,
                 ..
@@ -269,8 +285,11 @@ pub fn pay_offer_simple_case_lampo() -> error::Result<()> {
                 return Ok(());
             };
             // check if lampo see the channel
-            let channels: response::Channels =
-                node2.lampod().call("channels", json::json!({})).unwrap();
+            let channels: response::Channels = node2
+                .lampod()
+                .call("channels", json::json!({}))
+                .await
+                .unwrap();
             if channels.channels.is_empty() {
                 return Err(());
             }
@@ -279,8 +298,11 @@ pub fn pay_offer_simple_case_lampo() -> error::Result<()> {
                 return Err(());
             }
 
-            let channels: response::Channels =
-                node1.lampod().call("channels", json::json!({})).unwrap();
+            let channels: response::Channels = node1
+                .lampod()
+                .call("channels", json::json!({}))
+                .await
+                .unwrap();
 
             if channels.channels.is_empty() {
                 return Err(());
@@ -290,41 +312,47 @@ pub fn pay_offer_simple_case_lampo() -> error::Result<()> {
                 return Ok(());
             }
         }
-        node2.fund_wallet(6).unwrap();
+        node2.fund_wallet(6).await.unwrap();
         Err(())
     });
 
-    let offer: response::Offer = node2.lampod().call(
-        "offer",
-        request::GenerateOffer {
-            description: Some("making sure that we can work betwen lampo version".to_owned()),
-            amount_msat: Some(100_000_000),
-        },
-    )?;
+    let offer: response::Offer = node2
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: Some("making sure that we can work betwen lampo version".to_owned()),
+                amount_msat: Some(100_000_000),
+            },
+        )
+        .await?;
 
     log::info!(target: &node2.info.node_id, "offer generated `{:?}`", offer);
 
-    let pay: response::PayResult = node1.lampod().call(
-        "pay",
-        request::Pay {
-            invoice_str: offer.bolt12,
-            amount: None,
-        },
-    )?;
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: None,
+            },
+        )
+        .await?;
     log::info!(target: &node1.info.node_id, "payment made `{:?}`", pay);
     Ok(())
 }
 
-#[test]
-pub fn pay_offer_minimal_offer() -> error::Result<()> {
+#[tokio::test]
+pub async fn pay_offer_minimal_offer() -> error::Result<()> {
     init();
-    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
+    let btc = btc::BtcNode::tmp("regtest").await?;
     let btc = Arc::new(btc);
-    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
-    let node2 = Arc::new(LampoTesting::new(btc.clone())?);
+    let node1 = Arc::new(LampoTesting::new(btc.clone()).await?);
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
 
     let events = node1.lampod().events();
-    let _ = node1.fund_wallet(101)?;
+    let _ = node1.fund_wallet(101).await?;
     wait!(|| {
         let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
             events.recv_timeout(Duration::from_millis(100))
@@ -349,12 +377,12 @@ pub fn pay_offer_minimal_offer() -> error::Result<()> {
                 port: Some(node2.port),
             },
         )
-        .unwrap();
+        .await?;
     assert!(response.get("tx").is_some());
 
-    wait!(|| {
+    async_wait!(async {
         while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
-            node2.fund_wallet(6).unwrap();
+            node2.fund_wallet(6).await.unwrap();
             if let Event::Lightning(LightningEvent::ChannelReady {
                 counterparty_node_id,
                 ..
@@ -366,8 +394,11 @@ pub fn pay_offer_minimal_offer() -> error::Result<()> {
                 return Ok(());
             };
             // check if lampo see the channel
-            let channels: response::Channels =
-                node2.lampod().call("channels", json::json!({})).unwrap();
+            let channels: response::Channels = node2
+                .lampod()
+                .call("channels", json::json!({}))
+                .await
+                .unwrap();
             if channels.channels.is_empty() {
                 return Err(());
             }
@@ -376,8 +407,11 @@ pub fn pay_offer_minimal_offer() -> error::Result<()> {
                 return Err(());
             }
 
-            let channels: response::Channels =
-                node1.lampod().call("channels", json::json!({})).unwrap();
+            let channels: response::Channels = node1
+                .lampod()
+                .call("channels", json::json!({}))
+                .await
+                .unwrap();
 
             if channels.channels.is_empty() {
                 return Err(());
@@ -387,41 +421,47 @@ pub fn pay_offer_minimal_offer() -> error::Result<()> {
                 return Ok(());
             }
         }
-        node2.fund_wallet(6).unwrap();
+        node2.fund_wallet(6).await.unwrap();
         Err(())
     });
 
-    let offer: response::Offer = node2.lampod().call(
-        "offer",
-        request::GenerateOffer {
-            description: None,
-            amount_msat: None,
-        },
-    )?;
+    let offer: response::Offer = node2
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: None,
+                amount_msat: None,
+            },
+        )
+        .await?;
 
     log::info!(target: &node2.info.node_id, "offer generated `{:?}`", offer);
 
-    let pay: response::PayResult = node1.lampod().call(
-        "pay",
-        request::Pay {
-            invoice_str: offer.bolt12,
-            amount: Some(100_000_000),
-        },
-    )?;
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: Some(100_000_000),
+            },
+        )
+        .await?;
     log::info!(target: &node1.info.node_id, "payment made `{:?}`", pay);
     Ok(())
 }
 
-#[test]
-pub fn decode_offer() -> error::Result<()> {
+#[tokio::test]
+pub async fn decode_offer() -> error::Result<()> {
     init();
-    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
+    let btc = btc::BtcNode::tmp("regtest").await?;
     let btc = Arc::new(btc);
-    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
-    let node2 = Arc::new(LampoTesting::new(btc.clone())?);
+    let node1 = Arc::new(LampoTesting::new(btc.clone()).await?);
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
 
     let events = node1.lampod().events();
-    let _ = node1.fund_wallet(101)?;
+    let _ = node1.fund_wallet(101).await?;
     wait!(|| {
         let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
             events.recv_timeout(Duration::from_millis(100))
@@ -446,12 +486,12 @@ pub fn decode_offer() -> error::Result<()> {
                 port: Some(node2.port),
             },
         )
-        .unwrap();
+        .await?;
     assert!(response.get("tx").is_some());
 
-    wait!(|| {
+    async_wait!(async {
         while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
-            node2.fund_wallet(6).unwrap();
+            node2.fund_wallet(6).await.unwrap();
             if let Event::Lightning(LightningEvent::ChannelReady {
                 counterparty_node_id,
                 ..
@@ -463,8 +503,11 @@ pub fn decode_offer() -> error::Result<()> {
                 return Ok(());
             };
             // check if lampo see the channel
-            let channels: response::Channels =
-                node2.lampod().call("channels", json::json!({})).unwrap();
+            let channels: response::Channels = node2
+                .lampod()
+                .call("channels", json::json!({}))
+                .await
+                .unwrap();
             if channels.channels.is_empty() {
                 return Err(());
             }
@@ -473,8 +516,11 @@ pub fn decode_offer() -> error::Result<()> {
                 return Err(());
             }
 
-            let channels: response::Channels =
-                node1.lampod().call("channels", json::json!({})).unwrap();
+            let channels: response::Channels = node1
+                .lampod()
+                .call("channels", json::json!({}))
+                .await
+                .unwrap();
 
             if channels.channels.is_empty() {
                 return Err(());
@@ -484,26 +530,32 @@ pub fn decode_offer() -> error::Result<()> {
                 return Ok(());
             }
         }
-        node2.fund_wallet(6).unwrap();
+        node2.fund_wallet(6).await.unwrap();
         Err(())
     });
 
-    let offer: response::Offer = node2.lampod().call(
-        "offer",
-        request::GenerateOffer {
-            description: None,
-            amount_msat: None,
-        },
-    )?;
+    let offer: response::Offer = node2
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: None,
+                amount_msat: None,
+            },
+        )
+        .await?;
 
     log::info!(target: &node2.info.node_id, "offer generated `{:?}`", offer);
 
-    let decode: response::InvoiceInfo = node2.lampod().call(
-        "decode",
-        request::DecodeInvoice {
-            invoice_str: offer.bolt12,
-        },
-    )?;
+    let decode: response::InvoiceInfo = node2
+        .lampod()
+        .call(
+            "decode",
+            request::DecodeInvoice {
+                invoice_str: offer.bolt12,
+            },
+        )
+        .await?;
 
     assert_eq!(decode.issuer_id, Some(node2.info.node_id.clone()));
     log::info!(target: &node2.info.node_id, "decode offer `{:?}`", decode);
