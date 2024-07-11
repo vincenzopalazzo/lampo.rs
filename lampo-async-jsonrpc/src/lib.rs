@@ -2,8 +2,10 @@
 //! minimal dependencies footprint.
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::future::Future;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -16,10 +18,15 @@ pub mod command;
 pub mod errors;
 pub mod json_rpc2;
 
-use crate::command::Context;
 use crate::errors::Error;
 use crate::errors::RpcError;
 use crate::json_rpc2::{Request, Response};
+
+type AsyncCallback<T: Send + Sync> = Arc<
+    dyn Fn(Arc<T>, Value) -> Pin<Box<dyn Future<Output = Result<Value, Error>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// JSONRPC v2
 pub struct JSONRPCv2<T: Send + Sync + 'static> {
@@ -29,16 +36,15 @@ pub struct JSONRPCv2<T: Send + Sync + 'static> {
 
 pub struct Handler<T: Send + Sync + 'static> {
     stop: Cell<bool>,
-    rpc_method:
-        RefCell<HashMap<String, Arc<dyn Fn(&T, &Value) -> Result<Value, errors::Error> + 'static>>>,
-    ctx: Arc<dyn Context<Ctx = T>>,
+    rpc_method: RefCell<HashMap<String, AsyncCallback<T>>>,
+    ctx: Arc<T>,
 }
 
 unsafe impl<T: Send + Sync> Sync for Handler<T> {}
 unsafe impl<T: Send + Sync> Send for Handler<T> {}
 
 impl<T: Send + Sync + 'static> Handler<T> {
-    pub fn new(ctx: Arc<dyn Context<Ctx = T>>) -> Self {
+    pub fn new(ctx: Arc<T>) -> Self {
         Handler::<T> {
             stop: Cell::new(false),
             rpc_method: RefCell::new(HashMap::new()),
@@ -46,19 +52,15 @@ impl<T: Send + Sync + 'static> Handler<T> {
         }
     }
 
-    pub fn add_method<F>(&self, method: &str, callback: F)
-    where
-        F: Fn(&T, &Value) -> Result<Value, errors::Error> + 'static,
-    {
+    pub fn add_method(&self, method: &str, callback: AsyncCallback<T>) {
         self.rpc_method
             .borrow_mut()
-            .insert(method.to_owned(), Arc::new(callback));
+            .insert(method.to_owned(), callback);
     }
 
-    // FIXME: make this async
-    pub fn run_callback(&self, req: &Request<Value>) -> Option<Result<Value, errors::Error>> {
+    pub async fn run_callback(&self, req: &Request<Value>) -> Option<Result<Value, errors::Error>> {
         let binding = self.rpc_method.borrow();
-        let Some(callback) = binding.get(&req.method) else {
+        let Some(ref callback) = binding.get(&req.method) else {
             return Some(Err(errors::RpcError {
                 message: format!("method `{}` not found", req.method),
                 code: -1,
@@ -66,16 +68,12 @@ impl<T: Send + Sync + 'static> Handler<T> {
             }
             .into()));
         };
-        let resp = callback(self.ctx(), &req.params);
+        let resp = callback(self.ctx.clone(), req.params.clone()).await;
         Some(resp)
     }
 
     pub fn has_rpc(&self, method: &str) -> bool {
         self.rpc_method.borrow().contains_key(method)
-    }
-
-    fn ctx(&self) -> &T {
-        self.ctx.ctx()
     }
 
     pub fn stop(&self) {
@@ -84,27 +82,19 @@ impl<T: Send + Sync + 'static> Handler<T> {
 }
 
 impl<T: Send + Sync + 'static> JSONRPCv2<T> {
-    pub fn new(ctx: Arc<dyn Context<Ctx = T>>, path: &str) -> Result<Self, Error> {
+    pub fn new(ctx: Arc<T>, path: &str) -> Result<Self, Error> {
         Ok(Self {
             handler: Arc::new(Handler::new(ctx)),
             socket_path: path.to_owned(),
         })
     }
 
-    pub fn add_rpc<F>(&self, name: &str, callback: F) -> Result<(), ()>
-    where
-        F: Fn(&T, &Value) -> Result<Value, errors::Error> + 'static,
-    {
+    pub fn add_rpc(&self, name: &str, callback: AsyncCallback<T>) -> Result<(), ()> {
         if self.handler.has_rpc(name) {
             return Err(());
         }
         self.handler.add_method(name, callback);
         Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn ctx(&self) -> &T {
-        self.handler.ctx()
     }
 
     async fn handle_request(
@@ -131,7 +121,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
             });
         }
         // TODO: return an error
-        let resp = handler.run_callback(&payload).unwrap();
+        let resp = handler.run_callback(&payload).await.unwrap();
         let resp = Self::write(payload, resp).unwrap();
 
         log::debug!(
@@ -177,7 +167,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o666))?;
 
         while !self.handler.stop.get() {
-            let (mut socket, _) = listener.accept().await?;
+            let (mut socket, _) = listener.accept().await.unwrap();
             let handler = self.handler();
             tokio::spawn(async move {
                 let mut buffer = Vec::new();
@@ -189,7 +179,8 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                         let _ = socket.write_all(&response_bytes).await;
                     }
                 }
-            });
+            })
+            .await;
         }
         Ok(())
     }
