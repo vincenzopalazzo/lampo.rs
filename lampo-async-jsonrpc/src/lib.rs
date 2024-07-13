@@ -1,11 +1,11 @@
 //! Full feature async JSON RPC 2.0 Server/client with a
 //! minimal dependencies footprint.
+#![feature(type_alias_impl_trait)]
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -22,11 +22,8 @@ use crate::errors::Error;
 use crate::errors::RpcError;
 use crate::json_rpc2::{Request, Response};
 
-type AsyncCallback<T: Send + Sync> = Arc<
-    dyn Fn(Arc<T>, Value) -> Pin<Box<dyn Future<Output = Result<Value, Error>> + Send>>
-        + Send
-        + Sync,
->;
+type AsyncFn<T> = impl Fn(&T, Value) -> AsyncFuture;
+type AsyncFuture = impl Future<Output = Result<Value, Error>> + Send + 'static;
 
 /// JSONRPC v2
 pub struct JSONRPCv2<T: Send + Sync + 'static> {
@@ -36,7 +33,7 @@ pub struct JSONRPCv2<T: Send + Sync + 'static> {
 
 pub struct Handler<T: Send + Sync + 'static> {
     stop: Cell<bool>,
-    rpc_method: RefCell<HashMap<String, AsyncCallback<T>>>,
+    rpc_method: RefCell<HashMap<String, AsyncFn<T>>>,
     ctx: Arc<T>,
 }
 
@@ -52,15 +49,15 @@ impl<T: Send + Sync + 'static> Handler<T> {
         }
     }
 
-    pub fn add_method(&self, method: &str, callback: AsyncCallback<T>) {
+    pub fn add_method(&self, method: &str, callback: AsyncFn<T>) {
         self.rpc_method
             .borrow_mut()
             .insert(method.to_owned(), callback);
     }
 
     pub async fn run_callback(&self, req: &Request<Value>) -> Option<Result<Value, errors::Error>> {
-        let binding = self.rpc_method.borrow();
-        let Some(ref callback) = binding.get(&req.method) else {
+        let binding = self.rpc_method.take();
+        let Some(callback) = binding.get(&req.method) else {
             return Some(Err(errors::RpcError {
                 message: format!("method `{}` not found", req.method),
                 code: -1,
@@ -68,7 +65,7 @@ impl<T: Send + Sync + 'static> Handler<T> {
             }
             .into()));
         };
-        let resp = callback(self.ctx.clone(), req.params.clone()).await;
+        let resp = callback(&self.ctx, req.params.clone()).await;
         Some(resp)
     }
 
@@ -89,7 +86,7 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
         })
     }
 
-    pub fn add_rpc(&self, name: &str, callback: AsyncCallback<T>) -> Result<(), ()> {
+    pub fn add_rpc<F, Fut>(&self, name: &str, callback: AsyncFn<T>) -> Result<(), ()> {
         if self.handler.has_rpc(name) {
             return Err(());
         }

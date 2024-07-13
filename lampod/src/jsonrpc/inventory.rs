@@ -6,7 +6,7 @@ use lampo_common::json;
 use crate::json_rpc2::Error;
 use crate::LampoDaemon;
 
-pub fn get_info(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn get_info(ctx: &LampoDaemon, request: json::Value) -> Result<json::Value, Error> {
     log::info!("calling `getinfo` with request `{:?}`", request);
     let handler = ctx.handler();
     let (inchan, outchan) = chan::unbounded::<error::Result<json::Value>>();

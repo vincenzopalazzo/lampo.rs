@@ -32,7 +32,7 @@ pub struct LampoHandler {
     inventory_manager: Arc<LampoInventoryManager>,
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
-    external_handlers: RefCell<Vec<Arc<dyn ExternalHandler>>>,
+    external_handlers: RefCell<Vec<Arc<dyn ExternalHandler + Send + Sync>>>,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
     subscriber: Subscriber<Event>,
@@ -57,7 +57,10 @@ impl LampoHandler {
         }
     }
 
-    pub fn add_external_handler(&self, handler: Arc<dyn ExternalHandler>) -> error::Result<()> {
+    pub fn add_external_handler(
+        &self,
+        handler: Arc<dyn ExternalHandler + Send + Sync>,
+    ) -> error::Result<()> {
         let mut vect = self.external_handlers.borrow_mut();
         vect.push(handler);
         Ok(())
@@ -110,12 +113,11 @@ impl Handler for LampoHandler {
                 Ok(())
             }
             Command::ExternalCommand(req, chan) => {
-                log::info!(
-                    "external handler size {}",
-                    self.external_handlers.borrow().len()
-                );
-                for handler in self.external_handlers.borrow().iter() {
-                    if let Some(resp) = handler.handle(&req)? {
+                // FIXME: remove the clone
+                let handlers = self.external_handlers.clone().into_inner();
+                log::info!("external handler size {}", handlers.len());
+                for handler in handlers.into_iter() {
+                    if let Some(resp) = handler.handle(&req).await? {
                         chan.send(resp)?;
                         return Ok(());
                     }

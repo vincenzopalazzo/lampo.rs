@@ -9,6 +9,7 @@ pub mod peer_control;
 use std::cell::RefCell;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use lampo_async_jsonrpc::command::Context;
 use lampo_async_jsonrpc::json_rpc2;
 use lampo_async_jsonrpc::Handler;
@@ -55,16 +56,21 @@ impl CommandHandler {
     }
 }
 
+#[async_trait]
 impl ExternalHandler for CommandHandler {
-    fn handle(&self, req: &json_rpc2::Request<json::Value>) -> error::Result<Option<json::Value>> {
-        let handler = self.handler.borrow();
+    async fn handle(
+        &self,
+        req: &json_rpc2::Request<json::Value>,
+    ) -> error::Result<Option<json::Value>> {
+        // FIXME: remove clone
+        let handler = self.handler.clone().into_inner();
         let Some(handler) = handler.as_ref() else {
             log::info!("skipping the handling because it is not defined");
             return Ok(None);
         };
         log::debug!("handling the JSON RPC response with req {:?}", req);
         // FIXME: store the ctx inside the handler and not take as argument!
-        let Some(resp) = handler.run_callback(req) else {
+        let Some(resp) = handler.run_callback(req).await else {
             log::info!("callback `{}` not found, skipping handler", req.method);
             return Ok(None);
         };
@@ -73,14 +79,5 @@ impl ExternalHandler for CommandHandler {
         //
         // Like we should look at the error code, and return None.
         Ok(Some(resp?))
-    }
-}
-
-/// Implementing the Context for the JSON RPC 2.0 framework
-impl Context for LampoDaemon {
-    type Ctx = LampoDaemon;
-
-    fn ctx(&self) -> &Self::Ctx {
-        self
     }
 }

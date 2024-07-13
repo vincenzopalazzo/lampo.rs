@@ -230,7 +230,10 @@ impl LampoDaemon {
     /// Additionally, the registered handler serves as the entry point for
     /// the Chain of Responsibility pattern that handles all unsupported commands that the Lampod daemon
     /// may receive from external sources (assuming the user has defined a handler for them).
-    pub fn add_external_handler(&self, ext_handler: Arc<dyn ExternalHandler>) -> error::Result<()> {
+    pub fn add_external_handler(
+        &self,
+        ext_handler: Arc<dyn ExternalHandler + Send + Sync>,
+    ) -> error::Result<()> {
         let Some(ref handler) = self.handler else {
             error::bail!("Initial handler is None");
         };
