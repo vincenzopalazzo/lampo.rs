@@ -5,7 +5,10 @@ edition = "2021"
 
 [dependencies]
 lampo-common = { path = "../lampo-common" }
-clightningrpc-common = { version = "0.3.0-beta.3" }
 serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 log = "0.4.17"
+elite-rpc = "0.0.1"
+jsonrpsee = { version = "0.24.0", features = ["ws-client", "client-ws-transport-tls"] }
+jsonrpsee-client-transport = { version = "0.21.0", features = ["ws"] }
+jsonrpsee-core = { version = "0.21.0", features = ["async-client"] }
