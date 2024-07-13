@@ -201,5 +201,6 @@ async fn run_jsonrpc(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     server.add_rpc("keysend", json_keysend).unwrap();
     server.add_rpc("fees", json_estimate_fees).unwrap();
     server.add_rpc("close", json_close_channel).unwrap();
+    server.listen().await?;
     Ok(())
 }

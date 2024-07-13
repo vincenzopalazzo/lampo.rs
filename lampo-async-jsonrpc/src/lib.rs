@@ -38,9 +38,10 @@ impl<T: Sync + Send + 'static> JSONRPCv2<T> {
         let rpc_middleware = RpcServiceBuilder::new().rpc_logger(1024);
         let server = Server::builder()
             .set_rpc_middleware(rpc_middleware)
-            .build("127.0.0.1:0")
+            .build("127.0.0.1:9999")
             .await?;
-        let _addr = server.local_addr()?;
+        let addr = server.local_addr()?;
+        log::info!("Starting JSON RPC server on {addr}");
         let handle = server.start(self.inner);
         // FIXME: stop the server in a proprer way
         tokio::spawn(handle.stopped());
