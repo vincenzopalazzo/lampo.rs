@@ -128,7 +128,7 @@ impl LampoTesting {
         let lampo = Arc::new(lampo);
         let socket_path = format!("{}/lampod.socket", lampo.root_path());
         // FIXME: This can be an InMemory Handler without any problem
-        let server = JSONRPCv2::new(lampo.clone(), &socket_path)?;
+        let mut server = JSONRPCv2::new(lampo.clone(), &socket_path)?;
         server.add_rpc("getinfo", get_info).unwrap();
         server.add_rpc("connect", json_connect).unwrap();
         server.add_rpc("fundchannel", json_open_channel).unwrap();
@@ -138,17 +138,17 @@ impl LampoTesting {
         server.add_rpc("invoice", json_invoice).unwrap();
         server.add_rpc("offer", json_offer).unwrap();
         server
-            .add_rpc("decode_invoice", json_decode_invoice)
+            .add_rpc("decode", json_decode_invoice)
             .unwrap();
-
         server.add_rpc("pay", json_pay).unwrap();
         server.add_rpc("keysend", json_keysend).unwrap();
         server.add_rpc("close", json_close_channel).unwrap();
-        let handler = server.handler();
-        let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
-        rpc_handler.set_handler(handler);
-
-        lampo.add_external_handler(rpc_handler)?;
+        server.listen().await?;
+        // FIXME Inject the handler to speak with the server.
+        //let handler = server.handler();
+        //let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
+        //rpc_handler.set_handler(handler);
+        //lampo.add_external_handler(rpc_handler)?;
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
