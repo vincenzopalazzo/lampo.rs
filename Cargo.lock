@@ -345,6 +345,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a21f936df1771bf62b77f047b726c4625ff2e8aa607c01ec06e5a05bd8463401"
 dependencies = [
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -869,6 +870,7 @@ dependencies = [
  "lampo-client",
  "lampo-common",
  "lampo-jsonrpc",
+ "lightning-liquidity",
  "log",
  "once_cell",
  "time",
@@ -987,6 +989,21 @@ dependencies = [
  "bitcoin 0.30.2",
  "lightning",
  "secp256k1 0.27.0",
+ "serde",
+]
+
+[[package]]
+name = "lightning-liquidity"
+version = "0.1.0-alpha.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3fa6284740f64672f42145de7b0a242beea3821dae1f0eac7949a8f48799c828"
+dependencies = [
+ "bitcoin 0.30.2",
+ "chrono",
+ "lightning",
+ "lightning-invoice",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

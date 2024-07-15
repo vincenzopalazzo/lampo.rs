@@ -16,6 +16,7 @@ pub mod chain;
 pub mod command;
 pub mod handler;
 pub mod jsonrpc;
+mod liquidity;
 pub mod ln;
 pub mod persistence;
 

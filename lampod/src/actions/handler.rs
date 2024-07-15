@@ -24,6 +24,9 @@ use crate::{async_run, LampoDaemon};
 
 use super::{Handler, InventoryHandler};
 
+// TODO: Add a LampoLiquidity object here as we need to call, LampoLiquidity should contain LiquidityManager
+// If configured, users must forward the [`Event::HTLCIntercepted`] event parameters to [`LSPS2ServiceHandler::htlc_intercepted`]
+/// and the [`Event::ChannelReady`] event parameters to [`LSPS2ServiceHandler::channel_ready`].
 pub struct LampoHandler {
     channel_manager: Arc<LampoChannelManager>,
     peer_manager: Arc<LampoPeerManager>,
