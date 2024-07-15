@@ -66,7 +66,7 @@ impl LampoVLSInProcess {
             .allowlist(allowlist)
             .build()
             .expect("Cannot Build The Root Handler");
-        let root_handler = root_handler_builder.root_handler();
+        let root_handler = root_handler_builder.into_root_handler();
         LampoVLSInProcess {
             handler: root_handler,
         }
