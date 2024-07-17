@@ -101,6 +101,10 @@ impl LampoKeysManager {
         self.htlc_base_secret = Some(SecretKey::from_str(&htlc_base_secret).unwrap());
         self.shachain_seed = Some(self.inner.get_secure_random_bytes())
     }
+
+    pub fn get_node_secret_key(&self) -> SecretKey {
+        self.inner.get_node_secret_key()
+    }
 }
 
 impl EntropySource for LampoKeysManager {

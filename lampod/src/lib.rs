@@ -16,14 +16,20 @@ pub mod chain;
 pub mod command;
 pub mod handler;
 pub mod jsonrpc;
-mod liquidity;
+pub mod liquidity;
 pub mod ln;
 pub mod persistence;
 
 use std::cell::Cell;
+use std::os::unix::net::SocketAddr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use lampo_common::ldk::ln::msgs::SocketAddress;
+use lampo_common::secp256k1::PublicKey;
+use liquidity::LSPProvider;
+use liquidity::LampoLiquidity;
+use liquidity::LampoLiquidityManager;
 use tokio::runtime::Runtime;
 
 use lampo_common::backend::Backend;
@@ -68,7 +74,7 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
-
+    liquidity: Option<Arc<LampoLiquidityManager>>,
     // FIXME: remove this
     rt: Runtime,
 }
@@ -94,6 +100,7 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
+            liquidity: None,
             rt: Runtime::new().unwrap(),
         }
     }
@@ -104,6 +111,45 @@ impl LampoDaemon {
 
     pub fn conf(&self) -> &LampoConf {
         &self.conf
+    }
+
+    pub fn liquidity(&self) -> Arc<LampoLiquidityManager> {
+        self.liquidity.clone().unwrap()
+    }
+
+    // This should not be initiated when we open our node only when we
+    // provide some args inside cli or in lampo.conf
+    fn init_lampo_liquidity(
+        &self,
+        node_id: PublicKey,
+        addr: SocketAddress,
+        token: Option<String>,
+    ) -> error::Result<LampoLiquidityManager> {
+        log::info!("Starting lampo-liquidity manager as a consumer!");
+        //TODO: Fix this!
+        let liquidity = LampoLiquidity::new(
+            self.offchain_manager().key_manager(),
+            self.channel_manager().manager(),
+            Some(self.onchain_manager()),
+            None,
+            None,
+            None,
+        );
+        let liquidity = LampoLiquidityManager::new(
+            liquidity.into(),
+            Arc::new(self.conf.clone()),
+            Some(LSPProvider {
+                node_id,
+                addr,
+                token,
+                opening_params: None,
+                ctlv_exiry: None,
+                scid: None,
+            }),
+            self.channel_manager.as_ref().unwrap().clone(),
+            self.offchain_manager().key_manager(),
+        );
+        Ok(liquidity)
     }
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
