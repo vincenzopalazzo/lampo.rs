@@ -1,9 +1,10 @@
 //! Full feature async JSON RPC 2.0 Server/client with a
 //! minimal dependencies footprint.
 use std::future::Future;
+use std::net::TcpListener;
 use std::sync::Arc;
 
-use jsonrpsee::server::{RpcModule, RpcServiceBuilder, Server};
+use jsonrpsee::server::{RpcModule, Server};
 
 pub use jsonrpsee::types::{ErrorObject, ResponsePayload};
 pub use jsonrpsee::IntoResponse;
@@ -11,12 +12,14 @@ pub use jsonrpsee::IntoResponse;
 /// JSONRPC v2
 pub struct JSONRPCv2<T: Sync + Send + 'static> {
     inner: RpcModule<Arc<T>>,
+    host: String,
 }
 
 impl<T: Sync + Send + 'static> JSONRPCv2<T> {
-    pub fn new(ctx: Arc<T>, path: &str) -> anyhow::Result<Self> {
+    pub fn new(ctx: Arc<T>, host: &str) -> anyhow::Result<Self> {
         Ok(Self {
             inner: RpcModule::new(ctx),
+            host: host.to_owned(),
         })
     }
 
@@ -35,13 +38,7 @@ impl<T: Sync + Send + 'static> JSONRPCv2<T> {
     }
 
     pub async fn listen(self) -> std::io::Result<()> {
-        let rpc_middleware = RpcServiceBuilder::new().rpc_logger(1024);
-        let server = Server::builder()
-            .set_rpc_middleware(rpc_middleware)
-            .build("127.0.0.1:9999")
-            .await?;
-        let addr = server.local_addr()?;
-        log::info!("Starting JSON RPC server on {addr}");
+        let server = Server::builder().ws_only().build(self.host).await?;
         let handle = server.start(self.inner);
         // FIXME: stop the server in a proprer way
         tokio::spawn(handle.stopped());

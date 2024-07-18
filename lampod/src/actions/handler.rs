@@ -9,6 +9,7 @@ use lampo_common::error;
 use lampo_common::error::Ok;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::{Emitter, Event, Subscriber};
+use lampo_common::handler::ExternalHandler;
 use lampo_common::handler::Handler as EventHandler;
 use lampo_common::json;
 use lampo_common::ldk;
@@ -18,7 +19,6 @@ use lampo_common::types::ChannelState;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
-use crate::handler::external_handler::ExternalHandler;
 use crate::jsonrpc::Request;
 use crate::ln::events::PeerEvents;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
@@ -117,7 +117,7 @@ impl Handler for LampoHandler {
                 let handlers = self.external_handlers.clone().into_inner();
                 log::info!("external handler size {}", handlers.len());
                 for handler in handlers.into_iter() {
-                    if let Some(resp) = handler.handle(&req).await? {
+                    if let Some(resp) = handler.handle(&req.method, &req.params).await? {
                         chan.send(resp)?;
                         return Ok(());
                     }

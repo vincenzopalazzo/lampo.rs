@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1.38.0", features = ["time"] }
 async-trait = "0.1.80"
+
 serde = "1"
 lampo-common = { path = "../lampo-common" }
 lampo-async-jsonrpc = { path = "../lampo-async-jsonrpc" }

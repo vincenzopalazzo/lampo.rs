@@ -8,7 +8,9 @@ lampo-common = { path = "../lampo-common" }
 serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 log = "0.4.17"
+
+async-trait = "0.1.80"
 elite-rpc = "0.0.1"
-jsonrpsee = { version = "0.24.0", features = ["ws-client", "client-ws-transport-tls"] }
-jsonrpsee-client-transport = { version = "0.21.0", features = ["ws"] }
-jsonrpsee-core = { version = "0.21.0", features = ["async-client"] }
+jsonrpsee = { git = "https://github.com/vincenzopalazzo/jsonrpsee.git", features = ["ws-client", "client-ws-transport-tls"] }
+jsonrpsee-client-transport = { git = "https://github.com/vincenzopalazzo/jsonrpsee.git", features = ["ws"] }
+jsonrpsee-core = { git = "https://github.com/vincenzopalazzo/jsonrpsee.git", features = ["async-client"] }

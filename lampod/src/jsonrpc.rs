@@ -1,24 +1,15 @@
 //! JSON RPC 2.0 implementation
+use lampo_async_jsonrpc::{ErrorObject, IntoResponse, ResponsePayload};
+use lampo_common::json;
+use lampo_common::json::{Deserialize, Serialize};
+use lampo_common::{chan, error};
+
 pub mod channels;
 pub mod inventory;
 pub mod offchain;
 pub mod onchain;
 pub mod open_channel;
 pub mod peer_control;
-
-use std::cell::RefCell;
-use std::sync::Arc;
-
-use async_trait::async_trait;
-
-use lampo_async_jsonrpc::{ErrorObject, IntoResponse, ResponsePayload};
-use lampo_common::conf::LampoConf;
-use lampo_common::json;
-use lampo_common::json::{Deserialize, Serialize};
-use lampo_common::{chan, error};
-
-use crate::handler::external_handler::ExternalHandler;
-use crate::LampoDaemon;
 
 #[macro_export]
 macro_rules! rpc_error {
@@ -32,65 +23,6 @@ macro_rules! rpc_error {
 }
 
 pub type Result<T> = std::result::Result<T, RpcError>;
-
-/// Trait to implement a specific API handler.
-///
-/// Immagine that there is a default API handler ship by lampo that you do
-/// not like, and you would like to implement your own, so with this you can.
-///
-/// In addition, an handler can be also a plugin system that allow dynamically
-/// added plugins.
-#[async_trait]
-pub trait Handler<T>: Sync + Send {
-    /// Custom handler to handler a specific metod
-    async fn handle(&self, request: &Request<json::Value>) -> Option<error::Result<json::Value>>;
-}
-
-/// JSON RPC 2.0 Command handler!
-pub struct CommandHandler {
-    pub handler: RefCell<Option<Arc<dyn Handler<LampoDaemon>>>>,
-    pub conf: LampoConf,
-}
-
-unsafe impl Send for CommandHandler {}
-unsafe impl Sync for CommandHandler {}
-
-impl CommandHandler {
-    pub fn new(lampo_conf: &LampoConf) -> error::Result<Self> {
-        let handler = CommandHandler {
-            handler: RefCell::new(None),
-            conf: lampo_conf.clone(),
-        };
-        Ok(handler)
-    }
-
-    pub fn add_handler(&self, handler: Arc<dyn Handler<LampoDaemon>>) {
-        self.handler.replace(Some(handler));
-    }
-}
-
-#[async_trait]
-impl ExternalHandler for CommandHandler {
-    async fn handle(&self, req: &Request<json::Value>) -> error::Result<Option<json::Value>> {
-        // FIXME: remove clone
-        let handler = self.handler.clone().into_inner();
-        let Some(handler) = handler else {
-            log::info!("skipping the handling because it is not defined");
-            return Ok(None);
-        };
-        log::debug!("handling the JSON RPC response with req {:?}", req);
-        // FIXME: store the ctx inside the handler and not take as argument!
-        let Some(resp) = handler.handle(req).await else {
-            log::info!("callback `{}` not found, skipping handler", req.method);
-            return Ok(None);
-        };
-        // FIXME: we should manage the handler when we try to handle
-        // a method that it is not supported by this handler
-        //
-        // Like we should look at the error code, and return None.
-        Ok(Some(resp?))
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]

@@ -29,7 +29,6 @@ use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
-use lampod::jsonrpc::CommandHandler;
 use lampod::LampoDaemon;
 
 use crate::args::LampoCliArgs;
@@ -149,10 +148,6 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 
     // Init the lampod
     lampod.init(client)?;
-
-    let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
-    lampod.add_external_handler(rpc_handler.clone())?;
-
     log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
     let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
         .map_err(|err| {
