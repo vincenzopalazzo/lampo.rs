@@ -16,20 +16,18 @@ pub mod chain;
 pub mod command;
 pub mod handler;
 pub mod jsonrpc;
-pub mod liquidity;
 pub mod ln;
 pub mod persistence;
 
 use std::cell::Cell;
-use std::os::unix::net::SocketAddr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use lampo_common::ldk::ln::msgs::SocketAddress;
 use lampo_common::secp256k1::PublicKey;
-use liquidity::LSPProvider;
-use liquidity::LampoLiquidity;
-use liquidity::LampoLiquidityManager;
+use ln::liquidity::LampoLiquidity;
+use ln::liquidity::LampoLiquidityManager;
+use ln::liquidity::LiquidityProvider;
 use tokio::runtime::Runtime;
 
 use lampo_common::backend::Backend;
@@ -119,14 +117,13 @@ impl LampoDaemon {
 
     // This should not be initiated when we open our node only when we
     // provide some args inside cli or in lampo.conf
-    fn init_lampo_liquidity(
+    fn init_liquidity_manager(
         &self,
         node_id: PublicKey,
         addr: SocketAddress,
         token: Option<String>,
     ) -> error::Result<LampoLiquidityManager> {
         log::info!("Starting lampo-liquidity manager as a consumer!");
-        //TODO: Fix this!
         let liquidity = LampoLiquidity::new(
             self.offchain_manager().key_manager(),
             self.channel_manager().manager(),
@@ -137,8 +134,8 @@ impl LampoDaemon {
         );
         let liquidity = LampoLiquidityManager::new(
             liquidity.into(),
-            Arc::new(self.conf.clone()),
-            Some(LSPProvider {
+            self.conf.clone(),
+            Some(LiquidityProvider {
                 node_id,
                 addr,
                 token,
@@ -146,7 +143,7 @@ impl LampoDaemon {
                 ctlv_exiry: None,
                 scid: None,
             }),
-            self.channel_manager.as_ref().unwrap().clone(),
+            self.channel_manager(),
             self.offchain_manager().key_manager(),
         );
         Ok(liquidity)
