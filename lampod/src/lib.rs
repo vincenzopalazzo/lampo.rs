@@ -34,6 +34,7 @@ use lampo_common::ldk::events::EventHandler;
 use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
 use lampo_common::ldk::routing::gossip::P2PGossipSync;
 use lampo_common::wallet::WalletManager;
+use tokio::runtime::Runtime;
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
@@ -289,7 +290,8 @@ impl EventHandler for LampoDaemon {
     fn handle_event(&self, event: Event) {
         log::info!(target: "lampo", "ldk event {:?}", event);
         let handler = self.handler().clone();
-        tokio::spawn(async move {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async move {
             if let Err(err) = handler.handle(event).await {
                 log::error!("{err}");
             }

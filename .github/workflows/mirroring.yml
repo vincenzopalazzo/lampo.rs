@@ -2,9 +2,9 @@ name: Git Mirroring
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   delete:
-    branches: [main]
+    branches: [main, next]
 
 jobs:
   to_codeberg:
