@@ -1,11 +1,14 @@
 //! Inventory method implementation
-use lampo_common::json;
-use lampo_jsonrpc::errors::Error;
+use std::sync::Arc;
 
+use lampo_common::json;
+
+use crate::jsonrpc::Result;
 use crate::LampoDaemon;
 
-pub fn get_info(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn get_info(ctx: Arc<LampoDaemon>, request: json::Value) -> Result<json::Value> {
     log::info!("calling `getinfo` with request `{:?}`", request);
-    let result = ctx.call("getinfo", request.clone())?;
+    let handler = ctx.handler();
+    let result = handler.call("getinfo", request).await?;
     Ok(result)
 }

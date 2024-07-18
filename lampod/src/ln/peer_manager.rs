@@ -19,7 +19,6 @@ use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
 
-use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
@@ -121,7 +120,7 @@ impl LampoPeerManager {
         Ok(())
     }
 
-    pub fn run(&self) -> error::Result<()> {
+    pub async fn run(&self) -> error::Result<()> {
         let listen_port = self.conf.port;
         let Some(ref peer_manager) = self.peer_manager else {
             error::bail!("peer manager is None, at this point this should be not None");
@@ -137,72 +136,67 @@ impl LampoPeerManager {
             .announce_addr
             .clone()
             .unwrap_or_else(|| "127.0.0.1".to_string());
-        std::thread::spawn(move || {
-            let result = async_run!(async move {
-                let bind_addr = format!("{addr}:{listen_port}");
-                log::info!(target: "lampo", "Listening for in-bound connection on {bind_addr}");
-                let listener = match tokio::net::TcpListener::bind(bind_addr.clone()).await {
-                    Ok(listener) => listener,
-                    Err(e) => {
-                        return Err::<(), _>(error::anyhow!("Error binding to address: {}", e));
-                    }
-                };
 
-                loop {
-                    let alias = alias.clone();
-                    let peer_manager = peer_manager.clone();
-                    let chan_manager = chan_manager.clone();
-                    let accept = listener.accept().await;
-                    let accept = accept
-                        .map_err(|err| error::anyhow!("Error accepting connection: {}", err))?;
-                    match accept {
-                        (tcp_stream, _) => {
-                            log::info!(target: "lampo", "Got new connection {}", tcp_stream.peer_addr().unwrap());
-                            let addr = bind_addr.clone();
-                            let _ = tokio::spawn(async move {
-                                // Use LDK's supplied networking battery to facilitate inbound
-                                // connections.
-                                net::setup_inbound(
-                                    peer_manager.clone(),
-                                    tcp_stream.into_std().expect("impossible to convert a tpc_stream from tokio to std"),
-                                )
-                                .await;
-
-                                // Then, update our announcement once an hour to keep it fresh but avoid unnecessary churn
-                                // in the global gossip network.
-                                // FIXME: this value should be possible to alterate from config
-                                let mut interval = tokio::time::interval(Duration::from_secs(1));
-                                loop {
-                                    interval.tick().await;
-                                    // Don't bother trying to announce if we don't have any public channls, though our
-                                    // peers should drop such an announcement anyway. Note that announcement may not
-                                    // propagate until we have a channel with 6+ confirmations.
-                                    if chan_manager
-                                        .manager()
-                                        .list_channels()
-                                        .iter()
-                                        .any(|chan| chan.is_public)
-                                    {
-                                        peer_manager.broadcast_node_announcement(
-                                            [0; 3],
-                                            alias.as_bytes().try_into().unwrap_or([0u8; 32]),
-                                            vec![ldk::ln::msgs::SocketAddress::from_str(&addr)
-                                                .expect("impossible to convert an addr to ln socket addr (wire format)")],
-                                        );
-                                    }
-                                }
-                            })
-                            .await;
-                        }
-                    }
-                }
-            });
-
-            if let Err(err) = &result {
-                log::error!("error while try to listen on inbound connection: `{err}`");
+        let bind_addr = format!("{addr}:{listen_port}");
+        log::info!(target: "lampo", "Listening for in-bound connection on {bind_addr}");
+        let listener = match tokio::net::TcpListener::bind(bind_addr.clone()).await {
+            Ok(listener) => listener,
+            Err(e) => {
+                return Err::<(), _>(error::anyhow!("Error binding to address: {}", e));
             }
-            result
-        });
+        };
+
+        let _: error::Result<()> = tokio::spawn(async move {
+
+        loop {
+            let alias = alias.clone();
+            let peer_manager = peer_manager.clone();
+            let chan_manager = chan_manager.clone();
+            let accept = listener.accept().await;
+            let accept =
+                accept.map_err(|err| error::anyhow!("Error accepting connection: {}", err))?;
+            match accept {
+                (tcp_stream, _) => {
+                    log::info!(target: "lampo", "Got new connection {}", tcp_stream.peer_addr().unwrap());
+                    let addr = bind_addr.clone();
+                    let _ = tokio::spawn(async move {
+                        // Use LDK's supplied networking battery to facilitate inbound
+                        // connections.
+                        net::setup_inbound(
+                            peer_manager.clone(),
+                            tcp_stream.into_std().expect("impossible to convert a tpc_stream from tokio to std"),
+                        )
+                            .await;
+
+                        // Then, update our announcement once an hour to keep it fresh but avoid unnecessary churn
+                        // in the global gossip network.
+                        // FIXME: this value should be possible to alterate from config
+                        let mut interval = tokio::time::interval(Duration::from_secs(1));
+                        loop {
+                            interval.tick().await;
+                            // Don't bother trying to announce if we don't have any public channls, though our
+                            // peers should drop such an announcement anyway. Note that announcement may not
+                            // propagate until we have a channel with 6+ confirmations.
+                            if chan_manager
+                                .manager()
+                                .list_channels()
+                                .iter()
+                                .any(|chan| chan.is_public)
+                            {
+                                peer_manager.broadcast_node_announcement(
+                                    [0; 3],
+                                    alias.as_bytes().try_into().unwrap_or([0u8; 32]),
+                                    vec![ldk::ln::msgs::SocketAddress::from_str(&addr)
+                                         .expect("impossible to convert an addr to ln socket addr (wire format)")],
+                                        )   ;
+                            }
+                        }
+                    })
+                        .await;
+                }
+            }
+        }
+        }).await?;
         Ok(())
     }
 

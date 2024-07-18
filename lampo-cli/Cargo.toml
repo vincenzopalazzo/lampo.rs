@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 lampo-common = { path = "../lampo-common" }
 lampo-client = { path = "../lampo-client" }
+tokio = { version = "1.38", features = ["rt-multi-thread", "macros"] }
 log = { version = "0.4", features = ["std"] }
 lexopt = { version = "0.3" }
 radicle-term = { git = "https://github.com/radicle-dev/heartwood.git" }

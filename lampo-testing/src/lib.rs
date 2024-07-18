@@ -3,7 +3,6 @@ pub mod prelude {
     pub use clightning_testing::prelude::*;
     pub use clightning_testing::*;
     pub use lampod;
-    pub use lampod::async_run;
 }
 
 use std::str::FromStr;
@@ -12,31 +11,31 @@ use std::time::Duration;
 
 use clightning_testing::btc::BtcNode;
 use clightning_testing::prelude::*;
-use lampo_common::json;
-use lampo_common::model::response;
-use lampo_common::model::response::NewAddress;
-use lampod::jsonrpc::channels::json_close_channel;
-use lampod::jsonrpc::offchain::json_keysend;
+use lampo_client::LampoClient;
 use tempfile::TempDir;
 
+use lampo_async_jsonrpc::JSONRPCv2;
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::json;
+use lampo_common::model::response;
+use lampo_common::model::response::NewAddress;
 use lampo_core_wallet::CoreWalletManager;
-use lampo_jsonrpc::JSONRPCv2;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
+use lampod::jsonrpc::channels::json_close_channel;
 use lampod::jsonrpc::channels::json_list_channels;
 use lampod::jsonrpc::inventory::get_info;
 use lampod::jsonrpc::offchain::json_decode_invoice;
 use lampod::jsonrpc::offchain::json_invoice;
+use lampod::jsonrpc::offchain::json_keysend;
 use lampod::jsonrpc::offchain::json_offer;
 use lampod::jsonrpc::offchain::json_pay;
 use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
-use lampod::jsonrpc::CommandHandler;
 use lampod::LampoDaemon;
 
 #[macro_export]
@@ -59,6 +58,28 @@ macro_rules! wait {
     };
 }
 
+#[macro_export]
+macro_rules! async_wait {
+    ($callback:tt, $timeout:expr) => {
+        async {
+            let mut success = false;
+            for _ in 0..4 {
+                let result = $callback.await;
+                if let Err(_) = result {
+                    std::thread::sleep(std::time::Duration::from_secs($timeout));
+                    continue;
+                }
+                success = true;
+                break;
+            }
+            assert!(success, "callback got a timeout");
+        }
+        .await
+    };
+    ($callback:expr) => {
+        $crate::async_wait!($callback, 5);
+    };
+}
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     root_path: Arc<TempDir>,
@@ -67,10 +88,11 @@ pub struct LampoTesting {
     pub mnemonic: String,
     pub btc: Arc<BtcNode>,
     pub info: response::GetInfo,
+    pub ws_url: String,
 }
 
 impl LampoTesting {
-    pub fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
+    pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -105,8 +127,14 @@ impl LampoTesting {
 
         // Configuring the JSON RPC over unix
         let lampo = Arc::new(lampo);
-        let socket_path = format!("{}/lampod.socket", lampo.root_path());
-        let server = JSONRPCv2::new(lampo.clone(), &socket_path)?;
+        // SAFETY: this should be safe because if the system has no
+        // ports it is a bug
+        let port = port::random_free_port().unwrap();
+
+        let ws_url = format!("127.0.0.1:{port}");
+        log::info!("ws url: `{ws_url}`");
+        // FIXME: This can be an InMemory Handler without any problem
+        let mut server = JSONRPCv2::new(lampo.clone(), &ws_url)?;
         server.add_rpc("getinfo", get_info).unwrap();
         server.add_rpc("connect", json_connect).unwrap();
         server.add_rpc("fundchannel", json_open_channel).unwrap();
@@ -115,25 +143,24 @@ impl LampoTesting {
         server.add_rpc("funds", json_funds).unwrap();
         server.add_rpc("invoice", json_invoice).unwrap();
         server.add_rpc("offer", json_offer).unwrap();
-        server
-            .add_rpc("decode_invoice", json_decode_invoice)
-            .unwrap();
-
+        server.add_rpc("decode", json_decode_invoice).unwrap();
         server.add_rpc("pay", json_pay).unwrap();
         server.add_rpc("keysend", json_keysend).unwrap();
         server.add_rpc("close", json_close_channel).unwrap();
-        let handler = server.handler();
-        let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
-        rpc_handler.set_handler(handler);
-        lampo.add_external_handler(rpc_handler)?;
+        server.listen().await?;
+
+        let client = LampoClient::new(&format!("ws://{ws_url}")).await?;
+        lampo.add_external_handler(Arc::new(client))?;
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
-        std::thread::spawn(move || lampo.listen().unwrap().join());
+        lampo.listen().await?;
+
         // wait that lampo starts
         std::thread::sleep(Duration::from_secs(1));
-        let info: response::GetInfo = handler.call("getinfo", json::json!({}))?;
-        log::info!("ready for integration testing!");
+
+        let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
+        log::info!("ready for integration testing `{:?}`!", info);
         Ok(Self {
             inner: handler,
             mnemonic,
@@ -142,14 +169,22 @@ impl LampoTesting {
             btc,
             root_path: Arc::new(dir),
             info,
+            ws_url,
         })
     }
 
-    pub fn fund_wallet(&self, blocks: u64) -> error::Result<bitcoincore_rpc::bitcoin::Address> {
+    pub async fn fund_wallet(
+        &self,
+        blocks: u64,
+    ) -> error::Result<bitcoincore_rpc::bitcoin::Address> {
         use clightning_testing::prelude::bitcoincore_rpc::RpcApi;
 
         // mine some bitcoin inside the lampo address
-        let address: NewAddress = self.lampod().call("newaddr", json::json!({})).unwrap();
+        let address: NewAddress = self
+            .lampod()
+            .call("newaddr", json::json!({}))
+            .await
+            .unwrap();
         let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
             .unwrap()
             .assume_checked();
@@ -159,8 +194,8 @@ impl LampoTesting {
             .generate_to_address(blocks, &address)
             .unwrap();
 
-        wait!(|| {
-            let funds: response::Utxos = self.inner.call("funds", json::json!({})).unwrap();
+        async_wait!(async {
+            let funds: response::Utxos = self.inner.call("funds", json::json!({})).await.unwrap();
             if !funds.transactions.is_empty() {
                 return Ok(());
             }

@@ -17,6 +17,9 @@ fn init() {
     // ignore error
     INIT.call_once(|| match level {
         Ok(level) => {
+            if level.trim().is_empty() {
+                return;
+            }
             if let Err(e) = lampo_common::logger::init(&level, None) {
                 eprintln!("Error initializing logger: {}", e);
             } else {

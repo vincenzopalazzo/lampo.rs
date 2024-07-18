@@ -5,7 +5,12 @@ edition = "2021"
 
 [dependencies]
 lampo-common = { path = "../lampo-common" }
-clightningrpc-common = { version = "0.3.0-beta.3" }
 serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 log = "0.4.17"
+
+async-trait = "0.1.80"
+elite-rpc = "0.0.1"
+jsonrpsee = { git = "https://github.com/vincenzopalazzo/jsonrpsee.git", features = ["ws-client", "client-ws-transport-tls"] }
+jsonrpsee-client-transport = { git = "https://github.com/vincenzopalazzo/jsonrpsee.git", features = ["ws"] }
+jsonrpsee-core = { git = "https://github.com/vincenzopalazzo/jsonrpsee.git", features = ["async-client"] }
