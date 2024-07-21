@@ -8,7 +8,7 @@ use std::time::SystemTime;
 // FIXME: this is not async we should modify it
 use std::fs::File;
 
-use chrono::prelude::*;
+use crate::chrono::prelude::*;
 use colored::*;
 
 pub use log::{Level, Log, Metadata, Record, SetLoggerError};
@@ -53,7 +53,7 @@ impl Log for Logger {
                 writeln!(
                     stream,
                     "{} {}",
-                    DateTime::from(SystemTime::now())
+                    DateTime::<Utc>::from(SystemTime::now())
                         .to_rfc3339_opts(SecondsFormat::Millis, true)
                         .white(),
                     message,

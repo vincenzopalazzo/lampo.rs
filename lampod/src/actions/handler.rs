@@ -1,4 +1,5 @@
 //! Handler module implementation that
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -19,14 +20,12 @@ use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::handler::external_handler::ExternalHandler;
 use crate::ln::events::PeerEvents;
+use crate::ln::liquidity::LampoLiquidityManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::{async_run, LampoDaemon};
 
 use super::{Handler, InventoryHandler};
 
-// TODO: Add a LampoLiquidity object here as we need to call, LampoLiquidity should contain LiquidityManager
-// If configured, users must forward the [`Event::HTLCIntercepted`] event parameters to [`LSPS2ServiceHandler::htlc_intercepted`]
-/// and the [`Event::ChannelReady`] event parameters to [`LSPS2ServiceHandler::channel_ready`].
 pub struct LampoHandler {
     channel_manager: Arc<LampoChannelManager>,
     peer_manager: Arc<LampoPeerManager>,
@@ -34,7 +33,9 @@ pub struct LampoHandler {
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
     external_handlers: RefCell<Vec<Arc<dyn ExternalHandler>>>,
-    #[allow(dead_code)]
+    // Question: How about Option<Arc<Mutex<LampoLiquidityManager>>>
+    liquidity_manager: Option<RefCell<LampoLiquidityManager>>,
+    // Do this inside liquidity
     emitter: Emitter<Event>,
     subscriber: Subscriber<Event>,
 }
@@ -53,6 +54,7 @@ impl LampoHandler {
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
             external_handlers: RefCell::new(Vec::new()),
+            liquidity_manager: lampod.liquidity.clone(),
             emitter,
             subscriber,
         }
@@ -142,6 +144,10 @@ impl Handler for LampoHandler {
                 counterparty_node_id,
                 channel_type,
             } => {
+                let liquidity_manager = self.liquidity_manager.clone();
+                if let Some(ref liq_manager) = liquidity_manager {
+                    let _ = liquidity_manager.unwrap().borrow().channel_ready(user_channel_id, &channel_id, &counterparty_node_id);
+                }
                 log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
                 self.emit(Event::Lightning(LightningEvent::ChannelReady {
                     counterparty_node_id,
@@ -287,6 +293,22 @@ impl Handler for LampoHandler {
                 self.emit(Event::Lightning(hop));
                 Ok(())
             },
+            ldk::events::Event::HTLCIntercepted { intercept_id, requested_next_hop_scid, payment_hash, inbound_amount_msat, expected_outbound_amount_msat } => {
+                // TODO: Emit this event
+                log::info!("Intecepted an HTLC");
+                let liquidity_manager = self.liquidity_manager.clone();
+                if liquidity_manager.is_some() {
+                    liquidity_manager.unwrap().borrow().htlc_intercepted(requested_next_hop_scid, intercept_id, expected_outbound_amount_msat, payment_hash)?;
+                }
+
+                Ok(())
+            },
+            ldk::events::Event::HTLCHandlingFailed { prev_channel_id, failed_next_destination } => {
+                todo!()
+            }
+            ldk::events::Event::PaymentForwarded { prev_channel_id, next_channel_id, prev_user_channel_id, next_user_channel_id, total_fee_earned_msat, skimmed_fee_msat, claim_from_onchain_tx, outbound_amount_forwarded_msat } => {
+                todo!()
+            }
             _ => Err(error::anyhow!("unexpected ldk event: {:?}", event)),
         }
     }

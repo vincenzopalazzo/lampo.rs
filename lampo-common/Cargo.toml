@@ -19,7 +19,7 @@ crossbeam-channel = "0.5.8"
 anyhow = "1.0.70"
 colored = "1.9"
 log = { version = "0.4", features = ["std"] }
-chrono = { version = "0.4", features = ["std"], default-features = false }
+chrono = { version = "0.4", features = ["std", "clock"], default-features = false }
 serde_json = "1.0"
 serde = "1.0"
 hex = "0.4.3"
