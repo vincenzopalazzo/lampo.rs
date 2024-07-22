@@ -18,16 +18,13 @@ use lampo_common::types::ChannelState;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
-use crate::ln::events::PeerEvents;
-use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::ln::LampoChannelManager;
 use crate::LampoDaemon;
 
 use super::Handler;
 
 pub struct LampoHandler {
     channel_manager: Arc<LampoChannelManager>,
-    peer_manager: Arc<LampoPeerManager>,
-    inventory_manager: Arc<LampoInventoryManager>,
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
     external_handlers: RefCell<Vec<Arc<dyn ExternalHandler>>>,
@@ -45,8 +42,6 @@ impl LampoHandler {
         let subscriber = emitter.subscriber();
         Self {
             channel_manager: lampod.channel_manager(),
-            peer_manager: lampod.peer_manager(),
-            inventory_manager: lampod.inventory_manager(),
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
             external_handlers: RefCell::new(Vec::new()),

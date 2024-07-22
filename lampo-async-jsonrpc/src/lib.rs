@@ -9,6 +9,10 @@ use tokio::runtime::Runtime;
 pub use jsonrpsee::types::{ErrorObject, ResponsePayload};
 pub use jsonrpsee::IntoResponse;
 
+use lampo_common::error;
+use lampo_common::json;
+use lampo_common::jsonrpc;
+
 /// JSONRPC v2
 pub struct JSONRPCv2<T: Sync + Send + 'static> {
     inner: RpcModule<Arc<T>>,
@@ -16,22 +20,42 @@ pub struct JSONRPCv2<T: Sync + Send + 'static> {
 }
 
 impl<T: Sync + Send + 'static> JSONRPCv2<T> {
-    pub fn new(ctx: Arc<T>, host: &str) -> anyhow::Result<Self> {
+    pub fn new(ctx: Arc<T>, host: &str) -> error::Result<Self> {
         Ok(Self {
             inner: RpcModule::new(ctx),
             host: host.to_owned(),
         })
     }
 
-    pub fn add_rpc<R, Fun, Fut>(&mut self, name: &'static str, callback: Fun) -> anyhow::Result<()>
+    pub fn add_async_rpc<R, Fun, Fut>(
+        &mut self,
+        name: &'static str,
+        callback: Fun,
+    ) -> error::Result<()>
     where
         R: IntoResponse + 'static,
         Fut: Future<Output = R> + Send,
-        Fun: (Fn(Arc<T>, serde_json::Value) -> Fut) + Clone + Send + Sync + 'static,
+        Fun: (Fn(Arc<T>, json::Value) -> Fut) + Clone + Send + Sync + 'static,
     {
-        self.inner.register_async_method(name, move |params, ctx| {
-            let request: serde_json::Value = params.parse().unwrap();
-            callback(ctx.as_ref().clone(), request)
+        self.inner
+            .register_async_method(name, move |params, ctx, _| {
+                let request: json::Value = params.parse().unwrap();
+                callback(ctx.as_ref().clone(), request)
+            })?;
+        Ok(())
+    }
+
+    pub fn add_sync_rpc<F>(&mut self, name: &'static str, callback: F) -> error::Result<()>
+    where
+        F: Fn(&T, json::Value) -> jsonrpc::Result<json::Value> + Send + Sync + 'static,
+    {
+        self.inner.register_method(name, move |params, ctx, _| {
+            let request: json::Value = params.parse().unwrap();
+            let result = callback(ctx.as_ref(), request);
+            match result {
+                Ok(result) => result,
+                Err(err) => json::to_value(err).unwrap(),
+            }
         })?;
         Ok(())
     }
@@ -49,7 +73,7 @@ impl<T: Sync + Send + 'static> JSONRPCv2<T> {
 
     /// Spawing the JSON RPC server on a new thread and a
     /// personal runtime to handle specific RPC call.
-    pub fn spawn(self) -> anyhow::Result<()> {
+    pub fn spawn(self) -> error::Result<()> {
         std::thread::spawn(move || {
             // We should create a single runtime for the JSON RPC server.
             let rt = Runtime::new().unwrap();

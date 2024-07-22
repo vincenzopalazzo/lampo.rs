@@ -1,16 +1,12 @@
 #[allow(dead_code)]
 mod args;
 
-use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use radicle_term as term;
-use tokio::io;
-use tokio::task::JoinHandle;
 
-use lampo_async_jsonrpc::Handler;
 use lampo_async_jsonrpc::JSONRPCv2;
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
@@ -32,7 +28,6 @@ use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
-use lampod::jsonrpc::CommandHandler;
 use lampod::LampoDaemon;
 
 use crate::args::LampoCliArgs;
@@ -153,9 +148,6 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     // Init the lampod
     lampod.init(client)?;
 
-    let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
-    lampod.add_external_handler(rpc_handler.clone())?;
-
     log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
     let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
         .map_err(|err| {
@@ -164,47 +156,38 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
-    let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).await?;
-    rpc_handler.set_handler(handler.clone());
 
     ctrlc::set_handler(move || {
         use std::time::Duration;
         log::info!("Shutdown...");
-        handler.stop();
-        std::thread::sleep(Duration::from_secs(5));
+        std::thread::sleep(Duration::from_secs(1));
         std::process::exit(0);
     })?;
 
+    run_jsonrpc(lampod.clone())?;
     let workder = lampod.listen().unwrap();
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     let _ = workder.join();
-    let _ = jsorpc_worker.await?;
     Ok(())
 }
 
-async fn run_jsonrpc(
-    lampod: Arc<LampoDaemon>,
-) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler<LampoDaemon>>)> {
-    let socket_path = format!("{}/lampod.socket", lampod.root_path());
-    // we take the lock with the pid file so if we are at this point
-    // we can delete the socket because there is no other process
-    // that it is running.
-    let _ = std::fs::remove_file(socket_path.clone());
-    env::set_var("LAMPO_UNIX", socket_path.clone());
-    let server = JSONRPCv2::new(lampod, &socket_path)?;
-    server.add_rpc("getinfo", get_info).unwrap();
-    server.add_rpc("connect", json_connect).unwrap();
-    server.add_rpc("fundchannel", json_open_channel).unwrap();
-    server.add_rpc("newaddr", json_new_addr).unwrap();
-    server.add_rpc("channels", json_list_channels).unwrap();
-    server.add_rpc("funds", json_funds).unwrap();
-    server.add_rpc("invoice", json_invoice).unwrap();
-    server.add_rpc("offer", json_offer).unwrap();
-    server.add_rpc("decode", json_decode_invoice).unwrap();
-    server.add_rpc("pay", json_pay).unwrap();
-    server.add_rpc("keysend", json_keysend).unwrap();
-    server.add_rpc("fees", json_estimate_fees).unwrap();
-    server.add_rpc("close", json_close_channel).unwrap();
-    let handler = server.handler();
-    Ok((server.spawn().await, handler))
+fn run_jsonrpc(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+    let ws_addr = "127.0.0.1:9999";
+    let mut server = JSONRPCv2::new(lampod, ws_addr)?;
+    server.add_sync_rpc("getinfo", get_info).unwrap();
+    server.add_sync_rpc("connect", json_connect).unwrap();
+    server
+        .add_sync_rpc("fundchannel", json_open_channel)
+        .unwrap();
+    server.add_sync_rpc("newaddr", json_new_addr).unwrap();
+    server.add_sync_rpc("channels", json_list_channels).unwrap();
+    server.add_sync_rpc("funds", json_funds).unwrap();
+    server.add_sync_rpc("invoice", json_invoice).unwrap();
+    server.add_sync_rpc("offer", json_offer).unwrap();
+    server.add_sync_rpc("decode", json_decode_invoice).unwrap();
+    server.add_sync_rpc("pay", json_pay).unwrap();
+    server.add_sync_rpc("keysend", json_keysend).unwrap();
+    server.add_sync_rpc("fees", json_estimate_fees).unwrap();
+    server.add_sync_rpc("close", json_close_channel).unwrap();
+    server.spawn()
 }

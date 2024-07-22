@@ -1,18 +1,18 @@
 //! Inventory method implementation
 use lampo_common::json;
 use lampo_common::model::response::{NetworkChannel, NetworkChannels};
-use lampo_common::jsonrpc::{Error, RpcError};
+use lampo_common::jsonrpc::Result;
 
 use crate::LampoDaemon;
 
-pub fn get_info(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn get_info(ctx: &LampoDaemon, request: json::Value) -> Result<json::Value> {
     log::info!("calling `getinfo` with request `{:?}`", request);
-    let result = ctx.call("getinfo", request.clone())?;
-    Ok(result)
+    let result = ctx.inventory_manager().get_info_node()?;
+    Ok(json::to_value(result)?)
 }
 
 // FIXME: check the request
-pub fn json_network_channels(ctx: &LampoDaemon, _: &json::Value) -> Result<json::Value, Error> {
+pub fn json_network_channels(ctx: &LampoDaemon, _: json::Value) -> Result<json::Value> {
     let network_graph = ctx.channel_manager().graph();
     let network_graph = network_graph.read_only();
     let channels = network_graph.channels().unordered_keys();

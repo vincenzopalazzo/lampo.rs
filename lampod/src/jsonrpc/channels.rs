@@ -2,7 +2,7 @@ use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::json;
-use lampo_common::jsonrpc::{Error, RpcError};
+use lampo_common::jsonrpc::{Result, RpcError};
 use lampo_common::model::request;
 use lampo_common::model::response;
 
@@ -10,13 +10,13 @@ use crate::ln::events::ChannelEvents;
 use crate::rpc_error;
 use crate::LampoDaemon;
 
-pub fn json_list_channels(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_list_channels(ctx: &LampoDaemon, request: json::Value) -> Result<json::Value> {
     log::info!("call for `list_channels` with request {:?}", request);
     let resp = ctx.channel_manager().list_channels();
     Ok(json::to_value(resp)?)
 }
 
-pub fn json_close_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_close_channel(ctx: &LampoDaemon, request: json::Value) -> Result<json::Value> {
     log::info!("call for `closechannel` with request {:?}", request);
     let mut request: request::CloseChannel = json::from_value(request.clone())?;
     let events = ctx.handler().events();
@@ -54,13 +54,7 @@ pub fn json_close_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         let event = events
             // FIXME: find a way to map this error
             .recv_timeout(std::time::Duration::from_secs(30))
-            .map_err(|err| {
-                Error::Rpc(RpcError {
-                    code: -1,
-                    message: format!("{err}"),
-                    data: None,
-                })
-            })?;
+            .map_err(|err| rpc_error!("{err}"))?;
         if let Event::Lightning(LightningEvent::CloseChannelEvent {
             message,
             channel_id,

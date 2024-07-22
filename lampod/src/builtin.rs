@@ -21,10 +21,10 @@ macro_rules! sync {
 #[macro_export]
 macro_rules! rpc_error {
     ($($msg:tt)*) => {{
-        Error::Rpc(RpcError {
+        RpcError {
             code: -1,
             message: format!($($msg)*),
             data: None,
-        })
+        }
     }};
 }

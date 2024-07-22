@@ -1,7 +1,11 @@
-use std::{error, fmt, io};
+use std::{fmt, io};
 
 use serde::{Deserialize, Serialize};
 use serde_json;
+
+use crate::{error, json};
+
+pub type Result<T> = core::result::Result<T, RpcError>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -62,22 +66,6 @@ pub struct Response<T> {
     pub jsonrpc: String,
 }
 
-impl<T> Response<T> {
-    /// Extract the result from a response, consuming the response
-    pub fn into_result(self) -> Result<T, Error> {
-        if let Some(e) = self.error {
-            return Err(Error::Rpc(e));
-        }
-
-        self.result.ok_or(Error::NoErrorOrResult)
-    }
-
-    /// Returns whether or not the `result` field is empty
-    pub fn is_none(&self) -> bool {
-        self.result.is_none()
-    }
-}
-
 /// A library error
 #[derive(Debug)]
 pub enum Error {
@@ -136,8 +124,8 @@ impl fmt::Display for Error {
     }
 }
 
-impl error::Error for Error {
-    fn cause(&self) -> Option<&dyn error::Error> {
+impl std::error::Error for Error {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
         match *self {
             Error::Json(ref e) => Some(e),
             _ => None,
@@ -167,5 +155,31 @@ impl From<Error> for RpcError {
                 data: None,
             },
         }
+    }
+}
+
+impl From<error::Error> for RpcError {
+    fn from(value: error::Error) -> Self {
+        RpcError {
+            code: -1,
+            message: format!("{value}"),
+            data: None,
+        }
+    }
+}
+
+impl From<json::Error> for RpcError {
+    fn from(value: json::Error) -> Self {
+        RpcError {
+            code: -1,
+            message: format!("{value}"),
+            data: None,
+        }
+    }
+}
+
+impl Into<error::Error> for RpcError {
+    fn into(self) -> error::Error {
+        error::anyhow!("{}", self.message)
     }
 }
