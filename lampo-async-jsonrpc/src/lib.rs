@@ -2,6 +2,7 @@
 //! minimal dependencies footprint.
 use std::future::Future;
 use std::sync::Arc;
+use std::thread::JoinHandle;
 
 use jsonrpsee::server::{RpcModule, RpcServiceBuilder, Server, ServerHandle};
 use tokio::runtime::Runtime;
@@ -73,14 +74,15 @@ impl<T: Sync + Send + 'static> JSONRPCv2<T> {
 
     /// Spawing the JSON RPC server on a new thread and a
     /// personal runtime to handle specific RPC call.
-    pub fn spawn(self) -> error::Result<()> {
-        std::thread::spawn(move || {
+    pub fn spawn(self) -> JoinHandle<std::io::Result<()>> {
+        let rt = Runtime::new().unwrap();
+        let worker = std::thread::spawn(move || {
             // We should create a single runtime for the JSON RPC server.
-            let rt = Runtime::new().unwrap();
-            rt.spawn(self.listen())
+            rt.block_on(self.listen())?;
+            Ok(())
         });
         // FIXME: return the handler, so we should use a channel a some point.
-        Ok(())
+        worker
     }
 
     // FIXME: add `spawn_with_runtime` if necessary.

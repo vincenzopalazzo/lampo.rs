@@ -4,6 +4,7 @@ mod args;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::thread::JoinHandle;
 
 use radicle_term as term;
 
@@ -164,30 +165,30 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         std::process::exit(0);
     })?;
 
-    run_jsonrpc(lampod.clone())?;
-    let workder = lampod.listen().unwrap();
+    let workder = lampod.clone().listen()?;
+    run_jsonrpc(lampod.clone()).await?;
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
-    let _ = workder.join();
+    log::error!("not blocking");
+    workder.join().unwrap();
     Ok(())
 }
 
-fn run_jsonrpc(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+async fn run_jsonrpc(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     let ws_addr = "127.0.0.1:9999";
     let mut server = JSONRPCv2::new(lampod, ws_addr)?;
-    server.add_sync_rpc("getinfo", get_info).unwrap();
-    server.add_sync_rpc("connect", json_connect).unwrap();
-    server
-        .add_sync_rpc("fundchannel", json_open_channel)
-        .unwrap();
-    server.add_sync_rpc("newaddr", json_new_addr).unwrap();
-    server.add_sync_rpc("channels", json_list_channels).unwrap();
-    server.add_sync_rpc("funds", json_funds).unwrap();
-    server.add_sync_rpc("invoice", json_invoice).unwrap();
-    server.add_sync_rpc("offer", json_offer).unwrap();
-    server.add_sync_rpc("decode", json_decode_invoice).unwrap();
-    server.add_sync_rpc("pay", json_pay).unwrap();
-    server.add_sync_rpc("keysend", json_keysend).unwrap();
-    server.add_sync_rpc("fees", json_estimate_fees).unwrap();
-    server.add_sync_rpc("close", json_close_channel).unwrap();
-    server.spawn()
+    server.add_sync_rpc("getinfo", get_info)?;
+    server.add_sync_rpc("connect", json_connect)?;
+    server.add_sync_rpc("fundchannel", json_open_channel)?;
+    server.add_sync_rpc("newaddr", json_new_addr)?;
+    server.add_sync_rpc("channels", json_list_channels)?;
+    server.add_sync_rpc("funds", json_funds)?;
+    server.add_sync_rpc("invoice", json_invoice)?;
+    server.add_sync_rpc("offer", json_offer)?;
+    server.add_sync_rpc("decode", json_decode_invoice)?;
+    server.add_sync_rpc("pay", json_pay)?;
+    server.add_sync_rpc("keysend", json_keysend)?;
+    server.add_sync_rpc("fees", json_estimate_fees)?;
+    server.add_sync_rpc("close", json_close_channel)?;
+    server.listen().await?;
+    Ok(())
 }

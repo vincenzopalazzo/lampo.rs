@@ -240,7 +240,7 @@ impl LampoDaemon {
         Ok(())
     }
 
-    pub fn listen(self: Arc<Self>) -> error::Result<JoinHandle<std::io::Result<()>>> {
+    pub fn listen(self: Arc<Self>) -> error::Result<JoinHandle<()>> {
         log::info!(target: "lampod", "Starting lightning node version `{}`", env!("CARGO_PKG_VERSION"));
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
@@ -259,9 +259,9 @@ impl LampoDaemon {
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().backend.clone().listen();
         log::info!(target: "lampo", "Starting peer manager");
-        let _ = self.peer_manager().run();
+        let _peer_worker = self.peer_manager().run()?;
         log::info!(target: "lampo", "Starting channel manager");
-        let _ = self.channel_manager().listen();
+        let channel_worker = self.channel_manager().listen();
 
         let background_processor = BackgroundProcessor::start(
             self.persister.clone(),
@@ -273,10 +273,10 @@ impl LampoDaemon {
             self.logger.clone(),
             Some(self.channel_manager().scorer()),
         );
+        self.process.replace(Some(background_processor));
 
         Ok(std::thread::spawn(move || {
-            let _ = background_processor.join();
-            Ok(())
+            channel_worker.join();
         }))
     }
 
