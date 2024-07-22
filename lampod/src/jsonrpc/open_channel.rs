@@ -1,8 +1,8 @@
 //! Open Channel RPC Method implementation
 use lampo_common::json;
+use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::model::request;
 
-use crate::json_rpc2::{Error, RpcError};
 use crate::ln::events::ChannelEvents;
 use crate::LampoDaemon;
 

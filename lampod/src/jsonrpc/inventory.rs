@@ -1,8 +1,7 @@
 //! Inventory method implementation
 use lampo_common::json;
 use lampo_common::model::response::{NetworkChannel, NetworkChannels};
-
-use crate::json_rpc2::{Error, RpcError};
+use lampo_common::jsonrpc::{Error, RpcError};
 
 use crate::LampoDaemon;
 

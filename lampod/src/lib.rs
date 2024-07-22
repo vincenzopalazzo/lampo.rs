@@ -14,7 +14,6 @@ pub mod actions;
 mod builtin;
 pub mod chain;
 pub mod command;
-pub mod handler;
 pub mod jsonrpc;
 pub mod ln;
 pub mod persistence;
@@ -29,6 +28,7 @@ use lampo_common::backend::Backend;
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::events::Event;
 use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
@@ -36,12 +36,9 @@ use lampo_common::ldk::routing::gossip::P2PGossipSync;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
 
-pub use lampo_async_jsonrpc::json_rpc2;
-
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
-use crate::handler::external_handler::ExternalHandler;
 use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
