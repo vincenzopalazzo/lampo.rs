@@ -14,7 +14,7 @@ use crate::LampoDaemon;
 
 pub fn json_list_channels(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `list_channels` with request {:?}", request);
-    let resp = ctx.channel_manager().list_channel();
+    let resp = ctx.channel_manager().list_channels();
     Ok(json::to_value(resp)?)
 }
 
