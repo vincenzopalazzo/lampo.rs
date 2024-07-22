@@ -10,6 +10,7 @@ use lampo_common::json;
 use lampo_common::model::request;
 use lampo_common::model::response;
 use lampo_common::model::response::InvoiceInfo;
+use lampo_common::model::response::NetworkChannels;
 use lampo_common::model::response::Offer;
 use lampo_common::model::Connect;
 use lampo_common::secp256k1::PublicKey;
@@ -1226,4 +1227,78 @@ fn test_close_channel_without_opening_a_channel_fails() {
     );
     assert!(result.is_err(), "{:?}", result);
     async_run!(cln.stop()).unwrap();
+}
+
+#[test]
+fn test_sync_gossip_from_network_cln() {
+    init();
+    let mut cln1 = async_run!(cln::Node::with_params(
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "regtest"
+    ))
+    .unwrap();
+    let btc = cln1.btc();
+
+    let mut cln2 = async_run!(cln::Node::with_btc_and_params(
+        btc.clone(),
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "regtest"
+    ))
+    .unwrap();
+
+    let address = cln2.rpc().newaddr(None).unwrap();
+    fund_wallet(btc.clone(), &address.bech32.unwrap(), 106).unwrap();
+    crate::wait_cln_sync!(cln2);
+
+    let cln1_info = cln1.rpc().getinfo().unwrap();
+    let response = cln2
+        .rpc()
+        .connect(&cln1_info.id, Some(&format!("127.0.0.1:{}", cln1.port)))
+        .unwrap();
+    log::debug!("cln connected with cln {:?}", response);
+
+    cln2.rpc()
+        .fundchannel(
+            &cln1_info.id,
+            clightningrpc::requests::AmountOrAll::Amount(3000000),
+            None,
+        )
+        .unwrap();
+
+    wait!(|| {
+        let mut channels = cln1.rpc().listfunds().unwrap().channels;
+        let origin_size = channels.len();
+        channels.retain(|chan| chan.state == "CHANNELD_NORMAL");
+        if channels.len() == origin_size {
+            return Ok(());
+        }
+        log::info!("{:?}", channels);
+        let address = cln2.rpc().newaddr(None).unwrap();
+        fund_wallet(btc.clone(), &address.bech32.unwrap(), 6).unwrap();
+        crate::wait_cln_sync!(cln2);
+        Err(())
+    });
+
+    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo = lampo_manager.lampod();
+
+    let _: json::Value = lampo
+        .call(
+            "connect",
+            Connect {
+                node_id: cln1_info.id,
+                addr: "127.0.0.1".to_owned(),
+                port: cln1.port.into(),
+            },
+        )
+        .unwrap();
+    wait!(|| {
+        let channels: NetworkChannels = lampo.call("networkchannels", json::json!({})).unwrap();
+        if channels.channels.len() == 1 {
+            return Ok(());
+        }
+        Err(())
+    });
+
+    async_run!(cln1.stop()).unwrap();
 }
