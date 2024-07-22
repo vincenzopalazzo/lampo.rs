@@ -2,6 +2,7 @@ pub mod backend;
 pub mod conf;
 pub mod event;
 pub mod handler;
+pub mod jsonrpc;
 pub mod keys;
 pub mod logger;
 pub mod model;

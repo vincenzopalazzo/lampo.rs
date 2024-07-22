@@ -1,7 +1,7 @@
 //! Peer Control JSON RPC Interface!
 use lampo_common::json;
+use lampo_common::jsonrpc::Error;
 use lampo_common::model::Connect;
-use lampo_jsonrpc::errors::Error;
 
 use crate::{ln::events::PeerEvents, LampoDaemon};
 
