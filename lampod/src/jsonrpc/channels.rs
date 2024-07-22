@@ -2,10 +2,9 @@ use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::json;
+use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::model::request;
 use lampo_common::model::response;
-use lampo_jsonrpc::errors::Error;
-use lampo_jsonrpc::errors::RpcError;
 
 use crate::ln::events::ChannelEvents;
 
