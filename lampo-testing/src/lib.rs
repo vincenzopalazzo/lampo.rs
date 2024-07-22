@@ -16,6 +16,7 @@ use lampo_common::json;
 use lampo_common::model::response;
 use lampo_common::model::response::NewAddress;
 use lampod::jsonrpc::channels::json_close_channel;
+use lampod::jsonrpc::inventory::json_network_channels;
 use lampod::jsonrpc::offchain::json_keysend;
 use tempfile::TempDir;
 
@@ -122,6 +123,9 @@ impl LampoTesting {
         server.add_rpc("pay", json_pay).unwrap();
         server.add_rpc("keysend", json_keysend).unwrap();
         server.add_rpc("close", json_close_channel).unwrap();
+        server
+            .add_rpc("networkchannels", json_network_channels)
+            .unwrap();
         let handler = server.handler();
         let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
         rpc_handler.set_handler(handler);
