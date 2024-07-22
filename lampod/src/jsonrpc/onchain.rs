@@ -1,6 +1,6 @@
 //! On Chain RPC methods
 use lampo_common::json;
-use lampo_jsonrpc::errors::Error;
+use lampo_common::jsonrpc::Error;
 
 use crate::LampoDaemon;
 
