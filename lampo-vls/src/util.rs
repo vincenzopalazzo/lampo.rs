@@ -11,12 +11,7 @@ use lightning_signer::util::transaction_utils::{maybe_add_change_output, MAX_VAL
 use std::collections::HashSet;
 
 
-pub(crate) fn create_spending_transaction(
-    descriptors: &[&SpendableOutputDescriptor],
-    outputs: Vec<TxOut>,
-    change_destination_script: Box<ScriptBuf>,
-    feerate_sats_per_1000_weight: u32,
-) -> Result<Transaction> {
+pub(crate) fn create_spending_transaction(descriptors: &[&SpendableOutputDescriptor], outputs: Vec<TxOut>, change_destination_script: Box<ScriptBuf>, feerate_sats_per_1000_weight: u32,) -> Result<Transaction> {
     let mut input = Vec::new();
     let mut input_value = 0;
     let mut witness_weight = 0;

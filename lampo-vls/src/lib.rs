@@ -1,11 +1,13 @@
 use keys_manager::LampoKeysManager;
+use lampo_common::ldk::sign::EntropySource;
+use lampo_common::ldk::sign::NodeSigner;
+use lampo_common::ldk::sign::OutputSpender;
 use std::str::FromStr;
 use lampo_common::conf::LampoConf;
 use lampo_common::ldk::sign::SignerProvider;
 use vls_proxy::portfront::SignerPortFront;
 use vls_proxy::vls_frontend::frontend::SourceFactory;
 use vls_proxy::vls_frontend::Frontend;
-use vls_proxy::vls_protocol_client::DynKeysInterface;
 use vls_proxy::vls_protocol_client::DynSigner;
 use vls_proxy::vls_protocol_client::KeysManagerClient;
 use lampo_common::bitcoin::{Address, Network};
@@ -13,13 +15,14 @@ use triggered::{trigger, Listener};
 use url::Url;
 use protocol_handler::LampoVLSInProcess;
 use signer::LampoVLSSignerPort;
-use vls_proxy::vls_protocol_client::SpendableKeysInterface;
 use std::sync::Arc;
 
 mod keys_manager;
 mod protocol_handler;
 mod signer;
 mod util;
+
+pub trait ILampoKeys: OutputSpender + NodeSigner + EntropySource + SignerProvider {}
 
 fn make_in_process_signer(
     network: Network,
@@ -28,7 +31,7 @@ fn make_in_process_signer(
     bitcoin_rpc_url: Url,
     shutdown_signal: Listener,
     seed: [u8; 32],
-) -> Box<dyn SpendableKeysInterface<EcdsaSigner = DynSigner>> {
+) -> Box<dyn ILampoKeys<EcdsaSigner = DynSigner>> {
     // This will create a handler that will manage the VLS protocol operations
     let protocol_handler = Arc::new(LampoVLSInProcess::new(sweep_address.clone(), network, seed));
     let signer_port = Arc::new(LampoVLSSignerPort::new(protocol_handler.clone()));
@@ -49,7 +52,7 @@ fn make_in_process_signer(
     // signer, thus we need a client to facilitate that
     let client = KeysManagerClient::new(protocol_handler, network.to_string());
     // Create a LampoKeysManager object
-    let keys_manager = LampoKeysManager::new(client, sweep_address);
+    let keys_manager = LampoKeysManager::new(client);
     Box::new(keys_manager)
 }
 
@@ -94,7 +97,7 @@ impl SignerType {
     fn make_signer(
         &self,
         params: SignerParams,
-    ) -> Box<dyn SpendableKeysInterface<EcdsaSigner = DynSigner>> {
+    ) -> Box<dyn ILampoKeys<EcdsaSigner = DynSigner>> {
         match self {
             // Create an InProcess Signer
             SignerType::InProcess => make_in_process_signer(
@@ -117,7 +120,7 @@ fn get_keys_manager(
     seed: [u8; 32],
     signer_type: SignerType,
     address: Address,
-) -> Box<dyn SpendableKeysInterface<EcdsaSigner = DynSigner>> {
+) -> Box<dyn ILampoKeys<EcdsaSigner = DynSigner>> {
     let (_, listener) = trigger();
     let params = SignerParams::new(conf.network.clone(), conf.root_path, address, Url::from_str(conf.core_url).unwrap(), listener, seed);
     signer_type.make_signer(params)
@@ -125,14 +128,14 @@ fn get_keys_manager(
 
 /// Struct encapsulating a keys manager
 pub struct LampoKeys {
-    pub keys_manager: Arc<dyn SignerProvider<EcdsaSigner = DynSigner>>,
+    pub keys_manager: Arc<dyn ILampoKeys<EcdsaSigner = DynSigner>>,
 }
 
 impl LampoKeys {
     pub fn new(signer_type: SignerType, conf: &LampoConf, seed: [u8; 32], sweep_address: Address) -> Self {
         let keys_manager = get_keys_manager(conf, seed, signer_type, sweep_address);
         LampoKeys {
-            keys_manager: Arc::new(DynKeysInterface::new(keys_manager)),
+            keys_manager: keys_manager.into()
         }
     }
 }
