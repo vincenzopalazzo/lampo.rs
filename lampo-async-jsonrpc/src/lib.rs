@@ -69,7 +69,6 @@ impl<T: Sync + Send + 'static> JSONRPCv2<T> {
             .await?;
         let addr = server.local_addr()?;
         log::info!("Starting JSON RPC server on {addr}");
->>>>>>> aaacb93 (client: make the client async)
         let handle = server.start(self.inner);
         tokio::spawn(handle.clone().stopped());
         Ok(handle)
