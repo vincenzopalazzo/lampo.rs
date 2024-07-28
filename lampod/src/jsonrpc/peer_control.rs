@@ -3,7 +3,7 @@ use lampo_common::json;
 use lampo_common::jsonrpc::Result;
 use lampo_common::model::Connect;
 
-use crate::{async_run, ln::events::PeerEvents, LampoDaemon};
+use crate::LampoDaemon;
 
 pub fn json_connect(ctx: &LampoDaemon, request: json::Value) -> Result<json::Value> {
     log::info!("call for `connect` with request `{:?}`", request);
@@ -11,6 +11,7 @@ pub fn json_connect(ctx: &LampoDaemon, request: json::Value) -> Result<json::Val
     let host = input.addr()?;
     let node_id = input.node_id()?;
 
-    async_run!(ctx.rt, ctx.peer_manager().connect(node_id, host))?;
+    let peer_manager = ctx.peer_manager();
+    peer_manager.connect(node_id, host)?;
     Ok(request.clone())
 }

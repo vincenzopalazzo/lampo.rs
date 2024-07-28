@@ -206,55 +206,34 @@ impl LampoPeerManager {
         Ok(())
     }
 
-    pub fn is_connected_with(&self, peer_id: NodeId) -> bool {
-        let Some(ref manager) = self.peer_manager else {
-            panic!("at this point the peer manager should be known");
-        };
-        manager.peer_by_node_id(&peer_id).is_some()
-    }
-}
-
-#[async_trait]
-impl PeerEvents for LampoPeerManager {
-    async fn handle(&self, event: super::peer_event::PeerCommand) -> error::Result<()> {
-        match event {
-            peer_event::PeerCommand::Connect(node_id, addr, chan) => {
-                let connect = Connect {
-                    node_id: node_id.to_string(),
-                    addr: addr.ip().to_string(),
-                    port: addr.port() as u64,
-                };
-                self.connect(node_id, addr).await?;
-                chan.send(connect)?;
+    pub fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
+        let manager = self.manager();
+        async_run!(async move {
+            let Some(close_callback) = net::connect_outbound(manager.clone(), node_id, host).await
+            else {
+                error::bail!("impossible connect with the peer `{node_id}`");
+            };
+            let mut connection_closed_future = Box::pin(close_callback);
+            let manager = manager.clone();
+            loop {
+                match futures::poll!(&mut connection_closed_future) {
+                    std::task::Poll::Ready(_) => {
+                        log::info!("node `{node_id}` disconnected");
+                        return Ok(());
+                    }
+                    std::task::Poll::Pending => {}
+                }
+                // Avoid blocking the tokio context by sleeping a bit
+                match manager.peer_by_node_id(&node_id) {
+                    Some(_) => return Ok(()),
+                    None => tokio::time::sleep(Duration::from_millis(10)).await,
+                }
             }
-        };
+        });
         Ok(())
     }
 
-    async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
-        let Some(close_callback) = net::connect_outbound(self.manager(), node_id, host).await
-        else {
-            error::bail!("impossible connect with the peer `{node_id}`");
-        };
-        let mut connection_closed_future = Box::pin(close_callback);
-        let manager = self.manager();
-        loop {
-            match futures::poll!(&mut connection_closed_future) {
-                std::task::Poll::Ready(_) => {
-                    log::info!("node `{node_id}` disconnected");
-                    return Ok(());
-                }
-                std::task::Poll::Pending => {}
-            }
-            // Avoid blocking the tokio context by sleeping a bit
-            match manager.peer_by_node_id(&node_id) {
-                Some(_) => return Ok(()),
-                None => tokio::time::sleep(Duration::from_millis(10)).await,
-            }
-        }
-    }
-
-    async fn disconnect(&self, node_id: NodeId) -> error::Result<()> {
+    pub fn disconnect(&self, node_id: NodeId) -> error::Result<()> {
         //check the pubkey matches a valid connected peer
         if self.manager().peer_by_node_id(&node_id).is_none() {
             error::bail!("Error: Could not find peer `{node_id}`");
@@ -262,5 +241,12 @@ impl PeerEvents for LampoPeerManager {
 
         self.manager().disconnect_by_node_id(node_id);
         Ok(())
+    }
+
+    pub fn is_connected_with(&self, peer_id: NodeId) -> bool {
+        let Some(ref manager) = self.peer_manager else {
+            panic!("at this point the peer manager should be known");
+        };
+        manager.peer_by_node_id(&peer_id).is_some()
     }
 }

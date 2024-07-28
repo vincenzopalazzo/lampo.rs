@@ -80,6 +80,10 @@ impl LampoDaemon {
         //FIXME: sync some where else
         let wallet = wallet_manager.clone();
         let _ = std::thread::spawn(move || wallet.sync().unwrap());
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
@@ -92,7 +96,7 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
-            rt: Runtime::new().unwrap(),
+            rt,
         }
     }
 
