@@ -4,14 +4,14 @@ use std::process::exit;
 
 use radicle_term as term;
 
-use lampo_client::errors::Error;
-use lampo_client::UnixClient;
+use lampo_client::LampoClient;
 use lampo_common::error;
 use lampo_common::json;
 
 use crate::args::LampoCliArgs;
 
-fn main() -> error::Result<()> {
+#[tokio::main]
+async fn main() -> error::Result<()> {
     let args = match args::parse_args() {
         Ok(args) => args,
         Err(err) => {
@@ -19,13 +19,10 @@ fn main() -> error::Result<()> {
             exit(1);
         }
     };
-    let resp = run(args);
+    let resp = run(args).await;
     match resp {
         Ok(resp) => {
             term::print(json::to_string_pretty(&resp)?);
-        }
-        Err(Error::Rpc(rpc)) => {
-            term::print(json::to_string_pretty(&rpc)?);
         }
         Err(err) => {
             term::error(format!("{err}"));
@@ -34,8 +31,8 @@ fn main() -> error::Result<()> {
     Ok(())
 }
 
-fn run(args: LampoCliArgs) -> Result<json::Value, lampo_client::errors::Error> {
-    let client = UnixClient::new(&args.socket).unwrap();
-    let resp = client.call(&args.method, args.args)?;
+async fn run(args: LampoCliArgs) -> error::Result<json::Value> {
+    let client = LampoClient::new(&args.socket).await?;
+    let resp = client.call(&args.method, args.args).await?;
     Ok(resp)
 }

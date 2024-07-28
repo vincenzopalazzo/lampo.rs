@@ -40,8 +40,6 @@ Options
 pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     use lexopt::prelude::*;
 
-    let mut data_dir: Option<String> = None;
-    let mut network: Option<String> = None;
     let mut socket: Option<String> = None;
     let mut method: Option<String> = None;
     let mut args = HashMap::<String, json::Value>::new();
@@ -49,14 +47,6 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
-            Short('d') | Long("data-dir") => {
-                let val: String = parser.value()?.parse()?;
-                data_dir = Some(val);
-            }
-            Short('n') | Long("network") => {
-                let val: String = parser.value()?.parse()?;
-                network = Some(val);
-            }
             Short('s') | Long("socket") => {
                 let val: String = parser.value()?.parse()?;
                 socket = Some(val);
@@ -107,15 +97,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     // by appending the network name (default: testnet) to the path
     // and adding the socket path (lampod.socket)
     if socket.is_none() {
-        let data_dir = data_dir
-            .or_else(|| {
-                #[allow(deprecated)]
-                std::env::home_dir().map(|path| path.to_string_lossy().to_string())
-            })
-            .unwrap();
-        let data_dir = format!("{data_dir}/.lampo");
-        let network = network.unwrap_or_else(|| "testnet".to_owned());
-        let socket_path = format!("{}/{}{}", data_dir, network, "/lampod.socket");
+        let socket_path = format!("ws://127.0.0.1:9999");
         log::debug!("socket path is {:?}", socket_path);
         socket = Some(socket_path);
     }

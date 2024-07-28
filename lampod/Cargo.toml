@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 tokio = { version = "^1.29.1", features = ["rt-multi-thread", "parking_lot"] }
 lampo-common = { path = "../lampo-common" }
-lampo-jsonrpc = { path = "../lampo-jsonrpc" }
+lampo-async-jsonrpc = { path = "../lampo-async-jsonrpc" }
 lampo-client = { path = "../lampo-client" }
 log = "0.4.17"
 time = "0.3.13"

@@ -14,7 +14,6 @@ pub mod actions;
 mod builtin;
 pub mod chain;
 pub mod command;
-pub mod handler;
 pub mod jsonrpc;
 pub mod ln;
 pub mod persistence;
@@ -29,6 +28,7 @@ use lampo_common::backend::Backend;
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::events::Event;
 use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
@@ -39,7 +39,6 @@ use lampo_common::wallet::WalletManager;
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
-use crate::handler::external_handler::ExternalHandler;
 use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
@@ -81,6 +80,10 @@ impl LampoDaemon {
         //FIXME: sync some where else
         let wallet = wallet_manager.clone();
         let _ = std::thread::spawn(move || wallet.sync().unwrap());
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
@@ -93,7 +96,7 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
-            rt: Runtime::new().unwrap(),
+            rt,
         }
     }
 
@@ -241,7 +244,7 @@ impl LampoDaemon {
         Ok(())
     }
 
-    pub fn listen(self: Arc<Self>) -> error::Result<JoinHandle<std::io::Result<()>>> {
+    pub fn listen(self: Arc<Self>) -> error::Result<JoinHandle<()>> {
         log::info!(target: "lampod", "Starting lightning node version `{}`", env!("CARGO_PKG_VERSION"));
         let gossip_sync = Arc::new(P2PGossipSync::new(
             self.channel_manager().graph(),
@@ -260,9 +263,9 @@ impl LampoDaemon {
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().backend.clone().listen();
         log::info!(target: "lampo", "Starting peer manager");
-        let _ = self.peer_manager().run();
+        let _peer_worker = self.peer_manager().run()?;
         log::info!(target: "lampo", "Starting channel manager");
-        let _ = self.channel_manager().listen();
+        let channel_worker = self.channel_manager().listen();
 
         let background_processor = BackgroundProcessor::start(
             self.persister.clone(),
@@ -274,10 +277,10 @@ impl LampoDaemon {
             self.logger.clone(),
             Some(self.channel_manager().scorer()),
         );
+        self.process.replace(Some(background_processor));
 
         Ok(std::thread::spawn(move || {
-            let _ = background_processor.join();
-            Ok(())
+            channel_worker.join();
         }))
     }
 

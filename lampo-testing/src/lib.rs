@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use clightning_testing::btc::BtcNode;
 use clightning_testing::prelude::*;
+use lampo_common::handler::InMemoryHandler;
 use lampo_common::json;
 use lampo_common::model::response;
 use lampo_common::model::response::NewAddress;
@@ -24,7 +25,6 @@ use lampo_bitcoind::BitcoinCore;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_core_wallet::CoreWalletManager;
-use lampo_jsonrpc::JSONRPCv2;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::jsonrpc::channels::json_list_channels;
@@ -37,7 +37,6 @@ use lampod::jsonrpc::onchain::json_funds;
 use lampod::jsonrpc::onchain::json_new_addr;
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
-use lampod::jsonrpc::CommandHandler;
 use lampod::LampoDaemon;
 
 #[macro_export]
@@ -106,8 +105,7 @@ impl LampoTesting {
 
         // Configuring the JSON RPC over unix
         let lampo = Arc::new(lampo);
-        let socket_path = format!("{}/lampod.socket", lampo.root_path());
-        let server = JSONRPCv2::new(lampo.clone(), &socket_path)?;
+        let mut server = InMemoryHandler::new(lampo.clone());
         server.add_rpc("getinfo", get_info).unwrap();
         server.add_rpc("connect", json_connect).unwrap();
         server.add_rpc("fundchannel", json_open_channel).unwrap();
@@ -126,9 +124,8 @@ impl LampoTesting {
         server
             .add_rpc("networkchannels", json_network_channels)
             .unwrap();
-        let handler = server.handler();
-        let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
-        rpc_handler.set_handler(handler);
+
+        let rpc_handler = Arc::new(server);
         lampo.add_external_handler(rpc_handler)?;
 
         // run lampo and take the handler over to run commands
