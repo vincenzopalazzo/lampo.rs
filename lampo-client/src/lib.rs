@@ -1,11 +1,11 @@
 use jsonrpsee::core::client::ClientT;
-use jsonrpsee::rpc_params;
 use jsonrpsee::ws_client::WsClient;
 use jsonrpsee::ws_client::WsClientBuilder;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use lampo_common::error;
+use lampo_common::json;
 
 pub struct LampoClient {
     inner: WsClient,
@@ -22,7 +22,7 @@ impl LampoClient {
         method: &str,
         input: T,
     ) -> error::Result<U> {
-        let response = self.inner.request(method, rpc_params!(input)).await?;
+        let response = self.inner.request(method, json::to_value(input)?).await?;
         Ok(response)
     }
 }
