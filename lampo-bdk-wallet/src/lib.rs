@@ -2,7 +2,7 @@
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
-use bdk::bitcoin::bip32::ExtendedPrivKey;
+use bdk::bitcoin::bip32::Xpriv;
 use bdk::bitcoin::consensus::serialize;
 use bdk::bitcoin::{Amount, ScriptBuf};
 use bdk::keys::bip39::{Language, Mnemonic, WordCount};
@@ -10,12 +10,10 @@ use bdk::keys::GeneratableKey;
 use bdk::keys::{DerivableKey, ExtendedKey, GeneratedKey};
 use bdk::template::Bip84;
 use bdk::wallet::{ChangeSet, Update};
-use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
-use bdk_esplora::EsploraExt;
+use bdk::{KeychainKind, SignOptions, Wallet};
 use bdk_file_store::Store;
 
 use lampo_common::bitcoin::consensus::deserialize;
-use lampo_common::bitcoin::hashes::hex::ToHex;
 use lampo_common::bitcoin::{PrivateKey, Script, Transaction};
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::error;
@@ -24,7 +22,7 @@ use lampo_common::model::response::{NewAddress, Utxo};
 use lampo_common::wallet::WalletManager;
 
 pub struct BDKWalletManager {
-    pub wallet: RefCell<Mutex<Wallet<Store<'static, ChangeSet>>>>,
+    pub wallet: RefCell<Mutex<Wallet>>,
     pub keymanager: Arc<LampoKeys>,
     pub network: Network,
 }
@@ -40,10 +38,9 @@ impl BDKWalletManager {
     fn build_wallet(
         conf: Arc<LampoConf>,
         mnemonic_words: &str,
-    ) -> Result<(Wallet<Store<'static, ChangeSet>>, LampoKeys), bdk::Error> {
+    ) -> error::Result<(Wallet, LampoKeys)> {
         // Parse a mnemonic
-        let mnemonic =
-            Mnemonic::parse(mnemonic_words).map_err(|err| bdk::Error::Generic(format!("{err}")))?;
+        let mnemonic = Mnemonic::parse(mnemonic_words)?;
         // Generate the extended key
         let xkey: ExtendedKey = mnemonic.into_extended_key()?;
         let network = match conf.network.to_string().as_str() {
@@ -54,15 +51,10 @@ impl BDKWalletManager {
             _ => unreachable!(),
         };
         // Get xprv from the extended key
-        let xprv = xkey.into_xprv(network).ok_or(bdk::Error::Generic(
-            "wrong convertion to a private key".to_string(),
-        ))?;
+        let xprv = xkey
+            .into_xprv(network)
+            .ok_or(error::anyhow!("wrong convertion to a private key"))?;
 
-        let db = Store::<ChangeSet>::new_from_path(
-            "lampo".as_bytes(),
-            format!("{}/onchain", conf.path()),
-        )
-        .map_err(|err| bdk::Error::Generic(format!("{err}")))?;
         let ldk_kesy = LampoKeys::new(xprv.private_key.secret_bytes());
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
         let wallet = Wallet::new(
@@ -70,8 +62,7 @@ impl BDKWalletManager {
             Some(Bip84(xprv, KeychainKind::Internal)),
             db,
             network,
-        )
-        .map_err(|err| bdk::Error::Generic(err.to_string()))?;
+        )?;
         let descriptor = wallet.public_descriptor(KeychainKind::Internal).unwrap();
         log::info!("descriptor: {descriptor}");
         Ok((wallet, ldk_kesy))
@@ -81,7 +72,7 @@ impl BDKWalletManager {
     fn build_from_private_key(
         xprv: PrivateKey,
         channel_keys: Option<String>,
-    ) -> Result<(Wallet<Store<'static, ChangeSet>>, LampoKeys), bdk::Error> {
+    ) -> error::Result<(Wallet, LampoKeys)> {
         let ldk_keys = if channel_keys.is_some() {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
         } else {
@@ -89,8 +80,7 @@ impl BDKWalletManager {
         };
 
         // FIXME: Get a tmp path
-        let db = Store::new_from_path("lampo".as_bytes(), "/tmp/onchain")
-            .map_err(|err| bdk::Error::Generic(format!("{err}")))?;
+        let db = Store::open_or_create_new("lampo".as_bytes(), "/tmp/onchain")?;
         let network = match xprv.network.to_string().as_str() {
             "bitcoin" => bdk::bitcoin::Network::Bitcoin,
             "testnet" => bdk::bitcoin::Network::Testnet,
@@ -98,10 +88,9 @@ impl BDKWalletManager {
             "regtest" => bdk::bitcoin::Network::Regtest,
             _ => unreachable!(),
         };
-        let key = ExtendedPrivKey::new_master(network, &xprv.inner.secret_bytes())?;
+        let key = Xpriv::new_master(network, &xprv.inner.secret_bytes())?;
         let key = ExtendedKey::from(key);
-        let wallet = Wallet::new(Bip84(key, KeychainKind::External), None, db, network)
-            .map_err(|err| bdk::Error::Generic(err.to_string()))?;
+        let wallet = Wallet::new(Bip84(key, KeychainKind::External), None, db, network)?;
         Ok((wallet, ldk_keys))
     }
 }
@@ -111,7 +100,7 @@ impl WalletManager for BDKWalletManager {
         // Generate fresh mnemonic
         let mnemonic: GeneratedKey<_, bdk::miniscript::Tap> =
             Mnemonic::generate((WordCount::Words12, Language::English))
-                .map_err(|err| bdk::Error::Generic(format!("{:?}", err)))?;
+                .map_err(|e| error::anyhow!("{:?}", e))?;
         // Convert mnemonic to string
         let mnemonic_words = mnemonic.to_string();
         log::info!("mnemonic words `{mnemonic_words}`");
@@ -240,19 +229,14 @@ impl WalletManager for BDKWalletManager {
 
         wallet.apply_update(update)?;
         wallet.commit()?;
-        log::info!(
-            "bdk in sync at height {}!",
-            client
-                .get_height()
-                .map_err(|err| bdk::Error::Generic(format!("{err}")))?
-        );
+        log::info!("bdk in sync at height {}!", client.get_height()?);
         Ok(())
     }
 }
 
 #[cfg(debug_assertions)]
 impl TryFrom<(PrivateKey, Option<String>)> for BDKWalletManager {
-    type Error = bdk::Error;
+    type Error = error::Error;
 
     fn try_from(value: (PrivateKey, Option<String>)) -> Result<Self, Self::Error> {
         let (wallet, keymanager) = BDKWalletManager::build_from_private_key(value.0, value.1)?;
