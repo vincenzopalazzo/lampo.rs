@@ -23,6 +23,8 @@ pub struct LampoConf {
     pub log_level: String,
     pub alias: Option<String>,
     pub announce_addr: Option<String>,
+    // Should be something like liquidity=consumer, liquidity=provider or none
+    pub liquidity: Option<String>,
 }
 
 impl Default for LampoConf {
@@ -51,6 +53,7 @@ impl Default for LampoConf {
             log_file: None,
             alias: None,
             announce_addr: None,
+            liquidity: None,
         }
     }
 }
@@ -132,6 +135,16 @@ impl LampoConf {
         }
 
         Ok(conf)
+    }
+
+    // These functions should be called when we get something like
+    // liquidity=consumer of liquidity=provider inside lampo.conf
+    pub fn configure_as_liquidity_consumer(&mut self) {
+        self.liquidity = Some("Consumer".to_string())
+    }
+
+    pub fn configure_as_liquidity_provider(&mut self) {
+        self.liquidity = Some("Provider".to_string())
     }
 }
 
@@ -220,6 +233,7 @@ impl TryFrom<String> for LampoConf {
         let log_file = conf.get_conf("log-file").unwrap_or(None);
         let alias = conf.get_conf("alias").unwrap_or(None);
         let announce_addr = conf.get_conf("announce-addr").unwrap_or(None);
+        let liquidity = conf.get_conf("liquidity").unwrap_or(None);
 
         Ok(Self {
             inner: Some(conf),
@@ -237,6 +251,7 @@ impl TryFrom<String> for LampoConf {
             log_level: level,
             alias,
             announce_addr,
+            liquidity,
         })
     }
 }

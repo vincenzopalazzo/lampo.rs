@@ -64,5 +64,6 @@ impl<T: Clone> Subscriber<T> {
 pub enum Event {
     Lightning(LightningEvent),
     OnChain(OnChainEvent),
+    Liquidity(String),
     Inventory,
 }
