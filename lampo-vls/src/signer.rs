@@ -3,19 +3,18 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use vls_proxy::vls_protocol_client::{Error, SignerPort, Transport};
 
-#[allow(dead_code)]
-pub struct LampoVLSSignerPort {
+pub struct VLSSignerPort {
     protocol_handler: Arc<dyn Transport>,
 }
 
-impl LampoVLSSignerPort {
+impl VLSSignerPort {
     pub fn new(protocol_handler: Arc<dyn Transport>) -> Self {
-        LampoVLSSignerPort { protocol_handler }
+        VLSSignerPort { protocol_handler }
     }
 }
 
 #[async_trait]
-impl SignerPort for LampoVLSSignerPort {
+impl SignerPort for VLSSignerPort {
     async fn handle_message(&self, message: Vec<u8>) -> Result<Vec<u8>, Error> {
         self.protocol_handler.node_call(message)
     }

@@ -3,40 +3,49 @@ use std::{sync::Arc, time::SystemTime};
 use bitcoin::secp256k1::{Secp256k1, SecretKey};
 use lightning::sign::{InMemorySigner, NodeSigner, OutputSpender, SignerProvider};
 
-use crate::ldk::sign::{EntropySource, KeysManager};
+use crate::{conf::LampoConf, ldk::sign::{EntropySource, KeysManager}};
 
 /// Lampo keys implementations
 pub struct LampoKeys {
     pub keys_manager: Arc<LampoKeysManager>,
 }
 
-impl LampoKeys {
-    pub fn new(seed: [u8; 32]) -> Self {
-        // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.
+pub trait KeysManagerFactory {
+    type GenericKeysManager: SignerProvider;
+
+    fn create_keys_manager(&self, conf: Arc<LampoConf>, seed: &[u8; 32]) -> Self::GenericKeysManager;
+} 
+
+pub struct LDKKeysManagerFactory;
+
+impl KeysManagerFactory for LDKKeysManagerFactory {
+    type GenericKeysManager = KeysManager;
+
+    fn create_keys_manager(&self, _ : Arc<LampoConf>, seed: &[u8; 32]) -> Self::GenericKeysManager {
         let start_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap();
+        KeysManager::new(seed, start_time.as_secs(), start_time.subsec_nanos())
+    }
+}
 
+impl LampoKeys {
+    pub fn new(seed: [u8; 32], conf: Arc<LampoConf>) -> Self {
         LampoKeys {
             keys_manager: Arc::new(LampoKeysManager::new(
                 &seed,
-                start_time.as_secs(),
-                start_time.subsec_nanos(),
+                conf
             )),
         }
     }
 
     #[cfg(debug_assertions)]
-    pub fn with_channel_keys(seed: [u8; 32], channels_keys: String) -> Self {
-        // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.
-        let start_time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
+    pub fn with_channel_keys(seed: [u8; 32], channels_keys: String, conf: Arc<LampoConf>) -> Self {
 
         let keys = channels_keys.split('/').collect::<Vec<_>>();
 
         let mut manager =
-            LampoKeysManager::new(&seed, start_time.as_secs(), start_time.subsec_nanos());
+            LampoKeysManager::new(&seed, conf);
         manager.set_channels_keys(
             keys[1].to_string(),
             keys[2].to_string(),
@@ -67,8 +76,8 @@ pub struct LampoKeysManager {
 }
 
 impl LampoKeysManager {
-    pub fn new(seed: &[u8; 32], starting_time_secs: u64, starting_time_nanos: u32) -> Self {
-        let inner = KeysManager::new(seed, starting_time_secs, starting_time_nanos);
+    pub fn new(seed: &[u8; 32], conf: Arc<LampoConf>) -> Self {
+        let inner = LDKKeysManagerFactory.create_keys_manager(conf, seed);
         Self {
             inner,
             funding_key: None,

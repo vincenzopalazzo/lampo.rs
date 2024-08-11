@@ -2,7 +2,7 @@ use vls_proxy::vls_protocol_client::{Error, Transport};
 use vls_proxy::vls_protocol_signer::handler::Handler;
 use vls_proxy::vls_protocol_signer::handler::{HandlerBuilder, RootHandler};
 use vls_proxy::vls_protocol_signer::vls_protocol::{model::PubKey, msgs};
-use lampo_common::bitcoin::{Address, Network};
+use lampo_common::bitcoin::Network;
 use lightning_signer::node::NodeServices;
 use lightning_signer::persist::DummyPersister;
 use lightning_signer::policy::simple_validator::make_simple_policy;
@@ -15,12 +15,12 @@ use std::sync::Arc;
 #[allow(dead_code)]
 /// The `LampoVLSInProcess` represents a VLS client with a Null Transport.
 /// Designed to run VLS in-process, but still performs the VLS protocol, No Persistence.
-pub struct LampoVLSInProcess {
+pub struct InProcessProtocolHandler {
     pub handler: RootHandler
 }
 
 /// Describe method to handle messages using the VLS protocol for Singer and Channel API.
-impl Transport for LampoVLSInProcess {
+impl Transport for InProcessProtocolHandler {
     /// Perform a call for the Signer Protocol API
     fn node_call(&self, msg: Vec<u8>) -> Result<Vec<u8>, Error> {
         // Deserialize the incoming message
@@ -43,13 +43,13 @@ impl Transport for LampoVLSInProcess {
 }
 
 #[allow(dead_code)]
-impl LampoVLSInProcess {
+impl InProcessProtocolHandler {
     // Initialize the ProtocolHandler with Default Configuration, No Persistence
-    pub fn new(address: Address, network: Network, seed: [u8; 32]) -> Self {
+    pub fn new(network: Network, seed: &[u8; 32]) -> Self {
         // Create a dummy persister (no persistence)
         let persister = Arc::new(DummyPersister);
         // Define an allowlist with the given address
-        let allowlist = vec![address.to_string()];
+        let allowlist = vec![];
         // Create a simple policy for the network
         let policy = make_simple_policy(network);
         // Create Validators using SimpleValidatorFactory with the policy
@@ -62,12 +62,12 @@ impl LampoVLSInProcess {
             persister,
             clock,
         };
-        let (root_handler_builder, _) = HandlerBuilder::new(network, 0, services, seed)
+        let (root_handler_builder, _) = HandlerBuilder::new(network, 0, services, seed.to_owned())
             .allowlist(allowlist)
             .build()
             .expect("Cannot Build The Root Handler");
         let root_handler = root_handler_builder.into_root_handler();
-        LampoVLSInProcess {
+        InProcessProtocolHandler {
             handler: root_handler,
         }
     }

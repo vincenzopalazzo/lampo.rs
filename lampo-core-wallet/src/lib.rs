@@ -56,7 +56,7 @@ impl CoreWalletManager {
             .into_xprv(network)
             .ok_or(error::anyhow!("impossible cast the private key"))?;
 
-        let ldk_keys = LampoKeys::new(xprv.private_key.secret_bytes());
+        let ldk_keys = LampoKeys::new(xprv.private_key.secret_bytes(), conf);
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
         let wallet = bdk::Wallet::new(
             Bip84(xprv, KeychainKind::External),
@@ -71,13 +71,14 @@ impl CoreWalletManager {
     fn build_from_private_key(
         xprv: lampo_common::bitcoin::PrivateKey,
         channel_keys: Option<String>,
+        conf: Arc<LampoConf>,
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
         use bdk::bitcoin::bip32::Xpriv;
 
         let ldk_keys = if let Some(channel_keys) = channel_keys {
-            LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys)
+            LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys, conf)
         } else {
-            LampoKeys::new(xprv.inner.secret_bytes())
+            LampoKeys::new(xprv.inner.secret_bytes(), conf)
         };
         let network = match xprv.network.to_string().as_str() {
             "bitcoin" => bdk::bitcoin::Network::Bitcoin,
@@ -348,7 +349,7 @@ impl TryFrom<(PrivateKey, Option<String>, Arc<LampoConf>)> for CoreWalletManager
 
     fn try_from(value: (PrivateKey, Option<String>, Arc<LampoConf>)) -> Result<Self, Self::Error> {
         let conf = value.2;
-        let (wallet, keymanager) = Self::build_from_private_key(value.0, value.1)?;
+        let (wallet, keymanager) = Self::build_from_private_key(value.0, value.1, conf.clone())?;
         let rpc = Self::build_bitcoin_rpc(conf.clone(), None)?;
         let wallet_name = Self::configure_bitcoin_wallet(&rpc, conf.clone(), wallet)?;
         let rpc = Self::build_bitcoin_rpc(conf.clone(), Some(&wallet_name))?;
