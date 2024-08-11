@@ -1,16 +1,17 @@
-use vls_proxy::vls_protocol_client::{Error, Transport};
-use vls_proxy::vls_protocol_signer::handler::Handler;
-use vls_proxy::vls_protocol_signer::handler::{HandlerBuilder, RootHandler};
-use vls_proxy::vls_protocol_signer::vls_protocol::{model::PubKey, msgs};
-use lampo_common::bitcoin::Network;
+use std::sync::Arc;
+
 use lightning_signer::node::NodeServices;
 use lightning_signer::persist::DummyPersister;
 use lightning_signer::policy::simple_validator::make_simple_policy;
 use lightning_signer::policy::simple_validator::SimpleValidatorFactory;
 use lightning_signer::signer::ClockStartingTimeFactory;
 use lightning_signer::util::clock::StandardClock;
+use vls_proxy::vls_protocol_client::{Error, Transport};
+use vls_proxy::vls_protocol_signer::handler::Handler;
+use vls_proxy::vls_protocol_signer::handler::{HandlerBuilder, RootHandler};
+use vls_proxy::vls_protocol_signer::vls_protocol::{model::PubKey, msgs};
 
-use std::sync::Arc;
+use lampo_common::bitcoin::Network;
 
 #[allow(dead_code)]
 /// The `LampoVLSInProcess` represents a VLS client with a Null Transport.
