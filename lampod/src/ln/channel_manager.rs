@@ -21,7 +21,7 @@ use lampo_common::ldk::ln::channelmanager::{
     ChainParameters, ChannelManager, ChannelManagerReadArgs,
 };
 use lampo_common::ldk::persister::fs_store::FilesystemStore;
-use lampo_common::ldk::routing::gossip::NetworkGraph;
+use lampo_common::ldk::routing::gossip::{NetworkGraph, ReadOnlyNetworkGraph};
 use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
@@ -192,7 +192,7 @@ impl LampoChannelManager {
         self.channeld.clone().unwrap()
     }
 
-    pub fn list_channel(&self) -> Channels {
+    pub fn list_channels(&self) -> Channels {
         let channels: Vec<Channel> = self
             .manager()
             .list_channels()

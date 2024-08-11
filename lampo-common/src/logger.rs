@@ -54,7 +54,15 @@ impl Log for Logger {
                     .to_rfc3339_opts(SecondsFormat::Millis, true)
                     .white();
 
-                writeln!(stream, "{} {}", colored_string, message,).expect("write shouldn't fail");
+                writeln!(
+                    stream,
+                    "{} {}",
+                    DateTime::<Utc>::from(SystemTime::now())
+                        .to_rfc3339_opts(SecondsFormat::Millis, true)
+                        .white(),
+                    message,
+                )
+                .expect("write shouldn't fail");
             }
         }
     }
