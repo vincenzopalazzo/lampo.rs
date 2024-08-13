@@ -20,10 +20,12 @@ pub mod ln;
 pub mod persistence;
 
 use std::cell::Cell;
-use std::cell::RefCell;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use lampo_common::ldk::ln::msgs::SocketAddress;
+use lampo_common::secp256k1::PublicKey;
 use lightning_liquidity::lsps2::client::LSPS2ClientConfig;
 use lightning_liquidity::lsps2::service::LSPS2ServiceConfig;
 use lightning_liquidity::LiquidityClientConfig;
@@ -74,7 +76,7 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
-    liquidity: Option<RefCell<LampoLiquidityManager>>,
+    liquidity: Option<Arc<LampoLiquidityManager>>,
     // FIXME: remove this
     rt: Runtime,
 }
@@ -113,8 +115,8 @@ impl LampoDaemon {
         &self.conf
     }
 
-    pub fn liquidity(&self) -> Option<RefCell<LampoLiquidityManager>> {
-        self.liquidity.clone()
+    pub fn liquidity(&self) -> Arc<LampoLiquidityManager> {
+        self.liquidity.clone().unwrap()
     }
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
@@ -179,14 +181,32 @@ impl LampoDaemon {
 
     pub fn init_peer_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampo", "init peer manager ...");
+        let mut peer_manager;
+        let peer_liquidity;
 
+        if let Some(liq) = &self.liquidity {
+            peer_liquidity = Some(Arc::clone(&self.liquidity.clone().unwrap()));
+        } else {
+            peer_liquidity = None;
+        }
+        peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone(), peer_liquidity);
+
+        peer_manager.init(
+            self.onchain_manager(),
+            self.wallet_manager.clone(),
+            self.channel_manager(),
+        )?;
+
+        self.peer_manager = Some(Arc::new(peer_manager));
+        Ok(())
+    }
+
+    pub fn init_liquidity_manager(&mut self) -> error::Result<()> {
         let liquidity;
         let liquidity_manager;
-        // FIXME: check this somewhere else
         if let Some(liq) = &self.conf.liquidity {
-            // FIXME: This could probably be made into an enum
             if liq == "Consumer" {
-                log::info!("Acting as consumer");
+                log::info!("Acting as LSP consumer");
                 liquidity = LampoLiquidity::new(
                     self.offchain_manager().key_manager(),
                     self.channel_manager().manager(),
@@ -198,59 +218,48 @@ impl LampoDaemon {
                         lsps2_client_config: Some(LSPS2ClientConfig {}),
                     }),
                 );
+
+                liquidity_manager = Some(LampoLiquidityManager::new_lsp_as_client(
+                    Arc::new(liquidity),
+                    self.conf.clone(),
+                    self.channel_manager(),
+                    self.offchain_manager().key_manager(),
+                    PublicKey::from_str(&self.conf.lsp_node_id.clone().unwrap())
+                        .expect("Wrong node id"),
+                    SocketAddress::from_str(&self.conf.lsp_socket_addr.clone().unwrap())
+                        .expect("Failed to parse socket address"),
+                ));
             } else if liq == "Provider" {
-                log::info!("Acring as a provider");
-                // FIXME: Probably do something about this
+                log::info!("Acting as a provider");
                 let promise_secret: [u8; 32] = [0; 32];
                 liquidity = LampoLiquidity::new(
                     self.offchain_manager().key_manager(),
                     self.channel_manager().manager(),
                     Some(self.onchain_manager()),
                     None,
-                    // Do something here
                     Some(LiquidityServiceConfig {
                         lsps2_service_config: Some(LSPS2ServiceConfig { promise_secret }),
                         advertise_service: true,
                     }),
                     None,
                 );
+                liquidity_manager = Some(LampoLiquidityManager::new_lsp(
+                    Arc::new(liquidity),
+                    self.conf.clone(),
+                    self.channel_manager(),
+                    self.offchain_manager().key_manager(),
+                ));
             } else {
                 error::bail!("Wrong config provided");
             }
-
-            liquidity_manager = Some(LampoLiquidityManager::new_lsp(
-                Arc::new(liquidity),
-                self.conf.clone(),
-                self.channel_manager(),
-                self.offchain_manager().key_manager(),
-            ));
         } else {
             liquidity_manager = None;
         }
 
-        let mut peer_manager;
-        let peer_liquidity;
-
-        if let Some(ref liq) = liquidity_manager {
-            peer_liquidity = Some(Arc::new(liq.clone()));
-        } else {
-            peer_liquidity = None;
-        }
-        peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone(), peer_liquidity);
-
-        if let Some(liq_manager) = liquidity_manager {
-            self.liquidity = Some(RefCell::new(liq_manager));
-        } else {
-            self.liquidity = None;
+        if let Some(liq) = liquidity_manager {
+            self.liquidity = Some(Arc::new(liq));
         }
 
-        peer_manager.init(
-            self.onchain_manager(),
-            self.wallet_manager.clone(),
-            self.channel_manager(),
-        )?;
-        self.peer_manager = Some(Arc::new(peer_manager));
-        log::info!("Exit peer manager");
         Ok(())
     }
 
@@ -296,11 +305,15 @@ impl LampoDaemon {
         self.init_onchaind(client.clone())?;
         self.init_channeld()?;
         self.init_offchain_manager()?;
+        self.init_liquidity_manager()?;
         self.init_peer_manager()?;
         self.init_inventory_manager()?;
         self.init_event_handler()?;
         client.set_handler(self.handler());
         self.channel_manager().set_handler(self.handler());
+        if let Some(liq) = &self.liquidity {
+            self.liquidity().set_handler(self.handler());
+        }
         Ok(())
     }
 
@@ -329,16 +342,14 @@ impl LampoDaemon {
         let handler = self.handler();
         // Here is the event handled
 
-        if let Some(lsp) = self.liquidity() {
-            log::info!("Listening for liquidity events!");
-            let liquidity = self.liquidity().unwrap();
+        if let Some(liq) = &self.liquidity {
+            let res = liq.clone();
+            log::info!("Listening for lsp events...");
             std::thread::spawn(move || {
                 async_run!(async move {
-                    println!("We are inside thread! async_run");
-                    liquidity.borrow_mut().listen();
-                    // loop {
-                    //     log::info!("We are inside!");
-                    // }
+                    loop {
+                        let _ = &res.listen().await;
+                    }
                 })
             });
         }

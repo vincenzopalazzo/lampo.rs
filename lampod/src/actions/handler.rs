@@ -6,6 +6,7 @@ use std::sync::Arc;
 use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::error::Ok;
+use lampo_common::event::liquidity::LiquidityEvent;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::{Emitter, Event, Subscriber};
 use lampo_common::handler::Handler as EventHandler;
@@ -33,9 +34,7 @@ pub struct LampoHandler {
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
     external_handlers: RefCell<Vec<Arc<dyn ExternalHandler>>>,
-    // Question: How about Option<Arc<Mutex<LampoLiquidityManager>>>
-    liquidity_manager: Option<RefCell<LampoLiquidityManager>>,
-    // Do this inside liquidity
+    liquidity_manager: Option<Arc<LampoLiquidityManager>>,
     emitter: Emitter<Event>,
     subscriber: Subscriber<Event>,
 }
@@ -146,7 +145,7 @@ impl Handler for LampoHandler {
             } => {
                 let liquidity_manager = self.liquidity_manager.clone();
                 if let Some(ref liq_manager) = liquidity_manager {
-                    let _ = liquidity_manager.unwrap().borrow().channel_ready(user_channel_id, &channel_id, &counterparty_node_id);
+                    let _ = liquidity_manager.unwrap().channel_ready(user_channel_id, &channel_id, &counterparty_node_id);
                 }
                 log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
                 self.emit(Event::Lightning(LightningEvent::ChannelReady {
@@ -294,21 +293,29 @@ impl Handler for LampoHandler {
                 Ok(())
             },
             ldk::events::Event::HTLCIntercepted { intercept_id, requested_next_hop_scid, payment_hash, inbound_amount_msat, expected_outbound_amount_msat } => {
-                // TODO: Emit this event
                 log::info!("Intecepted an HTLC");
                 let liquidity_manager = self.liquidity_manager.clone();
-                if liquidity_manager.is_some() {
-                    liquidity_manager.unwrap().borrow().htlc_intercepted(requested_next_hop_scid, intercept_id, expected_outbound_amount_msat, payment_hash)?;
+                if let Some(ref liq_manager) = liquidity_manager {
+                    let _ = liquidity_manager.unwrap().htlc_intercepted(requested_next_hop_scid, intercept_id, inbound_amount_msat, payment_hash);
                 }
-
+                let event = LiquidityEvent::HTLCIntercepted { intercept_id, requested_next_hop_scid, payment_hash, inbound_amount_msat, expected_outbound_amount_msat };
+                self.emit(Event::Liquidity(event));
+                log::info!("Successfully emitted the Intercepted event!");
                 Ok(())
             },
             ldk::events::Event::HTLCHandlingFailed { prev_channel_id, failed_next_destination } => {
-                todo!()
+                log::info!("HTLC Handling failed");
+                let event = LiquidityEvent::HTLCHandlingFailed { prev_channel_id, failed_next_destination };
+                self.emit(Event::Liquidity(event));
+                Ok(())
             }
             ldk::events::Event::PaymentForwarded { prev_channel_id, next_channel_id, prev_user_channel_id, next_user_channel_id, total_fee_earned_msat, skimmed_fee_msat, claim_from_onchain_tx, outbound_amount_forwarded_msat } => {
-                todo!()
+                log::info!("Payment Forwarded");
+                let event = LiquidityEvent::PaymentForwarded { prev_channel_id, next_channel_id, prev_user_channel_id, next_user_channel_id, total_fee_earned_msat, skimmed_fee_msat, claim_from_onchain_tx, outbound_amount_forwarded_msat };
+                self.emit(Event::Liquidity(event));
+                Ok(())
             }
+
             _ => Err(error::anyhow!("unexpected ldk event: {:?}", event)),
         }
     }

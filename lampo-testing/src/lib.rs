@@ -65,12 +65,13 @@ macro_rules! wait {
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     root_path: Arc<TempDir>,
-    liquidity: Option<RefCell<LampoLiquidityManager>>,
+    liquidity: Option<Arc<LampoLiquidityManager>>,
     pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
     pub mnemonic: String,
     pub btc: Arc<BtcNode>,
     pub info: response::GetInfo,
+    pub lampod: Option<Arc<LampoDaemon>>,
 }
 
 impl LampoTesting {
@@ -147,12 +148,18 @@ impl LampoTesting {
             root_path: dir.into(),
             info,
             liquidity: None,
+            lampod: None,
         })
     }
 
     // Use this for liquidity.
     // FIXME: Integrate this with new method
-    pub fn new_liquidity(btc: Arc<BtcNode>, liquidity: String) -> error::Result<Self> {
+    pub fn new_liquidity(
+        btc: Arc<BtcNode>,
+        liquidity: String,
+        lsp_node_id: Option<String>,
+        lsp_socket_addr: Option<String>,
+    ) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -168,6 +175,8 @@ impl LampoTesting {
         let core_url = format!("127.0.0.1:{}", btc.port);
         if liquidity == "consumer" {
             lampo_conf.configure_as_liquidity_consumer();
+            lampo_conf.lsp_node_id = lsp_node_id;
+            lampo_conf.lsp_socket_addr = lsp_socket_addr;
         } else {
             lampo_conf.configure_as_liquidity_provider();
         }
@@ -231,7 +240,8 @@ impl LampoTesting {
             btc,
             root_path: Arc::new(dir),
             info,
-            liquidity,
+            liquidity: Some(liquidity),
+            lampod: Some(lampod),
         })
     }
 
@@ -267,7 +277,7 @@ impl LampoTesting {
         self.root_path.clone()
     }
 
-    pub fn liquidity(&self) -> Option<RefCell<LampoLiquidityManager>> {
-        self.liquidity.clone()
+    pub fn liquidity(&self) -> Arc<LampoLiquidityManager> {
+        self.liquidity.as_ref().unwrap().clone()
     }
 }

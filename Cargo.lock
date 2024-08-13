@@ -856,6 +856,7 @@ dependencies = [
  "lightning-background-processor",
  "lightning-block-sync",
  "lightning-invoice",
+ "lightning-liquidity",
  "lightning-net-tokio",
  "lightning-persister",
  "lightning-rapid-gossip-sync",

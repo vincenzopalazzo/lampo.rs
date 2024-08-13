@@ -25,6 +25,8 @@ pub struct LampoConf {
     pub announce_addr: Option<String>,
     // Should be something like liquidity=consumer, liquidity=provider or none
     pub liquidity: Option<String>,
+    pub lsp_node_id: Option<String>,
+    pub lsp_socket_addr: Option<String>,
 }
 
 impl Default for LampoConf {
@@ -54,6 +56,8 @@ impl Default for LampoConf {
             alias: None,
             announce_addr: None,
             liquidity: None,
+            lsp_node_id: None,
+            lsp_socket_addr: None,
         }
     }
 }
@@ -123,6 +127,11 @@ impl LampoConf {
         let input_path = path;
         let path = Self::normalize_root_dir(&conf.root_path, conf.network);
         conf.root_path = path.clone();
+        // Must be used when we act as a liquidity provider
+        conf.ldk_conf = UserConfig {
+            accept_intercept_htlcs: true,
+            ..Default::default()
+        };
 
         let lampo_file = format!("{}/lampo.conf", conf.path());
 
@@ -234,6 +243,8 @@ impl TryFrom<String> for LampoConf {
         let alias = conf.get_conf("alias").unwrap_or(None);
         let announce_addr = conf.get_conf("announce-addr").unwrap_or(None);
         let liquidity = conf.get_conf("liquidity").unwrap_or(None);
+        let lsp_node_id = conf.get_conf("lsp-node-id").unwrap_or(None);
+        let lsp_socket_addr = conf.get_conf("lsp-socket-addr").unwrap_or(None);
 
         Ok(Self {
             inner: Some(conf),
@@ -252,6 +263,8 @@ impl TryFrom<String> for LampoConf {
             alias,
             announce_addr,
             liquidity,
+            lsp_node_id,
+            lsp_socket_addr,
         })
     }
 }

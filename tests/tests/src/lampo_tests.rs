@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lampo_common::error;
+use lampo_common::event::liquidity::LiquidityEvent;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
@@ -519,7 +520,7 @@ pub fn decode_offer() -> error::Result<()> {
 }
 
 #[test]
-pub fn act_as_liquidity_server() -> error::Result<()> {
+pub fn test_generate_a_jit_invoice() -> error::Result<()> {
     init();
     let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
     let btc = Arc::new(btc);
@@ -527,19 +528,104 @@ pub fn act_as_liquidity_server() -> error::Result<()> {
     let node1 = Arc::new(LampoTesting::new_liquidity(
         btc.clone(),
         "server".to_string(),
+        None,
+        None,
     )?);
+
+    let _info: response::GetInfo = node1.lampod().call("getinfo", json::json!({})).unwrap();
+    let node1_id = _info.node_id.clone();
+    let socket_addr = format!("127.0.0.1:{}", node1.port.clone());
+    let socket_addr =
+        SocketAddress::from_str(&socket_addr).expect("Failed to parse socket address");
+
     // This should act as a client
     let node2 = Arc::new(LampoTesting::new_liquidity(
         btc.clone(),
         "consumer".to_string(),
+        Some(node1.info.node_id.clone()),
+        Some(socket_addr.to_string()),
+    )?);
+
+    let response: response::Connect = node2
+        .lampod()
+        .call(
+            "connect",
+            request::Connect {
+                node_id: node1.info.node_id.clone(),
+                addr: "127.0.0.1".to_owned(),
+                port: node1.port,
+            },
+        )
+        .unwrap();
+
+    log::info!("Connect successful: {:?}", response);
+
+    let events = node1.lampod().events();
+    let _ = node1.fund_wallet(101)?;
+    wait!(|| {
+        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
+            events.recv_timeout(Duration::from_millis(100))
+        else {
+            return Err(());
+        };
+        if height.to_consensus_u32() == 101 {
+            return Ok(());
+        }
+        Err(())
+    });
+
+    let result = node2
+        .liquidity()
+        .create_jit_invoice(10000, "A new desc".to_string());
+
+    assert!(result.is_ok());
+    log::info!("{}", result.unwrap().to_string());
+
+    Ok(())
+}
+
+#[test]
+pub fn test_pay_a_jit_invoice() -> error::Result<()> {
+    init();
+    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
+    let btc = Arc::new(btc);
+    // This is acting as a server
+    let node1 = Arc::new(LampoTesting::new_liquidity(
+        btc.clone(),
+        "server".to_string(),
+        None,
+        None,
     )?);
 
     let _info: response::GetInfo = node1.lampod().call("getinfo", json::json!({})).unwrap();
-    println!("This is the getinfo response: {:?}", _info);
     let node1_id = _info.node_id.clone();
-    let socket_addr = format!("127.0.0.1:{}", node2.port.clone());
+    let socket_addr = format!("127.0.0.1:{}", node1.port.clone());
     let socket_addr =
         SocketAddress::from_str(&socket_addr).expect("Failed to parse socket address");
+
+    // This should act as a client
+    let node2 = Arc::new(LampoTesting::new_liquidity(
+        btc.clone(),
+        "consumer".to_string(),
+        Some(node1.info.node_id.clone()),
+        Some(socket_addr.to_string()),
+    )?);
+
+    // Paying the jit invoice
+    let node3 = Arc::new(LampoTesting::new(btc.clone())?);
+
+    // Connecting server and payee
+    let response: response::Connect = node1
+        .lampod()
+        .call(
+            "connect",
+            request::Connect {
+                node_id: node3.info.node_id.clone(),
+                addr: "127.0.0.1".to_owned(),
+                port: node3.port,
+            },
+        )
+        .unwrap();
 
     let response: response::Connect = node2
         .lampod()
@@ -557,11 +643,6 @@ pub fn act_as_liquidity_server() -> error::Result<()> {
 
     let node_id = PublicKey::from_str(&node1_id).expect("Wrong node id");
 
-    let liquidity = node2.liquidity().unwrap().clone();
-    let liquidity_consumer =
-        liquidity
-            .borrow_mut()
-            .configure_as_liquidity_consumer(node_id, socket_addr, None)?;
     let events = node1.lampod().events();
     let _ = node1.fund_wallet(101)?;
     wait!(|| {
@@ -576,23 +657,96 @@ pub fn act_as_liquidity_server() -> error::Result<()> {
         Err(())
     });
 
-    let res = node2.liquidity().unwrap().clone();
-    let result = res
-        .clone()
-        .borrow_mut()
-        .create_a_jit_channel(100_000_000, "A new desc".to_string())?;
-
-    let liquidity_events = res.borrow().events();
-
+    let _ = node3.fund_wallet(101)?;
+    let events3 = node3.lampod().events();
     wait!(|| {
-        while let Ok(event) = liquidity_events.recv_timeout(Duration::from_nanos(100_000)) {
-            if let Event::Liquidity(liq_event) = event {
-                return Ok(());
-            };
+        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
+            events3.recv_timeout(Duration::from_millis(100))
+        else {
+            return Err(());
+        };
+        if height.to_consensus_u32() == 202 {
+            return Ok(());
         }
-        node2.fund_wallet(6).unwrap();
         Err(())
     });
+
+    // The Provider needs to pay this invoice
+    let result = node2
+        .liquidity()
+        .create_jit_invoice(10000, "A new desc".to_string())?;
+
+    log::info!("This is the invoice: {}", result.clone().to_string());
+
+    // Funding channel
+    let response: json::Value = node3
+        .lampod()
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: node1.info.node_id.clone(),
+                amount: 100000,
+                public: true,
+                port: Some(node1.port.clone()),
+                addr: Some("127.0.0.1".to_string()),
+            },
+        )
+        .unwrap();
+    let events3 = node3.lampod().events();
+    wait!(|| {
+        while let Ok(event) = events3.recv_timeout(Duration::from_millis(10)) {
+            node3.fund_wallet(6).unwrap();
+            if let Event::Lightning(LightningEvent::ChannelReady {
+                counterparty_node_id,
+                ..
+            }) = event
+            {
+                if counterparty_node_id.to_string() == node1.info.node_id {
+                    return Err(());
+                }
+                return Ok(());
+            };
+            // check if lampo see the channel
+            let channels: response::Channels =
+                node3.lampod().call("channels", json::json!({})).unwrap();
+            if channels.channels.is_empty() {
+                return Err(());
+            }
+
+            if !channels.channels.first().unwrap().ready {
+                return Err(());
+            }
+
+            let channels: response::Channels =
+                node1.lampod().call("channels", json::json!({})).unwrap();
+
+            if channels.channels.is_empty() {
+                return Err(());
+            }
+
+            if channels.channels.first().unwrap().ready {
+                return Ok(());
+            }
+        }
+        node3.fund_wallet(6).unwrap();
+        Err(())
+    });
+    // This would return a timeout as json_pay will continue to wait till it get an
+    // PaymentSuccessful event. Out logic is not at fault here it is because node1 gets
+    // the HTLCIntercepted event but can't process further because of this function blocking
+    // the thread
+    // TODO: Find a better way to fix this.
+    // There are three nodes payer <-> lsp <-> client
+    // The JIT channels are created on the go when the payer pays the invoice generated by the LSP.
+    // But as we are generating the invoice and paying on the go, the Channel remains pending as we are not
+    // by hand generating any blocks in order to get this channel confirmed.
+    let pay: response::PayResult = node3.lampod().call(
+        "pay",
+        request::Pay {
+            invoice_str: result.to_string(),
+            amount: result.clone().amount_milli_satoshis(),
+        },
+    )?;
 
     Ok(())
 }
