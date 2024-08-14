@@ -49,11 +49,6 @@ impl Log for Logger {
                     Level::Debug => message.dimmed(),
                     Level::Trace => message.cyan().dimmed(),
                 };
-                let utc_time: DateTime<Utc> = DateTime::from(SystemTime::now());
-                let colored_string = utc_time
-                    .to_rfc3339_opts(SecondsFormat::Millis, true)
-                    .white();
-
                 writeln!(
                     stream,
                     "{} {}",

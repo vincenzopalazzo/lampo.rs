@@ -1,51 +1,33 @@
-use std::{sync::Arc, time::SystemTime};
+use std::sync::Arc;
 
-use bitcoin::secp256k1::{Secp256k1, SecretKey};
-use lightning::sign::{InMemorySigner, NodeSigner, OutputSpender, SignerProvider};
-
-use crate::{conf::LampoConf, ldk::sign::{EntropySource, KeysManager}};
+use crate::ldk::sign::ecdsa::WriteableEcdsaChannelSigner;
+use crate::bitcoin::secp256k1::SecretKey;
+use crate::ldk::sign::{NodeSigner, OutputSpender, SignerProvider};
+use crate::{ldk::sign::{EntropySource, KeysManager}};
 
 /// Lampo keys implementations
-pub struct LampoKeys {
-    pub keys_manager: Arc<LampoKeysManager>,
+pub struct LampoKeys<T: ILampoKeys> {
+    pub keys_manager: Arc<LampoKeysManager<T>>,
 }
 
-pub trait KeysManagerFactory {
-    type GenericKeysManager: SignerProvider;
+pub trait ILampoKeys: NodeSigner + SignerProvider<EcdsaSigner: WriteableEcdsaChannelSigner> + EntropySource + OutputSpender {} 
 
-    fn create_keys_manager(&self, conf: Arc<LampoConf>, seed: &[u8; 32]) -> Self::GenericKeysManager;
-} 
+impl ILampoKeys for KeysManager {}
 
-pub struct LDKKeysManagerFactory;
-
-impl KeysManagerFactory for LDKKeysManagerFactory {
-    type GenericKeysManager = KeysManager;
-
-    fn create_keys_manager(&self, _ : Arc<LampoConf>, seed: &[u8; 32]) -> Self::GenericKeysManager {
-        let start_time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
-        KeysManager::new(seed, start_time.as_secs(), start_time.subsec_nanos())
-    }
-}
-
-impl LampoKeys {
-    pub fn new(seed: [u8; 32], conf: Arc<LampoConf>) -> Self {
+impl<T: ILampoKeys> LampoKeys<T> {
+    pub fn new(inner: T) -> Self {
         LampoKeys {
-            keys_manager: Arc::new(LampoKeysManager::new(
-                &seed,
-                conf
-            )),
+            keys_manager: Arc::new(LampoKeysManager::new(inner)),
         }
     }
 
     #[cfg(debug_assertions)]
-    pub fn with_channel_keys(seed: [u8; 32], channels_keys: String, conf: Arc<LampoConf>) -> Self {
+    pub fn with_channel_keys(inner: T, channels_keys: String) -> Self {
 
         let keys = channels_keys.split('/').collect::<Vec<_>>();
 
         let mut manager =
-            LampoKeysManager::new(&seed, conf);
+            LampoKeysManager::new(inner);
         manager.set_channels_keys(
             keys[1].to_string(),
             keys[2].to_string(),
@@ -59,13 +41,13 @@ impl LampoKeys {
         }
     }
 
-    pub fn inner(&self) -> Arc<LampoKeysManager> {
+    pub fn inner(&self) -> Arc<LampoKeysManager<T>> {
         self.keys_manager.clone()
     }
 }
 
-pub struct LampoKeysManager {
-    pub(crate) inner: KeysManager,
+pub struct LampoKeysManager<T: ILampoKeys>{
+    pub(crate) inner: T,
 
     funding_key: Option<SecretKey>,
     revocation_base_secret: Option<SecretKey>,
@@ -75,9 +57,8 @@ pub struct LampoKeysManager {
     shachain_seed: Option<[u8; 32]>,
 }
 
-impl LampoKeysManager {
-    pub fn new(seed: &[u8; 32], conf: Arc<LampoConf>) -> Self {
-        let inner = LDKKeysManagerFactory.create_keys_manager(conf, seed);
+impl<T: ILampoKeys> LampoKeysManager<T> {
+    pub fn new(inner: T) -> Self {
         Self {
             inner,
             funding_key: None,
@@ -112,13 +93,13 @@ impl LampoKeysManager {
     }
 }
 
-impl EntropySource for LampoKeysManager {
+impl<T: ILampoKeys> EntropySource for LampoKeysManager<T> {
     fn get_secure_random_bytes(&self) -> [u8; 32] {
         self.inner.get_secure_random_bytes()
     }
 }
 
-impl NodeSigner for LampoKeysManager {
+impl<T: ILampoKeys> NodeSigner for LampoKeysManager<T> {
     fn ecdh(
         &self,
         recipient: lightning::sign::Recipient,
@@ -170,7 +151,7 @@ impl NodeSigner for LampoKeysManager {
     }
 }
 
-impl OutputSpender for LampoKeysManager {
+impl<T: ILampoKeys> OutputSpender for LampoKeysManager<T> {
     fn spend_spendable_outputs<C: bitcoin::secp256k1::Signing>(
         &self,
         descriptors: &[&lightning::sign::SpendableOutputDescriptor],
@@ -191,36 +172,35 @@ impl OutputSpender for LampoKeysManager {
     }
 }
 
-impl SignerProvider for LampoKeysManager {
+impl<T: ILampoKeys> SignerProvider for LampoKeysManager<T> {
     // FIXME: this should be the same of the inner
-    type EcdsaSigner = InMemorySigner;
+    type EcdsaSigner = <T as SignerProvider>::EcdsaSigner;
 
     fn derive_channel_signer(
         &self,
         channel_value_satoshis: u64,
         channel_keys_id: [u8; 32],
     ) -> Self::EcdsaSigner {
-        if self.funding_key.is_some() {
-            // FIXME(vincenzopalazzo): make this a general
-            let commitment_seed = [
-                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-            ];
-            return InMemorySigner::new(
-                &Secp256k1::new(),
-                self.funding_key.unwrap(),
-                self.revocation_base_secret.unwrap(),
-                self.payment_base_secret.unwrap(),
-                self.delayed_payment_base_secret.unwrap(),
-                self.htlc_base_secret.unwrap(),
-                commitment_seed,
-                channel_value_satoshis,
-                channel_keys_id,
-                self.shachain_seed.unwrap(),
-            );
-        }
-        self.inner
-            .derive_channel_signer(channel_value_satoshis, channel_keys_id)
+        // if self.funding_key.is_some() {
+        // // FIXME(vincenzopalazzo): make this a general
+        //     let commitment_seed = [
+        //         255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        //         255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        //     ];
+        //     return InMemorySigner::new(
+        //         &Secp256k1::new(),
+        //         self.funding_key.unwrap(),
+        //         self.revocation_base_secret.unwrap(),
+        //         self.payment_base_secret.unwrap(),
+        //         self.delayed_payment_base_secret.unwrap(),
+        //         self.htlc_base_secret.unwrap(),
+        //         commitment_seed,
+        //         channel_value_satoshis,
+        //         channel_keys_id,
+        //         self.shachain_seed.unwrap(),
+        //     );
+        // }
+        self.inner.derive_channel_signer(channel_value_satoshis, channel_keys_id)
     }
 
     fn generate_channel_keys_id(
@@ -248,3 +228,4 @@ impl SignerProvider for LampoKeysManager {
         self.inner.read_chan_signer(reader)
     }
 }
+
