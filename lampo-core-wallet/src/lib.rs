@@ -14,6 +14,7 @@ use bdk::template::Bip84;
 use bdk::KeychainKind;
 use bitcoin_hashes::hex::HexIterator;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
+use lampo_common::keys::ILampoKeys;
 
 #[cfg(debug_assertions)]
 use crate::bitcoin::PrivateKey;
@@ -28,18 +29,19 @@ use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::{NewAddress, Utxo};
 use lampo_common::wallet::WalletManager;
 
-pub struct CoreWalletManager {
+pub struct CoreWalletManager<T: ILampoKeys> {
     rpc: Client,
-    keymanager: Arc<LampoKeys>,
+    keymanager: Arc<LampoKeys<T>>,
     network: Network,
 }
 
-impl CoreWalletManager {
+impl<T: ILampoKeys> CoreWalletManager<T> {
     /// Build from mnemonic_words and return bkd::Wallet or bdk::Error
     fn build_wallet(
         conf: Arc<LampoConf>,
         mnemonic_words: &str,
-    ) -> error::Result<(bdk::Wallet, LampoKeys)> {
+        inner: T
+    ) -> error::Result<(bdk::Wallet, LampoKeys<T>)> {
         // Parse a mnemonic
         let mnemonic = Mnemonic::parse(mnemonic_words).map_err(|err| error::anyhow!("{err}"))?;
         // Generate the extended key
@@ -56,7 +58,7 @@ impl CoreWalletManager {
             .into_xprv(network)
             .ok_or(error::anyhow!("impossible cast the private key"))?;
 
-        let ldk_keys = LampoKeys::new(xprv.private_key.secret_bytes(), conf);
+        let ldk_keys = LampoKeys::new(inner);
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
         let wallet = bdk::Wallet::new(
             Bip84(xprv, KeychainKind::External),
@@ -71,14 +73,15 @@ impl CoreWalletManager {
     fn build_from_private_key(
         xprv: lampo_common::bitcoin::PrivateKey,
         channel_keys: Option<String>,
-        conf: Arc<LampoConf>,
-    ) -> error::Result<(bdk::Wallet, LampoKeys)> {
+        _conf: Arc<LampoConf>,
+        inner: T
+    ) -> error::Result<(bdk::Wallet, LampoKeys<T>)> {
         use bdk::bitcoin::bip32::Xpriv;
 
         let ldk_keys = if let Some(channel_keys) = channel_keys {
-            LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys, conf)
+            LampoKeys::with_channel_keys(inner, channel_keys)
         } else {
-            LampoKeys::new(xprv.inner.secret_bytes(), conf)
+            LampoKeys::new(inner)
         };
         let network = match xprv.network.to_string().as_str() {
             "bitcoin" => bdk::bitcoin::Network::Bitcoin,
@@ -200,8 +203,8 @@ struct Tx {
     hex: Option<String>,
 }
 
-impl WalletManager for CoreWalletManager {
-    fn new(conf: Arc<LampoConf>) -> error::Result<(Self, String)>
+impl<T: ILampoKeys> WalletManager<T> for CoreWalletManager<T> {
+    fn new(conf: Arc<LampoConf>, inner: T) -> error::Result<(Self, String)>
     where
         Self: Sized,
     {
@@ -210,7 +213,7 @@ impl WalletManager for CoreWalletManager {
                 .map_err(|err| error::anyhow!("{:?}", err))?;
 
         let (wallet, keymanager) =
-            CoreWalletManager::build_wallet(conf.clone(), &mnemonic.to_string())?;
+            CoreWalletManager::build_wallet(conf.clone(), &mnemonic.to_string(), inner)?;
         let rpc = Self::build_bitcoin_rpc(conf.clone(), None)?;
         let wallet_name = Self::configure_bitcoin_wallet(&rpc, conf.clone(), wallet)?;
         let rpc = Self::build_bitcoin_rpc(conf.clone(), Some(&wallet_name))?;
@@ -289,7 +292,7 @@ impl WalletManager for CoreWalletManager {
         Ok(balance.to_sat() * 1000)
     }
 
-    fn ldk_keys(&self) -> Arc<LampoKeys> {
+    fn ldk_keys(&self) -> Arc<LampoKeys<T>> {
         self.keymanager.clone()
     }
 
@@ -309,11 +312,11 @@ impl WalletManager for CoreWalletManager {
         Ok(unspend)
     }
 
-    fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self>
+    fn restore(conf: Arc<LampoConf>, mnemonic_words: &str, inner: T) -> error::Result<Self>
     where
         Self: Sized,
     {
-        let (wallet, keymanager) = CoreWalletManager::build_wallet(conf.clone(), mnemonic_words)?;
+        let (wallet, keymanager) = CoreWalletManager::build_wallet(conf.clone(), mnemonic_words, inner)?;
 
         let rpc = Client::new(
             conf.core_url
@@ -343,21 +346,21 @@ impl WalletManager for CoreWalletManager {
     }
 }
 
-#[cfg(debug_assertions)]
-impl TryFrom<(PrivateKey, Option<String>, Arc<LampoConf>)> for CoreWalletManager {
-    type Error = error::Error;
+// #[cfg(debug_assertions)]
+// impl<T: ILampoKeys> TryFrom<(PrivateKey, Option<String>, Arc<LampoConf>)> for CoreWalletManager<T> {
+//     type Error = error::Error;
 
-    fn try_from(value: (PrivateKey, Option<String>, Arc<LampoConf>)) -> Result<Self, Self::Error> {
-        let conf = value.2;
-        let (wallet, keymanager) = Self::build_from_private_key(value.0, value.1, conf.clone())?;
-        let rpc = Self::build_bitcoin_rpc(conf.clone(), None)?;
-        let wallet_name = Self::configure_bitcoin_wallet(&rpc, conf.clone(), wallet)?;
-        let rpc = Self::build_bitcoin_rpc(conf.clone(), Some(&wallet_name))?;
+//     fn try_from(value: (PrivateKey, Option<String>, Arc<LampoConf>)) -> Result<Self, Self::Error> {
+//         let conf = value.2;
+//         let (wallet, keymanager) = Self::build_from_private_key(value.0, value.1, conf.clone())?;
+//         let rpc = Self::build_bitcoin_rpc(conf.clone(), None)?;
+//         let wallet_name = Self::configure_bitcoin_wallet(&rpc, conf.clone(), wallet)?;
+//         let rpc = Self::build_bitcoin_rpc(conf.clone(), Some(&wallet_name))?;
 
-        Ok(Self {
-            keymanager: Arc::new(keymanager),
-            rpc,
-            network: conf.network,
-        })
-    }
-}
+//         Ok(Self {
+//             keymanager: Arc::new(keymanager),
+//             rpc,
+//             network: conf.network,
+//         })
+//     }
+// }

@@ -3,14 +3,14 @@ use std::sync::Arc;
 use crate::ldk::sign::ecdsa::WriteableEcdsaChannelSigner;
 use crate::bitcoin::secp256k1::SecretKey;
 use crate::ldk::sign::{NodeSigner, OutputSpender, SignerProvider};
-use crate::{ldk::sign::{EntropySource, KeysManager}};
+use crate::ldk::sign::{EntropySource, KeysManager};
 
 /// Lampo keys implementations
 pub struct LampoKeys<T: ILampoKeys> {
     pub keys_manager: Arc<LampoKeysManager<T>>,
 }
 
-pub trait ILampoKeys: NodeSigner + SignerProvider<EcdsaSigner: WriteableEcdsaChannelSigner> + EntropySource + OutputSpender {} 
+pub trait ILampoKeys: NodeSigner + SignerProvider<EcdsaSigner: WriteableEcdsaChannelSigner> + EntropySource + OutputSpender + Send + Sync {} 
 
 impl ILampoKeys for KeysManager {}
 
@@ -174,7 +174,7 @@ impl<T: ILampoKeys> OutputSpender for LampoKeysManager<T> {
 
 impl<T: ILampoKeys> SignerProvider for LampoKeysManager<T> {
     // FIXME: this should be the same of the inner
-    type EcdsaSigner = <T as SignerProvider>::EcdsaSigner;
+    type EcdsaSigner = T::EcdsaSigner;
 
     fn derive_channel_signer(
         &self,

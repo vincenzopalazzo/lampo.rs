@@ -10,12 +10,12 @@ use crate::model::response::{NewAddress, Utxo};
 /// over Wallet implementation!
 pub trait WalletManager<T: ILampoKeys>: Send + Sync {
     /// Generate a new wallet for the network
-    fn new(conf: Arc<LampoConf>) -> error::Result<(Self, String)>
+    fn new(conf: Arc<LampoConf>, inner: T) -> error::Result<(Self, String)>
     where
         Self: Sized;
 
     /// Restore a previous created wallet from a network and a mnemonic_words
-    fn restore(network: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self>
+    fn restore(network: Arc<LampoConf>, mnemonic_words: &str, inner: T) -> error::Result<Self>
     where
         Self: Sized;
 
