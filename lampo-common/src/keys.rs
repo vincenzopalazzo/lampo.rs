@@ -1,33 +1,189 @@
 use std::sync::Arc;
 
-use crate::ldk::sign::ecdsa::WriteableEcdsaChannelSigner;
+use lightning::sign::ecdsa::EcdsaChannelSigner;
+
 use crate::bitcoin::secp256k1::SecretKey;
-use crate::ldk::sign::{NodeSigner, OutputSpender, SignerProvider};
+use crate::ldk::sign::ecdsa::WriteableEcdsaChannelSigner;
 use crate::ldk::sign::{EntropySource, KeysManager};
+use crate::ldk::sign::{NodeSigner, OutputSpender, SignerProvider};
+use crate::ldk::util::ser::Writeable;
 
 /// Lampo keys implementations
-pub struct LampoKeys<T: ILampoKeys> {
-    pub keys_manager: Arc<LampoKeysManager<T>>,
+pub struct LampoKeys {
+    pub keys_manager: Arc<LampoKeysManager>,
 }
 
-pub trait ILampoKeys: NodeSigner + SignerProvider<EcdsaSigner: WriteableEcdsaChannelSigner> + EntropySource + OutputSpender + Send + Sync {} 
+pub struct LampoSigner {
+    pub inner: Arc<dyn WriteableEcdsaChannelSigner>,
+}
+
+impl WriteableEcdsaChannelSigner for LampoSigner {}
+
+impl Writeable for LampoSigner {
+    fn encode(&self) -> Vec<u8> {
+        self.inner.encode()
+    }
+
+    fn serialized_length(&self) -> usize {
+        self.inner.serialized_length()
+    }
+
+    fn write<W: lightning::util::ser::Writer>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+        self.inner.write(writer)
+    }
+}
+
+impl EcdsaChannelSigner for LampoSigner {
+    fn sign_channel_announcement_with_funding_key(
+        &self,
+        msg: &lightning::ln::msgs::UnsignedChannelAnnouncement,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.inner
+            .sign_channel_announcement_with_funding_key(msg, secp_ctx)
+    }
+
+    fn sign_closing_transaction(
+        &self,
+        closing_tx: &lightning::ln::chan_utils::ClosingTransaction,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.inner.sign_closing_transaction(closing_tx, secp_ctx)
+    }
+
+    fn sign_counterparty_commitment(
+        &self,
+        commitment_tx: &lightning::ln::chan_utils::CommitmentTransaction,
+        inbound_htlc_preimages: Vec<lightning::ln::PaymentPreimage>,
+        outbound_htlc_preimages: Vec<lightning::ln::PaymentPreimage>,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<
+        (
+            bitcoin::secp256k1::ecdsa::Signature,
+            Vec<bitcoin::secp256k1::ecdsa::Signature>,
+        ),
+        (),
+    > {
+        self.inner.sign_counterparty_commitment(
+            commitment_tx,
+            inbound_htlc_preimages,
+            outbound_htlc_preimages,
+            secp_ctx,
+        )
+    }
+
+    fn sign_counterparty_htlc_transaction(
+        &self,
+        htlc_tx: &bitcoin::Transaction,
+        input: usize,
+        amount: u64,
+        per_commitment_point: &bitcoin::secp256k1::PublicKey,
+        htlc: &lightning::ln::chan_utils::HTLCOutputInCommitment,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.inner.sign_counterparty_htlc_transaction(
+            htlc_tx,
+            input,
+            amount,
+            per_commitment_point,
+            htlc,
+            secp_ctx,
+        )
+    }
+
+    fn sign_holder_anchor_input(
+        &self,
+        anchor_tx: &bitcoin::Transaction,
+        input: usize,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.inner
+            .sign_holder_anchor_input(anchor_tx, input, secp_ctx)
+    }
+
+    fn sign_holder_commitment(
+        &self,
+        commitment_tx: &lightning::ln::chan_utils::HolderCommitmentTransaction,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.inner.sign_holder_commitment(commitment_tx, secp_ctx)
+    }
+
+    fn sign_holder_htlc_transaction(
+        &self,
+        htlc_tx: &bitcoin::Transaction,
+        input: usize,
+        htlc_descriptor: &lightning::sign::HTLCDescriptor,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.inner
+            .sign_holder_htlc_transaction(htlc_tx, input, htlc_descriptor, secp_ctx)
+    }
+
+    fn sign_justice_revoked_htlc(
+        &self,
+        justice_tx: &bitcoin::Transaction,
+        input: usize,
+        amount: u64,
+        per_commitment_key: &SecretKey,
+        htlc: &lightning::ln::chan_utils::HTLCOutputInCommitment,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.inner.sign_justice_revoked_htlc(
+            justice_tx,
+            input,
+            amount,
+            per_commitment_key,
+            htlc,
+            secp_ctx,
+        )
+    }
+
+    fn sign_justice_revoked_output(
+        &self,
+        justice_tx: &bitcoin::Transaction,
+        input: usize,
+        amount: u64,
+        per_commitment_key: &SecretKey,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.inner.sign_justice_revoked_output(
+            justice_tx,
+            input,
+            amount,
+            per_commitment_key,
+            secp_ctx,
+        )
+    }
+
+    fn unsafe_sign_holder_commitment(
+        &self,
+        commitment_tx: &lightning::ln::chan_utils::HolderCommitmentTransaction,
+        secp_ctx: &bitcoin::key::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.unsafe_sign_holder_commitment(commitment_tx, secp_ctx)
+    }
+}
+
+pub trait ILampoKeys:
+    NodeSigner + SignerProvider<EcdsaSigner = LampoKeys> + EntropySource + OutputSpender + Send + Sync
+{
+}
 
 impl ILampoKeys for KeysManager {}
 
-impl<T: ILampoKeys> LampoKeys<T> {
-    pub fn new(inner: T) -> Self {
+impl LampoKeys {
+    pub fn new(inner: Arc<dyn ILampoKeys>) -> Self {
         LampoKeys {
             keys_manager: Arc::new(LampoKeysManager::new(inner)),
         }
     }
 
     #[cfg(debug_assertions)]
-    pub fn with_channel_keys(inner: T, channels_keys: String) -> Self {
-
+    pub fn with_channel_keys(inner: Arc<dyn ILampoKeys>, channels_keys: String) -> Self {
         let keys = channels_keys.split('/').collect::<Vec<_>>();
 
-        let mut manager =
-            LampoKeysManager::new(inner);
+        let mut manager = LampoKeysManager::new(inner);
         manager.set_channels_keys(
             keys[1].to_string(),
             keys[2].to_string(),
@@ -41,13 +197,13 @@ impl<T: ILampoKeys> LampoKeys<T> {
         }
     }
 
-    pub fn inner(&self) -> Arc<LampoKeysManager<T>> {
+    pub fn inner(&self) -> Arc<LampoKeysManager> {
         self.keys_manager.clone()
     }
 }
 
-pub struct LampoKeysManager<T: ILampoKeys>{
-    pub(crate) inner: T,
+pub struct LampoKeysManager {
+    pub(crate) inner: Arc<dyn ILampoKeys>,
 
     funding_key: Option<SecretKey>,
     revocation_base_secret: Option<SecretKey>,
@@ -57,8 +213,8 @@ pub struct LampoKeysManager<T: ILampoKeys>{
     shachain_seed: Option<[u8; 32]>,
 }
 
-impl<T: ILampoKeys> LampoKeysManager<T> {
-    pub fn new(inner: T) -> Self {
+impl LampoKeysManager {
+    pub fn new(inner: Arc<dyn ILampoKeys>) -> Self {
         Self {
             inner,
             funding_key: None,
@@ -93,13 +249,13 @@ impl<T: ILampoKeys> LampoKeysManager<T> {
     }
 }
 
-impl<T: ILampoKeys> EntropySource for LampoKeysManager<T> {
+impl EntropySource for LampoKeysManager {
     fn get_secure_random_bytes(&self) -> [u8; 32] {
         self.inner.get_secure_random_bytes()
     }
 }
 
-impl<T: ILampoKeys> NodeSigner for LampoKeysManager<T> {
+impl NodeSigner for LampoKeysManager {
     fn ecdh(
         &self,
         recipient: lightning::sign::Recipient,
@@ -151,7 +307,7 @@ impl<T: ILampoKeys> NodeSigner for LampoKeysManager<T> {
     }
 }
 
-impl<T: ILampoKeys> OutputSpender for LampoKeysManager<T> {
+impl OutputSpender for LampoKeysManager {
     fn spend_spendable_outputs<C: bitcoin::secp256k1::Signing>(
         &self,
         descriptors: &[&lightning::sign::SpendableOutputDescriptor],
@@ -172,9 +328,9 @@ impl<T: ILampoKeys> OutputSpender for LampoKeysManager<T> {
     }
 }
 
-impl<T: ILampoKeys> SignerProvider for LampoKeysManager<T> {
+impl SignerProvider for LampoKeysManager {
     // FIXME: this should be the same of the inner
-    type EcdsaSigner = T::EcdsaSigner;
+    type EcdsaSigner = <dyn ILampoKeys>::EcdsaSigner;
 
     fn derive_channel_signer(
         &self,
@@ -200,7 +356,8 @@ impl<T: ILampoKeys> SignerProvider for LampoKeysManager<T> {
         //         self.shachain_seed.unwrap(),
         //     );
         // }
-        self.inner.derive_channel_signer(channel_value_satoshis, channel_keys_id)
+        self.inner
+            .derive_channel_signer(channel_value_satoshis, channel_keys_id)
     }
 
     fn generate_channel_keys_id(
@@ -228,4 +385,3 @@ impl<T: ILampoKeys> SignerProvider for LampoKeysManager<T> {
         self.inner.read_chan_signer(reader)
     }
 }
-

@@ -20,7 +20,7 @@ pub trait WalletManager<T: ILampoKeys>: Send + Sync {
         Self: Sized;
 
     /// Return the keys for ldk.
-    fn ldk_keys(&self) -> Arc<LampoKeys<T>>;
+    fn ldk_keys(&self) -> Arc<LampoKeys>;
 
     /// return an on chain address
     fn get_onchain_address(&self) -> error::Result<NewAddress>;

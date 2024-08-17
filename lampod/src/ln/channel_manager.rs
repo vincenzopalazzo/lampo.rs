@@ -58,8 +58,13 @@ pub type LampoArcChannelManager<M, T, F, L, K: ILampoKeys> = ChannelManager<
     Arc<L>,
 >;
 
-type LampoChannel<K: ILampoKeys, S: WriteableEcdsaChannelSigner> =
-    LampoArcChannelManager<LampoChainMonitor<S>, LampoChainManager, LampoChainManager, LampoLogger, K>;
+type LampoChannel<K: ILampoKeys, S: WriteableEcdsaChannelSigner> = LampoArcChannelManager<
+    LampoChainMonitor<S>,
+    LampoChainManager,
+    LampoChainManager,
+    LampoLogger,
+    K,
+>;
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
 pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;

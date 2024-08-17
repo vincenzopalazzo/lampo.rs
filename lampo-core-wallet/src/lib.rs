@@ -40,7 +40,7 @@ impl<T: ILampoKeys> CoreWalletManager<T> {
     fn build_wallet(
         conf: Arc<LampoConf>,
         mnemonic_words: &str,
-        inner: T
+        inner: T,
     ) -> error::Result<(bdk::Wallet, LampoKeys<T>)> {
         // Parse a mnemonic
         let mnemonic = Mnemonic::parse(mnemonic_words).map_err(|err| error::anyhow!("{err}"))?;
@@ -74,7 +74,7 @@ impl<T: ILampoKeys> CoreWalletManager<T> {
         xprv: lampo_common::bitcoin::PrivateKey,
         channel_keys: Option<String>,
         _conf: Arc<LampoConf>,
-        inner: T
+        inner: T,
     ) -> error::Result<(bdk::Wallet, LampoKeys<T>)> {
         use bdk::bitcoin::bip32::Xpriv;
 
@@ -316,7 +316,8 @@ impl<T: ILampoKeys> WalletManager<T> for CoreWalletManager<T> {
     where
         Self: Sized,
     {
-        let (wallet, keymanager) = CoreWalletManager::build_wallet(conf.clone(), mnemonic_words, inner)?;
+        let (wallet, keymanager) =
+            CoreWalletManager::build_wallet(conf.clone(), mnemonic_words, inner)?;
 
         let rpc = Client::new(
             conf.core_url

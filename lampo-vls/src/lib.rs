@@ -4,17 +4,16 @@ pub mod signer;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use triggered::{trigger, Listener};
+use url::Url;
 use vls_proxy::portfront::SignerPortFront;
 use vls_proxy::vls_frontend::frontend::SourceFactory;
 use vls_proxy::vls_frontend::Frontend;
 use vls_proxy::vls_protocol_client::{KeysManagerClient, SignerClient};
-use triggered::{trigger, Listener};
-use url::Url;
 
 use lampo_common::bitcoin::Network;
 use lampo_common::conf::LampoConf;
 // use lampo_common::keys::KeysManagerFactory;
-
 
 // pub struct VLSKeysManagerFactory;
 
@@ -58,10 +57,14 @@ impl SignerType {
         match self {
             SignerType::InProcess => {
                 // This will create a handler that will manage the VLS protocol operations
-                let protocol_handler = Arc::new(protocol_handler::InProcessProtocolHandler::new(config.network, &config.seed));
+                let protocol_handler = Arc::new(protocol_handler::InProcessProtocolHandler::new(
+                    config.network,
+                    &config.seed,
+                ));
                 let signer_port = Arc::new(signer::VLSSignerPort::new(protocol_handler.clone()));
                 // This factory manages data sources but doesn't actually do anything (dummy).
-                let source_factory = Arc::new(SourceFactory::new(config.lampo_data_dir, config.network));
+                let source_factory =
+                    Arc::new(SourceFactory::new(config.lampo_data_dir, config.network));
                 // The SignerPortFront provide a client RPC interface to the core MultiSigner and Node objects via a communications link.
                 let signer_port_front = Arc::new(SignerPortFront::new(signer_port, config.network));
                 // The frontend acts like a proxy to handle communication between the Signer and the Node
@@ -77,7 +80,7 @@ impl SignerType {
                 // signer, thus we need a client to facilitate that
                 KeysManagerClient::new(protocol_handler, config.network.to_string())
             }
-            SignerType::GrpcRemote => unimplemented!()
+            SignerType::GrpcRemote => unimplemented!(),
         }
     }
 }

@@ -17,7 +17,7 @@ use lampo_common::bitcoin::Network;
 /// The `LampoVLSInProcess` represents a VLS client with a Null Transport.
 /// Designed to run VLS in-process, but still performs the VLS protocol, No Persistence.
 pub struct InProcessProtocolHandler {
-    pub handler: RootHandler
+    pub handler: RootHandler,
 }
 
 /// Describe method to handle messages using the VLS protocol for Singer and Channel API.
