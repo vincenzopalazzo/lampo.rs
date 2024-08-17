@@ -13,7 +13,7 @@ use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
-use lampo_common::keys::LampoKeysManager;
+use lampo_common::keys::{ILampoKeys, LampoKeysManager};
 use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
 use lampo_common::ldk::chain::{BestBlock, Confirm, Filter, Watch};
@@ -21,12 +21,12 @@ use lampo_common::ldk::ln::channelmanager::{
     ChainParameters, ChannelManager, ChannelManagerReadArgs,
 };
 use lampo_common::ldk::persister::fs_store::FilesystemStore;
-use lampo_common::ldk::routing::gossip::{NetworkGraph, ReadOnlyNetworkGraph};
+use lampo_common::ldk::routing::gossip::NetworkGraph;
 use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
-use lampo_common::ldk::sign::InMemorySigner;
+use lampo_common::ldk::sign::ecdsa::WriteableEcdsaChannelSigner;
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
@@ -38,8 +38,8 @@ use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
-pub type LampoChainMonitor = ChainMonitor<
-    InMemorySigner,
+pub type LampoChainMonitor<S: WriteableEcdsaChannelSigner> = ChainMonitor<
+    S,
     Arc<dyn Filter + Send + Sync>,
     Arc<LampoChainManager>,
     Arc<LampoChainManager>,
@@ -47,43 +47,43 @@ pub type LampoChainMonitor = ChainMonitor<
     Arc<FilesystemStore>,
 >;
 
-pub type LampoArcChannelManager<M, T, F, L> = ChannelManager<
+pub type LampoArcChannelManager<M, T, F, L, K: ILampoKeys> = ChannelManager<
     Arc<M>,
     Arc<T>,
-    Arc<LampoKeysManager>,
-    Arc<LampoKeysManager>,
-    Arc<LampoKeysManager>,
+    Arc<LampoKeysManager<K>>,
+    Arc<LampoKeysManager<K>>,
+    Arc<LampoKeysManager<K>>,
     Arc<F>,
-    Arc<LampoRouter>,
+    Arc<LampoRouter<K>>,
     Arc<L>,
 >;
 
-type LampoChannel =
-    LampoArcChannelManager<LampoChainMonitor, LampoChainManager, LampoChainManager, LampoLogger>;
+type LampoChannel<K: ILampoKeys, S: WriteableEcdsaChannelSigner> =
+    LampoArcChannelManager<LampoChainMonitor<S>, LampoChainManager, LampoChainManager, LampoLogger, K>;
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
 pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
-pub type LampoRouter = DefaultRouter<
+pub type LampoRouter<K: ILampoKeys> = DefaultRouter<
     Arc<LampoGraph>,
     Arc<LampoLogger>,
-    Arc<LampoKeysManager>,
+    Arc<LampoKeysManager<K>>,
     Arc<Mutex<LampoScorer>>,
     ProbabilisticScoringFeeParameters,
     LampoScorer,
 >;
 
-pub struct LampoChannelManager {
-    monitor: Option<Arc<LampoChainMonitor>>,
-    wallet_manager: Arc<dyn WalletManager>,
+pub struct LampoChannelManager<K: ILampoKeys, S: WriteableEcdsaChannelSigner> {
+    monitor: Option<Arc<LampoChainMonitor<S>>>,
+    wallet_manager: Arc<dyn WalletManager<K>>,
     persister: Arc<LampoPersistence>,
     graph: Option<Arc<LampoGraph>>,
     score: Option<Arc<Mutex<LampoScorer>>>,
     handler: RefCell<Option<Arc<LampoHandler>>>,
-    router: Option<Arc<LampoRouter>>,
+    router: Option<Arc<LampoRouter<K>>>,
 
     pub(crate) onchain: Arc<LampoChainManager>,
     pub(crate) conf: LampoConf,
-    pub(crate) channeld: Option<Arc<LampoChannel>>,
+    pub(crate) channeld: Option<Arc<LampoChannel<K, S>>>,
     pub(crate) logger: Arc<LampoLogger>,
 }
 
@@ -92,15 +92,15 @@ pub struct LampoChannelManager {
 //
 // Due the constructor is called only one time as the sethandler
 // it is safe use the ref cell across thread.
-unsafe impl Send for LampoChannelManager {}
-unsafe impl Sync for LampoChannelManager {}
+unsafe impl<K: ILampoKeys, S: WriteableEcdsaChannelSigner> Send for LampoChannelManager<K, S> {}
+unsafe impl<K: ILampoKeys, S: WriteableEcdsaChannelSigner> Sync for LampoChannelManager<K, S> {}
 
-impl LampoChannelManager {
+impl<K: ILampoKeys, S: WriteableEcdsaChannelSigner> LampoChannelManager<K, S> {
     pub fn new(
         conf: &LampoConf,
         logger: Arc<LampoLogger>,
         onchain: Arc<LampoChainManager>,
-        wallet_manager: Arc<dyn WalletManager>,
+        wallet_manager: Arc<dyn WalletManager<K>>,
         persister: Arc<LampoPersistence>,
     ) -> Self {
         LampoChannelManager {
@@ -174,7 +174,7 @@ impl LampoChannelManager {
         })
     }
 
-    fn build_channel_monitor(&self) -> LampoChainMonitor {
+    fn build_channel_monitor(&self) -> LampoChainMonitor<S> {
         ChainMonitor::new(
             Some(self.onchain.clone()),
             self.onchain.clone(),
@@ -184,11 +184,11 @@ impl LampoChannelManager {
         )
     }
 
-    pub fn chain_monitor(&self) -> Arc<LampoChainMonitor> {
+    pub fn chain_monitor(&self) -> Arc<LampoChainMonitor<S>> {
         self.monitor.clone().unwrap()
     }
 
-    pub fn manager(&self) -> Arc<LampoChannel> {
+    pub fn manager(&self) -> Arc<LampoChannel<K, S>> {
         self.channeld.clone().unwrap()
     }
 
@@ -232,7 +232,7 @@ impl LampoChannelManager {
         Ok(())
     }
 
-    pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
+    pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<S>>> {
         let keys = self.wallet_manager.ldk_keys().inner();
         let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
         let mut channel_monitors = Vec::new();
@@ -256,7 +256,7 @@ impl LampoChannelManager {
         DefaultRouter<
             Arc<LampoGraph>,
             Arc<LampoLogger>,
-            Arc<LampoKeysManager>,
+            Arc<LampoKeysManager<K>>,
             Arc<Mutex<LampoScorer>>,
             ProbabilisticScoringFeeParameters,
             LampoScorer,
@@ -336,7 +336,7 @@ impl LampoChannelManager {
         );
         let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
         let (_, channel_manager) =
-            <(BlockHash, LampoChannel)>::read(&mut channel_manager_file, read_args)
+            <(BlockHash, LampoChannel<K, S>)>::read(&mut channel_manager_file, read_args)
                 .map_err(|err| error::anyhow!("{err}"))?;
         self.channeld = Some(channel_manager.into());
         Ok(())
@@ -405,7 +405,7 @@ impl LampoChannelManager {
     }
 }
 
-impl ChannelEvents for LampoChannelManager {
+impl<K: ILampoKeys, S: WriteableEcdsaChannelSigner> ChannelEvents for LampoChannelManager<K, S> {
     fn open_channel(
         &self,
         open_channel: request::OpenChannel,

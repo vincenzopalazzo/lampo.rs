@@ -19,7 +19,7 @@ use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::keys::LampoKeysManager;
+use lampo_common::keys::{ILampoKeys, LampoKeysManager};
 use lampo_common::ldk;
 use lampo_common::ldk::ln::channelmanager::Retry;
 use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
@@ -27,25 +27,24 @@ use lampo_common::ldk::ln::{PaymentHash, PaymentPreimage};
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
-use lampo_common::ldk::sign::EntropySource;
 
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
 use crate::utils::logger::LampoLogger;
 
-pub struct OffchainManager {
-    channel_manager: Arc<LampoChannelManager>,
-    keys_manager: Arc<LampoKeysManager>,
+pub struct OffchainManager<K: ILampoKeys> {
+    channel_manager: Arc<LampoChannelManager<K>>,
+    keys_manager: Arc<LampoKeysManager<K>>,
     logger: Arc<LampoLogger>,
     lampo_conf: Arc<LampoConf>,
     chain_manager: Arc<LampoChainManager>,
 }
 
-impl OffchainManager {
+impl<K: ILampoKeys> OffchainManager<K> {
     // FIXME: use the build pattern here
     pub fn new(
-        keys_manager: Arc<LampoKeysManager>,
-        channel_manager: Arc<LampoChannelManager>,
+        keys_manager: Arc<LampoKeysManager<K>>,
+        channel_manager: Arc<LampoChannelManager<K>>,
         logger: Arc<LampoLogger>,
         lampo_conf: Arc<LampoConf>,
         chain_manager: Arc<LampoChainManager>,
