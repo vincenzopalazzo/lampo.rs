@@ -21,16 +21,16 @@ use lampo_common::ldk::ln::channelmanager::{
     ChainParameters, ChannelManager, ChannelManagerReadArgs,
 };
 use lampo_common::ldk::persister::fs_store::FilesystemStore;
-use lampo_common::ldk::routing::gossip::{NetworkGraph, ReadOnlyNetworkGraph};
+use lampo_common::ldk::routing::gossip::NetworkGraph;
 use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
-use lampo_common::ldk::sign::InMemorySigner;
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel, Channels};
+use lampo_common::vls::vls_proxy::vls_protocol_client::SignerClient;
 
 use crate::actions::handler::LampoHandler;
 use crate::chain::{LampoChainManager, WalletManager};
@@ -39,7 +39,7 @@ use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
 pub type LampoChainMonitor = ChainMonitor<
-    InMemorySigner,
+    SignerClient,
     Arc<dyn Filter + Send + Sync>,
     Arc<LampoChainManager>,
     Arc<LampoChainManager>,
@@ -232,7 +232,7 @@ impl LampoChannelManager {
         Ok(())
     }
 
-    pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
+    pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<SignerClient>>> {
         let keys = self.wallet_manager.ldk_keys().inner();
         let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
         let mut channel_monitors = Vec::new();

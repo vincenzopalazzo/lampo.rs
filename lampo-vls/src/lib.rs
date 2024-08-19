@@ -26,6 +26,8 @@ impl KeysManagerFactory for VLSKeysManagerFactory {
     }
 }
 
+
+
 struct SignerConfig {
     network: Network,
     lampo_data_dir: String,
@@ -37,6 +39,7 @@ struct SignerConfig {
 impl SignerConfig {
     pub fn new(conf: Arc<LampoConf>, seed: [u8; 32]) -> Self {
         let (_, listener) = trigger();
+        println!("FORMATING: {}", conf.core_url.as_ref().unwrap());
         SignerConfig {
             network: conf.network,
             lampo_data_dir: conf.root_path.clone(),

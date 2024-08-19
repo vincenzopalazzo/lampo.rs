@@ -1,7 +1,8 @@
 use std::{sync::Arc, time::SystemTime};
 
-use bitcoin::secp256k1::{Secp256k1, SecretKey};
-use lightning::sign::{InMemorySigner, NodeSigner, OutputSpender, SignerProvider};
+use bitcoin::secp256k1::SecretKey;
+use lightning::sign::{NodeSigner, OutputSpender, SignerProvider};
+use vls_proxy::vls_protocol_client::{KeysManagerClient, SignerClient};
 
 use crate::{conf::LampoConf, ldk::sign::{EntropySource, KeysManager}};
 
@@ -30,22 +31,19 @@ impl KeysManagerFactory for LDKKeysManagerFactory {
 }
 
 impl LampoKeys {
-    pub fn new(seed: [u8; 32], conf: Arc<LampoConf>) -> Self {
+    pub fn new(_seed: [u8; 32], _conf: Arc<LampoConf>, keys_manager: KeysManagerClient) -> Self {
         LampoKeys {
-            keys_manager: Arc::new(LampoKeysManager::new(
-                &seed,
-                conf
-            )),
+            keys_manager: Arc::new(LampoKeysManager::new(keys_manager)),
         }
     }
 
     #[cfg(debug_assertions)]
-    pub fn with_channel_keys(seed: [u8; 32], channels_keys: String, conf: Arc<LampoConf>) -> Self {
+    pub fn with_channel_keys(_seed: [u8; 32], channels_keys: String, _conf: Arc<LampoConf>, keys_manager: KeysManagerClient) -> Self {
 
         let keys = channels_keys.split('/').collect::<Vec<_>>();
 
         let mut manager =
-            LampoKeysManager::new(&seed, conf);
+            LampoKeysManager::new(keys_manager);
         manager.set_channels_keys(
             keys[1].to_string(),
             keys[2].to_string(),
@@ -65,7 +63,7 @@ impl LampoKeys {
 }
 
 pub struct LampoKeysManager {
-    pub(crate) inner: KeysManager,
+    pub(crate) inner: KeysManagerClient,
 
     funding_key: Option<SecretKey>,
     revocation_base_secret: Option<SecretKey>,
@@ -76,10 +74,9 @@ pub struct LampoKeysManager {
 }
 
 impl LampoKeysManager {
-    pub fn new(seed: &[u8; 32], conf: Arc<LampoConf>) -> Self {
-        let inner = LDKKeysManagerFactory.create_keys_manager(conf, seed);
+    pub fn new(keys_manager: KeysManagerClient) -> Self {
         Self {
-            inner,
+            inner: keys_manager,
             funding_key: None,
             revocation_base_secret: None,
             payment_base_secret: None,
@@ -193,32 +190,32 @@ impl OutputSpender for LampoKeysManager {
 
 impl SignerProvider for LampoKeysManager {
     // FIXME: this should be the same of the inner
-    type EcdsaSigner = InMemorySigner;
+    type EcdsaSigner = SignerClient;
 
     fn derive_channel_signer(
         &self,
         channel_value_satoshis: u64,
         channel_keys_id: [u8; 32],
     ) -> Self::EcdsaSigner {
-        if self.funding_key.is_some() {
-            // FIXME(vincenzopalazzo): make this a general
-            let commitment_seed = [
-                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-            ];
-            return InMemorySigner::new(
-                &Secp256k1::new(),
-                self.funding_key.unwrap(),
-                self.revocation_base_secret.unwrap(),
-                self.payment_base_secret.unwrap(),
-                self.delayed_payment_base_secret.unwrap(),
-                self.htlc_base_secret.unwrap(),
-                commitment_seed,
-                channel_value_satoshis,
-                channel_keys_id,
-                self.shachain_seed.unwrap(),
-            );
-        }
+        // if self.funding_key.is_some() {
+        //     // FIXME(vincenzopalazzo): make this a general
+        //     let commitment_seed = [
+        //         255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        //         255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        //     ];
+        //     return InMemorySigner::new(
+        //         &Secp256k1::new(),
+        //         self.funding_key.unwrap(),
+        //         self.revocation_base_secret.unwrap(),
+        //         self.payment_base_secret.unwrap(),
+        //         self.delayed_payment_base_secret.unwrap(),
+        //         self.htlc_base_secret.unwrap(),
+        //         commitment_seed,
+        //         channel_value_satoshis,
+        //         channel_keys_id,
+        //         self.shachain_seed.unwrap(),
+        //     );
+        // }
         self.inner
             .derive_channel_signer(channel_value_satoshis, channel_keys_id)
     }

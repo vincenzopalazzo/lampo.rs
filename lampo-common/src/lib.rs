@@ -17,6 +17,10 @@ pub mod ldk {
     pub use lightning_persister as persister;
 }
 
+pub mod vls {
+    pub use vls_proxy;
+}
+
 pub mod error {
     pub use anyhow::*;
 }
