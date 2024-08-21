@@ -611,8 +611,26 @@ pub fn test_pay_a_jit_invoice() -> error::Result<()> {
         Some(socket_addr.to_string()),
     )?);
 
-    // Paying the jit invoice
+    // This is a payee
     let node3 = Arc::new(LampoTesting::new(btc.clone())?);
+
+    // Connecting server and client
+    let response: response::Connect = node2
+        .lampod()
+        .call(
+            "connect",
+            request::Connect {
+                node_id: node1.info.node_id.clone(),
+                addr: "127.0.0.1".to_owned(),
+                port: node1.port,
+            },
+        )
+        .unwrap();
+
+    // The Provider needs to pay this invoice
+    let result = node2
+        .liquidity()
+        .create_jit_invoice(1000000, "A new desc".to_string())?;
 
     // Connecting server and payee
     let response: response::Connect = node1
@@ -623,18 +641,6 @@ pub fn test_pay_a_jit_invoice() -> error::Result<()> {
                 node_id: node3.info.node_id.clone(),
                 addr: "127.0.0.1".to_owned(),
                 port: node3.port,
-            },
-        )
-        .unwrap();
-
-    let response: response::Connect = node2
-        .lampod()
-        .call(
-            "connect",
-            request::Connect {
-                node_id: node1.info.node_id.clone(),
-                addr: "127.0.0.1".to_owned(),
-                port: node1.port,
             },
         )
         .unwrap();
@@ -671,27 +677,23 @@ pub fn test_pay_a_jit_invoice() -> error::Result<()> {
         Err(())
     });
 
-    // The Provider needs to pay this invoice
-    let result = node2
-        .liquidity()
-        .create_jit_invoice(10000, "A new desc".to_string())?;
-
     log::info!("This is the invoice: {}", result.clone().to_string());
 
-    // Funding channel
+    // Funding channel between payee and server
     let response: json::Value = node3
         .lampod()
         .call(
             "fundchannel",
             request::OpenChannel {
                 node_id: node1.info.node_id.clone(),
-                amount: 100000,
+                amount: 10000000,
                 public: true,
                 port: Some(node1.port.clone()),
                 addr: Some("127.0.0.1".to_string()),
             },
         )
         .unwrap();
+
     let events3 = node3.lampod().events();
     wait!(|| {
         while let Ok(event) = events3.recv_timeout(Duration::from_millis(10)) {
@@ -714,13 +716,6 @@ pub fn test_pay_a_jit_invoice() -> error::Result<()> {
             }
 
             if !channels.channels.first().unwrap().ready {
-                return Err(());
-            }
-
-            let channels: response::Channels =
-                node1.lampod().call("channels", json::json!({})).unwrap();
-
-            if channels.channels.is_empty() {
                 return Err(());
             }
 

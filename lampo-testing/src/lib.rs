@@ -96,6 +96,7 @@ impl LampoTesting {
             .ldk_conf
             .channel_handshake_limits
             .force_announced_channel_preference = false;
+        lampo_conf.ldk_conf.channel_config.accept_underpaying_htlcs = true;
         let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
         let wallet = Arc::new(wallet);
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
@@ -177,8 +178,11 @@ impl LampoTesting {
             lampo_conf.configure_as_liquidity_consumer();
             lampo_conf.lsp_node_id = lsp_node_id;
             lampo_conf.lsp_socket_addr = lsp_socket_addr;
+            lampo_conf.ldk_conf.manually_accept_inbound_channels = true;
+            lampo_conf.ldk_conf.channel_config.accept_underpaying_htlcs = true;
         } else {
             lampo_conf.configure_as_liquidity_provider();
+            lampo_conf.ldk_conf.channel_config.accept_underpaying_htlcs = true;
         }
         lampo_conf.core_pass = Some(btc.pass.clone());
         lampo_conf.core_url = Some(core_url);
@@ -187,6 +191,9 @@ impl LampoTesting {
             .ldk_conf
             .channel_handshake_limits
             .force_announced_channel_preference = false;
+        // This option is used when we want to configure the 0 conf channel for the LSP.
+        // OpenChannelRequest is received in the handler if this is set to true then we
+        // manually accept the channel having 0 confirmations of ChannelPending state.
         let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
         let wallet = Arc::new(wallet);
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());

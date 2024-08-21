@@ -6,9 +6,9 @@ pub mod onchain;
 use std::sync::{Arc, Mutex};
 
 use crate::chan;
+use crate::event::liquidity::LiquidityEvent;
 use crate::event::ln::LightningEvent;
 use crate::event::onchain::OnChainEvent;
-use liquidity::LiquidityEvent;
 
 /// Publishes events to subscribers.
 #[derive(Clone)]

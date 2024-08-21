@@ -7,12 +7,14 @@ use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::chrono::DateTime;
 use lampo_common::chrono::Utc;
 use lampo_common::conf::LampoConf;
+use lampo_common::conf::Liquidity;
 use lampo_common::error;
 use lampo_common::error::Ok;
 use lampo_common::event::liquidity::LiquidityEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::keys::LampoKeysManager;
+use lampo_common::ldk::events::HTLCDestination;
 use lampo_common::ldk::invoice::Bolt11Invoice;
 use lampo_common::ldk::invoice::InvoiceBuilder;
 use lampo_common::ldk::invoice::RouteHint;
@@ -106,6 +108,24 @@ impl LampoLiquidityManager {
         }
     }
 
+    pub fn htlc_handling_failed(
+        &self,
+        failed_next_destination: HTLCDestination,
+    ) -> error::Result<()> {
+        match self.lampo_conf.liquidity.clone().unwrap() {
+            Liquidity::Provider => {
+                self.liquidity_manager()
+                    .lsps2_service_handler()
+                    .unwrap()
+                    .htlc_handling_failed(failed_next_destination)
+                    .map_err(|e| error::anyhow!("Error : {:?}", e))?;
+            }
+            _ => return Ok(()),
+        }
+
+        Ok(())
+    }
+
     fn has_some_provider(&self) -> Option<LSPManager> {
         self.lsp_manager.clone()
     }
@@ -131,7 +151,15 @@ impl LampoLiquidityManager {
                 payment_hash,
             )
             .map_err(|e| error::anyhow!("Error : {:?}", e))?;
+        Ok(())
+    }
 
+    pub fn payment_forwarded(&self, next_channel_id: ChannelId) -> error::Result<()> {
+        self.liquidity_manager()
+            .lsps2_service_handler()
+            .unwrap()
+            .payment_forwarded(next_channel_id)
+            .map_err(|e| error::anyhow!("Error : {:?}", e))?;
         Ok(())
     }
 
@@ -141,11 +169,17 @@ impl LampoLiquidityManager {
         channel_id: &ChannelId,
         counterparty_node_id: &PublicKey,
     ) -> error::Result<()> {
-        self.lampo_liquidity
-            .lsps2_service_handler()
-            .unwrap()
-            .channel_ready(user_channel_id, channel_id, counterparty_node_id)
-            .map_err(|e| error::anyhow!("Error occured : {:?}", e))?;
+        // Here unwrap is failing
+        match self.lampo_conf.liquidity.clone().unwrap() {
+            Liquidity::Provider => {
+                self.lampo_liquidity
+                    .lsps2_service_handler()
+                    .unwrap()
+                    .channel_ready(user_channel_id, channel_id, counterparty_node_id)
+                    .map_err(|e| error::anyhow!("Error occured : {:?}", e))?;
+            }
+            _ => return Ok(()),
+        }
 
         Ok(())
     }
@@ -181,8 +215,6 @@ impl LampoLiquidityManager {
                         counterparty_node_id,
                         opening_fee_params_menu,
                     }));
-
-                log::info!("Emitted!");
 
                 Ok(())
             }
@@ -306,7 +338,6 @@ impl LampoLiquidityManager {
                 config.channel_config.forwarding_fee_base_msat = 0;
                 config.channel_config.forwarding_fee_proportional_millionths = 0;
 
-                // Some error here
                 let res = self
                     .channel_manager
                     .channeld()

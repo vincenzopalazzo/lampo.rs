@@ -1,9 +1,9 @@
 //! Handler module implementation that
-use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::sync::Arc;
 
 use lampo_common::chan;
+use lampo_common::conf::Liquidity;
 use lampo_common::error;
 use lampo_common::error::Ok;
 use lampo_common::event::liquidity::LiquidityEvent;
@@ -135,7 +135,25 @@ impl Handler for LampoHandler {
                 push_msat,
                 channel_type,
             } => {
-                Err(error::anyhow!("Request for open a channel received, unfortunatly we do not support this feature yet."))
+                log::info!("Recieved open channel request!");
+                let liquidity_manager = self.liquidity_manager.clone();
+                if let Some(_) = liquidity_manager {
+                    // Accept the 0conf channel when we are the client for the LSP else just ignore
+                    match self.channel_manager.conf.liquidity.clone().unwrap() {
+                        Liquidity::Consumer => {
+                            let _ = self
+                                .channel_manager
+                                .channeld()
+                                .accept_inbound_channel_from_trusted_peer_0conf(
+                                    &temporary_channel_id,
+                                    &counterparty_node_id,
+                                    0,
+                                );
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(())
             }
             ldk::events::Event::ChannelReady {
                 channel_id,
@@ -144,8 +162,12 @@ impl Handler for LampoHandler {
                 channel_type,
             } => {
                 let liquidity_manager = self.liquidity_manager.clone();
-                if let Some(ref liq_manager) = liquidity_manager {
-                    let _ = liquidity_manager.unwrap().channel_ready(user_channel_id, &channel_id, &counterparty_node_id);
+                if let Some(liq_manager) = liquidity_manager.as_ref() {
+                    let _ = liquidity_manager.unwrap().channel_ready(
+                        user_channel_id,
+                        &channel_id,
+                        &counterparty_node_id,
+                    );
                 }
                 log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
                 self.emit(Event::Lightning(LightningEvent::ChannelReady {
@@ -154,7 +176,7 @@ impl Handler for LampoHandler {
                     channel_type,
                 }));
                 Ok(())
-            },
+            }
             ldk::events::Event::ChannelClosed {
                 channel_id,
                 user_channel_id,
@@ -168,7 +190,12 @@ impl Handler for LampoHandler {
                 }
                 let node_id = counterparty_node_id.map(|id| id.to_string());
                 let txo = channel_funding_txo.map(|txo| txo.to_string());
-                self.emit(Event::Lightning(LightningEvent::CloseChannelEvent { channel_id: channel_id.to_string(), message: reason.to_string(), counterparty_node_id : node_id, funding_utxo : txo}));
+                self.emit(Event::Lightning(LightningEvent::CloseChannelEvent {
+                    channel_id: channel_id.to_string(),
+                    message: reason.to_string(),
+                    counterparty_node_id: node_id,
+                    funding_utxo: txo,
+                }));
                 log::info!("channel `{user_channel_id}` closed with reason: `{reason}`");
                 Ok(())
             }
@@ -187,11 +214,18 @@ impl Handler for LampoHandler {
 
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
                 // FIXME: estimate the fee rate with a callback
-                let fee = self.chain_manager.backend.fee_rate_estimation(6).map_err(|err| {
-                    let msg = format!("Channel Opening Error: {err}");
-                    self.emit(Event::Lightning(LightningEvent::ChannelEvent { state: ChannelState::OpeningError, message : msg}));
-                    err
-                })?;
+                let fee = self
+                    .chain_manager
+                    .backend
+                    .fee_rate_estimation(6)
+                    .map_err(|err| {
+                        let msg = format!("Channel Opening Error: {err}");
+                        self.emit(Event::Lightning(LightningEvent::ChannelEvent {
+                            state: ChannelState::OpeningError,
+                            message: msg,
+                        }));
+                        err
+                    })?;
                 log::info!("fee estimated {:?} sats", fee);
                 let transaction = self.wallet_manager.create_transaction(
                     output_script,
@@ -228,7 +262,10 @@ impl Handler for LampoHandler {
                     "channel pending with node `{}` with funding `{funding_txo}`",
                     counterparty_node_id.to_string()
                 );
-                self.emit(Event::Lightning(LightningEvent::ChannelPending { counterparty_node_id, funding_transaction: funding_txo }));
+                self.emit(Event::Lightning(LightningEvent::ChannelPending {
+                    counterparty_node_id,
+                    funding_transaction: funding_txo,
+                }));
                 Ok(())
             }
             ldk::events::Event::PendingHTLCsForwardable { time_forwardable } => {
@@ -249,11 +286,15 @@ impl Handler for LampoHandler {
                 claim_deadline,
             } => {
                 let preimage = match purpose {
-                    ldk::events::PaymentPurpose::Bolt11InvoicePayment  {
+                    ldk::events::PaymentPurpose::Bolt11InvoicePayment {
                         payment_preimage, ..
                     } => payment_preimage,
-                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, .. } => payment_preimage,
-                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => payment_preimage,
+                    ldk::events::PaymentPurpose::Bolt12OfferPayment {
+                        payment_preimage, ..
+                    } => payment_preimage,
+                    ldk::events::PaymentPurpose::Bolt12RefundPayment {
+                        payment_preimage, ..
+                    } => payment_preimage,
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
                 };
                 self.channel_manager
@@ -274,9 +315,19 @@ impl Handler for LampoHandler {
                         payment_secret,
                         ..
                     } => (payment_preimage, Some(payment_secret)),
-                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
-                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
-                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
+                    ldk::events::PaymentPurpose::Bolt12OfferPayment {
+                        payment_preimage,
+                        payment_secret,
+                        ..
+                    } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::Bolt12RefundPayment {
+                        payment_preimage,
+                        payment_secret,
+                        ..
+                    } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => {
+                        (Some(preimage), None)
+                    }
                 };
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristent these information
@@ -285,37 +336,100 @@ impl Handler for LampoHandler {
             ldk::events::Event::PaymentSent { .. } => {
                 log::info!("payment sent: `{:?}`", event);
                 Ok(())
-            },
-            ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
-                let path = path.hops.iter().map(|hop| PaymentHop::from(hop.clone())).collect::<Vec<PaymentHop>>();
-                let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path };
+            }
+            ldk::events::Event::PaymentPathSuccessful {
+                payment_hash, path, ..
+            } => {
+                let path = path
+                    .hops
+                    .iter()
+                    .map(|hop| PaymentHop::from(hop.clone()))
+                    .collect::<Vec<PaymentHop>>();
+                let hop = LightningEvent::PaymentEvent {
+                    state: PaymentState::Success,
+                    payment_hash: payment_hash.map(|hash| hash.to_string()),
+                    path,
+                };
                 self.emit(Event::Lightning(hop));
                 Ok(())
-            },
-            ldk::events::Event::HTLCIntercepted { intercept_id, requested_next_hop_scid, payment_hash, inbound_amount_msat, expected_outbound_amount_msat } => {
+            }
+            ldk::events::Event::HTLCIntercepted {
+                intercept_id,
+                requested_next_hop_scid,
+                payment_hash,
+                inbound_amount_msat,
+                expected_outbound_amount_msat,
+            } => {
                 log::info!("Intecepted an HTLC");
                 let liquidity_manager = self.liquidity_manager.clone();
-                if let Some(ref liq_manager) = liquidity_manager {
-                    let _ = liquidity_manager.unwrap().htlc_intercepted(requested_next_hop_scid, intercept_id, inbound_amount_msat, payment_hash);
+                if let Some(liq_manager) = liquidity_manager.as_ref() {
+                    let _ = liquidity_manager.unwrap().htlc_intercepted(
+                        requested_next_hop_scid,
+                        intercept_id,
+                        expected_outbound_amount_msat,
+                        payment_hash,
+                    );
                 }
-                let event = LiquidityEvent::HTLCIntercepted { intercept_id, requested_next_hop_scid, payment_hash, inbound_amount_msat, expected_outbound_amount_msat };
+                let event = LiquidityEvent::HTLCIntercepted {
+                    intercept_id,
+                    requested_next_hop_scid,
+                    payment_hash,
+                    inbound_amount_msat,
+                    expected_outbound_amount_msat,
+                };
                 self.emit(Event::Liquidity(event));
                 log::info!("Successfully emitted the Intercepted event!");
                 Ok(())
-            },
-            ldk::events::Event::HTLCHandlingFailed { prev_channel_id, failed_next_destination } => {
+            }
+            ldk::events::Event::HTLCHandlingFailed {
+                prev_channel_id,
+                failed_next_destination,
+            } => {
                 log::info!("HTLC Handling failed");
-                let event = LiquidityEvent::HTLCHandlingFailed { prev_channel_id, failed_next_destination };
+                let liquidity_manager = self.liquidity_manager.clone();
+                if let Some(ref liq_manager) = liquidity_manager {
+                    let _ = liquidity_manager
+                        .unwrap()
+                        .htlc_handling_failed(failed_next_destination.clone());
+                }
+                let event = LiquidityEvent::HTLCHandlingFailed {
+                    prev_channel_id,
+                    failed_next_destination,
+                };
                 self.emit(Event::Liquidity(event));
                 Ok(())
             }
-            ldk::events::Event::PaymentForwarded { prev_channel_id, next_channel_id, prev_user_channel_id, next_user_channel_id, total_fee_earned_msat, skimmed_fee_msat, claim_from_onchain_tx, outbound_amount_forwarded_msat } => {
+            ldk::events::Event::PaymentForwarded {
+                prev_channel_id,
+                next_channel_id,
+                prev_user_channel_id,
+                next_user_channel_id,
+                total_fee_earned_msat,
+                skimmed_fee_msat,
+                claim_from_onchain_tx,
+                outbound_amount_forwarded_msat,
+            } => {
                 log::info!("Payment Forwarded");
-                let event = LiquidityEvent::PaymentForwarded { prev_channel_id, next_channel_id, prev_user_channel_id, next_user_channel_id, total_fee_earned_msat, skimmed_fee_msat, claim_from_onchain_tx, outbound_amount_forwarded_msat };
+                let liquidity_manager = self.liquidity_manager.clone();
+                if let Some(liq_manager) = liquidity_manager.as_ref() {
+                    log::info!("Inside payment forwarded!");
+                    let _ = liquidity_manager
+                        .unwrap()
+                        .payment_forwarded(next_channel_id.unwrap());
+                }
+                let event = LiquidityEvent::PaymentForwarded {
+                    prev_channel_id,
+                    next_channel_id,
+                    prev_user_channel_id,
+                    next_user_channel_id,
+                    total_fee_earned_msat,
+                    skimmed_fee_msat,
+                    claim_from_onchain_tx,
+                    outbound_amount_forwarded_msat,
+                };
                 self.emit(Event::Liquidity(event));
                 Ok(())
             }
-
             _ => Err(error::anyhow!("unexpected ldk event: {:?}", event)),
         }
     }

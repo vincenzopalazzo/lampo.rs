@@ -66,7 +66,6 @@ impl TryInto<LampoConf> for LampoCliArgs {
 
         let path = self.data_dir.unwrap_or(conf.root_path);
         // FIXME: this override the full configuration, we should merge the two
-        // FIXME: Make this configurable
         conf = LampoConf::new(Some(path), Some(conf.network), None)?;
         conf.prepare_dirs()?;
 

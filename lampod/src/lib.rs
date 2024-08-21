@@ -24,6 +24,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use lampo_common::conf::Liquidity;
 use lampo_common::ldk::ln::msgs::SocketAddress;
 use lampo_common::secp256k1::PublicKey;
 use lightning_liquidity::lsps2::client::LSPS2ClientConfig;
@@ -205,53 +206,54 @@ impl LampoDaemon {
         let liquidity;
         let liquidity_manager;
         if let Some(liq) = &self.conf.liquidity {
-            if liq == "Consumer" {
-                log::info!("Acting as LSP consumer");
-                liquidity = LampoLiquidity::new(
-                    self.offchain_manager().key_manager(),
-                    self.channel_manager().manager(),
-                    Some(self.onchain_manager()),
-                    None,
-                    None,
-                    // Do something here
-                    Some(LiquidityClientConfig {
-                        lsps2_client_config: Some(LSPS2ClientConfig {}),
-                    }),
-                );
+            match liq {
+                Liquidity::Consumer => {
+                    log::info!("Acting as LSP consumer");
+                    liquidity = LampoLiquidity::new(
+                        self.offchain_manager().key_manager(),
+                        self.channel_manager().manager(),
+                        Some(self.onchain_manager()),
+                        None,
+                        None,
+                        // Do something here
+                        Some(LiquidityClientConfig {
+                            lsps2_client_config: Some(LSPS2ClientConfig {}),
+                        }),
+                    );
 
-                liquidity_manager = Some(LampoLiquidityManager::new_lsp_as_client(
-                    Arc::new(liquidity),
-                    self.conf.clone(),
-                    self.channel_manager(),
-                    self.offchain_manager().key_manager(),
-                    PublicKey::from_str(&self.conf.lsp_node_id.clone().unwrap())
-                        .expect("Wrong node id"),
-                    SocketAddress::from_str(&self.conf.lsp_socket_addr.clone().unwrap())
-                        .expect("Failed to parse socket address"),
-                ));
-            } else if liq == "Provider" {
-                log::info!("Acting as a provider");
-                let promise_secret: [u8; 32] = [0; 32];
-                liquidity = LampoLiquidity::new(
-                    self.offchain_manager().key_manager(),
-                    self.channel_manager().manager(),
-                    Some(self.onchain_manager()),
-                    None,
-                    Some(LiquidityServiceConfig {
-                        lsps2_service_config: Some(LSPS2ServiceConfig { promise_secret }),
-                        advertise_service: true,
-                    }),
-                    None,
-                );
-                liquidity_manager = Some(LampoLiquidityManager::new_lsp(
-                    Arc::new(liquidity),
-                    self.conf.clone(),
-                    self.channel_manager(),
-                    self.offchain_manager().key_manager(),
-                ));
-            } else {
-                error::bail!("Wrong config provided");
-            }
+                    liquidity_manager = Some(LampoLiquidityManager::new_lsp_as_client(
+                        Arc::new(liquidity),
+                        self.conf.clone(),
+                        self.channel_manager(),
+                        self.offchain_manager().key_manager(),
+                        PublicKey::from_str(&self.conf.lsp_node_id.clone().unwrap())
+                            .expect("Wrong node id"),
+                        SocketAddress::from_str(&self.conf.lsp_socket_addr.clone().unwrap())
+                            .expect("Failed to parse socket address"),
+                    ));
+                }
+                Liquidity::Provider => {
+                    log::info!("Acting as a provider");
+                    let promise_secret: [u8; 32] = [0; 32];
+                    liquidity = LampoLiquidity::new(
+                        self.offchain_manager().key_manager(),
+                        self.channel_manager().manager(),
+                        Some(self.onchain_manager()),
+                        None,
+                        Some(LiquidityServiceConfig {
+                            lsps2_service_config: Some(LSPS2ServiceConfig { promise_secret }),
+                            advertise_service: true,
+                        }),
+                        None,
+                    );
+                    liquidity_manager = Some(LampoLiquidityManager::new_lsp(
+                        Arc::new(liquidity),
+                        self.conf.clone(),
+                        self.channel_manager(),
+                        self.offchain_manager().key_manager(),
+                    ));
+                }
+            };
         } else {
             liquidity_manager = None;
         }
