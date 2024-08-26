@@ -1,6 +1,11 @@
 use std::{sync::Arc, time::SystemTime};
 
 use bitcoin::secp256k1::SecretKey;
+use tokio::runtime::Runtime;
+use tokio::runtime::Handle;
+use tokio::task::JoinHandle;
+use tonic::transport::Error as TonicError;
+use triggered::{Listener, Trigger};
 use lightning::sign::{NodeSigner, OutputSpender, SignerProvider};
 use vls_proxy::vls_protocol_client::{KeysManagerClient, SignerClient};
 
@@ -14,21 +19,21 @@ pub struct LampoKeys {
 pub trait KeysManagerFactory {
     type GenericKeysManager: SignerProvider;
 
-    fn create_keys_manager(&self, conf: Arc<LampoConf>, seed: &[u8; 32]) -> Self::GenericKeysManager;
+    fn create_keys_manager(&self, conf: Arc<LampoConf>, seed: &[u8; 32], vls_port: Option<u16>, shutter: Option<Shutter>) -> GrpcKeysManager;
 } 
 
-pub struct LDKKeysManagerFactory;
+// pub struct LDKKeysManagerFactory;
 
-impl KeysManagerFactory for LDKKeysManagerFactory {
-    type GenericKeysManager = KeysManager;
+// impl KeysManagerFactory for LDKKeysManagerFactory {
+//     type GenericKeysManager = KeysManager;
 
-    fn create_keys_manager(&self, _ : Arc<LampoConf>, seed: &[u8; 32]) -> Self::GenericKeysManager {
-        let start_time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
-        KeysManager::new(seed, start_time.as_secs(), start_time.subsec_nanos())
-    }
-}
+//     fn create_keys_manager(&self, _ : Arc<LampoConf>, seed: &[u8; 32], _: Option<u16>, _: Option<Shutter>, ) -> Self::GenericKeysManager {
+//         let start_time = SystemTime::now()
+//             .duration_since(SystemTime::UNIX_EPOCH)
+//             .unwrap();
+//         KeysManager::new(seed, start_time.as_secs(), start_time.subsec_nanos())
+//     }
+// }
 
 impl LampoKeys {
     pub fn new(_seed: [u8; 32], _conf: Arc<LampoConf>, keys_manager: KeysManagerClient) -> Self {
@@ -243,5 +248,93 @@ impl SignerProvider for LampoKeysManager {
         reader: &[u8],
     ) -> Result<Self::EcdsaSigner, lightning::ln::msgs::DecodeError> {
         self.inner.read_chan_signer(reader)
+    }
+}
+
+
+
+#[derive(Clone)]
+pub struct Shutter {
+	pub trigger: Trigger,
+	pub signal: Listener,
+}
+
+impl Shutter {
+	pub fn new() -> Self {
+		let (trigger, signal) = triggered::trigger();
+		let ctrlc_trigger = trigger.clone();
+		ctrlc::set_handler(move || {
+			ctrlc_trigger.trigger();
+		})
+		.expect("Error setting Ctrl-C handler - do you have more than one?");
+
+		Self { trigger, signal }
+	}
+}
+
+
+pub struct GrpcKeysManager {
+    pub async_runtime: Arc<AsyncRuntime>,
+    pub keys_manager: KeysManagerClient,
+    pub _server_handle: JoinHandle<Result<(), TonicError>>
+}
+
+impl GrpcKeysManager {
+    pub fn new(async_runtime: Arc<AsyncRuntime>, keys_manager: KeysManagerClient, server_handle: JoinHandle<Result<(), tonic::transport::Error>>) -> Self {
+        GrpcKeysManager {
+            async_runtime,
+            keys_manager,
+            _server_handle: server_handle
+        }
+    }
+
+    pub fn keys_manager(&self) -> &KeysManagerClient {
+        &self.keys_manager
+    }
+
+    pub fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
+        self.async_runtime.block_on(future)
+    }
+
+    // pub fn get_runtime(&self) -> Runtime {
+    //     self.runtime
+    // }
+
+    // pub fn get_keys_manager(&self) -> KeysManagerClient {
+    //     self.keys_manager
+    // }
+}
+
+
+pub struct AsyncRuntime {
+    runtime: Arc<Runtime>,
+}
+
+impl AsyncRuntime {
+    pub fn new() -> Self {
+        let runtime = Arc::new(Runtime::new().expect("Failed to create Tokio runtime"));
+        Self { runtime }
+    }
+
+    pub fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
+        self.runtime.block_on(future)
+    }
+
+    pub fn spawn<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.runtime.spawn(future)
+    }
+
+    pub fn handle(&self) -> &Handle {
+        self.runtime.handle()
+    }
+}
+
+impl Clone for AsyncRuntime {
+    fn clone(&self) -> Self {
+        Self { runtime: self.runtime.clone() }
     }
 }

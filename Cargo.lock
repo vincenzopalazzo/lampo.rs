@@ -1569,6 +1569,7 @@ dependencies = [
  "clightningrpc-conf",
  "colored",
  "crossbeam-channel",
+ "ctrlc",
  "hex",
  "lightning 0.0.123",
  "lightning-background-processor",
@@ -1580,6 +1581,9 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "tokio",
+ "tonic",
+ "triggered",
  "vls-core",
  "vls-proxy",
 ]
@@ -1633,7 +1637,9 @@ name = "lampo-vls"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "ctrlc",
  "lampo-common",
+ "tokio",
  "triggered",
  "url",
  "vls-core",
