@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use vls_proxy::vls_protocol_client::{KeysManagerClient, SignerClient};
-
 use crate::conf::LampoConf;
 use crate::bitcoin::secp256k1::SecretKey;
 use crate::ldk::sign::{NodeSigner, OutputSpender, SignerProvider, EntropySource};
+use crate::vls::vls_proxy::vls_protocol_client::{KeysManagerClient, SignerClient};
 
 
 /// Lampo keys implementations

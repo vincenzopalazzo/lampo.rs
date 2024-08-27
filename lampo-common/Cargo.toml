@@ -24,10 +24,6 @@ serde_json = "1.0"
 serde = "1.0"
 hex = "0.4.3"
 
-[dependencies.vls-core]
-git = "https://gitlab.com/Vanshul/validating-lightning-signer/"
-branch = "macros/ldk-upgrade-123"
-
 [dependencies.vls-proxy]
 git = "https://gitlab.com/Vanshul/validating-lightning-signer/"
 branch = "macros/ldk-upgrade-123"

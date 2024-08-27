@@ -1580,7 +1580,6 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "vls-core",
  "vls-proxy",
 ]
 
