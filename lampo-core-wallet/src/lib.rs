@@ -14,9 +14,8 @@ use bdk::template::Bip84;
 use bdk::KeychainKind;
 use bitcoin_hashes::hex::HexIterator;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
-use lampo_common::keys::KeysManagerFactory;
-use lampo_common::keys::Shutter;
-use lampo_vls::VLSKeysManagerFactory;
+use lampo_vls::util::Shutter;
+use lampo_vls::VLSKeys;
 
 #[cfg(debug_assertions)]
 use crate::bitcoin::PrivateKey;
@@ -59,7 +58,7 @@ impl CoreWalletManager {
             .into_xprv(network)
             .ok_or(error::anyhow!("impossible cast the private key"))?;
 
-        let vls_grpc = VLSKeysManagerFactory.create_keys_manager(conf.clone(), &xprv.private_key.secret_bytes(), Option::from(6600), Option::from(Shutter::new()));
+        let vls_grpc = VLSKeys.create_keys_manager(conf.clone(), &xprv.private_key.secret_bytes(), Option::from(6600), Option::from(Shutter::new()));
         let keys_manger = vls_grpc.keys_manager;
         let ldk_keys = LampoKeys::new(xprv.private_key.secret_bytes(), conf, keys_manger);
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
@@ -79,9 +78,8 @@ impl CoreWalletManager {
         conf: Arc<LampoConf>,
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
         use bdk::bitcoin::bip32::Xpriv;
-        use lampo_common::keys::Shutter;
 
-        let vls_grpc = VLSKeysManagerFactory.create_keys_manager(conf.clone(), &xprv.inner.secret_bytes(), Option::from(20000), Option::from(Shutter::new()));
+        let vls_grpc = VLSKeys.create_keys_manager(conf.clone(), &xprv.inner.secret_bytes(), Option::from(20000), Option::from(Shutter::new()));
         let keys_manger = vls_grpc.keys_manager;
 
         let ldk_keys = if let Some(channel_keys) = channel_keys {

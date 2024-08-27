@@ -147,13 +147,13 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
     rpc_handler.set_handler(handler.clone());
 
-    ctrlc::set_handler(move || {
-        use std::time::Duration;
-        log::info!("Shutdown...");
-        handler.stop();
-        std::thread::sleep(Duration::from_secs(5));
-        std::process::exit(0);
-    })?;
+    // ctrlc::set_handler(move || {
+    //     use std::time::Duration;
+    //     log::info!("Shutdown...");
+    //     handler.stop();
+    //     std::thread::sleep(Duration::from_secs(5));
+    //     std::process::exit(0);
+    // })?;
 
     let workder = lampod.listen().unwrap();
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
