@@ -25,6 +25,7 @@ impl FromStr for LogLevel {
             "warn" => Ok(LogLevel::Warn),
             "error" => Ok(LogLevel::Error),
             "trace" => Ok(LogLevel::Trace),
+            "gossip" => Ok(LogLevel::Debug),
             _ => Err(format!("Unknown {} level", s)),
         }
     }
