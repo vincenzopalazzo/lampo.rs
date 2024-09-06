@@ -31,7 +31,6 @@ impl VLSKeys {
     }
 }
 
-
 struct SignerConfig {
     network: Network,
     lampo_data_dir: String,
@@ -45,11 +44,23 @@ struct SignerConfig {
 impl SignerConfig {
     pub fn new(conf: Arc<LampoConf>, seed: [u8; 32], vls_port: Option<u16>, shutter: Option<Shutter>) -> Self {
         let (_, listener) = trigger();
+        let url = Url::from_str(conf.core_url.as_ref().unwrap()).unwrap();
+
+        let bitcoin_rpc_url = Url::from_str(
+            format!(
+                "http://{}:{}@{}:{}", 
+                conf.core_user.as_ref().unwrap(), 
+                conf.core_pass.as_ref().unwrap(), 
+                url.host().unwrap(), 
+                url.port().unwrap()
+            ).as_ref()
+        ).unwrap();
+
         SignerConfig {
             network: conf.network,
             lampo_data_dir: conf.root_path.clone(),
-            bitcoin_rpc_url: Url::from_str(conf.core_url.as_ref().unwrap()).unwrap(),
             shutdown_signal: listener,
+            bitcoin_rpc_url,
             vls_port,
             shutter,
             seed,
@@ -58,7 +69,7 @@ impl SignerConfig {
 }
 pub enum SignerType {
     InProcess,  // InProcess Signer
-    GrpcRemote, // Remote Signer (not implemented yet)
+    GrpcRemote, // Remote Signer
 }
 
 impl SignerType {
@@ -72,11 +83,11 @@ impl SignerType {
                     let protocol_handler = Arc::new(protocol_handler::InProcessProtocolHandler::new(config.network, &config.seed));
 
                     let signer_port = Arc::new(signer::VLSSignerPort::new(protocol_handler.clone()));
-                    // This factory manages data sources but doesn't actually do anything (dummy).
+
                     let source_factory = Arc::new(SourceFactory::new(config.lampo_data_dir, config.network));
-                    // The SignerPortFront provide a client RPC interface to the core MultiSigner and Node objects via a communications link.
+
                     let signer_port_front = Arc::new(SignerPortFront::new(signer_port, config.network));
-                    // The frontend acts like a proxy to handle communication between the Signer and the Node
+
                     let frontend = Frontend::new(
                         signer_port_front,
                         source_factory,
@@ -94,7 +105,6 @@ impl SignerType {
             },
 
             SignerType::GrpcRemote => {
-    
                 let async_runtime = Arc::new(AsyncRuntime::new());
 
                 let (keys_manager, server_handle) = async_runtime.block_on(async {
@@ -107,7 +117,7 @@ impl SignerType {
 
                     let signer_handle = async_runtime.handle().clone();
 
-                    let hello = signer_handle.spawn(server.start(incoming, shutter.signal.clone()));
+                    let server_handler = signer_handle.spawn(server.start(incoming, shutter.signal.clone()));
 
                     let transport = Arc::new(GrpcProtocolHandler::new(sender, async_runtime.clone()).await.expect("Cannot create gRPC transport"));
 
@@ -121,7 +131,7 @@ impl SignerType {
                     );
                     frontend.start();
 
-                    (KeysManagerClient::new(transport, config.network.to_string()), hello)
+                    (KeysManagerClient::new(transport, config.network.to_string()), server_handler)
                 });
 
                 VLSKeysManager::new(async_runtime, keys_manager, Option::from(server_handle))
