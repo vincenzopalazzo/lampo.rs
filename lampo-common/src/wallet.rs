@@ -5,17 +5,18 @@ use crate::conf::LampoConf;
 use crate::error;
 use crate::keys::LampoKeys;
 use crate::model::response::{NewAddress, Utxo};
+use crate::utils::shutter::Shutter;
 
 /// Wallet manager trait that define a generic interface
 /// over Wallet implementation!
 pub trait WalletManager: Send + Sync {
     /// Generate a new wallet for the network
-    fn new(conf: Arc<LampoConf>) -> error::Result<(Self, String)>
+    fn new(conf: Arc<LampoConf>, shutter: Option<Arc<Shutter>>) -> error::Result<(Self, String)>
     where
         Self: Sized;
 
     /// Restore a previous created wallet from a network and a mnemonic_words
-    fn restore(network: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self>
+    fn restore(network: Arc<LampoConf>, mnemonic_words: &str, shutter: Option<Arc<Shutter>>) -> error::Result<Self>
     where
         Self: Sized;
 

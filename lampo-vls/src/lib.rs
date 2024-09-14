@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use protocol_handler::GrpcProtocolHandler;
 use signer::VLSSignerPort;
-use util::{AsyncRuntime, VLSKeysManager, Shutter};
+use util::{AsyncRuntime, VLSKeysManager};
+
 use vls_proxy::grpc::adapter::HsmdService;
 use vls_proxy::grpc::incoming::TcpIncoming;
 use vls_proxy::grpc::signer_loop::InitMessageCache;
@@ -20,12 +21,13 @@ use triggered::{trigger, Listener};
 use url::Url;
 
 use lampo_common::bitcoin::Network;
+use lampo_common::utils::shutter::Shutter;
 use lampo_common::conf::LampoConf;
 
 pub struct VLSKeys;
 
 impl VLSKeys {
-    pub fn create_keys_manager(&self, conf: Arc<LampoConf>, seed: &[u8; 32], vls_port: Option<u16>, shutter: Option<Shutter>) -> VLSKeysManager {
+    pub fn create_keys_manager(&self, conf: Arc<LampoConf>, seed: &[u8; 32], vls_port: Option<u16>, shutter: Option<Arc<Shutter>>) -> VLSKeysManager {
         let config = SignerConfig::new(conf, *seed, vls_port, shutter);
         SignerType::GrpcRemote.create_keys_manager(config)
     }
@@ -38,11 +40,11 @@ struct SignerConfig {
     shutdown_signal: Listener,
     seed: [u8; 32],
     vls_port: Option<u16>,
-    shutter: Option<Shutter>,
+    shutter: Option<Arc<Shutter>>,
 }
 
 impl SignerConfig {
-    pub fn new(conf: Arc<LampoConf>, seed: [u8; 32], vls_port: Option<u16>, shutter: Option<Shutter>) -> Self {
+    pub fn new(conf: Arc<LampoConf>, seed: [u8; 32], vls_port: Option<u16>, shutter: Option<Arc<Shutter>>) -> Self {
         let (_, listener) = trigger();
         let url = Url::from_str(conf.core_url.as_ref().unwrap()).unwrap();
 
@@ -112,12 +114,12 @@ impl SignerType {
                     let incoming = TcpIncoming::new(addr, false, None).expect("listen incoming");
                     let init_message_cache = Arc::new(Mutex::new(InitMessageCache::new()));
                     let shutter = config.shutter.unwrap();
-                    let server = HsmdService::new(shutter.trigger.clone(), shutter.signal.clone(), init_message_cache);
+                    let server = HsmdService::new(shutter.trigger(), shutter.signal(), init_message_cache);
                     let sender = server.sender();
 
                     let signer_handle = async_runtime.handle().clone();
 
-                    let server_handler = signer_handle.spawn(server.start(incoming, shutter.signal.clone()));
+                    let server_handler = signer_handle.spawn(server.start(incoming, shutter.signal()));
 
                     let transport = Arc::new(GrpcProtocolHandler::new(sender, async_runtime.clone()).await.expect("Cannot create gRPC transport"));
 
@@ -127,7 +129,7 @@ impl SignerType {
                         Arc::new(SignerPortFront::new(signer_port, config.network)),
                         source_factory,
                         config.bitcoin_rpc_url,
-                        shutter.signal,
+                        shutter.signal()
                     );
                     frontend.start();
 

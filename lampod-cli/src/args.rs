@@ -46,6 +46,7 @@ pub struct LampoCliArgs {
     pub bitcoind_url: Option<String>,
     pub bitcoind_user: Option<String>,
     pub bitcoind_pass: Option<String>,
+    pub vls_port: Option<u16>,
 }
 
 impl TryInto<LampoConf> for LampoCliArgs {
@@ -90,6 +91,9 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if self.log_level.is_some() {
             conf.log_level = self.log_level.unwrap();
         }
+        if self.vls_port.is_some() {
+            conf.vls_port = self.vls_port;
+        }
         Ok(conf)
     }
 }
@@ -105,6 +109,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut bitcoind_url: Option<String> = None;
     let mut bitcoind_user: Option<String> = None;
     let mut bitcoind_pass: Option<String> = None;
+    let mut vls_port: Option<u16> = Some(6600);
     let mut restore_wallet = false;
 
     let mut parser = lexopt::Parser::from_env();
@@ -145,6 +150,11 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
             Long("restore-wallet") => {
                 restore_wallet = true;
             }
+            Long("vls-port") => {
+                let port: u16 = parser.value()?.parse()?;
+                vls_port = Some(port);
+            }
+
             Long("help") => {
                 let _ = print_help();
                 std::process::exit(0);
@@ -162,6 +172,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         bitcoind_url,
         bitcoind_pass,
         bitcoind_user,
+        vls_port,
         // Default log level is info if it is not specified
         // in the command line
         log_level: level,

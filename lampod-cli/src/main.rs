@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use lampo_common::utils::shutter::Shutter;
 use radicle_term as term;
 
 use lampo_bitcoind::BitcoinCore;
@@ -97,12 +98,15 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", client),
     };
 
+    let shutter = Shutter::new();
+    let trigger = shutter.trigger();
     let wallet = if let Some(ref _private_key) = lampo_conf.private_key {
         unimplemented!()
     } else if mnemonic.is_none() {
         let (wallet, mnemonic) = match client.kind() {
             lampo_common::backend::BackendKind::Core => {
-                CoreWalletManager::new(Arc::new(lampo_conf.clone()))?
+                let shutter = Shutter::new();
+                CoreWalletManager::new(Arc::new(lampo_conf.clone()), Option::from(Arc::new(shutter)))?
             }
             lampo_common::backend::BackendKind::Nakamoto => {
                 error::bail!("wallet is not implemented for nakamoto")
@@ -120,7 +124,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
             lampo_common::backend::BackendKind::Core => {
                 // SAFETY: It is safe to unwrap the mnemonic because we check it
                 // before.
-                CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic.unwrap())?
+                CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic.unwrap(), Option::from(Arc::new(shutter)))?
             }
             lampo_common::backend::BackendKind::Nakamoto => {
                 error::bail!("wallet is not implemented for nakamoto")
@@ -147,13 +151,14 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
     rpc_handler.set_handler(handler.clone());
 
-    // ctrlc::set_handler(move || {
-    //     use std::time::Duration;
-    //     log::info!("Shutdown...");
-    //     handler.stop();
-    //     std::thread::sleep(Duration::from_secs(5));
-    //     std::process::exit(0);
-    // })?;
+    ctrlc::set_handler(move || {
+        use std::time::Duration;
+        log::info!("Shutdown...");
+        trigger.trigger();
+        handler.stop();
+        std::thread::sleep(Duration::from_secs(5));
+        std::process::exit(0);
+    })?;
 
     let workder = lampod.listen().unwrap();
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");

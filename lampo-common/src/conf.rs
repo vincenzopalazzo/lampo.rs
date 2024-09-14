@@ -23,6 +23,7 @@ pub struct LampoConf {
     pub log_level: String,
     pub alias: Option<String>,
     pub announce_addr: Option<String>,
+    pub vls_port: Option<u16>,
 }
 
 impl Default for LampoConf {
@@ -51,6 +52,7 @@ impl Default for LampoConf {
             log_file: None,
             alias: None,
             announce_addr: None,
+            vls_port: None,
         }
     }
 }
@@ -220,6 +222,15 @@ impl TryFrom<String> for LampoConf {
         let log_file = conf.get_conf("log-file").unwrap_or(None);
         let alias = conf.get_conf("alias").unwrap_or(None);
         let announce_addr = conf.get_conf("announce-addr").unwrap_or(None);
+        let vls_port: Option<u16> = match conf.get_conf("vls-port").unwrap_or(None) {
+            Some(port) => {
+                let port: u16 = port.parse().unwrap_or(6600);
+                Option::from(port)
+            }
+            None => {
+                None
+            }
+        };
 
         Ok(Self {
             inner: Some(conf),
@@ -237,6 +248,7 @@ impl TryFrom<String> for LampoConf {
             log_level: level,
             alias,
             announce_addr,
+            vls_port,
         })
     }
 }

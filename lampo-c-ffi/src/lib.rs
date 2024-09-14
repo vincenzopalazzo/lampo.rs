@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
+use lampo_common::utils::shutter::Shutter;
 use std::sync::Once;
 
 pub use lampod::LampoDaemon;
@@ -162,7 +163,8 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDaemon
         unimplemented!()
     } else {
         // FIXME: add the possibility to create it from the mnemonic
-        let Ok((wallet, _mnemonic)) = CoreWalletManager::new(conf.clone()) else {
+        let shutter = Shutter::new();
+        let Ok((wallet, _mnemonic)) = CoreWalletManager::new(conf.clone(), Option::from(Arc::new(shutter))) else {
             LAST_ERR
                 .lock()
                 .unwrap()

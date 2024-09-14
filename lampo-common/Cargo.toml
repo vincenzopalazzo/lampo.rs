@@ -11,7 +11,6 @@ lightning-block-sync = { version = "0.0.123" }
 lightning-persister = { version = "0.0.123" }
 lightning-background-processor = { version = "0.0.123" }
 lightning-net-tokio = { version = "0.0.123" }
-lightning-rapid-gossip-sync = { version = "0.0.123" }
 lightning-invoice = { version = "0.31" }
 bitcoin = { version = "0.30.2", features = ["serde"] }
 clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
@@ -23,8 +22,7 @@ chrono = { version = "0.4", features = ["std"], default-features = false }
 serde_json = "1.0"
 serde = "1.0"
 hex = "0.4.3"
-
-[dependencies.vls-proxy]
-git = "https://gitlab.com/Vanshul/validating-lightning-signer/"
-branch = "macros/ldk-upgrade-123"
+ctrlc = { version = "3.1", features = ["termination"] }
+triggered = "0.1.2"
+vls-proxy = { git = "https://gitlab.com/Vanshul/validating-lightning-signer", branch = "macros/ldk-upgrade-123"}
 
