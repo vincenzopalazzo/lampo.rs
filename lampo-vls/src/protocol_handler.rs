@@ -37,7 +37,7 @@ impl Transport for InProcessProtocolHandler {
         // Deserialize the incoming message
         let message = msgs::from_vec(msg)?;
         // Handle the message using RootHandler
-        let (result, _) = self.handler.handle(message).map_err(|_| Error::Transport)?;
+        let result = self.handler.handle(message).map_err(|_| Error::Transport)?;
         Ok(result.as_vec())
     }
 
@@ -48,7 +48,7 @@ impl Transport for InProcessProtocolHandler {
         // Creating a ChannelHandler
         let handler = self.handler.for_new_client(0, peer_id, db_id);
         // Handle the message using ChannelHandler
-        let (result, _) = handler.handle(message).map_err(|_| Error::Transport)?;
+        let result = handler.handle(message).map_err(|_| Error::Transport)?;
         Ok(result.as_vec())
     }
 }
@@ -67,14 +67,16 @@ impl InProcessProtocolHandler {
         let validator_factory = Arc::new(SimpleValidatorFactory::new_with_policy(policy));
         let starting_time_factory = ClockStartingTimeFactory::new();
         let clock = Arc::new(StandardClock());
+        let trusted_oracle_pubkeys = vec![];
         let services = NodeServices {
             validator_factory,
             starting_time_factory,
             persister,
             clock,
+            trusted_oracle_pubkeys
         };
         let builder = HandlerBuilder::new(network, 0, services, seed.to_owned()).allowlist(allowlist);
-        let (mut init_handler, _) = builder.build().expect("Cannot Build Root Handler");
+        let mut init_handler = builder.build().expect("Cannot Build Root Handler");
 
 		let preinit = msgs::HsmdDevPreinit {
 			derivation_style: 1,
@@ -92,7 +94,7 @@ impl InProcessProtocolHandler {
 		init_handler.handle(msgs::Message::HsmdDevPreinit(preinit)).expect("HSMD preinit failed");
 		init_handler.handle(msgs::Message::HsmdInit2(init)).expect("HSMD init failed");
 
-        let root_handler = init_handler.into_root_handler();
+        let root_handler = init_handler.into();
         InProcessProtocolHandler {
             handler: root_handler,
         }

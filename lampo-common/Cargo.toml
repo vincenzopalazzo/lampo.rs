@@ -24,5 +24,5 @@ serde = "1.0"
 hex = "0.4.3"
 ctrlc = { version = "3.1", features = ["termination"] }
 triggered = "0.1.2"
-vls-proxy = { git = "https://gitlab.com/Vanshul/validating-lightning-signer", branch = "macros/ldk-upgrade-123"}
+vls-proxy = { git = "https://gitlab.com/lightning-signer/validating-lightning-signer", branch = "main"}
 

@@ -19,15 +19,9 @@ checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
 name = "ahash"
-version = "0.3.8"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8fd72866655d1904d6b0997d0b07ba561047d070fbe29de039031c641b61217"
-
-[[package]]
-name = "ahash"
-version = "0.8.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
+checksum = "72832d73be48bac96a5d7944568f305d829ed55b0ce3b483647089dfaf6cf704"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -100,9 +94,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.88"
+version = "1.0.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e1496f8fb1fbf272686b8d37f523dab3e4a7443300055e74cdaa449f3114356"
+checksum = "86fdf8605db99b54d3cd748a44c6d04df638eb5dafb219b135d0149bd0db01f6"
 
 [[package]]
 name = "as-any"
@@ -396,16 +390,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bitcoin-consensus-derive"
-version = "0.1.0"
-source = "git+https://gitlab.com/davidcaseria/serde-bolt.git?branch=upgrade-bitcoin-dep#641d05a68515464281de57dba9637107a523a103"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "bitcoin-internals"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -422,8 +406,9 @@ checksum = "73290177011694f38ec25e165d0387ab7ea749a4b81cd4c80dae5988229f7a57"
 
 [[package]]
 name = "bitcoin-push-decoder"
-version = "0.2.2"
-source = "git+https://gitlab.com/vincenzopalazzo/txoo?rev=3538e269e94698eff523a7a2aa93b1959e44e26b#3538e269e94698eff523a7a2aa93b1959e44e26b"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee01fc59f06261a3727830dc61fd87f9f9ae503194d7aea0306a2535a9a06a3d"
 dependencies = [
  "bitcoin 0.30.2",
  "hex",
@@ -506,8 +491,8 @@ dependencies = [
 
 [[package]]
 name = "bolt-derive"
-version = "0.2.0"
-source = "git+https://gitlab.com/Vanshul/validating-lightning-signer?branch=macros/ldk-upgrade-123#d9bd64452778394381555b8c326a57445e8b876a"
+version = "0.3.1"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -534,9 +519,9 @@ checksum = "8318a53db07bb3f8dca91a600466bdb3f2eaadeedfdbcf02e1accbad9271ba50"
 
 [[package]]
 name = "cc"
-version = "1.1.18"
+version = "1.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b62ac837cdb5cb22e10a256099b4fc502b1dfe560cb282963a974d7abd80e476"
+checksum = "2d74707dde2ba56f86ae90effb3b43ddd369504387e718014de010cec7959800"
 dependencies = [
  "jobserver",
  "libc",
@@ -1100,27 +1085,26 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91b62f79061a0bc2e046024cb7ba44b08419ed238ecbd9adbd787434b9e8c25"
-dependencies = [
- "ahash 0.3.8",
- "autocfg",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 
 [[package]]
 name = "hashbrown"
-version = "0.14.5"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash 0.8.11",
+ "ahash",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f93e7192158dbcda357bdec5fb5788eebf8bbac027f3f33e719d29135ae84156"
+dependencies = [
+ "ahash",
  "allocator-api2",
 ]
 
@@ -1346,7 +1330,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68b900aa2f7301e21c36462b170ee99994de34dff39a4a6a528e80e7376d07e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.5",
+ "hashbrown 0.14.2",
 ]
 
 [[package]]
@@ -1578,10 +1562,10 @@ dependencies = [
  "crossbeam-channel",
  "ctrlc",
  "hex",
- "lightning 0.0.123",
+ "lightning",
  "lightning-background-processor",
  "lightning-block-sync",
- "lightning-invoice 0.31.0",
+ "lightning-invoice",
  "lightning-net-tokio",
  "lightning-persister",
  "log",
@@ -1747,16 +1731,6 @@ dependencies = [
 
 [[package]]
 name = "lightning"
-version = "0.0.119"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32899363dc48d297838ce1264c4bb6867ede6ec11f06f3b9823f3ff403f1ccc2"
-dependencies = [
- "bitcoin 0.30.2",
- "hex-conservative",
-]
-
-[[package]]
-name = "lightning"
 version = "0.0.123"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fd92d4aa159374be430c7590e169b4a6c0fb79018f5bc4ea1bffde536384db3"
@@ -1772,7 +1746,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fb1c2c64050e37cee7c3b6b022106523784055ac3ee572d360780a1d6fe8062c"
 dependencies = [
  "bitcoin 0.30.2",
- "lightning 0.0.123",
+ "lightning",
  "lightning-rapid-gossip-sync",
 ]
 
@@ -1784,20 +1758,7 @@ checksum = "61e1e70fa351daccede0c366cf16320b16a3e42b05ae3c7ec9c0df6b5d3a3e18"
 dependencies = [
  "bitcoin 0.30.2",
  "hex-conservative",
- "lightning 0.0.123",
-]
-
-[[package]]
-name = "lightning-invoice"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd3421ccfaeac77763114f68f3fc5308f11a0e8a880618b4f84d1d22493aa465"
-dependencies = [
- "bech32 0.9.1",
- "bitcoin 0.30.2",
- "lightning 0.0.119",
- "num-traits",
- "secp256k1 0.27.0",
+ "lightning",
 ]
 
 [[package]]
@@ -1808,7 +1769,7 @@ checksum = "26d07d01cf197bf2184b929b7dc94aa70d935aac6df896c256a3a9475b7e9d40"
 dependencies = [
  "bech32 0.9.1",
  "bitcoin 0.30.2",
- "lightning 0.0.123",
+ "lightning",
  "secp256k1 0.27.0",
 ]
 
@@ -1819,7 +1780,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9e6a4d49c50a1344916d080dc8c012ce3a778cdd45de8def75350b2b40fe018"
 dependencies = [
  "bitcoin 0.30.2",
- "lightning 0.0.123",
+ "lightning",
  "tokio",
 ]
 
@@ -1830,7 +1791,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a8dd33971815fa074b05678e09a6d4b15c78225ea34d66ed4f17c35a53467a9"
 dependencies = [
  "bitcoin 0.30.2",
- "lightning 0.0.123",
+ "lightning",
  "windows-sys 0.48.0",
 ]
 
@@ -1841,13 +1802,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d861b0f0cd5f8fe8c63760023c4fd4fd32c384881b41780b62ced2a8a619f91"
 dependencies = [
  "bitcoin 0.30.2",
- "lightning 0.0.123",
+ "lightning",
 ]
 
 [[package]]
 name = "lightning-storage-server"
-version = "0.3.0"
-source = "git+https://gitlab.com/Vanshul/validating-lightning-signer?branch=macros/ldk-upgrade-123#d9bd64452778394381555b8c326a57445e8b876a"
+version = "0.3.1"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1902,7 +1863,7 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4a83fb7698b3643a0e34f9ae6f2e8f0178c0fd42f8b59d493aa271ff3a5bf21"
 dependencies = [
- "hashbrown 0.14.5",
+ "hashbrown 0.14.2",
 ]
 
 [[package]]
@@ -2693,11 +2654,12 @@ dependencies = [
 
 [[package]]
 name = "serde_bolt"
-version = "0.3.4"
-source = "git+https://gitlab.com/davidcaseria/serde-bolt.git?branch=upgrade-bitcoin-dep#641d05a68515464281de57dba9637107a523a103"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bffab210d8357b433ffab5b3fd39d56f7fddb5eb36c84039fa455933ef05209f"
 dependencies = [
  "bitcoin 0.30.2",
- "bitcoin-consensus-derive 0.1.0 (git+https://gitlab.com/davidcaseria/serde-bolt.git?branch=upgrade-bitcoin-dep)",
+ "bitcoin-consensus-derive",
  "chunked-buffer",
  "hex",
 ]
@@ -3342,8 +3304,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "txoo"
-version = "0.7.0"
-source = "git+https://gitlab.com/vincenzopalazzo/txoo?branch=macros/upgrade-bitcoin#94ba28c5cd86a6591b4ebd9832bd45c880624dc9"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5675f1c4ed9845d91baa88cc10aff641867ed17b32440f9e26cd04c086610ba0"
 dependencies = [
  "async-trait",
  "bitcoin 0.30.2",
@@ -3358,8 +3321,9 @@ dependencies = [
 
 [[package]]
 name = "txoo-bitcoind-client"
-version = "0.7.0"
-source = "git+https://gitlab.com/vincenzopalazzo/txoo?branch=macros/upgrade-bitcoin#94ba28c5cd86a6591b4ebd9832bd45c880624dc9"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6a2765d35bcdbcc5b213fe7460c3cbd59d339ca8d47539a2a14b561af945cfc"
 dependencies = [
  "async-trait",
  "bitcoin 0.30.2",
@@ -3473,22 +3437,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vls-core"
-version = "0.11.0"
-source = "git+https://gitlab.com/Vanshul/validating-lightning-signer?branch=macros/ldk-upgrade-123#d9bd64452778394381555b8c326a57445e8b876a"
+name = "vls-common"
+version = "0.12.0"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
 dependencies = [
+ "hex",
+]
+
+[[package]]
+name = "vls-core"
+version = "0.12.0"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
+dependencies = [
+ "ahash",
  "anyhow",
  "backtrace",
  "bitcoin 0.30.2",
- "bitcoin-consensus-derive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bitcoin-consensus-derive",
  "bitcoin-push-decoder",
  "bolt-derive",
  "env_logger 0.9.3",
- "hashbrown 0.8.2",
+ "hashbrown 0.13.2",
  "hex",
  "itertools",
- "lightning 0.0.123",
- "lightning-invoice 0.27.0",
+ "lightning",
+ "lightning-invoice",
  "log",
  "scopeguard",
  "serde",
@@ -3497,12 +3470,13 @@ dependencies = [
  "serde_with",
  "tracing",
  "txoo",
+ "vls-common",
 ]
 
 [[package]]
 name = "vls-frontend"
-version = "0.11.0"
-source = "git+https://gitlab.com/Vanshul/validating-lightning-signer?branch=macros/ldk-upgrade-123#d9bd64452778394381555b8c326a57445e8b876a"
+version = "0.12.0"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
 dependencies = [
  "async-trait",
  "lightning-storage-server",
@@ -3516,8 +3490,8 @@ dependencies = [
 
 [[package]]
 name = "vls-persist"
-version = "0.11.0"
-source = "git+https://gitlab.com/Vanshul/validating-lightning-signer?branch=macros/ldk-upgrade-123#d9bd64452778394381555b8c326a57445e8b876a"
+version = "0.12.0"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
 dependencies = [
  "hex",
  "log",
@@ -3532,11 +3506,11 @@ dependencies = [
 
 [[package]]
 name = "vls-protocol"
-version = "0.11.0"
-source = "git+https://gitlab.com/Vanshul/validating-lightning-signer?branch=macros/ldk-upgrade-123#d9bd64452778394381555b8c326a57445e8b876a"
+version = "0.12.0"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
 dependencies = [
  "as-any",
- "bitcoin-consensus-derive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bitcoin-consensus-derive",
  "bolt-derive",
  "hex",
  "log",
@@ -3547,8 +3521,8 @@ dependencies = [
 
 [[package]]
 name = "vls-protocol-client"
-version = "0.11.0"
-source = "git+https://gitlab.com/Vanshul/validating-lightning-signer?branch=macros/ldk-upgrade-123#d9bd64452778394381555b8c326a57445e8b876a"
+version = "0.12.0"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3562,8 +3536,8 @@ dependencies = [
 
 [[package]]
 name = "vls-protocol-signer"
-version = "0.11.0"
-source = "git+https://gitlab.com/Vanshul/validating-lightning-signer?branch=macros/ldk-upgrade-123#d9bd64452778394381555b8c326a57445e8b876a"
+version = "0.12.0"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
 dependencies = [
  "bit-vec",
  "log",
@@ -3573,8 +3547,8 @@ dependencies = [
 
 [[package]]
 name = "vls-proxy"
-version = "0.11.0"
-source = "git+https://gitlab.com/Vanshul/validating-lightning-signer?branch=macros/ldk-upgrade-123#d9bd64452778394381555b8c326a57445e8b876a"
+version = "0.12.0"
+source = "git+https://gitlab.com/lightning-signer/validating-lightning-signer?branch=main#254a44d8c3919f6be10e091987200f901c5285cc"
 dependencies = [
  "anyhow",
  "as-any",

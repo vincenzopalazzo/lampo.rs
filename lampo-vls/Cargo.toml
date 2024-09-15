@@ -12,5 +12,5 @@ url = "2.5.0"
 async-trait = "0.1"
 tonic = "0.9"
 tokio = { version = "1", features = ["full"] }
-vls-core = { git = "https://gitlab.com/Vanshul/validating-lightning-signer", branch = "macros/ldk-upgrade-123"}
-vls-proxy = { git = "https://gitlab.com/Vanshul/validating-lightning-signer", branch = "macros/ldk-upgrade-123"}
+vls-core = { git = "https://gitlab.com/lightning-signer/validating-lightning-signer", branch = "main" }
+vls-proxy = { git = "https://gitlab.com/lightning-signer/validating-lightning-signer", branch = "main", features = ["developer"]}

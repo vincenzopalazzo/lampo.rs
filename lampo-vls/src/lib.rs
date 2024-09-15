@@ -14,7 +14,7 @@ use vls_proxy::grpc::adapter::HsmdService;
 use vls_proxy::grpc::incoming::TcpIncoming;
 use vls_proxy::grpc::signer_loop::InitMessageCache;
 use vls_proxy::portfront::SignerPortFront;
-use vls_proxy::vls_frontend::frontend::SourceFactory;
+use vls_proxy::vls_frontend::frontend::DummySourceFactory;
 use vls_proxy::vls_frontend::Frontend;
 use vls_proxy::vls_protocol_client::KeysManagerClient;
 use triggered::{trigger, Listener};
@@ -86,7 +86,7 @@ impl SignerType {
 
                     let signer_port = Arc::new(signer::VLSSignerPort::new(protocol_handler.clone()));
 
-                    let source_factory = Arc::new(SourceFactory::new(config.lampo_data_dir, config.network));
+                    let source_factory = Arc::new(DummySourceFactory::new(config.lampo_data_dir, config.network));
 
                     let signer_port_front = Arc::new(SignerPortFront::new(signer_port, config.network));
 
@@ -123,7 +123,7 @@ impl SignerType {
 
                     let transport = Arc::new(GrpcProtocolHandler::new(sender, async_runtime.clone()).await.expect("Cannot create gRPC transport"));
 
-                    let source_factory = Arc::new(SourceFactory::new(config.lampo_data_dir, config.network));
+                    let source_factory = Arc::new(DummySourceFactory::new(config.lampo_data_dir, config.network));
                     let signer_port = Arc::new(VLSSignerPort::new(transport.clone()));
                     let frontend = Frontend::new(
                         Arc::new(SignerPortFront::new(signer_port, config.network)),
