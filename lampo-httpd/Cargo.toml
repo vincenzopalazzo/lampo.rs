@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+actix-web = "4"
+paperclip = { version = "0.8.0", features = ["actix4"] }
+log = "*"
+paste = "1.0.15"
+
+lampo-common = { path = "../lampo-common" }
+lampod = { path = "../lampod" }

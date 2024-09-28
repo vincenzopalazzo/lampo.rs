@@ -1,6 +1,7 @@
+use paperclip::actix::Apiv2Schema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
 pub struct GetInfo {
     pub node_id: String,
     pub peers: usize,
@@ -13,7 +14,7 @@ pub struct GetInfo {
     pub block_hash: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Apiv2Schema)]
 pub struct NetworkInfo {
     pub address: String,
     pub port: u64,

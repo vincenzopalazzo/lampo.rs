@@ -3,12 +3,13 @@ pub mod request {
     use std::str::FromStr;
 
     use bitcoin::secp256k1::PublicKey;
+    use paperclip::actix::Apiv2Schema;
     use serde::{Deserialize, Serialize};
 
     use crate::error;
     use crate::types::*;
 
-    #[derive(Clone, Serialize, Deserialize)]
+    #[derive(Clone, Serialize, Deserialize, Apiv2Schema)]
     pub struct CloseChannel {
         pub node_id: String,
         // Hex of the channel
@@ -48,9 +49,10 @@ pub mod request {
 }
 
 pub mod response {
+    use paperclip::actix::Apiv2Schema;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct CloseChannel {
         pub channel_id: String,
         pub message: String,
