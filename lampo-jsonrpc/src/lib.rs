@@ -3,11 +3,9 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io;
-use std::io::ErrorKind;
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::net::UnixListener;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -144,7 +142,8 @@ impl<T: Send + Sync + 'static> JSONRPCv2<T> {
                         // Put this inside the unfinish queue
                         let Ok(requ) = serde_json::from_slice::<Request<Value>>(&buff) else {
                             log::warn!(target: "jsonrpc", "looks like that the json is not fully read ` {}`", String::from_utf8(buff.to_vec()).unwrap());
-                            // Usually this mean that we was too fast in reading and the sender too low
+                            // Usually this mean that we was too fast in reading and the sender too
+                            // low
                             continue;
                         };
                         log::trace!(target: "jsonrpc", "request {:?}", requ);
@@ -311,19 +310,20 @@ impl<T: Send + Sync + 'static> Drop for JSONRPCv2<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::Write, os::unix::net::UnixStream, path::Path, str::FromStr, sync::Arc, time::Duration,
-    };
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::path::Path;
+    use std::str::FromStr;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use lampo_common::logger;
     use ntest::timeout;
     use serde_json::Value;
 
-    use crate::{
-        command::Context,
-        json_rpc2::{Id, Request, Response},
-        JSONRPCv2,
-    };
+    use crate::command::Context;
+    use crate::json_rpc2::{Id, Request, Response};
+    use crate::JSONRPCv2;
 
     struct DummyCtx;
 

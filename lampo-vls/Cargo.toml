@@ -1,0 +1,14 @@
+[package]
+name = "lampo-vls"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lampo-common = { path = "../lampo-common" }
+vls-core = { git = "https://gitlab.com/lightning-signer/validating-lightning-signer", branch = "main" }
+vls-proxy = { git = "https://gitlab.com/lightning-signer/validating-lightning-signer", branch = "main" }
+vls-persist = { git = "https://gitlab.com/lightning-signer/validating-lightning-signer", branch = "main" }
+log = "*"
+hex = "*"
+url = "*"
+triggered = "0.1"

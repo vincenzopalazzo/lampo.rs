@@ -1,5 +1,6 @@
 //! Connect Model
-use std::{net::SocketAddr, str::FromStr};
+use std::net::SocketAddr;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 

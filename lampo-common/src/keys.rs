@@ -1,4 +1,5 @@
-use std::{sync::Arc, time::SystemTime};
+use std::sync::Arc;
+use std::time::SystemTime;
 
 use bitcoin::secp256k1::{Secp256k1, SecretKey};
 use lightning::sign::{InMemorySigner, NodeSigner, OutputSpender, SignerProvider};
@@ -12,7 +13,8 @@ pub struct LampoKeys {
 
 impl LampoKeys {
     pub fn new(seed: [u8; 32]) -> Self {
-        // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.
+        // Fill in random_32_bytes with secure random data, or, on restart, reload the
+        // seed from disk.
         let start_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap();
@@ -28,7 +30,8 @@ impl LampoKeys {
 
     #[cfg(debug_assertions)]
     pub fn with_channel_keys(seed: [u8; 32], channels_keys: String) -> Self {
-        // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.
+        // Fill in random_32_bytes with secure random data, or, on restart, reload the
+        // seed from disk.
         let start_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap();
