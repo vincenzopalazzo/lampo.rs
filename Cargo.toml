@@ -7,7 +7,6 @@ members = [
         "lampo-bitcoind",
         "lampo-jsonrpc",
         "lampo-client",
-        "lampo-c-ffi",
         "lampo-core-wallet",
         "lampo-testing",
         "lampo-vls",
@@ -22,7 +21,6 @@ default-members = [
         "lampo-bitcoind",
         "lampo-jsonrpc",
         "lampo-client",
-        "lampo-c-ffi",
         "lampo-core-wallet",
 ]
 resolver = "2"

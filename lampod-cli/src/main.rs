@@ -106,7 +106,10 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         let (wallet, mnemonic) = match client.kind() {
             lampo_common::backend::BackendKind::Core => {
                 let shutter = Shutter::new();
-                CoreWalletManager::new(Arc::new(lampo_conf.clone()), Option::from(Arc::new(shutter)))?
+                CoreWalletManager::new(
+                    Arc::new(lampo_conf.clone()),
+                    Option::from(Arc::new(shutter)),
+                )?
             }
             lampo_common::backend::BackendKind::Nakamoto => {
                 error::bail!("wallet is not implemented for nakamoto")
@@ -124,7 +127,11 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
             lampo_common::backend::BackendKind::Core => {
                 // SAFETY: It is safe to unwrap the mnemonic because we check it
                 // before.
-                CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic.unwrap(), Option::from(Arc::new(shutter)))?
+                CoreWalletManager::restore(
+                    Arc::new(lampo_conf.clone()),
+                    &mnemonic.unwrap(),
+                    Option::from(Arc::new(shutter)),
+                )?
             }
             lampo_common::backend::BackendKind::Nakamoto => {
                 error::bail!("wallet is not implemented for nakamoto")

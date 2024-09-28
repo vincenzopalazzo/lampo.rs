@@ -1,23 +1,26 @@
 use std::sync::Arc;
 
-use vls_proxy::vls_protocol_client::KeysManagerClient;
+use tokio::runtime::Handle;
 use tokio::{runtime::Runtime, task::JoinHandle};
 use tonic::transport::Error as TonicError;
-use tokio::runtime::Handle;
-
+use vls_proxy::vls_protocol_client::KeysManagerClient;
 
 pub struct VLSKeysManager {
     pub async_runtime: Arc<AsyncRuntime>,
     pub keys_manager: KeysManagerClient,
-    pub server_handle: Option<JoinHandle<Result<(), TonicError>>>
+    pub server_handle: Option<JoinHandle<Result<(), TonicError>>>,
 }
 
 impl VLSKeysManager {
-    pub fn new(async_runtime: Arc<AsyncRuntime>, keys_manager: KeysManagerClient, server_handle: Option<JoinHandle<Result<(), TonicError>>>) -> Self {
+    pub fn new(
+        async_runtime: Arc<AsyncRuntime>,
+        keys_manager: KeysManagerClient,
+        server_handle: Option<JoinHandle<Result<(), TonicError>>>,
+    ) -> Self {
         VLSKeysManager {
             async_runtime,
             keys_manager,
-            server_handle
+            server_handle,
         }
     }
 
@@ -29,7 +32,6 @@ impl VLSKeysManager {
         self.async_runtime.block_on(future)
     }
 }
-
 
 pub struct AsyncRuntime {
     runtime: Arc<Runtime>,
@@ -60,6 +62,8 @@ impl AsyncRuntime {
 
 impl Clone for AsyncRuntime {
     fn clone(&self) -> Self {
-        Self { runtime: self.runtime.clone() }
+        Self {
+            runtime: self.runtime.clone(),
+        }
     }
 }

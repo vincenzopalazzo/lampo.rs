@@ -164,7 +164,9 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDaemon
     } else {
         // FIXME: add the possibility to create it from the mnemonic
         let shutter = Shutter::new();
-        let Ok((wallet, _mnemonic)) = CoreWalletManager::new(conf.clone(), Option::from(Arc::new(shutter))) else {
+        let Ok((wallet, _mnemonic)) =
+            CoreWalletManager::new(conf.clone(), Option::from(Arc::new(shutter)))
+        else {
             LAST_ERR
                 .lock()
                 .unwrap()

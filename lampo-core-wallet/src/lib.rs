@@ -38,7 +38,7 @@ impl CoreWalletManager {
     fn build_wallet(
         conf: Arc<LampoConf>,
         mnemonic_words: &str,
-        shutter: Option<Arc<Shutter>>
+        shutter: Option<Arc<Shutter>>,
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
         // Parse a mnemonic
         let mnemonic = Mnemonic::parse(mnemonic_words).map_err(|err| error::anyhow!("{err}"))?;
@@ -56,7 +56,12 @@ impl CoreWalletManager {
             .into_xprv(network)
             .ok_or(error::anyhow!("impossible cast the private key"))?;
 
-        let vls_grpc = VLSKeys.create_keys_manager(conf.clone(), &xprv.private_key.secret_bytes(), conf.vls_port, shutter);
+        let vls_grpc = VLSKeys.create_keys_manager(
+            conf.clone(),
+            &xprv.private_key.secret_bytes(),
+            conf.vls_port,
+            shutter,
+        );
         let keys_manger = vls_grpc.keys_manager;
         let ldk_keys = LampoKeys::new(xprv.private_key.secret_bytes(), conf, keys_manger);
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
@@ -74,11 +79,16 @@ impl CoreWalletManager {
         xprv: lampo_common::bitcoin::PrivateKey,
         channel_keys: Option<String>,
         conf: Arc<LampoConf>,
-        shutter: Option<Arc<Shutter>>
+        shutter: Option<Arc<Shutter>>,
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
         use bdk::bitcoin::bip32::Xpriv;
 
-        let vls_grpc = VLSKeys.create_keys_manager(conf.clone(), &xprv.inner.secret_bytes(), conf.vls_port, shutter);
+        let vls_grpc = VLSKeys.create_keys_manager(
+            conf.clone(),
+            &xprv.inner.secret_bytes(),
+            conf.vls_port,
+            shutter,
+        );
         let keys_manger = vls_grpc.keys_manager;
 
         let ldk_keys = if let Some(channel_keys) = channel_keys {
@@ -315,11 +325,16 @@ impl WalletManager for CoreWalletManager {
         Ok(unspend)
     }
 
-    fn restore(conf: Arc<LampoConf>, mnemonic_words: &str, shutter: Option<Arc<Shutter>>) -> error::Result<Self>
+    fn restore(
+        conf: Arc<LampoConf>,
+        mnemonic_words: &str,
+        shutter: Option<Arc<Shutter>>,
+    ) -> error::Result<Self>
     where
         Self: Sized,
     {
-        let (wallet, keymanager) = CoreWalletManager::build_wallet(conf.clone(), mnemonic_words, shutter)?;
+        let (wallet, keymanager) =
+            CoreWalletManager::build_wallet(conf.clone(), mnemonic_words, shutter)?;
 
         let rpc = Client::new(
             conf.core_url

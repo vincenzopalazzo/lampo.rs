@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use crate::conf::LampoConf;
 use crate::bitcoin::secp256k1::SecretKey;
-use crate::ldk::sign::{NodeSigner, OutputSpender, SignerProvider, EntropySource};
+use crate::conf::LampoConf;
+use crate::ldk::sign::{EntropySource, NodeSigner, OutputSpender, SignerProvider};
 use crate::vls::vls_proxy::vls_protocol_client::{KeysManagerClient, SignerClient};
-
 
 /// Lampo keys implementations
 pub struct LampoKeys {
@@ -19,12 +18,15 @@ impl LampoKeys {
     }
 
     #[cfg(debug_assertions)]
-    pub fn with_channel_keys(_seed: [u8; 32], channels_keys: String, _conf: Arc<LampoConf>, keys_manager: KeysManagerClient) -> Self {
-
+    pub fn with_channel_keys(
+        _seed: [u8; 32],
+        channels_keys: String,
+        _conf: Arc<LampoConf>,
+        keys_manager: KeysManagerClient,
+    ) -> Self {
         let keys = channels_keys.split('/').collect::<Vec<_>>();
 
-        let mut manager =
-            LampoKeysManager::new(keys_manager);
+        let mut manager = LampoKeysManager::new(keys_manager);
         manager.set_channels_keys(
             keys[1].to_string(),
             keys[2].to_string(),
@@ -207,4 +209,3 @@ impl SignerProvider for LampoKeysManager {
         self.inner.read_chan_signer(reader)
     }
 }
-

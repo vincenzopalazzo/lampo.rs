@@ -227,9 +227,7 @@ impl TryFrom<String> for LampoConf {
                 let port: u16 = port.parse().unwrap_or(6600);
                 Option::from(port)
             }
-            None => {
-                None
-            }
+            None => None,
         };
 
         Ok(Self {

@@ -16,7 +16,11 @@ pub trait WalletManager: Send + Sync {
         Self: Sized;
 
     /// Restore a previous created wallet from a network and a mnemonic_words
-    fn restore(network: Arc<LampoConf>, mnemonic_words: &str, shutter: Option<Arc<Shutter>>) -> error::Result<Self>
+    fn restore(
+        network: Arc<LampoConf>,
+        mnemonic_words: &str,
+        shutter: Option<Arc<Shutter>>,
+    ) -> error::Result<Self>
     where
         Self: Sized;
 
