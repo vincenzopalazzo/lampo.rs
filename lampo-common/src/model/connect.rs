@@ -1,13 +1,14 @@
 //! Connect Model
 use std::{net::SocketAddr, str::FromStr};
 
+use paperclip::actix::Apiv2Schema;
 use serde::{Deserialize, Serialize};
 
 use super::request::OpenChannel;
 use crate::error;
 use crate::types::NodeId;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
 pub struct Connect {
     pub node_id: String,
     pub addr: String,
