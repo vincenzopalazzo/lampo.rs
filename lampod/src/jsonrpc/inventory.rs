@@ -5,6 +5,7 @@ use lampo_common::model::response::{NetworkChannel, NetworkChannels};
 
 use crate::LampoDaemon;
 
+// FIXME: change the name to `json_get_info`
 pub fn get_info(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("calling `getinfo` with request `{:?}`", request);
     let result = ctx.call("getinfo", request.clone())?;
