@@ -3,13 +3,8 @@ use std::ops::Not;
 use std::sync::Arc;
 
 use bdk::bitcoin::Amount;
-use bdk::keys::bip39::Language;
-use bdk::keys::bip39::Mnemonic;
-use bdk::keys::bip39::WordCount;
-use bdk::keys::DerivableKey;
-use bdk::keys::ExtendedKey;
-use bdk::keys::GeneratableKey;
-use bdk::keys::GeneratedKey;
+use bdk::keys::bip39::{Language, Mnemonic, WordCount};
+use bdk::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
 use bdk::template::Bip84;
 use bdk::KeychainKind;
 use bitcoin_hashes::hex::HexIterator;
@@ -18,15 +13,13 @@ use bitcoincore_rpc::{Auth, Client, RpcApi};
 #[cfg(debug_assertions)]
 use crate::bitcoin::PrivateKey;
 
-use lampo_common::bitcoin;
 use lampo_common::bitcoin::consensus::Decodable;
 use lampo_common::conf::{LampoConf, Network};
-use lampo_common::error;
-use lampo_common::json;
 use lampo_common::json::Deserialize;
 use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::{NewAddress, Utxo};
 use lampo_common::wallet::WalletManager;
+use lampo_common::{bitcoin, error, json};
 
 pub struct CoreWalletManager {
     rpc: Client,
@@ -57,7 +50,8 @@ impl CoreWalletManager {
             .ok_or(error::anyhow!("impossible cast the private key"))?;
 
         let ldk_keys = LampoKeys::new(xprv.private_key.secret_bytes());
-        // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
+        // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and
+        // "m/84h/1h/0h/1")
         let wallet = bdk::Wallet::new(
             Bip84(xprv, KeychainKind::External),
             Some(Bip84(xprv, KeychainKind::Internal)),

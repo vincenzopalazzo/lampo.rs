@@ -28,20 +28,17 @@ use tokio::runtime::Runtime;
 use lampo_common::backend::Backend;
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::conf::LampoConf;
-use lampo_common::error;
-use lampo_common::json;
 use lampo_common::ldk::events::Event;
 use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
 use lampo_common::ldk::routing::gossip::P2PGossipSync;
-use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
+use lampo_common::{error, json, utils};
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
 use crate::handler::external_handler::ExternalHandler;
-use crate::ln::OffchainManager;
-use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager, OffchainManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
@@ -227,12 +224,14 @@ impl LampoDaemon {
         Ok(())
     }
 
-    /// Registers an external handler to handle incoming requests from external sources.
-    /// These requests are passed to the handler via the `call` method.
+    /// Registers an external handler to handle incoming requests from external
+    /// sources. These requests are passed to the handler via the `call`
+    /// method.
     ///
     /// Additionally, the registered handler serves as the entry point for
-    /// the Chain of Responsibility pattern that handles all unsupported commands that the Lampod daemon
-    /// may receive from external sources (assuming the user has defined a handler for them).
+    /// the Chain of Responsibility pattern that handles all unsupported
+    /// commands that the Lampod daemon may receive from external sources
+    /// (assuming the user has defined a handler for them).
     pub fn add_external_handler(&self, ext_handler: Arc<dyn ExternalHandler>) -> error::Result<()> {
         let Some(ref handler) = self.handler else {
             error::bail!("Initial handler is None");
@@ -282,12 +281,13 @@ impl LampoDaemon {
     }
 
     /// Call any method supported by the lampod configuration. This includes
-    /// a lot of handler code. This function serves as a broker pattern in some ways,
-    /// but it may also function as a chain of responsibility pattern in certain cases.
+    /// a lot of handler code. This function serves as a broker pattern in some
+    /// ways, but it may also function as a chain of responsibility pattern
+    /// in certain cases.
     ///
-    /// Welcome to the third design pattern in under 300 lines of code. The code will clarify the
-    /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
-    /// at some point.
+    /// Welcome to the third design pattern in under 300 lines of code. The code
+    /// will clarify the idea, but be prepared to see a broker pattern begin
+    /// as a chain of responsibility pattern at some point.
     pub fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
         let Some(ref handler) = self.handler else {
             error::bail!("at this point the handler should be not None");

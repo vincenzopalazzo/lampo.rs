@@ -2,16 +2,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use lampo_common::backend::Backend;
-use lampo_common::bitcoin;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::Transaction;
-use lampo_common::ldk;
 use lampo_common::ldk::chain::chaininterface::{
     BroadcasterInterface, ConfirmationTarget, FeeEstimator,
 };
 use lampo_common::ldk::chain::Filter;
 use lampo_common::ldk::routing::utxo::UtxoLookup;
 use lampo_common::wallet::WalletManager;
+use lampo_common::{bitcoin, ldk};
 
 #[derive(Clone)]
 pub struct LampoChainManager {

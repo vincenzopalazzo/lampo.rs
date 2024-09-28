@@ -18,16 +18,13 @@ use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
 use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
 use lampo_common::conf::LampoConf;
-use lampo_common::error;
 use lampo_common::keys::LampoKeysManager;
-use lampo_common::ldk;
-use lampo_common::ldk::ln::channelmanager::Retry;
-use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
+use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields, Retry};
 use lampo_common::ldk::ln::{PaymentHash, PaymentPreimage};
-use lampo_common::ldk::offers::offer::Amount;
-use lampo_common::ldk::offers::offer::Offer;
+use lampo_common::ldk::offers::offer::{Amount, Offer};
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
 use lampo_common::ldk::sign::EntropySource;
+use lampo_common::{error, ldk};
 
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
@@ -158,8 +155,9 @@ impl OffchainManager {
         );
         let PaymentPreimage(bytes) = payment_preimage;
         let payment_hash = PaymentHash(Sha256::hash(&bytes).to_byte_array());
-        // The 40 here is the max CheckLockTimeVerify which locks the output of the transaction for a certain
-        // period of time.The false here stands for the allow_mpp, which is to allow the multi part route payments.
+        // The 40 here is the max CheckLockTimeVerify which locks the output of the
+        // transaction for a certain period of time.The false here stands for
+        // the allow_mpp, which is to allow the multi part route payments.
         let route_params = RouteParameters {
             payment_params: PaymentParameters::for_keysend(destination, 40, false),
             final_value_msat: amount_msat,

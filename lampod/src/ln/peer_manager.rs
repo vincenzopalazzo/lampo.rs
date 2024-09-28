@@ -6,18 +6,16 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 
 use lampo_common::conf::LampoConf;
-use lampo_common::error;
 use lampo_common::keys::LampoKeysManager;
-use lampo_common::ldk;
 use lampo_common::ldk::blinded_path::EmptyNodeIdLookUp;
-use lampo_common::ldk::ln::peer_handler::MessageHandler;
-use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
+use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, MessageHandler, PeerManager};
 use lampo_common::ldk::net;
 use lampo_common::ldk::net::SocketDescriptor;
 use lampo_common::ldk::onion_message::messenger::{DefaultMessageRouter, OnionMessenger};
 use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
+use lampo_common::{error, ldk};
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};

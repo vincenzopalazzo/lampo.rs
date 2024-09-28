@@ -1,35 +1,27 @@
 #[allow(dead_code)]
 mod args;
 
-use std::env;
-use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use std::{env, io};
 
 use radicle_term as term;
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
-use lampo_common::error;
-use lampo_common::logger;
+use lampo_common::{error, logger};
 use lampo_core_wallet::CoreWalletManager;
-use lampo_jsonrpc::Handler;
-use lampo_jsonrpc::JSONRPCv2;
+use lampo_jsonrpc::{Handler, JSONRPCv2};
 use lampod::chain::WalletManager;
-use lampod::jsonrpc::channels::json_close_channel;
-use lampod::jsonrpc::channels::json_list_channels;
+use lampod::jsonrpc::channels::{json_close_channel, json_list_channels};
 use lampod::jsonrpc::inventory::get_info;
-use lampod::jsonrpc::offchain::json_decode_invoice;
-use lampod::jsonrpc::offchain::json_invoice;
-use lampod::jsonrpc::offchain::json_keysend;
-use lampod::jsonrpc::offchain::json_offer;
-use lampod::jsonrpc::offchain::json_pay;
-use lampod::jsonrpc::onchain::json_estimate_fees;
-use lampod::jsonrpc::onchain::json_funds;
-use lampod::jsonrpc::onchain::json_new_addr;
+use lampod::jsonrpc::offchain::{
+    json_decode_invoice, json_invoice, json_keysend, json_offer, json_pay,
+};
+use lampod::jsonrpc::onchain::{json_estimate_fees, json_funds, json_new_addr};
 use lampod::jsonrpc::open_channel::json_open_channel;
 use lampod::jsonrpc::peer_control::json_connect;
 use lampod::jsonrpc::CommandHandler;

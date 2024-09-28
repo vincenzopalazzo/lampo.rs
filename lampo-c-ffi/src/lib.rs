@@ -1,8 +1,7 @@
 //! Exposing C FFI for interact with Lampo API
 //! and build easly a node.
 use std::cell::Cell;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use lampo_bitcoind::BitcoinCore;
 use lampo_common::backend::Backend;
@@ -204,8 +203,8 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDaemon
     Box::into_raw(lampod)
 }
 
-/// Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
-/// < 0 is an error happens, or 0 is all goes well.
+/// Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error
+/// code < 0 is an error happens, or 0 is all goes well.
 #[no_mangle]
 pub extern "C" fn lampo_last_errror() -> *const libc::c_char {
     let value = LAST_ERR.lock().unwrap().take();
@@ -214,8 +213,8 @@ pub extern "C" fn lampo_last_errror() -> *const libc::c_char {
     }
     null!()
 }
-/// Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error code
-/// < 0 is an error happens, or 0 is all goes well.
+/// Add a JSON RPC 2.0 Sever that listen on a unixsocket, and return a error
+/// code < 0 is an error happens, or 0 is all goes well.
 #[no_mangle]
 pub extern "C" fn add_jsonrpc_on_unixsocket(lampod: *mut LampoDaemon) -> i64 {
     use lampo_jsonrpc::JSONRPCv2;

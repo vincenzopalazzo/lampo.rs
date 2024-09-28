@@ -46,14 +46,18 @@ pub trait Backend {
 
     fn is_lightway(&self) -> bool;
 
-    /// You must follow this step if: you are not providing full blocks to LDK, i.e. if you're using BIP 157/158 or Electrum as your chain backend
+    /// You must follow this step if: you are not providing full blocks to LDK,
+    /// i.e. if you're using BIP 157/158 or Electrum as your chain backend
     ///
-    /// What it's used for: if you are not providing full blocks, LDK uses this object to tell you what transactions and outputs to watch for on-chain.
+    /// What it's used for: if you are not providing full blocks, LDK uses this
+    /// object to tell you what transactions and outputs to watch for on-chain.
     fn watch_utxo(&self, txid: &Txid, script: &Script);
 
-    /// You must follow this step if: you are not providing full blocks to LDK, i.e. if you're using BIP 157/158 or Electrum as your chain backend
+    /// You must follow this step if: you are not providing full blocks to LDK,
+    /// i.e. if you're using BIP 157/158 or Electrum as your chain backend
     ///
-    /// What it's used for: if you are not providing full blocks, LDK uses this object to tell you what transactions and outputs to watch for on-chain.
+    /// What it's used for: if you are not providing full blocks, LDK uses this
+    /// object to tell you what transactions and outputs to watch for on-chain.
     fn register_output(&self, output: WatchedOutput) -> Option<(usize, Transaction)>;
 
     fn get_header<'a>(

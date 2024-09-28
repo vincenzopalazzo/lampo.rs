@@ -2,9 +2,8 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use lampo_testing::prelude::bitcoincore_rpc;
 use lampo_testing::prelude::bitcoincore_rpc::RpcApi;
-use lampo_testing::prelude::btc;
+use lampo_testing::prelude::{bitcoincore_rpc, btc};
 
 use lampo_common::error;
 

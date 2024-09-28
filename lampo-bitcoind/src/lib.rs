@@ -9,19 +9,17 @@ use std::time::Duration;
 use bitcoincore_rpc::bitcoin::hashes::Hash;
 use bitcoincore_rpc::bitcoin::ScriptBuf;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetTxOutResult;
-use bitcoincore_rpc::Client;
-use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::{Client, RpcApi};
 
-use lampo_common::backend::{deserialize, serialize};
-use lampo_common::backend::{Backend, TxResult};
-use lampo_common::backend::{Block, BlockData, BlockHash};
+use lampo_common::backend::{
+    deserialize, serialize, Backend, Block, BlockData, BlockHash, TxResult,
+};
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::{Transaction, Txid};
-use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
-use lampo_common::json;
+use lampo_common::{error, json};
 
 pub struct BitcoinCore {
     inner: Client,
@@ -343,7 +341,8 @@ impl Backend for BitcoinCore {
             else {
                 unreachable!()
             };
-            // SAFETY: the outpoint should be always present otherwise we are looking inside the wrong tx
+            // SAFETY: the outpoint should be always present otherwise we are looking inside
+            // the wrong tx
             let outpoint = tx
                 .vout
                 .iter()
@@ -466,12 +465,13 @@ impl Backend for BitcoinCore {
                     // bitcoind wallet for our transaction.
                     //
                     // This is the only place where we can query because otherwise we can
-                    // confuse ldk when we send a new best block with height X and a Confirmed transaction
-                    // event at height Y, where Y > X. In this way ldk think that a reorgs happens.
+                    // confuse ldk when we send a new best block with height X and a Confirmed
+                    // transaction event at height Y, where Y > X. In this way
+                    // ldk think that a reorgs happens.
                     //
-                    // The reorgs do not happen commonly, it is only that the bitcoind wallet is able
-                    // to answer quickly while the lampo wallet is still looking
-                    // for external transaction inside the blocks.
+                    // The reorgs do not happen commonly, it is only that the bitcoind wallet is
+                    // able to answer quickly while the lampo wallet is still
+                    // looking for external transaction inside the blocks.
                     let _ = self.process_transactions();
                 } else if self.best_height.borrow().lt(&height.into()) {
                     log::trace!(target: "bitcoind", "New best block at height {height}, out current best block is {}", self.best_height.borrow());

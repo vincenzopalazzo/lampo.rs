@@ -23,7 +23,8 @@ impl<T> Default for Emitter<T> {
 }
 
 impl<T: Clone> Emitter<T> {
-    /// Emit an event to all subscribers and drop subscribers who can't receive it.
+    /// Emit an event to all subscribers and drop subscribers who can't receive
+    /// it.
     pub fn emit(&self, event: T) {
         self.subscribers
             .lock()

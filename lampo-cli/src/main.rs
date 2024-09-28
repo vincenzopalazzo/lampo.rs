@@ -6,8 +6,7 @@ use radicle_term as term;
 
 use lampo_client::errors::Error;
 use lampo_client::UnixClient;
-use lampo_common::error;
-use lampo_common::json;
+use lampo_common::{error, json};
 
 use crate::args::LampoCliArgs;
 
