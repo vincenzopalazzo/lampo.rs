@@ -5,9 +5,8 @@ members = [
         "lampod-cli",
         "lampo-cli",
         "lampo-bitcoind",
-        "lampo-jsonrpc",
         "lampo-client",
-        "lampo-c-ffi",
+        "lampo-httpd",
         "lampo-core-wallet",
         "lampo-testing",
         "tests/tests",
@@ -19,9 +18,8 @@ default-members = [
         "lampod-cli",
         "lampo-cli",
         "lampo-bitcoind",
-        "lampo-jsonrpc",
         "lampo-client",
-        "lampo-c-ffi",
+        "lampo-httpd",
         "lampo-core-wallet",
 ]
 resolver = "2"
