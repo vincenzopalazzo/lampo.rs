@@ -10,7 +10,7 @@ lampo-common = { path = "../lampo-common" }
 lampo-bitcoind = { path = "../lampo-bitcoind" }
 lampo-core-wallet = { path = "../lampo-core-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
-tokio = { version = "1.22.0", features = ["rt"] }
+tokio = { version = "1.22.0", features = ["rt", "macros"] }
 lexopt = { version = "0.3" }
 filelock-rs = "0.1.0-beta.2"
 log = { version = "0.4", features = ["std"] }
