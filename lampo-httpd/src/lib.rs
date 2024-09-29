@@ -24,7 +24,6 @@ pub type ResultJson<T> = std::result::Result<CreatedJson<T>, actix_web::Error>;
 /// endpoint.
 pub(crate) struct AppState {
     host: String,
-    data_dir: String,
     open_api_url: String,
 
     lampod: Arc<LampoDaemon>,
@@ -33,13 +32,11 @@ pub(crate) struct AppState {
 impl AppState {
     pub fn new(
         lampod: Arc<LampoDaemon>,
-        data_dir: String,
         host: String,
         open_api_url: String,
     ) -> error::Result<Self> {
         Ok(Self {
             host,
-            data_dir,
             open_api_url,
             lampod,
         })
@@ -48,19 +45,12 @@ impl AppState {
 
 pub async fn run<T: ToSocketAddrs + Display>(
     lampod: Arc<LampoDaemon>,
-    data_dir: String,
     host: T,
     open_api_url: String,
 ) -> error::Result<()> {
     let host_str = format!("{host}");
     let server = HttpServer::new(move || {
-        let state = AppState::new(
-            lampod.clone(),
-            data_dir.clone(),
-            host_str.clone(),
-            open_api_url.clone(),
-        )
-        .unwrap();
+        let state = AppState::new(lampod.clone(), host_str.clone(), open_api_url.clone()).unwrap();
         // FIXME: It is possible to avoid mapping the service in here?
         // it ispossible to init the app outside the callback and
         // use the macros to do add services?
