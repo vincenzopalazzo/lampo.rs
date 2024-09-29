@@ -21,27 +21,15 @@ use lampo_common::error;
 use lampo_common::logger;
 use lampo_core_wallet::CoreWalletManager;
 use lampod::chain::WalletManager;
-use lampod::jsonrpc::channels::json_close_channel;
-use lampod::jsonrpc::channels::json_list_channels;
-use lampod::jsonrpc::inventory::get_info;
-use lampod::jsonrpc::offchain::json_decode_invoice;
-use lampod::jsonrpc::offchain::json_invoice;
-use lampod::jsonrpc::offchain::json_keysend;
-use lampod::jsonrpc::offchain::json_offer;
-use lampod::jsonrpc::offchain::json_pay;
-use lampod::jsonrpc::onchain::json_estimate_fees;
-use lampod::jsonrpc::onchain::json_funds;
-use lampod::jsonrpc::onchain::json_new_addr;
-use lampod::jsonrpc::open_channel::json_open_channel;
-use lampod::jsonrpc::peer_control::json_connect;
 use lampod::LampoDaemon;
 
 use crate::args::LampoCliArgs;
 
-fn main() -> error::Result<()> {
+#[tokio::main]
+async fn main() -> error::Result<()> {
     log::debug!("Started!");
     let args = args::parse_args()?;
-    run(args)?;
+    run(args).await?;
     Ok(())
 }
 
@@ -72,9 +60,8 @@ fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
 }
 
 /// Return the root directory.
-fn run(args: LampoCliArgs) -> error::Result<()> {
+async fn run(args: LampoCliArgs) -> error::Result<()> {
     let restore_wallet = args.restore_wallet;
-
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
 
@@ -196,6 +183,7 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
+    run_httpd(lampod.clone()).await?;
 
     ctrlc::set_handler(move || {
         use std::time::Duration;
@@ -207,5 +195,14 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let workder = lampod.listen().unwrap();
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     let _ = workder.join();
+    Ok(())
+}
+
+pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+    tokio::spawn(lampo_httpd::run(
+        lampod,
+        "127.0.0.1:7878",
+        "http://127.0.0.1:7878".to_owned(),
+    ));
     Ok(())
 }
