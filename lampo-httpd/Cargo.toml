@@ -8,6 +8,10 @@ actix-web = "4"
 paperclip = { version = "0.8.0", features = ["actix4"] }
 log = "*"
 paste = "1.0.15"
+serde = "*"
 
 lampo-common = { path = "../lampo-common" }
 lampod = { path = "../lampod" }
+
+# FIXME: this should be optional
+elite-rpc =  { git = "https://github.com/vincenzopalazzo/elite-rpc.git", branch = "macros/custom-method" , features = ["curl"] }

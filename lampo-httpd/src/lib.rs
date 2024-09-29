@@ -1,4 +1,6 @@
 mod commands;
+mod handler;
+mod rest_protocol;
 
 use std::net::ToSocketAddrs;
 use std::{fmt::Display, sync::Arc};
