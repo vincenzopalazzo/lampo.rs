@@ -21,7 +21,6 @@ pub fn json_open_channel(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
         log::trace!("we are not connected with the peer {}", request.node_id);
         let conn = request::Connect::try_from(request.clone())?;
         let conn = json::to_value(conn)?;
-        let _ = ctx.rt.enter();
         ctx.call("connect", conn)?;
     }
 
