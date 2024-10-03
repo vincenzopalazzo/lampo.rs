@@ -14,4 +14,4 @@ lampo-common = { path = "../lampo-common" }
 lampod = { path = "../lampod" }
 
 # FIXME: this should be optional
-elite-rpc =  { git = "https://github.com/vincenzopalazzo/elite-rpc.git", branch = "macros/custom-method" , features = ["curl"] }
+elite-rpc =  { version = "0.0.4", features = ["curl"] }
