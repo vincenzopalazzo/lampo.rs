@@ -1,13 +1,11 @@
 #[allow(dead_code)]
 mod args;
 
-use std::env;
-use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
+use lampo_httpd::handler::HttpdHandler;
 use radicle_term as term;
 
 use lampo_bitcoind::BitcoinCore;
@@ -145,8 +143,14 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
+
     run_httpd(lampod.clone()).await?;
 
+    let handler = Arc::new(HttpdHandler::new(format!(
+        "{}:{}",
+        lampo_conf.api_host, lampo_conf.api_port
+    ))?);
+    lampod.add_external_handler(handler)?;
     ctrlc::set_handler(move || {
         use std::time::Duration;
         log::info!("Shutdown...");
@@ -161,10 +165,14 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 }
 
 pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
-    tokio::spawn(lampo_httpd::run(
-        lampod,
-        "127.0.0.1:7878",
-        "http://127.0.0.1:7878".to_owned(),
-    ));
+    let url = format!("{}:{}", lampod.conf().api_host, lampod.conf().api_port);
+    let mut http_hosting = url.clone();
+    if let Some(clean_url) = url.strip_prefix("http://") {
+        http_hosting = clean_url.to_string();
+    } else if let Some(clean_url) = url.strip_prefix("https://") {
+        http_hosting = clean_url.to_string();
+    }
+    log::info!("preparing httpd api on addr `{url}`");
+    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
     Ok(())
 }

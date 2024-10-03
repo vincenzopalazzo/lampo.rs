@@ -49,6 +49,8 @@ pub async fn run<T: ToSocketAddrs + Display>(
     open_api_url: String,
 ) -> error::Result<()> {
     let host_str = format!("{host}");
+    log::info!("httpd api running on `{host_str}`");
+
     let server = HttpServer::new(move || {
         let state = AppState::new(lampod.clone(), host_str.clone(), open_api_url.clone()).unwrap();
         // FIXME: It is possible to avoid mapping the service in here?
@@ -71,7 +73,6 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .build()
     })
     .bind(host)?;
-
     server.run().await?;
     Ok(())
 }
@@ -121,14 +122,28 @@ async fn swagger_api(data: web::Data<AppState>) -> HttpResponseWrapper {
 
 #[macro_export]
 macro_rules! post {
-   ($name:ident, response: $res_ty:ty) => {
-       post!($name, request: json::Value, response: $res_ty);
+    ($name:ident, response: $res_ty:ty) => {
+        paste! {
+            #[actix::api_v2_operation]
+            #[actix::post($name)]
+            pub async fn [<rest_$name>](
+                state: web::Data<AppState>,
+            ) -> ResultJson<$res_ty> {
+                let response = $name(&state.lampod, &json::json!({}));
+                if let Err(err) = response {
+                    return Err(actix_web::error::ErrorInternalServerError(err));
+                }
+                let response = json::from_value::<$res_ty>(response.unwrap());
+                let response = response.unwrap();
+                Ok(CreatedJson(response))
+            }
+        }
     };
     ($name:ident, request: $req_ty:ty, response: $res_ty:ty) => {
-        paste!{
+        paste! {
             #[actix::api_v2_operation]
-            #[actix::post(concat!("/", stringify!($name).to_lowercase()))]
-            pub async fn [<rest_ $name>](
+            #[actix::post($name)]
+            pub async fn [<rest_$name>](
                 state: web::Data<AppState>,
                 body: Json<json::Value>,
             ) -> ResultJson<$res_ty> {
