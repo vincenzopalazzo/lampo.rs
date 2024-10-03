@@ -22,8 +22,6 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use tokio::runtime::Runtime;
-
 use lampo_common::backend::Backend;
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::conf::LampoConf;
@@ -66,9 +64,6 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
-
-    // FIXME: remove this
-    rt: Runtime,
 }
 
 unsafe impl Send for LampoDaemon {}
@@ -92,7 +87,6 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
-            rt: Runtime::new().unwrap(),
         }
     }
 

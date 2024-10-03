@@ -1,16 +1,14 @@
 #[allow(dead_code)]
 mod args;
 
-use std::env;
-use std::io;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::thread::JoinHandle;
-
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
-use std::path::Path;
 
 use radicle_term as term;
 
@@ -20,6 +18,7 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
 use lampo_core_wallet::CoreWalletManager;
+use lampo_httpd::handler::HttpdHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
 
@@ -62,6 +61,8 @@ fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
 /// Return the root directory.
 async fn run(args: LampoCliArgs) -> error::Result<()> {
     let restore_wallet = args.restore_wallet;
+    let dev_force_poll = args.dev_force_poll;
+
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
 
@@ -183,8 +184,14 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
+
     run_httpd(lampod.clone()).await?;
 
+    let handler = Arc::new(HttpdHandler::new(format!(
+        "{}:{}",
+        lampo_conf.api_host, lampo_conf.api_port
+    ))?);
+    lampod.add_external_handler(handler)?;
     ctrlc::set_handler(move || {
         use std::time::Duration;
         log::info!("Shutdown...");
@@ -199,10 +206,14 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 }
 
 pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
-    tokio::spawn(lampo_httpd::run(
-        lampod,
-        "127.0.0.1:7878",
-        "http://127.0.0.1:7878".to_owned(),
-    ));
+    let url = format!("{}:{}", lampod.conf().api_host, lampod.conf().api_port);
+    let mut http_hosting = url.clone();
+    if let Some(clean_url) = url.strip_prefix("http://") {
+        http_hosting = clean_url.to_string();
+    } else if let Some(clean_url) = url.strip_prefix("https://") {
+        http_hosting = clean_url.to_string();
+    }
+    log::info!("preparing httpd api on addr `{url}`");
+    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
     Ok(())
 }
