@@ -7,16 +7,14 @@ use std::{fmt::Display, sync::Arc};
 
 use actix::{web, HttpResponseWrapper, OpenApiExt};
 use actix_web::{App, HttpResponse, HttpServer};
-use commands::inventory::{rest_get_info, rest_json_network_channels};
-use commands::offchain::{rest_json_decode_invoice, rest_json_invoice, rest_json_pay};
-use commands::peer::{
-    rest_json_close_channel, rest_json_connect, rest_json_list_channels, rest_json_open_channel,
-};
 use paperclip::actix::{self, CreatedJson};
 
 use lampo_common::error;
 use lampod::LampoDaemon;
 
+use commands::inventory::{rest_getinfo, rest_networkchannels};
+use commands::offchain::{rest_decode, rest_invoice, rest_pay};
+use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel};
 /// Result type for json responses
 pub type ResultJson<T> = std::result::Result<CreatedJson<T>, actix_web::Error>;
 
@@ -60,15 +58,15 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .app_data(web::Data::new(state))
             .wrap_api()
             .service(swagger_api)
-            .service(rest_get_info)
-            .service(rest_json_network_channels)
-            .service(rest_json_connect)
-            .service(rest_json_open_channel)
-            .service(rest_json_close_channel)
-            .service(rest_json_list_channels)
-            .service(rest_json_invoice)
-            .service(rest_json_decode_invoice)
-            .service(rest_json_pay)
+            .service(rest_getinfo)
+            .service(rest_channels)
+            .service(rest_connect)
+            .service(rest_fundchannel)
+            .service(rest_close)
+            .service(rest_networkchannels)
+            .service(rest_invoice)
+            .service(rest_decode)
+            .service(rest_pay)
             .with_json_spec_at("/api/v1")
             .build()
     })
@@ -129,7 +127,7 @@ macro_rules! post {
             pub async fn [<rest_$name>](
                 state: web::Data<AppState>,
             ) -> ResultJson<$res_ty> {
-                let response = $name(&state.lampod, &json::json!({}));
+                let response = [<json_$name>](&state.lampod, &json::json!({}));
                 if let Err(err) = response {
                     return Err(actix_web::error::ErrorInternalServerError(err));
                 }
@@ -153,7 +151,7 @@ macro_rules! post {
                 }
                 let request = request.unwrap();
                 let request = json::to_value(&request).unwrap();
-                let response = $name(&state.lampod, &request);
+                let response = [<json_$name>](&state.lampod, &request);
                 if let Err(err) = response {
                     return Err(actix_web::error::ErrorInternalServerError(err));
                 }
