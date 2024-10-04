@@ -5,9 +5,9 @@ use paste::paste;
 
 use lampo_common::json;
 use lampo_common::model::{request, response};
-use lampod::jsonrpc::inventory::{get_info, json_network_channels};
+use lampod::jsonrpc::inventory::*;
 
 use crate::{post, AppState, ResultJson};
 
-post!(get_info, response: response::GetInfo);
-post!(json_network_channels, request: json::Value, response: response::NetworkChannels);
+post!(getinfo, response: response::GetInfo);
+post!(networkchannels, request: json::Value, response: response::NetworkChannels);
