@@ -5,6 +5,8 @@ use lampo_common::error;
 use lampo_common::model::response::NetworkInfo;
 use lampo_common::model::GetInfo;
 
+use crate::async_run;
+
 use super::{LampoChannelManager, LampoPeerManager};
 
 pub struct LampoInventoryManager {
@@ -28,7 +30,8 @@ impl LampoInventoryManager {
         let alias = self.channel_manager.conf.alias.clone();
         // we have to put "" in case of alias missing as cln provide us with a random alias.
         let alias = alias.unwrap_or_default();
-        let (block_hash, height) = self.channel_manager.onchain.backend.get_best_block()?;
+        let (block_hash, height) =
+            async_run!(self.channel_manager.onchain.backend.get_best_block()).unwrap();
         let blockheight = height.unwrap_or_default();
         let lampo_dir = self.channel_manager.conf.root_path.to_string();
         // We provide a vector here as there may be other types of address in future like tor and ipv6.
