@@ -7,9 +7,9 @@ use lampo_common::json;
 
 #[derive(Debug)]
 pub struct LampoCliArgs {
-    pub socket: String,
     pub method: String,
     pub args: HashMap<String, json::Value>,
+    pub url: String,
 }
 
 struct Help {
@@ -40,26 +40,21 @@ Options
 pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     use lexopt::prelude::*;
 
-    let mut data_dir: Option<String> = None;
-    let mut network: Option<String> = None;
-    let mut socket: Option<String> = None;
+    let mut _network: Option<String> = None;
     let mut method: Option<String> = None;
+    let mut url: Option<String> = None;
     let mut args = HashMap::<String, json::Value>::new();
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
-            Short('d') | Long("data-dir") => {
-                let val: String = parser.value()?.parse()?;
-                data_dir = Some(val);
-            }
             Short('n') | Long("network") => {
                 let val: String = parser.value()?.parse()?;
-                network = Some(val);
+                _network = Some(val);
             }
-            Short('s') | Long("socket") => {
-                let val: String = parser.value()?.parse()?;
-                socket = Some(val);
+            Short('u') | Long("url") => {
+                let var: String = parser.value()?.parse()?;
+                url = Some(var);
             }
             Long("help") => {
                 let _ = print_help();
@@ -102,29 +97,9 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         }
     }
 
-    // If data-dir is specified and socket is not specified,
-    // we need to get the socket path from it
-    // by appending the network name (default: testnet) to the path
-    // and adding the socket path (lampod.socket)
-    if socket.is_none() {
-        let data_dir = data_dir
-            .or_else(|| {
-                #[allow(deprecated)]
-                std::env::home_dir().map(|path| path.to_string_lossy().to_string())
-            })
-            .unwrap();
-        let data_dir = format!("{data_dir}/.lampo");
-        let network = network.unwrap_or_else(|| "testnet".to_owned());
-        let socket_path = format!("{}/{}{}", data_dir, network, "/lampod.socket");
-        log::debug!("socket path is {:?}", socket_path);
-        socket = Some(socket_path);
-    }
-
     log::debug!("args parser are {:?} {:?}", method, args);
     Ok(LampoCliArgs {
-        socket: socket.ok_or_else(|| lexopt::Error::MissingValue {
-            option: Some("Socket path need to be specified".to_owned()),
-        })?,
+        url: url.unwrap_or("http://127.0.0.1:7979".to_string()),
         method: method.ok_or_else(|| lexopt::Error::MissingValue {
             option: Some(
                 "Too few params, a method need to be specified. Try run `lampo-cli --help`"

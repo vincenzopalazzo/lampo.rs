@@ -1,13 +1,11 @@
 #[allow(dead_code)]
 mod args;
 
-use std::env;
-use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
+use lampo_httpd::handler::HttpdHandler;
 use radicle_term as term;
 
 use lampo_bitcoind::BitcoinCore;
@@ -16,36 +14,21 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
 use lampo_core_wallet::CoreWalletManager;
-use lampo_jsonrpc::Handler;
-use lampo_jsonrpc::JSONRPCv2;
 use lampod::chain::WalletManager;
-use lampod::jsonrpc::channels::json_close_channel;
-use lampod::jsonrpc::channels::json_list_channels;
-use lampod::jsonrpc::inventory::get_info;
-use lampod::jsonrpc::offchain::json_decode_invoice;
-use lampod::jsonrpc::offchain::json_invoice;
-use lampod::jsonrpc::offchain::json_keysend;
-use lampod::jsonrpc::offchain::json_offer;
-use lampod::jsonrpc::offchain::json_pay;
-use lampod::jsonrpc::onchain::json_estimate_fees;
-use lampod::jsonrpc::onchain::json_funds;
-use lampod::jsonrpc::onchain::json_new_addr;
-use lampod::jsonrpc::open_channel::json_open_channel;
-use lampod::jsonrpc::peer_control::json_connect;
-use lampod::jsonrpc::CommandHandler;
 use lampod::LampoDaemon;
 
 use crate::args::LampoCliArgs;
 
-fn main() -> error::Result<()> {
+#[tokio::main]
+async fn main() -> error::Result<()> {
     log::debug!("Started!");
     let args = args::parse_args()?;
-    run(args)?;
+    run(args).await?;
     Ok(())
 }
 
 /// Return the root directory.
-fn run(args: LampoCliArgs) -> error::Result<()> {
+async fn run(args: LampoCliArgs) -> error::Result<()> {
     let mnemonic = if args.restore_wallet {
         let inputs: String = term::input(
             "BIP 39 Mnemonic",
@@ -152,9 +135,6 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     // Init the lampod
     lampod.init(client)?;
 
-    let rpc_handler = Arc::new(CommandHandler::new(&lampo_conf)?);
-    lampod.add_external_handler(rpc_handler.clone())?;
-
     log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
     let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
         .map_err(|err| {
@@ -163,13 +143,17 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
-    let (jsorpc_worker, handler) = run_jsonrpc(lampod.clone()).unwrap();
-    rpc_handler.set_handler(handler.clone());
 
+    run_httpd(lampod.clone()).await?;
+
+    let handler = Arc::new(HttpdHandler::new(format!(
+        "{}:{}",
+        lampo_conf.api_host, lampo_conf.api_port
+    ))?);
+    lampod.add_external_handler(handler)?;
     ctrlc::set_handler(move || {
         use std::time::Duration;
         log::info!("Shutdown...");
-        handler.stop();
         std::thread::sleep(Duration::from_secs(5));
         std::process::exit(0);
     })?;
@@ -177,33 +161,18 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
     let workder = lampod.listen().unwrap();
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     let _ = workder.join();
-    let _ = jsorpc_worker.join().unwrap();
     Ok(())
 }
 
-fn run_jsonrpc(
-    lampod: Arc<LampoDaemon>,
-) -> error::Result<(JoinHandle<io::Result<()>>, Arc<Handler<LampoDaemon>>)> {
-    let socket_path = format!("{}/lampod.socket", lampod.root_path());
-    // we take the lock with the pid file so if we are at this point
-    // we can delete the socket because there is no other process
-    // that it is running.
-    let _ = std::fs::remove_file(socket_path.clone());
-    env::set_var("LAMPO_UNIX", socket_path.clone());
-    let server = JSONRPCv2::new(lampod, &socket_path)?;
-    server.add_rpc("getinfo", get_info).unwrap();
-    server.add_rpc("connect", json_connect).unwrap();
-    server.add_rpc("fundchannel", json_open_channel).unwrap();
-    server.add_rpc("newaddr", json_new_addr).unwrap();
-    server.add_rpc("channels", json_list_channels).unwrap();
-    server.add_rpc("funds", json_funds).unwrap();
-    server.add_rpc("invoice", json_invoice).unwrap();
-    server.add_rpc("offer", json_offer).unwrap();
-    server.add_rpc("decode", json_decode_invoice).unwrap();
-    server.add_rpc("pay", json_pay).unwrap();
-    server.add_rpc("keysend", json_keysend).unwrap();
-    server.add_rpc("fees", json_estimate_fees).unwrap();
-    server.add_rpc("close", json_close_channel).unwrap();
-    let handler = server.handler();
-    Ok((server.spawn(), handler))
+pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+    let url = format!("{}:{}", lampod.conf().api_host, lampod.conf().api_port);
+    let mut http_hosting = url.clone();
+    if let Some(clean_url) = url.strip_prefix("http://") {
+        http_hosting = clean_url.to_string();
+    } else if let Some(clean_url) = url.strip_prefix("https://") {
+        http_hosting = clean_url.to_string();
+    }
+    log::info!("preparing httpd api on addr `{url}`");
+    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
+    Ok(())
 }

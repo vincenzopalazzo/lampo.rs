@@ -14,7 +14,6 @@ pub mod actions;
 mod builtin;
 pub mod chain;
 pub mod command;
-pub mod handler;
 pub mod jsonrpc;
 pub mod ln;
 pub mod persistence;
@@ -23,12 +22,11 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use tokio::runtime::Runtime;
-
 use lampo_common::backend::Backend;
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::events::Event;
 use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
@@ -39,7 +37,6 @@ use lampo_common::wallet::WalletManager;
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
-use crate::handler::external_handler::ExternalHandler;
 use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
@@ -67,9 +64,6 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
-
-    // FIXME: remove this
-    rt: Runtime,
 }
 
 unsafe impl Send for LampoDaemon {}
@@ -93,7 +87,6 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
-            rt: Runtime::new().unwrap(),
         }
     }
 

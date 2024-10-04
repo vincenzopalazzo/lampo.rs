@@ -23,3 +23,6 @@ chrono = { version = "0.4", features = ["std"], default-features = false }
 serde_json = "1.0"
 serde = "1.0"
 hex = "0.4.3"
+
+# FIXME: make this option and expose under a feature flag
+paperclip = { version = "0.8.0", features = ["actix4"] }

@@ -8,11 +8,11 @@ edition = "2021"
 lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 lampo-bitcoind = { path = "../lampo-bitcoind" }
-lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-core-wallet = { path = "../lampo-core-wallet" }
-tokio = { version = "1.22.0", features = ["rt"] }
+lampo-httpd = { path = "../lampo-httpd" }
+tokio = { version = "1.22.0", features = ["rt", "macros"] }
 lexopt = { version = "0.3" }
 filelock-rs = "0.1.0-beta.2"
 log = { version = "0.4", features = ["std"] }
-radicle-term = { git = "https://github.com/radicle-dev/heartwood.git" }
 ctrlc = "3.4.0"
+radicle-term = "0.11.0"

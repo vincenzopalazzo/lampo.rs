@@ -47,6 +47,8 @@ pub struct LampoCliArgs {
     pub bitcoind_user: Option<String>,
     pub bitcoind_pass: Option<String>,
     pub dev_force_poll: bool,
+    pub api_host: Option<String>,
+    pub api_port: Option<u64>,
 }
 
 impl TryInto<LampoConf> for LampoCliArgs {
@@ -91,6 +93,12 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if self.log_level.is_some() {
             conf.log_level = self.log_level.unwrap();
         }
+        if let Some(api_host) = self.api_host {
+            conf.api_host = api_host;
+        }
+        if let Some(api_port) = self.api_port {
+            conf.api_port = api_port;
+        }
         Ok(conf)
     }
 }
@@ -108,6 +116,8 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut bitcoind_pass: Option<String> = None;
     let mut restore_wallet = false;
     let mut dev_force_poll = false;
+    let mut api_host: Option<String> = None;
+    let mut api_port: Option<u64> = None;
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -149,6 +159,14 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
             }
             // FIXME: allow only in debug mode
             Long("dev-force-poll") => dev_force_poll = true,
+            Long("api-host") => {
+                let var: String = parser.value()?.parse()?;
+                api_host = Some(var);
+            }
+            Long("api-port") => {
+                let var: u64 = parser.value()?.parse()?;
+                api_port = Some(var);
+            }
             Long("help") => {
                 let _ = print_help();
                 std::process::exit(0);
@@ -170,6 +188,8 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         // Default log level is info if it is not specified
         // in the command line
         log_level: level,
+        api_host,
+        api_port,
     })
 }
 
