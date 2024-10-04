@@ -4,7 +4,6 @@ mod inventory_manager;
 mod offchain_manager;
 mod peer_manager;
 
-pub mod events;
 pub mod peer_event;
 
 pub use channel_manager::LampoChannelManager;

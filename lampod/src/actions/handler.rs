@@ -1,5 +1,6 @@
 //! Handler module implementation that
 use std::cell::RefCell;
+use std::fmt::format;
 use std::sync::Arc;
 
 use lampo_common::chan;
@@ -14,11 +15,9 @@ use lampo_common::jsonrpc::Request;
 use lampo_common::ldk;
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
-use lampo_common::types::ChannelState;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
-use crate::ln::events::PeerEvents;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::LampoDaemon;
 
@@ -170,7 +169,7 @@ impl Handler for LampoHandler {
                 // FIXME: estimate the fee rate with a callback
                 let fee = self.chain_manager.backend.fee_rate_estimation(6).map_err(|err| {
                     let msg = format!("Channel Opening Error: {err}");
-                    self.emit(Event::Lightning(LightningEvent::ChannelEvent { state: ChannelState::OpeningError, message : msg}));
+                    self.emit(Event::Lightning(LightningEvent::ChannelEvent { state: "error".to_owned(), message : msg}));
                     err
                 })?;
                 log::info!("fee estimated {:?} sats", fee);
