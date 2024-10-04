@@ -4,7 +4,6 @@ use lampo_common::json;
 use lampo_common::jsonrpc::Error;
 use lampo_common::model::request;
 
-use crate::ln::events::ChannelEvents;
 use crate::LampoDaemon;
 
 pub fn json_fundchannel(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
