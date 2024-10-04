@@ -16,17 +16,13 @@ use lampo_common::ldk::net;
 use lampo_common::ldk::net::SocketDescriptor;
 use lampo_common::ldk::onion_message::messenger::{DefaultMessageRouter, OnionMessenger};
 use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
-use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
+use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph};
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
-
-use super::channel_manager::{LampoArcChannelManager, LampoChainMonitor, LampoGraph};
-use super::events::PeerEvents;
-use super::peer_event;
 
 pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<LampoKeysManager>,
@@ -40,7 +36,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
 
 pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     SocketDescriptor,
-    Arc<LampoArcChannelManager<M, T, T, L>>,
+    Arc<LampoArcChannelManager<M, L>>,
     Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, Arc<T>, Arc<L>>>,
     Arc<LampoArcOnionMessenger<L>>,
     Arc<L>,
@@ -103,7 +99,7 @@ impl LampoPeerManager {
         ));
 
         let lightning_msg_handler = MessageHandler {
-            chan_handler: channel_manager.channeld.clone().unwrap(),
+            chan_handler: channel_manager.manager(),
             onion_message_handler: onion_messenger,
             route_handler: gossip_sync,
             custom_message_handler: IgnoringMessageHandler {},
@@ -212,26 +208,8 @@ impl LampoPeerManager {
         };
         manager.peer_by_node_id(&peer_id).is_some()
     }
-}
 
-#[async_trait]
-impl PeerEvents for LampoPeerManager {
-    async fn handle(&self, event: super::peer_event::PeerCommand) -> error::Result<()> {
-        match event {
-            peer_event::PeerCommand::Connect(node_id, addr, chan) => {
-                let connect = Connect {
-                    node_id: node_id.to_string(),
-                    addr: addr.ip().to_string(),
-                    port: addr.port() as u64,
-                };
-                self.connect(node_id, addr).await?;
-                chan.send(connect)?;
-            }
-        };
-        Ok(())
-    }
-
-    async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
+    pub async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
         let Some(close_callback) = net::connect_outbound(self.manager(), node_id, host).await
         else {
             error::bail!("impossible connect with the peer `{node_id}`");

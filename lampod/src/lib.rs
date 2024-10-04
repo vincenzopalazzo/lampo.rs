@@ -53,7 +53,7 @@ use crate::utils::logger::LampoLogger;
 /// top of the LampoDaemon.
 #[repr(C)]
 pub struct LampoDaemon {
-    conf: LampoConf,
+    conf: Arc<LampoConf>,
     peer_manager: Option<Arc<LampoPeerManager>>,
     onchain_manager: Option<Arc<LampoChainManager>>,
     channel_manager: Option<Arc<LampoChannelManager>>,
@@ -70,7 +70,7 @@ unsafe impl Send for LampoDaemon {}
 unsafe impl Sync for LampoDaemon {}
 
 impl LampoDaemon {
-    pub fn new(config: LampoConf, wallet_manager: Arc<dyn WalletManager>) -> Self {
+    pub fn new(config: Arc<LampoConf>, wallet_manager: Arc<dyn WalletManager>) -> Self {
         let root_path = config.path();
         //FIXME: sync some where else
         let wallet = wallet_manager.clone();
@@ -94,8 +94,8 @@ impl LampoDaemon {
         self.conf.path()
     }
 
-    pub fn conf(&self) -> &LampoConf {
-        &self.conf
+    pub fn conf(&self) -> Arc<LampoConf> {
+        self.conf.clone()
     }
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
@@ -111,29 +111,15 @@ impl LampoDaemon {
 
     pub fn init_channeld(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init channeld ...");
-        let mut manager = LampoChannelManager::new(
+        let manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
             self.onchain_manager(),
             self.wallet_manager.clone(),
             self.persister.clone(),
         );
-        let (block_hash, height) = self.onchain_manager().backend.get_best_block()?;
-        let block = self.onchain_manager().backend.get_block(&block_hash)?;
-        let timestamp = match block {
-            lampo_common::backend::BlockData::FullBlock(block) => block.header.time,
-            lampo_common::backend::BlockData::HeaderOnly(header) => header.time,
-        };
-
-        let height = height.ok_or(error::anyhow!("height not present"))?;
-
-        if manager.is_restarting()? {
-            manager.restart()?;
-        } else {
-            manager.start(block_hash, Height::from_consensus(height)?, timestamp)?;
-        }
-
         self.channel_manager = Some(Arc::new(manager));
+        self.channel_manager().listen()?;
         Ok(())
     }
 
@@ -151,7 +137,7 @@ impl LampoDaemon {
             self.wallet_manager().ldk_keys().keys_manager.clone(),
             self.channel_manager(),
             self.logger.clone(),
-            Arc::new(self.conf.clone()),
+            self.conf.clone(),
             self.onchain_manager(),
         )?;
         self.offchain_manager = Some(Arc::new(manager));
@@ -216,6 +202,7 @@ impl LampoDaemon {
         self.init_inventory_manager()?;
         self.init_event_handler()?;
         client.set_handler(self.handler());
+        client.set_channel_manager(self.channel_manager().manager());
         self.channel_manager().set_handler(self.handler());
         Ok(())
     }
