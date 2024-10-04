@@ -58,7 +58,7 @@ pub type LampoArcChannelManager<M, T, F, L> = ChannelManager<
     Arc<L>,
 >;
 
-type LampoChannel =
+pub type LampoChannel =
     LampoArcChannelManager<LampoChainMonitor, LampoChainManager, LampoChainManager, LampoLogger>;
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
