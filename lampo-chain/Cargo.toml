@@ -6,5 +6,6 @@ edition = "2021"
 [dependencies]
 lampo-common = { path = "../lampo-common" }
 lampod = { path = "../lampod" }
-lightning-transaction-sync = { version = "0.0.123", features = ["esplora-blocking"] }
+lightning-block-sync = { version = "0.0.123", features = [ "rpc-client" ] }
 log = "0.4.17"
+tokio ={ version = "*"}

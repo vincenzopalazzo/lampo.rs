@@ -1,3 +1,4 @@
+use core::sync;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -6,12 +7,14 @@ use lampo_common::bitcoin;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::Transaction;
 use lampo_common::ldk;
+use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{
     BroadcasterInterface, ConfirmationTarget, FeeEstimator,
 };
-use lampo_common::ldk::chain::Filter;
 use lampo_common::ldk::routing::utxo::UtxoLookup;
 use lampo_common::wallet::WalletManager;
+
+use crate::sync;
 
 #[derive(Clone)]
 pub struct LampoChainManager {
@@ -28,10 +31,6 @@ impl LampoChainManager {
             backend: client,
             wallet_manager,
         }
-    }
-
-    pub fn is_lightway(&self) -> bool {
-        self.backend.is_lightway()
     }
 
     fn print_ldk_target_to_string(&self, target: ConfirmationTarget) -> String {
@@ -104,19 +103,32 @@ impl BroadcasterInterface for LampoChainManager {
     }
 }
 
-impl Filter for LampoChainManager {
-    fn register_output(&self, output: ldk::chain::WatchedOutput) {
-        self.backend.register_output(output);
+impl BlockSource for LampoChainManager {
+    fn get_best_block<'a>(
+        &'a self,
+    ) -> ldk::block_sync::AsyncBlockSourceResult<(bitcoin::BlockHash, Option<u32>)> {
+        sync!(self.backend.get_best_block().await)
     }
 
-    fn register_tx(&self, txid: &bitcoin::Txid, script_pubkey: &bitcoin::Script) {
-        self.backend.watch_utxo(txid, script_pubkey);
+    fn get_block<'a>(
+        &'a self,
+        header_hash: &'a bitcoin::BlockHash,
+    ) -> ldk::block_sync::AsyncBlockSourceResult<'a, ldk::block_sync::BlockData> {
+        sync!(self.backend.get_block(header_hash).await)
+    }
+
+    fn get_header<'a>(
+        &'a self,
+        header_hash: &'a bitcoin::BlockHash,
+        height_hint: Option<u32>,
+    ) -> ldk::block_sync::AsyncBlockSourceResult<'a, ldk::block_sync::BlockHeaderData> {
+        sync!(self.backend.get_header(header_hash, height_hint).await)
     }
 }
 
 impl UtxoLookup for LampoChainManager {
     fn get_utxo(&self, _: &ChainHash, _: u64) -> lampo_common::backend::UtxoResult {
-        todo!()
+        unimplemented!()
     }
 }
 

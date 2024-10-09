@@ -118,6 +118,7 @@ impl LampoDaemon {
             self.wallet_manager.clone(),
             self.persister.clone(),
         );
+        // This should be rewritten too, probably there is something more simple
         let (block_hash, height) = self.onchain_manager().backend.get_best_block()?;
         let block = self.onchain_manager().backend.get_block(&block_hash)?;
         let timestamp = match block {

@@ -126,57 +126,14 @@ impl LampoChannelManager {
         self.handler.borrow().clone().unwrap()
     }
 
-    pub fn listen(self: Arc<Self>) -> JoinHandle<()> {
-        if self.is_restarting().unwrap() {
-            self.resume_channels().unwrap();
-            self.load_channel_monitors(true).unwrap();
-        }
-        std::thread::spawn(move || {
-            log::info!(target: "manager", "listening on chain event on the channel manager");
-            let events = self.handler().events();
-            loop {
-                let Ok(Event::OnChain(event)) = events.recv() else {
-                    continue;
-                };
-                log::trace!(target: "channel_manager", "event received {:?}", event);
-                match event {
-                    OnChainEvent::NewBestBlock((hash, height)) => {
-                        log::info!(target: "channel_manager", "new best block with hash `{}` at height `{height}`", hash.block_hash());
-                        self.chain_monitor()
-                            .best_block_updated(&hash, height.to_consensus_u32());
-                        self.manager()
-                            .best_block_updated(&hash, height.to_consensus_u32());
-                    }
-                    OnChainEvent::ConfirmedTransaction((tx, idx, header, height)) => {
-                        log::info!(target: "channel_manager", "confirmed transaction with txid `{}` at height `{height}`", tx.txid());
-                        self.chain_monitor().transactions_confirmed(
-                            &header,
-                            &[(idx as usize, &tx)],
-                            height.to_consensus_u32(),
-                        );
-                        self.manager().transactions_confirmed(
-                            &header,
-                            &[(idx as usize, &tx)],
-                            height.to_consensus_u32(),
-                        );
-                    }
-                    OnChainEvent::UnconfirmedTransaction(txid) => {
-                        log::info!(target: "channel_manager", "transaction with txid `{txid}` is still unconfirmed");
-                        self.chain_monitor().transaction_unconfirmed(&txid);
-                        self.manager().transaction_unconfirmed(&txid);
-                    }
-                    OnChainEvent::DiscardedTransaction(txid) => {
-                        log::warn!(target: "channel_manager", "transaction with txid `{txid}` discarded");
-                    }
-                    _ => continue,
-                }
-            }
-        })
+    pub fn listen(self: Arc<Self>) -> error::Result<()> {
+        Ok(())
     }
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {
         ChainMonitor::new(
-            Some(self.onchain.clone()),
+            // FIXME: this is needed when use esplora or electrum
+            None,
             self.onchain.clone(),
             self.logger.clone(),
             self.onchain.clone(),
@@ -339,37 +296,6 @@ impl LampoChannelManager {
             <(BlockHash, LampoChannel)>::read(&mut channel_manager_file, read_args)
                 .map_err(|err| error::anyhow!("{err}"))?;
         self.channeld = Some(channel_manager.into());
-        Ok(())
-    }
-
-    pub fn resume_channels(&self) -> error::Result<()> {
-        let mut relevant_txids_one = self
-            .channeld
-            .clone()
-            .unwrap()
-            .get_relevant_txids()
-            .iter()
-            .map(|(txid, _, _)| txid.clone())
-            .collect::<Vec<_>>();
-        let mut relevant_txids_two = self
-            .chain_monitor()
-            .get_relevant_txids()
-            .iter()
-            .map(|(txid, _, _)| txid.clone())
-            .collect::<Vec<_>>();
-        log::debug!(
-            "transactions {:?} {:?}",
-            relevant_txids_one,
-            relevant_txids_two
-        );
-        // FIXME: check if some of these transaction are out of chain
-        self.onchain
-            .backend
-            .manage_transactions(&mut relevant_txids_one)?;
-        self.onchain
-            .backend
-            .manage_transactions(&mut relevant_txids_two)?;
-        self.onchain.backend.process_transactions()?;
         Ok(())
     }
 
