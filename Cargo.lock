@@ -586,6 +586,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "chunked_transfer"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4de3bc4ea267985becf712dc6d9eed8b04c953b3fcfb339ebc87acd9804901"
+
+[[package]]
 name = "clightning-testing"
 version = "0.1.0"
 source = "git+https://github.com/laanwj/cln4rust.git#a20c7a2729b0d5e70aee46b97dcaaa297c88334a"
@@ -1198,12 +1204,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "lampo-bitcoind"
+name = "lampo-chain"
 version = "0.1.0"
 dependencies = [
- "bitcoincore-rpc",
+ "base64 0.13.1",
  "lampo-common",
+ "lampod",
+ "lightning-block-sync",
  "log",
+ "tokio",
 ]
 
 [[package]]
@@ -1275,7 +1284,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clightning-testing",
- "lampo-bitcoind",
+ "lampo-chain",
  "lampo-common",
  "lampo-core-wallet",
  "lampod",
@@ -1305,7 +1314,7 @@ version = "0.1.0"
 dependencies = [
  "ctrlc",
  "filelock-rs",
- "lampo-bitcoind",
+ "lampo-chain",
  "lampo-common",
  "lampo-core-wallet",
  "lampo-httpd",
@@ -1403,8 +1412,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61e1e70fa351daccede0c366cf16320b16a3e42b05ae3c7ec9c0df6b5d3a3e18"
 dependencies = [
  "bitcoin 0.30.2",
+ "chunked_transfer",
  "hex-conservative",
  "lightning",
+ "serde_json",
 ]
 
 [[package]]
