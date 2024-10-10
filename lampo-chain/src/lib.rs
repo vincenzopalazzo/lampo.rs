@@ -20,6 +20,7 @@ pub struct LampoChainSync {
     rpc_client: Arc<RpcClient>,
     channelmanager: RefCell<Option<Arc<LampoChannel>>>,
     chainmonitor: RefCell<Option<Arc<LampoChainMonitor>>>,
+    handler: RefCell<Option<Arc<dyn lampo_common::handler::Handler>>>,
 }
 
 unsafe impl Send for LampoChainSync {}
@@ -115,30 +116,6 @@ impl Backend for LampoChainSync {
         unimplemented!()
     }
 
-    // FIXME: this should be implemented by the block source no?
-    fn get_best_block(
-        &self,
-    ) -> lampo_common::error::Result<(lampo_common::bitcoin::BlockHash, Option<u32>)> {
-        unimplemented!()
-    }
-
-    // FIXME: this should be implemented by the block source no?
-    fn get_block<'a>(
-        &'a self,
-        header_hash: &'a lampo_common::bitcoin::BlockHash,
-    ) -> lampo_common::error::Result<lampo_common::backend::BlockData> {
-        unimplemented!()
-    }
-
-    fn get_header<'a>(
-        &'a self,
-        header_hash: &'a lampo_common::bitcoin::BlockHash,
-        height_hint: Option<u32>,
-    ) -> lampo_common::backend::AsyncBlockSourceResult<'a, lampo_common::backend::BlockHeaderData>
-    {
-        unimplemented!("`get_header` is not implemented for LampoChainSync");
-    }
-
     fn get_transaction(
         &self,
         txid: &lampo_common::bitcoin::Txid,
@@ -162,10 +139,6 @@ impl Backend for LampoChainSync {
         unimplemented!()
     }
 
-    fn is_lightway(&self) -> bool {
-        unimplemented!()
-    }
-
     fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
         tokio::spawn(async move {
             let mut cache = UnboundedCache::new();
@@ -186,39 +159,12 @@ impl Backend for LampoChainSync {
         Ok(())
     }
 
-    fn manage_transactions(
-        &self,
-        txs: &mut Vec<lampo_common::bitcoin::Txid>,
-    ) -> lampo_common::error::Result<()> {
-        unimplemented!()
-    }
-
     fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
         unimplemented!()
     }
 
-    fn process_transactions(&self) -> lampo_common::error::Result<()> {
-        unimplemented!()
+    fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {
+        self.handler.borrow_mut().replace(handler);
     }
-
-    fn register_output(
-        &self,
-        output: lampo_common::backend::WatchedOutput,
-    ) -> Option<(usize, lampo_common::bitcoin::Transaction)> {
-        unimplemented!()
-    }
-
-    fn set_handler(&self, _: Arc<dyn lampo_common::handler::Handler>) {
-        unimplemented!()
-    }
-
-    fn watch_utxo(
-        &self,
-        txid: &lampo_common::bitcoin::Txid,
-        script: &lampo_common::bitcoin::Script,
-    ) {
-        unimplemented!()
-    }
-
     // Depending for BlockSource
 }

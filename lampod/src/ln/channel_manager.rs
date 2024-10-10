@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::time::SystemTime;
 
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::{BlockHash, Transaction};
@@ -14,6 +14,7 @@ use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::keys::LampoKeysManager;
+use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
 use lampo_common::ldk::chain::{BestBlock, Confirm, Filter, Watch};
@@ -33,6 +34,7 @@ use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel, Channels};
 
 use crate::actions::handler::LampoHandler;
+use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::events::{ChangeStateChannelEvent, ChannelEvents};
 use crate::persistence::LampoPersistence;
@@ -170,25 +172,6 @@ impl LampoChannelManager {
         Channels { channels }
     }
 
-    pub fn load_channel_monitors(&self, watch: bool) -> error::Result<()> {
-        let keys = self.wallet_manager.ldk_keys().inner();
-        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
-        for (_, chan_mon) in monitors.drain(..) {
-            chan_mon.load_outputs_to_watch(&self.onchain, &self.logger);
-            if watch {
-                let monitor = self
-                    .monitor
-                    .clone()
-                    .ok_or(error::anyhow!("Channel Monitor not present"))?;
-                let outpoint = chan_mon.get_funding_txo().0;
-                monitor
-                    .watch_channel(outpoint, chan_mon)
-                    .map_err(|err| error::anyhow!("{:?}", err))?;
-            }
-        }
-        Ok(())
-    }
-
     pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
         let keys = self.wallet_manager.ldk_keys().inner();
         let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
@@ -198,6 +181,7 @@ impl LampoChannelManager {
         }
         Ok(channel_monitors)
     }
+
     pub fn graph(&self) -> Arc<LampoGraph> {
         self.graph.clone().unwrap()
     }
@@ -299,24 +283,25 @@ impl LampoChannelManager {
         Ok(())
     }
 
-    pub fn start(
-        &mut self,
-        block: BlockHash,
-        height: Height,
-        block_timestamp: u32,
-    ) -> error::Result<()> {
+    pub fn start(&mut self) -> error::Result<()> {
+        let (block_hash, block_height) = async_run!(self.onchain.get_best_block()).unwrap();
         let chain_params = ChainParameters {
             network: self.conf.network,
-            best_block: BestBlock::new(block, height.to_consensus_u32()),
+            best_block: BestBlock {
+                block_hash: block_hash,
+                // FIXME: the default could be dangerus here
+                height: block_height.unwrap_or_default(),
+            },
         };
 
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
         let monitor = self.build_channel_monitor();
         self.monitor = Some(Arc::new(monitor));
 
         let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
         self.channeld = Some(Arc::new(LampoArcChannelManager::new(
             self.onchain.clone(),
-            self.monitor.clone().unwrap(),
+            self.chain_monitor(),
             self.onchain.clone(),
             self.network_graph(),
             self.logger.clone(),
@@ -325,7 +310,7 @@ impl LampoChannelManager {
             keymanagers,
             self.conf.ldk_conf,
             chain_params,
-            block_timestamp,
+            now.as_secs() as u32,
         )));
         Ok(())
     }
