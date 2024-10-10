@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use lampo_common::bitcoin::BlockHash;
@@ -6,25 +6,73 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::ldk::chain::Listen;
 
+use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::init;
 use lightning_block_sync::rpc::RpcClient;
 use lightning_block_sync::{poll, AsyncBlockSourceResult, BlockHeaderData, UnboundedCache};
 use lightning_block_sync::{BlockSource, SpvClient};
 
 use lampo_common::backend::{Backend, BlockData};
-use lampod::ln::{LampoChainMonitor, LampoChannel, LampoChannelManager};
+use lampo_common::types::{LampoChainMonitor, LampoChannel};
 
 /// Welcome in another Facede pattern implementation
 pub struct LampoChainSync {
     config: Arc<LampoConf>,
     rpc_client: Arc<RpcClient>,
-    channelmanager: RefCell<Option<Arc<LampoChannel>>>,
-    chainmonitor: RefCell<Option<Arc<LampoChainMonitor>>>,
+    channel_manager: RefCell<Option<Arc<LampoChannel>>>,
+    chain_monitor: RefCell<Option<Arc<LampoChainMonitor>>>,
     handler: RefCell<Option<Arc<dyn lampo_common::handler::Handler>>>,
 }
 
 unsafe impl Send for LampoChainSync {}
 unsafe impl Sync for LampoChainSync {}
+
+impl LampoChainSync {
+    pub fn new(conf: Arc<LampoConf>) -> error::Result<Self> {
+        let core_url = conf.core_url.as_ref().ok_or(error::anyhow!(
+            "Core URL is missing from the configuration file"
+        ))?;
+        let core_user = conf.core_user.as_ref().ok_or(error::anyhow!(
+            "Core User is missing from the configuration file"
+        ))?;
+        let core_pass = conf.core_pass.as_ref().ok_or(error::anyhow!(
+            "Core Password is missing from the configuration file"
+        ))?;
+
+        // FIXME: somehow we should fix this
+        let url_parts: Vec<&str> = core_url.split(':').collect();
+        let host = url_parts[0].to_string() + ":" + url_parts[1];
+        let port = url_parts[2].parse::<u16>()?;
+
+        let http_endpoint = HttpEndpoint::for_host(host).with_port(port);
+        let rpc_credentials = base64::encode(format!("{}:{}", core_user, core_pass));
+
+        let rpc = RpcClient::new(&rpc_credentials, http_endpoint)?;
+        Ok(Self {
+            config: conf,
+            rpc_client: Arc::new(rpc),
+            channel_manager: RefCell::new(None),
+            chain_monitor: RefCell::new(None),
+            handler: RefCell::new(None),
+        })
+    }
+
+    pub fn set_channel_manager(&self, channel_manager: Arc<LampoChannel>) {
+        self.channel_manager.borrow_mut().replace(channel_manager);
+    }
+
+    pub fn set_chain_monitor(&self, chain_monitor: Arc<LampoChainMonitor>) {
+        self.chain_monitor.borrow_mut().replace(chain_monitor);
+    }
+
+    fn channel_manager(&self) -> Arc<LampoChannel> {
+        self.channel_manager.borrow().as_ref().unwrap().clone()
+    }
+
+    fn chain_monitor(&self) -> Arc<LampoChainMonitor> {
+        self.chain_monitor.borrow().as_ref().unwrap().clone()
+    }
+}
 
 impl Listen for LampoChainSync {
     fn block_connected(&self, block: &lampo_common::bitcoin::Block, height: u32) {
@@ -65,20 +113,6 @@ impl poll::Poll for LampoChainSync {
         best_known_chain_tip: poll::ValidatedBlockHeader,
     ) -> lightning_block_sync::AsyncBlockSourceResult<'a, poll::ChainTip> {
         unimplemented!()
-    }
-}
-
-impl LampoChainSync {
-    pub fn new(conf: Arc<LampoConf>) -> error::Result<Self> {
-        unimplemented!()
-    }
-
-    fn channel_manager(&self) -> Arc<LampoChannel> {
-        self.channelmanager.borrow().as_ref().unwrap().clone()
-    }
-
-    fn chain_monitor(&self) -> Arc<LampoChainMonitor> {
-        self.chainmonitor.borrow().as_ref().unwrap().clone()
     }
 }
 
@@ -139,6 +173,18 @@ impl Backend for LampoChainSync {
         unimplemented!()
     }
 
+    fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
+        unimplemented!()
+    }
+
+    fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {
+        self.handler.borrow_mut().replace(handler);
+    }
+
+    fn set_channel_manager(&self, channel_manager: Arc<LampoChannel>) {
+        self.set_channel_manager(channel_manager);
+    }
+
     fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
         tokio::spawn(async move {
             let mut cache = UnboundedCache::new();
@@ -158,13 +204,4 @@ impl Backend for LampoChainSync {
         });
         Ok(())
     }
-
-    fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
-        unimplemented!()
-    }
-
-    fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {
-        self.handler.borrow_mut().replace(handler);
-    }
-    // Depending for BlockSource
 }

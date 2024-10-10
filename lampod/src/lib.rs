@@ -111,20 +111,13 @@ impl LampoDaemon {
 
     pub fn init_channeld(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init channeld ...");
-        let mut manager = LampoChannelManager::new(
+        let manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
             self.onchain_manager(),
             self.wallet_manager.clone(),
             self.persister.clone(),
         );
-
-        if manager.is_restarting()? {
-            manager.restart()?;
-        } else {
-            manager.start()?;
-        }
-
         self.channel_manager = Some(Arc::new(manager));
         Ok(())
     }
@@ -208,6 +201,7 @@ impl LampoDaemon {
         self.init_inventory_manager()?;
         self.init_event_handler()?;
         client.set_handler(self.handler());
+        client.set_channel_manager(self.channel_manager().manager());
         self.channel_manager().set_handler(self.handler());
         Ok(())
     }

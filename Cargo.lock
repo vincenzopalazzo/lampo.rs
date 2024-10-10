@@ -1207,6 +1207,7 @@ dependencies = [
 name = "lampo-chain"
 version = "0.1.0"
 dependencies = [
+ "base64 0.13.1",
  "lampo-common",
  "lampod",
  "lightning-block-sync",

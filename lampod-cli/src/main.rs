@@ -40,7 +40,6 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         None
     };
 
-    let dev_force_poll = args.dev_force_poll;
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
     log::debug!(target: "lampod-cli", "init wallet ..");

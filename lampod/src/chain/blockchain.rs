@@ -135,3 +135,48 @@ impl UtxoLookup for LampoChainManager {
 // SAFETY: there is no reason why this should not be send and sync
 unsafe impl Send for LampoChainManager {}
 unsafe impl Sync for LampoChainManager {}
+
+impl Backend for LampoChainManager {
+    fn brodcast_tx(&self, tx: &Transaction) {
+        self.backend.brodcast_tx(tx);
+    }
+
+    fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
+        self.backend.fee_rate_estimation(blocks)
+    }
+
+    fn get_transaction(
+        &self,
+        txid: &bitcoin::Txid,
+    ) -> lampo_common::error::Result<lampo_common::backend::TxResult> {
+        self.backend.get_transaction(txid)
+    }
+
+    fn get_utxo(&self, block: &bitcoin::BlockHash, idx: u64) -> lampo_common::backend::UtxoResult {
+        Backend::get_utxo(self.backend.as_ref(), block, idx)
+    }
+
+    fn get_utxo_by_txid(
+        &self,
+        txid: &bitcoin::Txid,
+        script: &bitcoin::Script,
+    ) -> lampo_common::error::Result<lampo_common::backend::TxResult> {
+        self.backend.get_utxo_by_txid(txid, script)
+    }
+
+    fn kind(&self) -> lampo_common::backend::BackendKind {
+        self.backend.kind()
+    }
+
+    fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
+        self.backend.clone().listen()
+    }
+
+    fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
+        self.backend.minimum_mempool_fee()
+    }
+
+    fn set_handler(&self, arc: Arc<dyn lampo_common::handler::Handler>) {
+        self.backend.set_handler(arc);
+    }
+}

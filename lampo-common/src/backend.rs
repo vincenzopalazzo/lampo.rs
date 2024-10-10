@@ -7,7 +7,9 @@ use bitcoin::block::Header as BlockHeader;
 
 pub use bitcoin::consensus::{deserialize, serialize};
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
+use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 pub use lightning::chain::WatchedOutput;
+use lightning::routing::utxo::UtxoLookup;
 pub use lightning::routing::utxo::UtxoResult;
 use lightning_block_sync::BlockSource;
 pub use lightning_block_sync::{
@@ -17,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::handler::Handler;
+use crate::types::{LampoArcChannelManager, LampoChannel};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TxResult {
@@ -33,7 +36,7 @@ pub enum BackendKind {
 
 // FIXME: add the BlockSource trait for this
 /// Bakend Trait specification
-pub trait Backend: BlockSource {
+pub trait Backend: BlockSource + Send + Sync {
     /// Return the kind of backend
     fn kind(&self) -> BackendKind;
 
@@ -49,6 +52,9 @@ pub trait Backend: BlockSource {
     fn get_utxo_by_txid(&self, txid: &Txid, script: &Script) -> error::Result<TxResult>;
 
     fn set_handler(&self, _: Arc<dyn Handler>) {}
+
+    fn set_channel_manager(&self, _: Arc<LampoChannel>) {}
+
     /// Get the information of a transaction inside the blockchain.
     fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;
 

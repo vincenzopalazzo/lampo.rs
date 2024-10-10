@@ -3,7 +3,8 @@ use lampo_common::json;
 use lampo_common::jsonrpc::Error;
 use lampo_common::model::Connect;
 
-use crate::{async_run, ln::events::PeerEvents, LampoDaemon};
+use crate::async_run;
+use crate::LampoDaemon;
 
 pub fn json_connect(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `connect` with request `{:?}`", request);
