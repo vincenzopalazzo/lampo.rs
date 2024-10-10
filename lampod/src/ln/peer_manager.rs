@@ -133,29 +133,28 @@ impl LampoPeerManager {
             .announce_addr
             .clone()
             .unwrap_or_else(|| "127.0.0.1".to_string());
-        std::thread::spawn(move || {
-            let result = async_run!(async move {
-                let bind_addr = format!("{addr}:{listen_port}");
-                log::info!(target: "lampo", "Listening for in-bound connection on {bind_addr}");
-                let listener = match tokio::net::TcpListener::bind(bind_addr.clone()).await {
-                    Ok(listener) => listener,
-                    Err(e) => {
-                        return Err::<(), _>(error::anyhow!("Error binding to address: {}", e));
-                    }
-                };
+        tokio::spawn(async move {
+            let bind_addr = format!("{addr}:{listen_port}");
+            log::info!(target: "lampo", "Listening for in-bound connection on {bind_addr}");
+            let listener = match tokio::net::TcpListener::bind(bind_addr.clone()).await {
+                Ok(listener) => listener,
+                Err(e) => {
+                    return Err::<(), _>(error::anyhow!("Error binding to address: {}", e));
+                }
+            };
 
-                loop {
-                    let alias = alias.clone();
-                    let peer_manager = peer_manager.clone();
-                    let chan_manager = chan_manager.clone();
-                    let accept = listener.accept().await;
-                    let accept = accept
-                        .map_err(|err| error::anyhow!("Error accepting connection: {}", err))?;
-                    match accept {
-                        (tcp_stream, _) => {
-                            log::info!(target: "lampo", "Got new connection {}", tcp_stream.peer_addr().unwrap());
-                            let addr = bind_addr.clone();
-                            let _ = tokio::spawn(async move {
+            loop {
+                let alias = alias.clone();
+                let peer_manager = peer_manager.clone();
+                let chan_manager = chan_manager.clone();
+                let accept = listener.accept().await;
+                let accept =
+                    accept.map_err(|err| error::anyhow!("Error accepting connection: {}", err))?;
+                match accept {
+                    (tcp_stream, _) => {
+                        log::info!(target: "lampo", "Got new connection {}", tcp_stream.peer_addr().unwrap());
+                        let addr = bind_addr.clone();
+                        let _ = tokio::spawn(async move {
                                 // Use LDK's supplied networking battery to facilitate inbound
                                 // connections.
                                 net::setup_inbound(
@@ -189,15 +188,9 @@ impl LampoPeerManager {
                                 }
                             })
                             .await;
-                        }
                     }
                 }
-            });
-
-            if let Err(err) = &result {
-                log::error!("error while try to listen on inbound connection: `{err}`");
             }
-            result
         });
         Ok(())
     }

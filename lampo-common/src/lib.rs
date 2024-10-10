@@ -38,6 +38,7 @@ pub mod chan {
     pub use crossbeam_channel::*;
 }
 
+pub use async_trait::async_trait;
 pub use bitcoin;
 pub use bitcoin::secp256k1;
 
