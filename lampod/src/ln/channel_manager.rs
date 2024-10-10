@@ -95,11 +95,11 @@ impl LampoChannelManager {
         self.handler.borrow().clone().unwrap()
     }
 
-    pub fn listen(self: Arc<Self>) -> error::Result<()> {
+    pub async fn listen(self: Arc<Self>) -> error::Result<()> {
         if self.is_restarting()? {
             self.restart()?;
         } else {
-            self.start()?;
+            self.start().await?;
         }
         Ok(())
     }
@@ -307,8 +307,8 @@ impl LampoChannelManager {
         Ok(())
     }
 
-    pub fn start(&self) -> error::Result<()> {
-        let (block_hash, block_height) = async_run!(self.onchain.get_best_block()).unwrap();
+    pub async fn start(&self) -> error::Result<()> {
+        let (block_hash, block_height) = self.onchain.get_best_block().await.unwrap();
         let chain_params = ChainParameters {
             network: self.conf.network,
             best_block: BestBlock {
