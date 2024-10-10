@@ -119,6 +119,7 @@ impl LampoDaemon {
             self.persister.clone(),
         );
         self.channel_manager = Some(Arc::new(manager));
+        self.channel_manager().listen()?;
         Ok(())
     }
 

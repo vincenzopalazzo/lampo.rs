@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::handler::Handler;
-use crate::types::{LampoArcChannelManager, LampoChannel};
+use crate::types::{LampoArcChannelManager, LampoChainMonitor, LampoChannel};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TxResult {
@@ -54,6 +54,8 @@ pub trait Backend: BlockSource + Send + Sync {
     fn set_handler(&self, _: Arc<dyn Handler>) {}
 
     fn set_channel_manager(&self, _: Arc<LampoChannel>) {}
+
+    fn set_chain_monitor(&self, _: Arc<LampoChainMonitor>) {}
 
     /// Get the information of a transaction inside the blockchain.
     fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;

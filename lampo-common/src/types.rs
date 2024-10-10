@@ -1,5 +1,4 @@
 //! Lampo Common Types
-use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};

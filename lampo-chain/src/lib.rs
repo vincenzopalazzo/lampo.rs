@@ -74,48 +74,6 @@ impl LampoChainSync {
     }
 }
 
-impl Listen for LampoChainSync {
-    fn block_connected(&self, block: &lampo_common::bitcoin::Block, height: u32) {
-        unimplemented!()
-    }
-
-    fn block_disconnected(&self, header: &lampo_common::bitcoin::block::Header, height: u32) {
-        unimplemented!()
-    }
-
-    fn filtered_block_connected(
-        &self,
-        header: &lampo_common::bitcoin::block::Header,
-        txdata: &lampo_common::ldk::chain::transaction::TransactionData,
-        height: u32,
-    ) {
-        unimplemented!()
-    }
-}
-
-impl poll::Poll for LampoChainSync {
-    fn fetch_block<'a>(
-        &'a self,
-        header: &'a poll::ValidatedBlockHeader,
-    ) -> lightning_block_sync::AsyncBlockSourceResult<'a, poll::ValidatedBlock> {
-        unimplemented!()
-    }
-
-    fn look_up_previous_header<'a>(
-        &'a self,
-        header: &'a poll::ValidatedBlockHeader,
-    ) -> lightning_block_sync::AsyncBlockSourceResult<'a, poll::ValidatedBlockHeader> {
-        unimplemented!()
-    }
-
-    fn poll_chain_tip<'a>(
-        &'a self,
-        best_known_chain_tip: poll::ValidatedBlockHeader,
-    ) -> lightning_block_sync::AsyncBlockSourceResult<'a, poll::ChainTip> {
-        unimplemented!()
-    }
-}
-
 impl BlockSource for LampoChainSync {
     fn get_header<'a>(
         &'a self,
@@ -139,7 +97,7 @@ impl BlockSource for LampoChainSync {
 
 impl Backend for LampoChainSync {
     fn kind(&self) -> lampo_common::backend::BackendKind {
-        unimplemented!()
+        lampo_common::backend::BackendKind::Core
     }
 
     fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
@@ -183,6 +141,10 @@ impl Backend for LampoChainSync {
 
     fn set_channel_manager(&self, channel_manager: Arc<LampoChannel>) {
         self.set_channel_manager(channel_manager);
+    }
+
+    fn set_chain_monitor(&self, chain_monitor: Arc<LampoChainMonitor>) {
+        self.set_chain_monitor(chain_monitor);
     }
 
     fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
