@@ -6,7 +6,7 @@ macro_rules! async_run {
         $rt.block_on($expr)
     }};
     ($expr:expr) => {{
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Handle::current();
         async_run!(rt, $expr)
     }};
 }

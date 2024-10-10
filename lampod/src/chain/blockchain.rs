@@ -2,6 +2,7 @@ use core::sync;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use lampo_common::async_trait;
 use lampo_common::backend::Backend;
 use lampo_common::bitcoin;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
@@ -70,36 +71,28 @@ impl LampoChainManager {
 }
 
 /// Rust lightning FeeEstimator implementation
+#[async_trait]
 impl FeeEstimator for LampoChainManager {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        //FIXME: use cache to avoid return default value (that is 0) on u32
-        match confirmation_target {
-            ConfirmationTarget::OnChainSweep => {
-                self.backend.fee_rate_estimation(1).unwrap_or_default()
-            }
-            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee
-            | ConfirmationTarget::AnchorChannelFee
-            | ConfirmationTarget::NonAnchorChannelFee => {
-                self.backend.fee_rate_estimation(6).unwrap_or_default()
-            }
-            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee => {
-                self.backend.minimum_mempool_fee().unwrap()
-            }
-            ConfirmationTarget::ChannelCloseMinimum => {
-                self.backend.fee_rate_estimation(100).unwrap_or_default()
-            }
-            ConfirmationTarget::OutputSpendingFee => {
-                self.backend.fee_rate_estimation(12).unwrap_or_default()
-            }
-        }
+        // FIXME: have the result in the cache to make easy the query of it.
+        unimplemented!()
     }
 }
 
 /// Brodcaster Interface implementation for Lampo.
 impl BroadcasterInterface for LampoChainManager {
-    fn broadcast_transactions(&self, tx: &[&Transaction]) {
-        // FIXME: change the brodcasting
-        self.backend.brodcast_tx(tx.first().unwrap());
+    fn broadcast_transactions(&self, txs: &[&Transaction]) {
+        // FIXME: support brodcast_txs for multiple tx
+        // FIXME: we are missing any error in the brodcast_tx, we should
+        // fix that
+        for tx in txs.to_vec() {
+            let tx = tx.clone();
+            let backend = self.backend.clone();
+            tokio::spawn(async move {
+                let tx = tx.clone();
+                backend.brodcast_tx(&tx).await;
+            });
+        }
     }
 }
 
@@ -136,44 +129,49 @@ impl UtxoLookup for LampoChainManager {
 unsafe impl Send for LampoChainManager {}
 unsafe impl Sync for LampoChainManager {}
 
+#[async_trait]
 impl Backend for LampoChainManager {
-    fn brodcast_tx(&self, tx: &Transaction) {
+    async fn brodcast_tx(&self, tx: &Transaction) {
         self.backend.brodcast_tx(tx);
     }
 
-    fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
-        self.backend.fee_rate_estimation(blocks)
+    async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
+        self.backend.fee_rate_estimation(blocks).await
     }
 
-    fn get_transaction(
+    async fn get_transaction(
         &self,
         txid: &bitcoin::Txid,
     ) -> lampo_common::error::Result<lampo_common::backend::TxResult> {
-        self.backend.get_transaction(txid)
+        self.backend.get_transaction(txid).await
     }
 
-    fn get_utxo(&self, block: &bitcoin::BlockHash, idx: u64) -> lampo_common::backend::UtxoResult {
-        Backend::get_utxo(self.backend.as_ref(), block, idx)
+    async fn get_utxo(
+        &self,
+        block: &bitcoin::BlockHash,
+        idx: u64,
+    ) -> lampo_common::backend::UtxoResult {
+        Backend::get_utxo(self.backend.as_ref(), block, idx).await
     }
 
-    fn get_utxo_by_txid(
+    async fn get_utxo_by_txid(
         &self,
         txid: &bitcoin::Txid,
         script: &bitcoin::Script,
     ) -> lampo_common::error::Result<lampo_common::backend::TxResult> {
-        self.backend.get_utxo_by_txid(txid, script)
+        self.backend.get_utxo_by_txid(txid, script).await
     }
 
     fn kind(&self) -> lampo_common::backend::BackendKind {
         self.backend.kind()
     }
 
-    fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
-        self.backend.clone().listen()
+    async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
+        self.backend.clone().listen().await
     }
 
-    fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
-        self.backend.minimum_mempool_fee()
+    async fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
+        self.backend.minimum_mempool_fee().await
     }
 
     fn set_handler(&self, arc: Arc<dyn lampo_common::handler::Handler>) {

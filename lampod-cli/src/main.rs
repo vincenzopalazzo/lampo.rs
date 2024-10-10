@@ -162,7 +162,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let mut lampod = LampoDaemon::new(lampo_conf.clone(), Arc::new(wallet));
 
     // Init the lampod
-    lampod.init(client)?;
+    lampod.init(client).await?;
 
     log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
     let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
