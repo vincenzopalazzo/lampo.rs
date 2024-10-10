@@ -109,7 +109,7 @@ impl LampoDaemon {
         self.onchain_manager.clone().unwrap()
     }
 
-    pub fn init_channeld(&mut self) -> error::Result<()> {
+    pub async fn init_channeld(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init channeld ...");
         let manager = LampoChannelManager::new(
             &self.conf,
@@ -119,7 +119,7 @@ impl LampoDaemon {
             self.persister.clone(),
         );
         self.channel_manager = Some(Arc::new(manager));
-        self.channel_manager().listen()?;
+        self.channel_manager().listen().await?;
         Ok(())
     }
 
@@ -193,16 +193,17 @@ impl LampoDaemon {
         Ok(())
     }
 
-    pub fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
+    pub async fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         log::debug!(target: "lampod", "init lampod ...");
         self.init_onchaind(client.clone())?;
-        self.init_channeld()?;
+        self.init_channeld().await?;
         self.init_offchain_manager()?;
         self.init_peer_manager()?;
         self.init_inventory_manager()?;
         self.init_event_handler()?;
         client.set_handler(self.handler());
         client.set_channel_manager(self.channel_manager().manager());
+        client.set_chain_monitor(self.channel_manager().chain_monitor());
         self.channel_manager().set_handler(self.handler());
         Ok(())
     }
