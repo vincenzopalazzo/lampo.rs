@@ -4,7 +4,6 @@ use std::sync::Arc;
 use lampo_common::bitcoin::BlockHash;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::ldk::chain::Listen;
 
 use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::init;
@@ -41,13 +40,17 @@ impl LampoChainSync {
 
         // FIXME: somehow we should fix this
         let url_parts: Vec<&str> = core_url.split(':').collect();
-        let host = url_parts[0].to_string() + ":" + url_parts[1];
+        let host = url_parts[1];
+        let host = host.strip_prefix("//").unwrap_or(host);
         let port = url_parts[2].parse::<u16>()?;
 
-        let http_endpoint = HttpEndpoint::for_host(host).with_port(port);
+        log::debug!("Connecting to core at: {:?} - {host}", url_parts);
+
+        let http_endpoint = HttpEndpoint::for_host(host.to_owned()).with_port(port);
         let rpc_credentials = base64::encode(format!("{}:{}", core_user, core_pass));
 
         let rpc = RpcClient::new(&rpc_credentials, http_endpoint)?;
+
         Ok(Self {
             config: conf,
             rpc_client: Arc::new(rpc),
@@ -105,7 +108,7 @@ impl Backend for LampoChainSync {
     }
 
     fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
-        unimplemented!()
+        Ok(256)
     }
 
     fn get_transaction(

@@ -13,7 +13,6 @@ use crate::ldk::routing::router::DefaultRouter;
 use crate::ldk::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
 use crate::ldk::sign::InMemorySigner;
 
-use crate::backend::Backend;
 use crate::keys::LampoKeysManager;
 use crate::utils::logger::LampoLogger;
 
