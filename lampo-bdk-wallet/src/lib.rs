@@ -63,7 +63,7 @@ impl BDKWalletManager {
             format!("{}/onchain", conf.path()),
         )
         .map_err(|err| bdk::Error::Generic(format!("{err}")))?;
-        let ldk_kesy = LampoKeys::new(xprv.private_key.secret_bytes());
+        let ldk_keys = LampoKeys::new(xprv.private_key.secret_bytes());
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
         let wallet = Wallet::new(
             Bip84(xprv, KeychainKind::External),
@@ -74,7 +74,7 @@ impl BDKWalletManager {
         .map_err(|err| bdk::Error::Generic(err.to_string()))?;
         let descriptor = wallet.public_descriptor(KeychainKind::Internal).unwrap();
         log::info!("descriptor: {descriptor}");
-        Ok((wallet, ldk_kesy))
+        Ok((wallet, ldk_keys))
     }
 
     #[cfg(debug_assertions)]
