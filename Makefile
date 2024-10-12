@@ -8,7 +8,7 @@ default: fmt
 	$(CC) build
 
 fmt:
-	$(CC) fmt --all
+	$(CC) +nightly fmt --all
 	# $(CC) clippy --workspace
 
 check:

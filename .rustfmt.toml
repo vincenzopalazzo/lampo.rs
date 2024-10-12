@@ -1,0 +1,3 @@
+imports_granularity = 'Module'
+comment_width = 80
+wrap_comments = true

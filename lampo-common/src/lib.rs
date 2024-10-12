@@ -11,10 +11,10 @@ pub mod wallet;
 
 pub mod ldk {
     pub use lightning::*;
-    pub use lightning_background_processor as processor;
-    pub use lightning_invoice as invoice;
-    pub use lightning_net_tokio as net;
-    pub use lightning_persister as persister;
+    pub use {
+        lightning_background_processor as processor, lightning_invoice as invoice,
+        lightning_net_tokio as net, lightning_persister as persister,
+    };
 }
 
 pub mod error {
@@ -44,7 +44,8 @@ pub mod btc_rpc {
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct MinimumMempoolFee {
-        /// Minimum fee rate in BTC/kB for tx to be accepted. Is the maximum of minrelaytxfee and minimum mempool fee
+        /// Minimum fee rate in BTC/kB for tx to be accepted. Is the maximum of
+        /// minrelaytxfee and minimum mempool fee
         pub mempoolminfee: f32,
     }
 }
