@@ -58,7 +58,8 @@ pub type LampoArcChannelManager<M, T, F, L> = ChannelManager<
     Arc<L>,
 >;
 
-type LampoChannel =
+// Required inside LampoLiquidity
+pub type LampoChannel =
     LampoArcChannelManager<LampoChainMonitor, LampoChainManager, LampoChainManager, LampoLogger>;
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
@@ -124,6 +125,10 @@ impl LampoChannelManager {
 
     pub fn handler(&self) -> Arc<LampoHandler> {
         self.handler.borrow().clone().unwrap()
+    }
+
+    pub fn channeld(&self) -> Arc<LampoChannel> {
+        self.channeld.clone().unwrap()
     }
 
     pub fn listen(self: Arc<Self>) -> JoinHandle<()> {

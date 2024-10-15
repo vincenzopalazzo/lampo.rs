@@ -19,6 +19,8 @@ use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::model::Connect;
 use lampo_common::types::NodeId;
 
+use super::liquidity::LampoLiquidityManager;
+use super::LampoCustomMessageHandler;
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
@@ -44,11 +46,11 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, Arc<T>, Arc<L>>>,
     Arc<LampoArcOnionMessenger<L>>,
     Arc<L>,
-    IgnoringMessageHandler,
+    LampoCustomMessageHandler,
     Arc<LampoKeysManager>,
 >;
 
-type InnerLampoPeerManager =
+pub type InnerLampoPeerManager =
     SimpleArcPeerManager<LampoChainMonitor, LampoChainManager, LampoLogger>;
 
 pub struct LampoPeerManager {
@@ -56,15 +58,21 @@ pub struct LampoPeerManager {
     channel_manager: Option<Arc<LampoChannelManager>>,
     conf: LampoConf,
     logger: Arc<LampoLogger>,
+    liquidity: Option<Arc<LampoLiquidityManager>>,
 }
 
 impl LampoPeerManager {
-    pub fn new(conf: &LampoConf, logger: Arc<LampoLogger>) -> LampoPeerManager {
+    pub fn new(
+        conf: &LampoConf,
+        logger: Arc<LampoLogger>,
+        liquidity: Option<Arc<LampoLiquidityManager>>,
+    ) -> LampoPeerManager {
         LampoPeerManager {
             peer_manager: None,
             conf: conf.to_owned(),
             logger,
             channel_manager: None,
+            liquidity,
         }
     }
 
@@ -102,11 +110,19 @@ impl LampoPeerManager {
             self.logger.clone(),
         ));
 
+        let custom_message_handler;
+        if let Some(liquidity) = self.liquidity.clone() {
+            custom_message_handler =
+                LampoCustomMessageHandler::new_liquidity(Arc::clone(&liquidity));
+        } else {
+            custom_message_handler = LampoCustomMessageHandler::new_ignoring();
+        }
+
         let lightning_msg_handler = MessageHandler {
             chan_handler: channel_manager.channeld.clone().unwrap(),
             onion_message_handler: onion_messenger,
             route_handler: gossip_sync,
-            custom_message_handler: IgnoringMessageHandler {},
+            custom_message_handler,
         };
 
         let peer_manager = InnerLampoPeerManager::new(
@@ -116,7 +132,13 @@ impl LampoPeerManager {
             channel_manager.logger.clone(),
             wallet_manager.ldk_keys().keys_manager.clone(),
         );
-        self.peer_manager = Some(Arc::new(peer_manager));
+
+        let arc_peer_manager = Arc::new(peer_manager);
+
+        if let Some(lsp) = &self.liquidity {
+            lsp.set_peer_manager(Arc::clone(&arc_peer_manager))
+        }
+        self.peer_manager = Some(Arc::clone(&arc_peer_manager));
         self.channel_manager = Some(channel_manager.clone());
         Ok(())
     }

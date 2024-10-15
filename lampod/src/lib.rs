@@ -20,9 +20,19 @@ pub mod ln;
 pub mod persistence;
 
 use std::cell::Cell;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use lampo_common::conf::Liquidity;
+use lampo_common::ldk::ln::msgs::SocketAddress;
+use lampo_common::secp256k1::PublicKey;
+use lightning_liquidity::lsps2::client::LSPS2ClientConfig;
+use lightning_liquidity::lsps2::service::LSPS2ServiceConfig;
+use lightning_liquidity::LiquidityClientConfig;
+use lightning_liquidity::LiquidityServiceConfig;
+use ln::liquidity::LampoLiquidity;
+use ln::liquidity::LampoLiquidityManager;
 use tokio::runtime::Runtime;
 
 use lampo_common::backend::Backend;
@@ -67,7 +77,7 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
-
+    liquidity: Option<Arc<LampoLiquidityManager>>,
     // FIXME: remove this
     rt: Runtime,
 }
@@ -93,6 +103,7 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
+            liquidity: None,
             rt: Runtime::new().unwrap(),
         }
     }
@@ -103,6 +114,10 @@ impl LampoDaemon {
 
     pub fn conf(&self) -> &LampoConf {
         &self.conf
+    }
+
+    pub fn liquidity(&self) -> Arc<LampoLiquidityManager> {
+        self.liquidity.clone().unwrap()
     }
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
@@ -167,13 +182,86 @@ impl LampoDaemon {
 
     pub fn init_peer_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampo", "init peer manager ...");
-        let mut peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone());
+        let mut peer_manager;
+        let peer_liquidity;
+
+        if let Some(liq) = &self.liquidity {
+            peer_liquidity = Some(Arc::clone(&self.liquidity.clone().unwrap()));
+        } else {
+            peer_liquidity = None;
+        }
+        peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone(), peer_liquidity);
+
         peer_manager.init(
             self.onchain_manager(),
             self.wallet_manager.clone(),
             self.channel_manager(),
         )?;
+
         self.peer_manager = Some(Arc::new(peer_manager));
+        Ok(())
+    }
+
+    pub fn init_liquidity_manager(&mut self) -> error::Result<()> {
+        let liquidity;
+        let liquidity_manager;
+        if let Some(liq) = &self.conf.liquidity {
+            match liq {
+                Liquidity::Consumer => {
+                    log::info!("Acting as LSP consumer");
+                    liquidity = LampoLiquidity::new(
+                        self.offchain_manager().key_manager(),
+                        self.channel_manager().manager(),
+                        Some(self.onchain_manager()),
+                        None,
+                        None,
+                        // Do something here
+                        Some(LiquidityClientConfig {
+                            lsps2_client_config: Some(LSPS2ClientConfig {}),
+                        }),
+                    );
+
+                    liquidity_manager = Some(LampoLiquidityManager::new_lsp_as_client(
+                        Arc::new(liquidity),
+                        self.conf.clone(),
+                        self.channel_manager(),
+                        self.offchain_manager().key_manager(),
+                        PublicKey::from_str(&self.conf.lsp_node_id.clone().unwrap())
+                            .expect("Wrong node id"),
+                        SocketAddress::from_str(&self.conf.lsp_socket_addr.clone().unwrap())
+                            .expect("Failed to parse socket address"),
+                    ));
+                }
+                Liquidity::Provider => {
+                    log::info!("Acting as a provider");
+                    let promise_secret: [u8; 32] = [0; 32];
+                    liquidity = LampoLiquidity::new(
+                        self.offchain_manager().key_manager(),
+                        self.channel_manager().manager(),
+                        Some(self.onchain_manager()),
+                        None,
+                        Some(LiquidityServiceConfig {
+                            lsps2_service_config: Some(LSPS2ServiceConfig { promise_secret }),
+                            advertise_service: true,
+                        }),
+                        None,
+                    );
+                    liquidity_manager = Some(LampoLiquidityManager::new_lsp(
+                        Arc::new(liquidity),
+                        self.conf.clone(),
+                        self.channel_manager(),
+                        self.offchain_manager().key_manager(),
+                    ));
+                }
+            };
+        } else {
+            liquidity_manager = None;
+        }
+
+        if let Some(liq) = liquidity_manager {
+            self.liquidity = Some(Arc::new(liq));
+        }
+
         Ok(())
     }
 
@@ -219,11 +307,15 @@ impl LampoDaemon {
         self.init_onchaind(client.clone())?;
         self.init_channeld()?;
         self.init_offchain_manager()?;
+        self.init_liquidity_manager()?;
         self.init_peer_manager()?;
         self.init_inventory_manager()?;
         self.init_event_handler()?;
         client.set_handler(self.handler());
         self.channel_manager().set_handler(self.handler());
+        if let Some(liq) = &self.liquidity {
+            self.liquidity().set_handler(self.handler());
+        }
         Ok(())
     }
 
@@ -250,6 +342,20 @@ impl LampoDaemon {
         ));
 
         let handler = self.handler();
+        // Here is the event handled
+
+        if let Some(liq) = &self.liquidity {
+            let res = liq.clone();
+            log::info!("Listening for lsp events...");
+            std::thread::spawn(move || {
+                async_run!(async move {
+                    loop {
+                        let _ = &res.listen().await;
+                    }
+                })
+            });
+        }
+
         let event_handler = move |event: Event| {
             log::info!(target: "lampo", "ldk event {:?}", event);
             if let Err(err) = handler.handle(event) {
