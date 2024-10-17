@@ -1,0 +1,10 @@
+[package]
+name = "lampo-ldk-node"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lampo-common = { path = "../lampo-common" }
+ldk-node = "=0.3.0"
+
+lightning-liquidity = { version = "=0.1.0-alpha.4" }
