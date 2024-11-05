@@ -168,9 +168,20 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
             wallet
         }
     } else {
-        // If there is a file, we tell the user to use --restore-wallet
+        // If there is a file, we load the wallet with a warning
         if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
-            error::bail!("Wallet already exists. Please use --restore-wallet")
+            // Load the mnemonic from the file
+            log::warn!("Loading from existing wallet");
+            let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
+            let wallet = match client.kind() {
+                lampo_common::backend::BackendKind::Core => {
+                    CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic)?
+                }
+                lampo_common::backend::BackendKind::Nakamoto => {
+                    error::bail!("wallet is not implemented for nakamoto")
+                }
+            };
+            wallet
         } else {
             let (wallet, mnemonic) = match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
