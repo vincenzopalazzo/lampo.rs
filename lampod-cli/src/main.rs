@@ -8,6 +8,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::Path;
+
 use radicle_term as term;
 
 use lampo_bitcoind::BitcoinCore;
@@ -44,21 +48,39 @@ fn main() -> error::Result<()> {
     Ok(())
 }
 
+fn write_words_to_file<P: AsRef<Path>>(path: P, words: String) -> error::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+
+    // FIXME: we should give the possibility to encrypt this file.
+    file.write_all(words.as_bytes())?;
+    Ok(())
+}
+
+fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
+    let mut file = File::open(path.as_ref())?;
+    let mut content = String::new();
+
+    file.read_to_string(&mut content)?;
+
+    if content.is_empty() {
+        let path = path.as_ref().to_string_lossy().to_string();
+        error::bail!("The content of the wallet located at `{path}`. You lost the secret? Please report a bug this should never happens")
+    } else {
+        Ok(content)
+    }
+}
+
 /// Return the root directory.
 fn run(args: LampoCliArgs) -> error::Result<()> {
-    let mnemonic = if args.restore_wallet {
-        let inputs: String = term::input(
-            "BIP 39 Mnemonic",
-            None,
-            Some("To restore the wallet, lampo needs a BIP39 mnemonic with words separated by spaces."),
-        )?;
-        Some(inputs)
-    } else {
-        None
-    };
+    let restore_wallet = args.restore_wallet;
 
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
+
     log::debug!(target: "lampod-cli", "init wallet ..");
     // init the logger here
     logger::init(
@@ -97,36 +119,84 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", client),
     };
 
-    let wallet = if let Some(ref _private_key) = lampo_conf.private_key {
-        unimplemented!()
-    } else if mnemonic.is_none() {
-        let (wallet, mnemonic) = match client.kind() {
-            lampo_common::backend::BackendKind::Core => {
-                CoreWalletManager::new(Arc::new(lampo_conf.clone()))?
-            }
-            lampo_common::backend::BackendKind::Nakamoto => {
-                error::bail!("wallet is not implemented for nakamoto")
-            }
-        };
+    if let Some(ref _private_key) = lampo_conf.private_key {
+        error::bail!("Option to force a private key not available at the moment")
+    }
 
-        radicle_term::success!("Wallet Generated, please store these words in a safe way");
-        radicle_term::println(
-            radicle_term::format::badge_primary("wallet-keys"),
-            format!("{}", radicle_term::format::highlight(mnemonic)),
-        );
-        wallet
+    let words_path = format!("{}/", lampo_conf.path());
+    // There are several case in this if-else, that are:
+    // 1. lampo is running on a fresh os:
+    //   1.1: the user has a wallet, so need to specify `--restore-wallet`
+    //   1.2: the user does not have a wallet so lampo should generate a new seed for it and store it in a file.
+    // 2. lampo is running on os where there is a wallet, lampo will load the seeds from wallet:
+    //   2.1: The user keep specify --restore-wallet, so lampo should return an error an tell the user that there is already a wallet
+    //   2.2: The user do not specify the --restore-wallet, so lampo load from disk the file, if there is no file it return an error
+    // FIXME: there is a problem of code duplication here, we should move this code in utils functions.
+    let wallet = if restore_wallet {
+        if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
+            // Load the mnemonic from the file
+            let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
+            let wallet = match client.kind() {
+                lampo_common::backend::BackendKind::Core => {
+                    CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic)?
+                }
+                lampo_common::backend::BackendKind::Nakamoto => {
+                    error::bail!("wallet is not implemented for nakamoto")
+                }
+            };
+            wallet
+        } else {
+            // If file doesn't exist, ask for user input
+            let mnemonic: String = term::input(
+                "BIP 39 Mnemonic",
+                None,
+                Some("To restore the wallet, lampo needs the BIP39 mnemonic with words separated by spaces."),
+            )?;
+            // FIXME: make some sanity check about the mnemonic string
+            let wallet = match client.kind() {
+                lampo_common::backend::BackendKind::Core => {
+                    // SAFETY: It is safe to unwrap the mnemonic because we check it
+                    // before.
+                    CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic)?
+                }
+                lampo_common::backend::BackendKind::Nakamoto => {
+                    error::bail!("wallet is not implemented for nakamoto")
+                }
+            };
+
+            write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
+            wallet
+        }
     } else {
-        match client.kind() {
-            lampo_common::backend::BackendKind::Core => {
-                // SAFETY: It is safe to unwrap the mnemonic because we check it
-                // before.
-                CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic.unwrap())?
-            }
-            lampo_common::backend::BackendKind::Nakamoto => {
-                error::bail!("wallet is not implemented for nakamoto")
-            }
+        // If there is a file, we load the wallet with a warning
+        if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
+            // Load the mnemonic from the file
+            log::warn!("Loading from existing wallet");
+            let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
+            let wallet = match client.kind() {
+                lampo_common::backend::BackendKind::Core => {
+                    CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic)?
+                }
+                lampo_common::backend::BackendKind::Nakamoto => {
+                    error::bail!("wallet is not implemented for nakamoto")
+                }
+            };
+            wallet
+        } else {
+            let (wallet, mnemonic) = match client.kind() {
+                lampo_common::backend::BackendKind::Core => {
+                    CoreWalletManager::new(Arc::new(lampo_conf.clone()))?
+                }
+                lampo_common::backend::BackendKind::Nakamoto => {
+                    error::bail!("wallet is not implemented for nakamoto")
+                }
+            };
+
+            write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
+            wallet
         }
     };
+
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDaemon::new(lampo_conf.clone(), Arc::new(wallet));
 
