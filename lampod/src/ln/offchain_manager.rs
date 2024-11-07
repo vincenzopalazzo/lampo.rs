@@ -59,6 +59,10 @@ impl OffchainManager {
         })
     }
 
+    pub fn key_manager(&self) -> Arc<LampoKeysManager> {
+        self.keys_manager.clone()
+    }
+
     /// Generate an invoice with a specific amount and a specific
     /// description.
     pub fn generate_invoice(

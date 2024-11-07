@@ -23,6 +23,10 @@ pub struct LampoConf {
     pub log_level: String,
     pub alias: Option<String>,
     pub announce_addr: Option<String>,
+    // Should be something like liquidity=consumer, liquidity=provider or none
+    pub liquidity: Option<Liquidity>,
+    pub lsp_node_id: Option<String>,
+    pub lsp_socket_addr: Option<String>,
 }
 
 impl Default for LampoConf {
@@ -51,6 +55,9 @@ impl Default for LampoConf {
             log_file: None,
             alias: None,
             announce_addr: None,
+            liquidity: None,
+            lsp_node_id: None,
+            lsp_socket_addr: None,
         }
     }
 }
@@ -120,6 +127,11 @@ impl LampoConf {
         let input_path = path;
         let path = Self::normalize_root_dir(&conf.root_path, conf.network);
         conf.root_path = path.clone();
+        // Must be used when we act as a liquidity provider
+        conf.ldk_conf = UserConfig {
+            accept_intercept_htlcs: true,
+            ..Default::default()
+        };
 
         let lampo_file = format!("{}/lampo.conf", conf.path());
 
@@ -133,6 +145,22 @@ impl LampoConf {
 
         Ok(conf)
     }
+
+    // These functions should be called when we get something like
+    // liquidity=consumer of liquidity=provider inside lampo.conf
+    pub fn configure_as_liquidity_consumer(&mut self) {
+        self.liquidity = Some(Liquidity::Consumer);
+    }
+
+    pub fn configure_as_liquidity_provider(&mut self) {
+        self.liquidity = Some(Liquidity::Provider);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Liquidity {
+    Consumer,
+    Provider,
 }
 
 impl TryFrom<String> for LampoConf {
@@ -220,6 +248,16 @@ impl TryFrom<String> for LampoConf {
         let log_file = conf.get_conf("log-file").unwrap_or(None);
         let alias = conf.get_conf("alias").unwrap_or(None);
         let announce_addr = conf.get_conf("announce-addr").unwrap_or(None);
+        let liquidity = conf
+            .get_conf("liquidity")
+            .unwrap_or(None)
+            .map(|liq| match liq.as_str() {
+                "Provider" => Liquidity::Provider,
+                "Consumer" => Liquidity::Consumer,
+                _ => panic!(),
+            });
+        let lsp_node_id = conf.get_conf("lsp-node-id").unwrap_or(None);
+        let lsp_socket_addr = conf.get_conf("lsp-socket-addr").unwrap_or(None);
 
         Ok(Self {
             inner: Some(conf),
@@ -237,6 +275,9 @@ impl TryFrom<String> for LampoConf {
             log_level: level,
             alias,
             announce_addr,
+            liquidity,
+            lsp_node_id,
+            lsp_socket_addr,
         })
     }
 }
