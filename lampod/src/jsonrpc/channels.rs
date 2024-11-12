@@ -6,8 +6,6 @@ use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::model::request;
 use lampo_common::model::response;
 
-use crate::ln::events::ChannelEvents;
-
 use crate::rpc_error;
 use crate::LampoDaemon;
 

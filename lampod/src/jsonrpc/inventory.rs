@@ -14,8 +14,8 @@ pub fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Va
     let alias = ctx.conf.alias.clone();
     // we have to put "" in case of alias missing as cln provide us with a random alias.
     let alias = alias.unwrap_or_default();
-    let (_, height) = ctx.onchain_manager().backend.get_best_block()?;
-    let blockheight = height.unwrap_or_default();
+    // FIXME: blockheight should be fetched from the blockchain
+    let blockheight = 0;
     let lampo_dir = ctx.conf.root_path.to_string();
     // We provide a vector here as there may be other types of address in future like tor and ipv6.
     let mut address_vec = Vec::new();
