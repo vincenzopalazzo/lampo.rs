@@ -151,12 +151,6 @@ dependencies = [
 
 [[package]]
 name = "bech32"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf9ff0bbfd639f15c74af777d81383cf53efb7c93613f6cab67c6c11e05bbf8b"
-
-[[package]]
-name = "bech32"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
@@ -210,11 +204,11 @@ dependencies = [
 
 [[package]]
 name = "bitcoin-bech32"
-version = "0.12.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "754eb4c7f35c031f33c95cc257b4c4192a5c9d3de637d3ee78ab052a3f35da57"
+checksum = "0f764aae1214365b0317fa9d7c99e17e0ebf226200850767e4cd1fb84eec4087"
 dependencies = [
- "bech32 0.8.1",
+ "bech32 0.9.1",
 ]
 
 [[package]]
