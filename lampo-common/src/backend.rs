@@ -7,9 +7,7 @@ use bitcoin::block::Header as BlockHeader;
 
 pub use bitcoin::consensus::{deserialize, serialize};
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
-use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 pub use lightning::chain::WatchedOutput;
-use lightning::routing::utxo::UtxoLookup;
 pub use lightning::routing::utxo::UtxoResult;
 use lightning_block_sync::BlockSource;
 pub use lightning_block_sync::{
@@ -19,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::handler::Handler;
-use crate::types::{LampoArcChannelManager, LampoChainMonitor, LampoChannel};
+use crate::types::{LampoChainMonitor, LampoChannel};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TxResult {
