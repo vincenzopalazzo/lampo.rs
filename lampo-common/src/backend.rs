@@ -5,6 +5,7 @@ use std::sync::Arc;
 use bitcoin::absolute::Height;
 use bitcoin::block::Header as BlockHeader;
 
+use async_trait::async_trait;
 pub use bitcoin::consensus::{deserialize, serialize};
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
 pub use lightning::chain::WatchedOutput;
@@ -34,20 +35,21 @@ pub enum BackendKind {
 
 // FIXME: add the BlockSource trait for this
 /// Bakend Trait specification
+#[async_trait]
 pub trait Backend: BlockSource + Send + Sync {
     /// Return the kind of backend
     fn kind(&self) -> BackendKind;
 
     /// Fetch feerate give a number of blocks
-    fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32>;
+    async fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32>;
 
-    fn minimum_mempool_fee(&self) -> error::Result<u32>;
+    async fn minimum_mempool_fee(&self) -> error::Result<u32>;
 
-    fn brodcast_tx(&self, tx: &Transaction);
+    async fn brodcast_tx(&self, tx: &Transaction);
 
-    fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
+    async fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
 
-    fn get_utxo_by_txid(&self, txid: &Txid, script: &Script) -> error::Result<TxResult>;
+    async fn get_utxo_by_txid(&self, txid: &Txid, script: &Script) -> error::Result<TxResult>;
 
     fn set_handler(&self, _: Arc<dyn Handler>) {}
 
@@ -56,9 +58,9 @@ pub trait Backend: BlockSource + Send + Sync {
     fn set_chain_monitor(&self, _: Arc<LampoChainMonitor>) {}
 
     /// Get the information of a transaction inside the blockchain.
-    fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;
+    async fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;
 
     /// Spawn a thread and start polling the backend and notify
     /// the listener through the handler.
-    fn listen(self: Arc<Self>) -> error::Result<()>;
+    async fn listen(self: Arc<Self>) -> error::Result<()>;
 }

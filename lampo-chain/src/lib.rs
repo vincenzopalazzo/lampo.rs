@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
+use lampo_common::async_trait;
 use lampo_common::bitcoin::BlockHash;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
@@ -98,27 +99,28 @@ impl BlockSource for LampoChainSync {
     }
 }
 
+#[async_trait]
 impl Backend for LampoChainSync {
     fn kind(&self) -> lampo_common::backend::BackendKind {
         lampo_common::backend::BackendKind::Core
     }
 
-    fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
+    async fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
         unimplemented!()
     }
 
-    fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
+    async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
         Ok(256)
     }
 
-    fn get_transaction(
+    async fn get_transaction(
         &self,
         txid: &lampo_common::bitcoin::Txid,
     ) -> lampo_common::error::Result<lampo_common::backend::TxResult> {
         unimplemented!()
     }
 
-    fn get_utxo(
+    async fn get_utxo(
         &self,
         block: &lampo_common::bitcoin::BlockHash,
         idx: u64,
@@ -126,7 +128,7 @@ impl Backend for LampoChainSync {
         unimplemented!()
     }
 
-    fn get_utxo_by_txid(
+    async fn get_utxo_by_txid(
         &self,
         txid: &lampo_common::bitcoin::Txid,
         script: &lampo_common::bitcoin::Script,
@@ -134,7 +136,7 @@ impl Backend for LampoChainSync {
         unimplemented!()
     }
 
-    fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
+    async fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
         unimplemented!()
     }
 
@@ -150,7 +152,7 @@ impl Backend for LampoChainSync {
         self.set_chain_monitor(chain_monitor);
     }
 
-    fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
+    async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
         tokio::spawn(async move {
             let mut cache = UnboundedCache::new();
             let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
