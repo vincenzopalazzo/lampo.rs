@@ -19,8 +19,12 @@ clean:
 
 install:
 	$(CC) build --release
-	$(CC) install --locked --path ./lampo-cli 
+	$(CC) install --locked --path ./lampo-cli
 	$(CC) install --locked --path ./lampod-cli
 
 integration: default
 	 TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) $(CC) test -p tests $(ARGS)
+
+audit:
+	$(CC) install cargo-audit
+	$(CC) audit
