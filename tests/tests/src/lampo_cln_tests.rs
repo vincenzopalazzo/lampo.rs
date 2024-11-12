@@ -1,24 +1,18 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
-use lampo_common::json;
-use lampo_common::model::request;
-use lampo_common::model::response;
-use lampo_common::model::response::InvoiceInfo;
-use lampo_common::model::response::NetworkChannels;
-use lampo_common::model::response::Offer;
-use lampo_common::model::Connect;
+use lampo_common::model::response::{InvoiceInfo, NetworkChannels, Offer};
+use lampo_common::model::{request, response, Connect};
 use lampo_common::secp256k1::PublicKey;
+use lampo_common::{error, json};
 use lampo_testing::prelude::bitcoincore_rpc::RpcApi;
 use lampo_testing::prelude::*;
 
-use lampo_testing::wait;
-use lampo_testing::LampoTesting;
+use lampo_testing::{wait, LampoTesting};
 
 use crate::init;
 use crate::utils::*;
@@ -973,7 +967,8 @@ fn test_closing_two_channels_without_channelid_fails() {
         Err(())
     });
 
-    // This should fail as there are two channels with the peer so we need to pass the specific `channel_id`
+    // This should fail as there are two channels with the peer so we need to pass
+    // the specific `channel_id`
     let result: Result<response::CloseChannel, _> = lampo.call(
         "close",
         request::CloseChannel {

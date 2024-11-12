@@ -11,7 +11,7 @@ lampo-common = { path = "../lampo-common" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-client = { path = "../lampo-client" }
 log = "0.4.17"
-time = "0.3.13"
+time = "0.3"
 futures = "0.3.28"
 crossbeam-channel = "0.5.8"
 once_cell = "1.17.1"

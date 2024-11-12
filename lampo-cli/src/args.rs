@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use radicle_term as term;
 
-use lampo_common::error;
-use lampo_common::json;
+use lampo_common::{error, json};
 
 #[derive(Debug)]
 pub struct LampoCliArgs {

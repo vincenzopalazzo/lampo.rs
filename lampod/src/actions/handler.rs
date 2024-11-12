@@ -2,17 +2,13 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use lampo_common::chan;
-use lampo_common::error;
 use lampo_common::error::Ok;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::{Emitter, Event, Subscriber};
 use lampo_common::handler::Handler as EventHandler;
-use lampo_common::json;
-use lampo_common::ldk;
-use lampo_common::model::response::PaymentHop;
-use lampo_common::model::response::PaymentState;
+use lampo_common::model::response::{PaymentHop, PaymentState};
 use lampo_common::types::ChannelState;
+use lampo_common::{chan, error, json, ldk};
 use lampo_jsonrpc::json_rpc2::Request;
 
 use crate::chain::{LampoChainManager, WalletManager};
@@ -62,8 +58,9 @@ impl LampoHandler {
     }
 
     /// Call any method supported by the lampod configuration. This includes
-    /// a lot of handler code. This function serves as a broker pattern in some ways,
-    /// but it may also function as a chain of responsibility pattern in certain cases.
+    /// a lot of handler code. This function serves as a broker pattern in some
+    /// ways, but it may also function as a chain of responsibility pattern
+    /// in certain cases.
     pub fn call<T: json::Serialize, R: json::DeserializeOwned>(
         &self,
         method: &str,

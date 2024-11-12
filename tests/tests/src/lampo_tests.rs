@@ -4,17 +4,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
-use lampo_common::json;
 use lampo_common::model::{request, response};
+use lampo_common::{error, json};
 
 use lampo_testing::prelude::*;
-use lampo_testing::wait;
-use lampo_testing::LampoTesting;
+use lampo_testing::{wait, LampoTesting};
 
 use crate::init;
 
