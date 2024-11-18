@@ -8,6 +8,6 @@ log = "0.4.17"
 lampo-common = { path = "../lampo-common" }
 bitcoincore-rpc = { version = "0.17.0", features = [] }
 bitcoin-bech32 = "0.12"
-bitcoin_hashes = "0.12.0"
+bitcoin_hashes = "0.13.0"
 serde = "1"
 bdk = { version = "1.0.0-alpha.11", features = ["keys-bip39"] }

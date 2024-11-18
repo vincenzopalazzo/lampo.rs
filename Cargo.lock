@@ -962,7 +962,7 @@ version = "0.1.0"
 dependencies = [
  "bdk",
  "bitcoin-bech32",
- "bitcoin_hashes 0.12.0",
+ "bitcoin_hashes 0.13.0",
  "bitcoincore-rpc",
  "lampo-common",
  "log",
