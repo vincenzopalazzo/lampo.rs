@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { version = "0.0.123", features = ["max_level_trace"] }
+lightning = { version = "0.0.125", features = ["max_level_trace"] }
 lightning-block-sync = { version = "0.0.123" }
 lightning-persister = { version = "0.0.123" }
 lightning-background-processor = { version = "0.0.123" }
