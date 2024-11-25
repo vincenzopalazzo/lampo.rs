@@ -13,7 +13,7 @@ lightning-background-processor = { version = "0.0.123" }
 lightning-net-tokio = { version = "0.0.123" }
 lightning-rapid-gossip-sync = { version = "0.0.123" }
 lightning-invoice = { version = "0.31" }
-bitcoin = { version = "0.30.2", features = ["serde"] }
+bitcoin = { version = "0.31.2", features = ["serde"] }
 clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
 crossbeam-channel = "0.5.8"
 anyhow = "1.0.70"
