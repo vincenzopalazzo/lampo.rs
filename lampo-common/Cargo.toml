@@ -10,7 +10,7 @@ lightning = { version = "0.0.123", features = ["max_level_trace"] }
 lightning-block-sync = { version = "0.0.123" }
 lightning-persister = { version = "0.0.123" }
 lightning-background-processor = { version = "0.0.123" }
-lightning-net-tokio = { version = "0.0.123" }
+lightning-net-tokio = { version = "0.0.125" }
 lightning-rapid-gossip-sync = { version = "0.0.123" }
 lightning-invoice = { version = "0.31" }
 bitcoin = { version = "0.30.2", features = ["serde"] }
