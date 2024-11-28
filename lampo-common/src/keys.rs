@@ -1,8 +1,10 @@
 use std::{sync::Arc, time::SystemTime};
 
-use bitcoin::secp256k1::{Secp256k1, SecretKey};
 use lightning::sign::{InMemorySigner, NodeSigner, OutputSpender, SignerProvider};
+use lightning_invoice::RawBolt11Invoice;
 
+use crate::ldk::bitcoin::secp256k1::Secp256k1;
+use crate::ldk::bitcoin::secp256k1::SecretKey;
 use crate::ldk::sign::{EntropySource, KeysManager};
 
 /// Lampo keys implementations
@@ -113,9 +115,9 @@ impl NodeSigner for LampoKeysManager {
     fn ecdh(
         &self,
         recipient: lightning::sign::Recipient,
-        other_key: &bitcoin::secp256k1::PublicKey,
-        tweak: Option<&bitcoin::secp256k1::Scalar>,
-    ) -> Result<bitcoin::secp256k1::ecdh::SharedSecret, ()> {
+        other_key: &lightning::bitcoin::secp256k1::PublicKey,
+        tweak: Option<&lightning::bitcoin::secp256k1::Scalar>,
+    ) -> Result<lightning::bitcoin::secp256k1::ecdh::SharedSecret, ()> {
         self.inner.ecdh(recipient, other_key, tweak)
     }
 
@@ -126,51 +128,50 @@ impl NodeSigner for LampoKeysManager {
     fn get_node_id(
         &self,
         recipient: lightning::sign::Recipient,
-    ) -> Result<bitcoin::secp256k1::PublicKey, ()> {
+    ) -> Result<lightning::bitcoin::secp256k1::PublicKey, ()> {
         self.inner.get_node_id(recipient)
     }
 
     fn sign_bolt12_invoice(
         &self,
         invoice: &lightning::offers::invoice::UnsignedBolt12Invoice,
-    ) -> Result<bitcoin::secp256k1::schnorr::Signature, ()> {
+    ) -> Result<lightning::bitcoin::secp256k1::schnorr::Signature, ()> {
         self.inner.sign_bolt12_invoice(invoice)
     }
 
     fn sign_bolt12_invoice_request(
         &self,
         invoice_request: &lightning::offers::invoice_request::UnsignedInvoiceRequest,
-    ) -> Result<bitcoin::secp256k1::schnorr::Signature, ()> {
+    ) -> Result<lightning::bitcoin::secp256k1::schnorr::Signature, ()> {
         self.inner.sign_bolt12_invoice_request(invoice_request)
     }
 
     fn sign_gossip_message(
         &self,
         msg: lightning::ln::msgs::UnsignedGossipMessage,
-    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+    ) -> Result<lightning::bitcoin::secp256k1::ecdsa::Signature, ()> {
         self.inner.sign_gossip_message(msg)
     }
 
     fn sign_invoice(
         &self,
-        hrp_bytes: &[u8],
-        invoice_data: &[bitcoin::bech32::u5],
+        invoice_data: &RawBolt11Invoice,
         recipient: lightning::sign::Recipient,
-    ) -> Result<bitcoin::secp256k1::ecdsa::RecoverableSignature, ()> {
-        self.inner.sign_invoice(hrp_bytes, invoice_data, recipient)
+    ) -> Result<lightning::bitcoin::secp256k1::ecdsa::RecoverableSignature, ()> {
+        self.inner.sign_invoice(invoice_data, recipient)
     }
 }
 
 impl OutputSpender for LampoKeysManager {
-    fn spend_spendable_outputs<C: bitcoin::secp256k1::Signing>(
+    fn spend_spendable_outputs<C: lightning::bitcoin::secp256k1::Signing>(
         &self,
         descriptors: &[&lightning::sign::SpendableOutputDescriptor],
-        outputs: Vec<bitcoin::TxOut>,
-        change_destination_script: bitcoin::ScriptBuf,
+        outputs: Vec<lightning::bitcoin::TxOut>,
+        change_destination_script: lightning::bitcoin::ScriptBuf,
         feerate_sat_per_1000_weight: u32,
-        locktime: Option<bitcoin::absolute::LockTime>,
-        secp_ctx: &bitcoin::secp256k1::Secp256k1<C>,
-    ) -> Result<bitcoin::Transaction, ()> {
+        locktime: Option<lightning::bitcoin::absolute::LockTime>,
+        secp_ctx: &lightning::bitcoin::secp256k1::Secp256k1<C>,
+    ) -> Result<lightning::bitcoin::Transaction, ()> {
         self.inner.spend_spendable_outputs(
             descriptors,
             outputs,
@@ -224,7 +225,10 @@ impl SignerProvider for LampoKeysManager {
             .generate_channel_keys_id(inbound, channel_value_satoshis, user_channel_id)
     }
 
-    fn get_destination_script(&self, channel_keys_id: [u8; 32]) -> Result<bitcoin::ScriptBuf, ()> {
+    fn get_destination_script(
+        &self,
+        channel_keys_id: [u8; 32],
+    ) -> Result<lightning::bitcoin::ScriptBuf, ()> {
         self.inner.get_destination_script(channel_keys_id)
     }
 
