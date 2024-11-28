@@ -12,14 +12,14 @@ use bdk::keys::GeneratableKey;
 use bdk::keys::GeneratedKey;
 use bdk::template::Bip84;
 use bdk::KeychainKind;
-use bitcoin_hashes::hex::HexIterator;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 
 #[cfg(debug_assertions)]
 use crate::bitcoin::PrivateKey;
 
 use lampo_common::bitcoin;
-use lampo_common::bitcoin::consensus::Decodable;
+use lampo_common::bitcoin::consensus::encode;
+use lampo_common::bitcoin::Transaction;
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::error;
 use lampo_common::json;
@@ -73,18 +73,17 @@ impl CoreWalletManager {
         channel_keys: Option<String>,
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
         use bdk::bitcoin::bip32::Xpriv;
+        use lampo_common::bitcoin::NetworkKind;
 
         let ldk_keys = if let Some(channel_keys) = channel_keys {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys)
         } else {
             LampoKeys::new(xprv.inner.secret_bytes())
         };
-        let network = match xprv.network.to_string().as_str() {
-            "bitcoin" => bdk::bitcoin::Network::Bitcoin,
-            "testnet" => bdk::bitcoin::Network::Testnet,
-            "signet" => bdk::bitcoin::Network::Signet,
-            "regtest" => bdk::bitcoin::Network::Regtest,
-            _ => unreachable!(),
+        let network = match &xprv.network {
+            NetworkKind::Main => bdk::bitcoin::Network::Bitcoin,
+            // All other networks are handled inside test network only
+            NetworkKind::Test => bdk::bitcoin::Network::Testnet,
         };
         let key = Xpriv::new_master(network, &xprv.inner.secret_bytes())?;
         let key = ExtendedKey::from(key);
@@ -272,9 +271,9 @@ impl WalletManager for CoreWalletManager {
             .rpc
             .call("signrawtransactionwithwallet", &[json::json!(tx.hex)])?;
         let hex = hex.hex.unwrap();
-        let mut reader = HexIterator::new(&hex)?;
-        let object = Decodable::consensus_decode(&mut reader)?;
-        Ok(object)
+
+        let tx = encode::deserialize_hex::<Transaction>(&hex)?;
+        Ok(tx)
     }
 
     fn get_onchain_address(&self) -> error::Result<NewAddress> {
