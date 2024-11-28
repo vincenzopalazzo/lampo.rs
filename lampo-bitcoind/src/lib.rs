@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+// BitcoinCore-RPC uses 0.30.0
 use bitcoincore_rpc::bitcoin::hashes::Hash;
+use bitcoincore_rpc::bitcoin::Block;
 use bitcoincore_rpc::bitcoin::ScriptBuf;
 use bitcoincore_rpc::bitcoincore_rpc_json::GetTxOutResult;
 use bitcoincore_rpc::Client;
@@ -14,9 +16,10 @@ use bitcoincore_rpc::RpcApi;
 
 use lampo_common::backend::{deserialize, serialize};
 use lampo_common::backend::{Backend, TxResult};
-use lampo_common::backend::{Block, BlockData, BlockHash};
+use lampo_common::backend::{BlockData, BlockHash};
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::{Transaction, Txid};
+use lampo_common::conf::Network;
 use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
@@ -121,7 +124,7 @@ impl BitcoinCore {
                 .txdata
                 .iter()
                 .enumerate()
-                .find(|(_, tx)| tx.txid() == *utxo)
+                .find(|(_, tx)| tx.compute_txid() == *utxo)
             {
                 // Confirmed!
                 let handler = self.handler.borrow();
@@ -157,12 +160,16 @@ impl Backend for BitcoinCore {
         );
         log::info!(target: "bitcoind", "broadcast transaction return {:?}", result);
         if result.is_ok() {
-            self.ours_txs.lock().unwrap().borrow_mut().push(tx.txid());
+            self.ours_txs
+                .lock()
+                .unwrap()
+                .borrow_mut()
+                .push(tx.compute_txid());
             self.others_txs
                 .lock()
                 .unwrap()
                 .borrow_mut()
-                .retain(|(txid, _)| txid.to_string() == tx.txid().to_string());
+                .retain(|(txid, _)| txid.to_string() == tx.compute_txid().to_string());
             let handler = self.handler.borrow();
             let Some(handler) = handler.as_ref() else {
                 return;
@@ -179,7 +186,7 @@ impl Backend for BitcoinCore {
 
         // FIXME: store the network inside the self
         let chain_info = self.inner.get_blockchain_info()?;
-        let network_str = chain_info.chain.as_str();
+        let network_str = chain_info.chain.as_ref().network;
 
         if let Some(errors) = &result.errors {
             // Thanks to bitcoin core that will not process in time
@@ -187,8 +194,11 @@ impl Backend for BitcoinCore {
             // or conditional code skipping.
             //
             // What next LND? :)
-            if network_str == "regtest" {
-                return Ok(253);
+            match &network_str {
+                Network::Regtest => {
+                    return Ok(253);
+                }
+                _ => {}
             }
 
             error::bail!(
@@ -202,7 +212,7 @@ impl Backend for BitcoinCore {
         let result: u32 = result.fee_rate.unwrap_or_default().to_sat() as u32;
         let result = match network_str {
             // in the regtest case that it is useful for integration testing
-            "regtest" => {
+            Network::Regtest => {
                 if result == 0 {
                     253
                 } else {
@@ -248,8 +258,9 @@ impl Backend for BitcoinCore {
         let bytes = serialize(header_hash);
         let hash = BlockHash::from_slice(bytes.as_slice())?;
         let result = self.inner.get_block(&hash)?;
-        let block: Block = deserialize(&inner_serialize(&result))?;
+        let block: lampo_common::bitcoin::Block = deserialize(&inner_serialize(&result))?;
         log::debug!(target: "bitcoind", "decode blocks {}", header_hash.to_string());
+        // Lightning 0.0.125 uses bitcoin 0.32.4
         Ok(BlockData::FullBlock(block))
     }
 
@@ -382,15 +393,15 @@ impl Backend for BitcoinCore {
         for txid in txs.iter() {
             match self.get_transaction(txid)? {
                 TxResult::Confirmed((tx, idx, header, height)) => {
-                    confirmed_txs.push(tx.txid());
+                    confirmed_txs.push(tx.compute_txid());
                     handler.emit(Event::OnChain(OnChainEvent::ConfirmedTransaction((
                         tx, idx, header, height,
                     ))))
                 }
                 TxResult::Unconfirmed(tx) => {
-                    unconfirmed_txs.push(tx.txid());
+                    unconfirmed_txs.push(tx.compute_txid());
                     handler.emit(Event::OnChain(OnChainEvent::UnconfirmedTransaction(
-                        tx.txid(),
+                        tx.compute_txid(),
                     )));
                 }
                 TxResult::Discarded => {
