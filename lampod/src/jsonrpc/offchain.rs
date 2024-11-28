@@ -39,8 +39,9 @@ pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Valu
     log::info!("call for `offer` with request `{:?}`", request);
     let request: GenerateOffer = json::from_value(request.clone())?;
     let manager = ctx.channel_manager().manager();
+    // TODO: This should have an option to define the duration of the offer
     let mut offer_builder = manager
-        .create_offer_builder()
+        .create_offer_builder(None)
         .map_err(|err| crate::rpc_error!("{:?}", err))?;
 
     if let Some(description) = request.description {

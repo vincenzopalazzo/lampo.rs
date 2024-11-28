@@ -36,7 +36,6 @@ impl LampoChainManager {
 
     fn print_ldk_target_to_string(&self, target: ConfirmationTarget) -> String {
         match target {
-            ConfirmationTarget::OnChainSweep => String::from("on_chain_sweep"),
             ConfirmationTarget::AnchorChannelFee => String::from("anchor_channel"),
             ConfirmationTarget::NonAnchorChannelFee => String::from("non_anchor_channel"),
             ConfirmationTarget::ChannelCloseMinimum => String::from("channel_close_minimum"),
@@ -47,18 +46,21 @@ impl LampoChainManager {
                 String::from("min_allowed_non_anchor_channel_remote")
             }
             ConfirmationTarget::OutputSpendingFee => String::from("output_spending"),
+            ConfirmationTarget::MaximumFeeEstimate => String::from("max_fee_estimate"),
+            ConfirmationTarget::UrgentOnChainSweep => String::from("urgent_on_chain_sweep"),
         }
     }
 
     pub fn estimated_fees(&self) -> HashMap<String, Option<u32>> {
         let fees_targets = vec![
-            ConfirmationTarget::OnChainSweep,
             ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
             ConfirmationTarget::NonAnchorChannelFee,
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
             ConfirmationTarget::AnchorChannelFee,
             ConfirmationTarget::ChannelCloseMinimum,
             ConfirmationTarget::OutputSpendingFee,
+            ConfirmationTarget::MaximumFeeEstimate,
+            ConfirmationTarget::UrgentOnChainSweep,
         ];
         let mut map: HashMap<String, Option<u32>> = HashMap::new();
         for target in fees_targets {
@@ -75,7 +77,7 @@ impl FeeEstimator for LampoChainManager {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         //FIXME: use cache to avoid return default value (that is 0) on u32
         match confirmation_target {
-            ConfirmationTarget::OnChainSweep => {
+            ConfirmationTarget::UrgentOnChainSweep => {
                 self.backend.fee_rate_estimation(1).unwrap_or_default()
             }
             ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee
@@ -90,6 +92,10 @@ impl FeeEstimator for LampoChainManager {
                 self.backend.fee_rate_estimation(100).unwrap_or_default()
             }
             ConfirmationTarget::OutputSpendingFee => {
+                self.backend.fee_rate_estimation(12).unwrap_or_default()
+            }
+            // FIXME: How much blocks needs to be taken care of in MaximumFeeEstimate?
+            ConfirmationTarget::MaximumFeeEstimate => {
                 self.backend.fee_rate_estimation(12).unwrap_or_default()
             }
         }
