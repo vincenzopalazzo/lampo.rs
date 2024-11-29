@@ -21,7 +21,7 @@ use lampo_common::ldk::ln::channelmanager::{
     ChainParameters, ChannelManager, ChannelManagerReadArgs,
 };
 use lampo_common::ldk::persister::fs_store::FilesystemStore;
-use lampo_common::ldk::routing::gossip::{NetworkGraph, ReadOnlyNetworkGraph};
+use lampo_common::ldk::routing::gossip::NetworkGraph;
 use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
@@ -148,7 +148,7 @@ impl LampoChannelManager {
                             .best_block_updated(&hash, height.to_consensus_u32());
                     }
                     OnChainEvent::ConfirmedTransaction((tx, idx, header, height)) => {
-                        log::info!(target: "channel_manager", "confirmed transaction with txid `{}` at height `{height}`", tx.txid());
+                        log::info!(target: "channel_manager", "confirmed transaction with txid `{}` at height `{height}`", tx.compute_txid());
                         self.chain_monitor().transactions_confirmed(
                             &header,
                             &[(idx as usize, &tx)],
@@ -205,7 +205,7 @@ impl LampoChannelManager {
                 ready: channel.is_channel_ready,
                 amount: channel.channel_value_satoshis,
                 amount_msat: channel.next_outbound_htlc_limit_msat,
-                public: channel.is_public,
+                public: channel.is_announced,
                 available_balance_for_send_msat: channel.outbound_capacity_msat,
                 available_balance_for_recv_msat: channel.inbound_capacity_msat,
             })
@@ -432,7 +432,7 @@ impl ChannelEvents for LampoChannelManager {
             }
         };
 
-        let txid = tx.as_ref().map(|tx| tx.txid());
+        let txid = tx.as_ref().map(|tx| tx.compute_txid());
 
         Ok(response::OpenChannel {
             node_id: open_channel.node_id,

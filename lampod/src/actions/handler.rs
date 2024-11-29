@@ -18,7 +18,6 @@ use lampo_common::types::ChannelState;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
-use crate::ln::events::PeerEvents;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::LampoDaemon;
 
@@ -118,8 +117,7 @@ impl Handler for LampoHandler {
                 counterparty_node_id,
                 funding_satoshis,
                 push_msat,
-                channel_type,
-            } => {
+                channel_type, is_announced, params } => {
                 Err(error::anyhow!("Request for open a channel received, unfortunatly we do not support this feature yet."))
             }
             ldk::events::Event::ChannelReady {
@@ -179,7 +177,7 @@ impl Handler for LampoHandler {
                     channel_value_satoshis,
                     fee,
                 )?;
-                log::info!("funding transaction created `{}`", transaction.txid());
+                log::info!("funding transaction created `{}`", transaction.compute_txid());
                 log::info!(
                     "transaction hex `{}`",
                     lampo_common::bitcoin::consensus::encode::serialize_hex(&transaction)
@@ -193,8 +191,8 @@ impl Handler for LampoHandler {
                 self.channel_manager
                     .manager()
                     .funding_transaction_generated(
-                        &temporary_channel_id,
-                        &counterparty_node_id,
+                        temporary_channel_id,
+                        counterparty_node_id,
                         transaction,
                     )
                     .map_err(|err| error::anyhow!("{:?}", err))?;

@@ -243,11 +243,14 @@ impl LampoDaemon {
         ));
 
         let handler = self.handler();
+        // TODO: In 0.0.125, events can also throw errors, we should probably take
+        // care of this
         let event_handler = move |event: Event| {
             log::info!(target: "lampo", "ldk event {:?}", event);
             if let Err(err) = handler.handle(event) {
                 log::error!("{err}");
             }
+            Ok(())
         };
 
         log::info!(target: "lampo", "Stating onchaind");
@@ -262,6 +265,7 @@ impl LampoDaemon {
             event_handler,
             self.channel_manager().chain_monitor(),
             self.channel_manager().manager(),
+            Some(self.peer_manager().onion_messenger()),
             GossipSync::p2p(gossip_sync),
             self.peer_manager().manager(),
             self.logger.clone(),
