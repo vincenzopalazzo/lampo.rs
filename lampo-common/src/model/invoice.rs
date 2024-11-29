@@ -32,7 +32,6 @@ pub mod request {
 pub mod response {
     use std::vec::Vec;
 
-    use bitcoin::secp256k1::PublicKey;
     use lightning::routing::router::RouteHop;
     use paperclip::actix::Apiv2Schema;
     use serde::{Deserialize, Serialize};
@@ -48,7 +47,7 @@ pub mod response {
     pub struct Offer {
         pub bolt12: String,
         pub metadata: Option<String>,
-        pub metadata_pubkey: Option<PublicKey>,
+        pub metadata_pubkey: Option<lightning::bitcoin::secp256k1::PublicKey>,
     }
 
     impl From<ldk::offers::offer::Offer> for Offer {

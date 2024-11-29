@@ -1,8 +1,10 @@
 use std::{sync::Arc, time::SystemTime};
 
-use bitcoin::secp256k1::{Secp256k1, SecretKey};
 use lightning::sign::{InMemorySigner, NodeSigner, OutputSpender, SignerProvider};
+use lightning_invoice::RawBolt11Invoice;
 
+use crate::bitcoin::secp256k1::Secp256k1;
+use crate::bitcoin::secp256k1::SecretKey;
 use crate::ldk::sign::{EntropySource, KeysManager};
 
 /// Lampo keys implementations
@@ -153,11 +155,10 @@ impl NodeSigner for LampoKeysManager {
 
     fn sign_invoice(
         &self,
-        hrp_bytes: &[u8],
-        invoice_data: &[bitcoin::bech32::u5],
+        invoice_data: &RawBolt11Invoice,
         recipient: lightning::sign::Recipient,
     ) -> Result<bitcoin::secp256k1::ecdsa::RecoverableSignature, ()> {
-        self.inner.sign_invoice(hrp_bytes, invoice_data, recipient)
+        self.inner.sign_invoice(invoice_data, recipient)
     }
 }
 
@@ -224,7 +225,10 @@ impl SignerProvider for LampoKeysManager {
             .generate_channel_keys_id(inbound, channel_value_satoshis, user_channel_id)
     }
 
-    fn get_destination_script(&self, channel_keys_id: [u8; 32]) -> Result<bitcoin::ScriptBuf, ()> {
+    fn get_destination_script(
+        &self,
+        channel_keys_id: [u8; 32],
+    ) -> Result<bitcoin::ScriptBuf, ()> {
         self.inner.get_destination_script(channel_keys_id)
     }
 

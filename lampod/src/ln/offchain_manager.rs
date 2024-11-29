@@ -68,7 +68,7 @@ impl OffchainManager {
         expiring_in: u32,
     ) -> error::Result<ldk::invoice::Bolt11Invoice> {
         let currency = ldk::invoice::Currency::try_from(self.lampo_conf.network)?;
-        let invoice = ldk::invoice::utils::create_invoice_from_channelmanager(
+        let invoice = ldk::ln::invoice_utils::create_invoice_from_channelmanager(
             &self.channel_manager.manager(),
             self.keys_manager.clone(),
             self.logger.clone(),
@@ -83,7 +83,9 @@ impl OffchainManager {
     }
 
     pub fn decode_invoice(&self, invoice_str: &str) -> error::Result<ldk::invoice::Bolt11Invoice> {
-        let invoice = invoice_str.parse::<ldk::invoice::Bolt11Invoice>()?;
+        let invoice = invoice_str
+            .parse::<ldk::invoice::Bolt11Invoice>()
+            .map_err(|err| error::anyhow!("Error occured while decoding invoice {err}"))?;
         Ok(invoice)
     }
 
@@ -129,7 +131,7 @@ impl OffchainManager {
         let invoice = self.decode_invoice(invoice_str)?;
         let payment_id = PaymentId((*invoice.payment_hash()).to_byte_array());
         let (payment_hash, onion, route) = if invoice.amount_milli_satoshis().is_none() {
-            ldk::invoice::payment::payment_parameters_from_zero_amount_invoice(
+            ldk::ln::bolt11_payment::payment_parameters_from_zero_amount_invoice(
                 &invoice,
                 amount_msat.ok_or(error::anyhow!(
                     "invoice with no amount, and amount must be specified"
@@ -137,7 +139,7 @@ impl OffchainManager {
             )
             .map_err(|err| error::anyhow!("{:?}", err))?
         } else {
-            ldk::invoice::payment::payment_parameters_from_invoice(&invoice)
+            ldk::ln::bolt11_payment::payment_parameters_from_invoice(&invoice)
                 .map_err(|err| error::anyhow!("{:?}", err))?
         };
         self.channel_manager
