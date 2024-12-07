@@ -18,4 +18,4 @@ lampo-core-wallet = { path = "../lampo-core-wallet" }
 
 
 [target.'cfg(target_os = "android")'.dependencies]
-android_logger = "0.11"
+android_logger = "0.14"
