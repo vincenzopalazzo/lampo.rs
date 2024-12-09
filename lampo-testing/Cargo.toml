@@ -14,4 +14,4 @@ log = "0.4.18"
 tempfile = "3.6.0"
 port-selector = "0.1.6"
 anyhow = "1.0.71"
-tokio = { version = "1.22.0", features = ["process", "time", "fs"] }
+tokio = { version = "1.42.0", features = ["process", "time", "fs"] }
