@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "^1.29.1", features = ["rt-multi-thread", "parking_lot"] }
+tokio = { version = "^1.42.0", features = ["rt-multi-thread", "parking_lot"] }
 lampo-common = { path = "../lampo-common" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-client = { path = "../lampo-client" }
