@@ -135,6 +135,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         lampo_conf.api_host, lampo_conf.api_port
     ))?);
     lampod.add_external_handler(handler)?;
+
     ctrlc::set_handler(move || {
         use std::time::Duration;
         log::info!("Shutdown...");
@@ -142,10 +143,12 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         std::process::exit(0);
     })?;
 
-    let workder = lampod.listen().unwrap();
+    lampod.listen();
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
-    let _ = workder.join();
-    Ok(())
+    // FIXME: this should not block on, but the listen should be blocking the execution
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    }
 }
 
 pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {

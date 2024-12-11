@@ -75,7 +75,8 @@ impl LampoChainManager {
 impl FeeEstimator for LampoChainManager {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
         // FIXME: have the result in the cache to make easy the query of it.
-        unimplemented!()
+        // TODO: fix this
+        256
     }
 }
 

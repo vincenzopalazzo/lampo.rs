@@ -19,20 +19,21 @@ pub mod ln;
 pub mod persistence;
 
 use std::cell::Cell;
+use std::io;
 use std::sync::Arc;
-use std::thread::JoinHandle;
+use std::time::SystemTime;
 
 use lampo_common::backend::Backend;
-use lampo_common::bitcoin::absolute::Height;
 use lampo_common::conf::LampoConf;
-use lampo_common::error;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::events::Event;
-use lampo_common::ldk::processor::{BackgroundProcessor, GossipSync};
-use lampo_common::ldk::routing::gossip::P2PGossipSync;
+use lampo_common::ldk::processor::{process_events_async, BackgroundProcessor, GossipSync};
+use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
+use lampo_common::{error, ldk};
+use tokio::task::JoinHandle;
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
@@ -41,6 +42,9 @@ use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
+
+pub(crate) type P2PGossipSync =
+    ldk::routing::gossip::P2PGossipSync<Arc<LampoGraph>, Arc<LampoChainManager>, Arc<LampoLogger>>;
 
 /// LampoDaemon is the main data structure that uses the facade
 /// pattern to hide the complexity of the LDK library. You can interact
@@ -222,21 +226,13 @@ impl LampoDaemon {
         Ok(())
     }
 
-    pub fn listen(self: Arc<Self>) -> error::Result<JoinHandle<std::io::Result<()>>> {
+    pub fn listen(self: Arc<Self>) -> JoinHandle<Result<(), io::Error>> {
         log::info!(target: "lampod", "Starting lightning node version `{}`", env!("CARGO_PKG_VERSION"));
-        let gossip_sync = Arc::new(P2PGossipSync::new(
+        let gossip_sync: Arc<P2PGossipSync> = Arc::new(ldk::routing::gossip::P2PGossipSync::new(
             self.channel_manager().graph(),
             None::<Arc<LampoChainManager>>,
             self.logger.clone(),
         ));
-
-        let handler = self.handler();
-        let event_handler = move |event: Event| {
-            log::info!(target: "lampo", "ldk event {:?}", event);
-            if let Err(err) = handler.handle(event) {
-                log::error!("{err}");
-            }
-        };
 
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().backend.clone().listen();
@@ -245,21 +241,38 @@ impl LampoDaemon {
         log::info!(target: "lampo", "Starting channel manager");
         let _ = self.channel_manager().listen();
 
-        let background_processor = BackgroundProcessor::start(
-            self.persister.clone(),
-            event_handler,
-            self.channel_manager().chain_monitor(),
-            self.channel_manager().manager(),
-            GossipSync::p2p(gossip_sync),
-            self.peer_manager().manager(),
-            self.logger.clone(),
-            Some(self.channel_manager().scorer()),
-        );
+        tokio::spawn(async move {
+            process_events_async(
+                self.persister.clone(),
+                |env| self.handler_ldk_events(env),
+                self.channel_manager().chain_monitor(),
+                self.channel_manager().manager(),
+                GossipSync::p2p(gossip_sync),
+                self.peer_manager().manager(),
+                self.logger.clone(),
+                Some(self.channel_manager().scorer()),
+                |d| {
+                    Box::pin(async move {
+                        tokio::time::sleep(d).await;
+                        false
+                    })
+                },
+                true,
+                || {
+                    Some(
+                        SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap(),
+                    )
+                },
+            )
+            .await
+            // FIXME: add the stop event handler
+        })
+    }
 
-        Ok(std::thread::spawn(move || {
-            let _ = background_processor.join();
-            Ok(())
-        }))
+    async fn handler_ldk_events(&self, env: Event) {
+        self.handler().handle(env).await;
     }
 
     /// Call any method supported by the lampod configuration. This includes
@@ -269,10 +282,10 @@ impl LampoDaemon {
     /// Welcome to the third design pattern in under 300 lines of code. The code will clarify the
     /// idea, but be prepared to see a broker pattern begin as a chain of responsibility pattern
     /// at some point.
-    pub fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
+    pub async fn call(&self, method: &str, args: json::Value) -> error::Result<json::Value> {
         let Some(ref handler) = self.handler else {
             error::bail!("at this point the handler should be not None");
         };
-        handler.call::<json::Value, json::Value>(method, args)
+        handler.call::<json::Value, json::Value>(method, args).await
     }
 }
