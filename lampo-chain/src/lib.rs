@@ -1,18 +1,21 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use lampo_common::async_trait;
-use lampo_common::bitcoin::BlockHash;
-use lampo_common::conf::LampoConf;
-use lampo_common::error;
-
+use lampo_common::model::response;
 use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::init;
 use lightning_block_sync::rpc::RpcClient;
 use lightning_block_sync::{poll, AsyncBlockSourceResult, BlockHeaderData, UnboundedCache};
 use lightning_block_sync::{BlockSource, SpvClient};
 
+use lampo_common::async_trait;
 use lampo_common::backend::{Backend, BlockData};
+use lampo_common::bitcoin::consensus::encode::serialize_hex;
+use lampo_common::bitcoin::BlockHash;
+use lampo_common::conf::LampoConf;
+use lampo_common::error;
+use lampo_common::json;
+use lampo_common::serde::Deserialize;
 use lampo_common::types::{LampoChainMonitor, LampoChannel};
 
 /// Welcome in another Facede pattern implementation
@@ -106,11 +109,32 @@ impl Backend for LampoChainSync {
     }
 
     async fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
-        unimplemented!()
+        let resp = self
+            .rpc_client
+            .call_method::<json::Value>("sendrawtransaction", &[serialize_hex(tx).into()])
+            .await;
+        log::info!("Broadcasting tx result: {:?}", resp);
     }
 
     async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
-        Ok(256)
+        #[derive(Deserialize)]
+        pub struct FeeRate {
+            feerate: Option<u32>,
+            errors: Option<Vec<String>>,
+        }
+        let resp = self
+            .rpc_client
+            .call_method::<json::Value>("estimatesmartfee", &[blocks.into()])
+            .await?;
+        let resp: FeeRate = json::from_value(resp)?;
+        if let Some(errs) = resp.errors {
+            return Err(error::anyhow!("Error in fee rate estimation: {:?}", errs).into());
+        }
+        let Some(feerate) = resp.feerate else {
+            return Err(error::anyhow!("No fee rate estimation available").into());
+        };
+        // estimate fee rate in BTC/kvB
+        Ok(feerate)
     }
 
     async fn get_transaction(
