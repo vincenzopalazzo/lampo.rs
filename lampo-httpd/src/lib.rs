@@ -13,7 +13,7 @@ use paperclip::actix::{self, CreatedJson};
 use lampo_common::error;
 use lampod::LampoDaemon;
 
-use commands::inventory::{rest_getinfo, rest_networkchannels};
+use commands::inventory::{rest_funds, rest_getinfo, rest_networkchannels};
 use commands::offchain::{rest_decode, rest_invoice, rest_pay};
 use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel};
 /// Result type for json responses
@@ -68,6 +68,7 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_invoice)
             .service(rest_decode)
             .service(rest_pay)
+            .service(rest_funds)
             .with_json_spec_at("/api/v1")
             .build()
     })
