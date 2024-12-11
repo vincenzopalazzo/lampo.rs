@@ -6,7 +6,10 @@ use lampo_common::model::request;
 
 use crate::LampoDaemon;
 
-pub fn json_fundchannel(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_fundchannel(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
     log::info!("call for `openchannel` with request {:?}", request);
     let request: request::OpenChannel = json::from_value(request.clone())?;
 
@@ -20,7 +23,7 @@ pub fn json_fundchannel(ctx: &LampoDaemon, request: &json::Value) -> Result<json
         log::trace!("we are not connected with the peer {}", request.node_id);
         let conn = request::Connect::try_from(request.clone())?;
         let conn = json::to_value(conn)?;
-        ctx.call("connect", conn)?;
+        ctx.call("connect", conn).await?;
     }
 
     // FIXME: there are use case there need to be covered, like
