@@ -272,7 +272,9 @@ impl LampoDaemon {
     }
 
     async fn handler_ldk_events(&self, env: Event) {
-        self.handler().handle(env).await;
+        if let Err(err) = self.handler().handle(env).await {
+            log::error!(target: "lampod", "Error handling event: {:?}", err);
+        }
     }
 
     /// Call any method supported by the lampod configuration. This includes

@@ -23,6 +23,8 @@ pub mod error {
     pub use anyhow::*;
 }
 
+pub use serde;
+
 pub mod json {
     pub use serde::de::DeserializeOwned;
     pub use serde::{Deserialize, Serialize};
