@@ -1,8 +1,8 @@
 //! Handler module implementation that
 use std::cell::RefCell;
-use std::fmt::format;
 use std::sync::Arc;
 
+use lampo_common::async_trait;
 use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::error::Ok;
@@ -63,7 +63,7 @@ impl LampoHandler {
     /// Call any method supported by the lampod configuration. This includes
     /// a lot of handler code. This function serves as a broker pattern in some ways,
     /// but it may also function as a chain of responsibility pattern in certain cases.
-    pub fn call<T: json::Serialize, R: json::DeserializeOwned>(
+    pub async fn call<T: json::Serialize, R: json::DeserializeOwned>(
         &self,
         method: &str,
         args: T,
@@ -73,7 +73,7 @@ impl LampoHandler {
         let (sender, receiver) = chan::bounded::<json::Value>(1);
         let command = Command::from_req(&request, &sender)?;
         log::info!("received {:?}", command);
-        self.react(command)?;
+        self.react(command).await?;
         let result = receiver.recv()?;
         Ok(json::from_value::<R>(result)?)
     }
@@ -91,9 +91,9 @@ impl EventHandler for LampoHandler {
     }
 }
 
-#[allow(unused_variables)]
+#[async_trait]
 impl Handler for LampoHandler {
-    fn react(&self, event: crate::command::Command) -> error::Result<()> {
+    async fn react(&self, event: crate::command::Command) -> error::Result<()> {
         let handler = self.external_handlers.borrow();
         match event {
             Command::ExternalCommand(req, chan) => {
@@ -110,7 +110,7 @@ impl Handler for LampoHandler {
     }
 
     /// method used to handle the incoming event from ldk
-    fn handle(&self, event: ldk::events::Event) -> error::Result<()> {
+    async fn handle(&self, event: ldk::events::Event) -> error::Result<()> {
         match event {
             ldk::events::Event::OpenChannelRequest {
                 temporary_channel_id,
@@ -167,7 +167,7 @@ impl Handler for LampoHandler {
 
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
                 // FIXME: estimate the fee rate with a callback
-                let fee = self.chain_manager.backend.fee_rate_estimation(6).map_err(|err| {
+                let fee = self.chain_manager.backend.fee_rate_estimation(6).await.map_err(|err| {
                     let msg = format!("Channel Opening Error: {err}");
                     self.emit(Event::Lightning(LightningEvent::ChannelEvent { state: "error".to_owned(), message : msg}));
                     err

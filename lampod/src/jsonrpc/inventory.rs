@@ -8,7 +8,7 @@ use lampo_common::model::GetInfo;
 use crate::{async_run, LampoDaemon};
 
 // FIXME: change the name to `json_get_info`
-pub fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("calling `getinfo` with request `{:?}`", request);
     let chain = ctx.conf.network.to_string();
     let alias = ctx.conf.alias.clone();
@@ -49,7 +49,10 @@ pub fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Va
 }
 
 // FIXME: check the request
-pub fn json_networkchannels(ctx: &LampoDaemon, _: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_networkchannels(
+    ctx: &LampoDaemon,
+    _: &json::Value,
+) -> Result<json::Value, Error> {
     let network_graph = ctx.channel_manager().graph();
     let network_graph = network_graph.read_only();
     let channels = network_graph.channels().unordered_keys();

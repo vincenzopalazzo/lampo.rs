@@ -127,7 +127,7 @@ macro_rules! post {
             pub async fn [<rest_$name>](
                 state: web::Data<AppState>,
             ) -> ResultJson<$res_ty> {
-                let response = [<json_$name>](&state.lampod, &json::json!({}));
+                let response = [<json_$name>](&state.lampod, &json::json!({})).await;
                 if let Err(err) = response {
                     return Err(actix_web::error::ErrorInternalServerError(err));
                 }
@@ -151,7 +151,7 @@ macro_rules! post {
                 }
                 let request = request.unwrap();
                 let request = json::to_value(&request).unwrap();
-                let response = [<json_$name>](&state.lampod, &request);
+                let response = [<json_$name>](&state.lampod, &request).await;
                 if let Err(err) = response {
                     return Err(actix_web::error::ErrorInternalServerError(err));
                 }
