@@ -7,9 +7,6 @@ use elite_rpc::transport::TransportMethod;
 use elite_rpc::EliteRPC;
 use radicle_term as term;
 
-//use lampo_common::error;
-//use lampo_common::json;
-
 use crate::args::LampoCliArgs;
 
 fn main() -> error::Result<()> {
