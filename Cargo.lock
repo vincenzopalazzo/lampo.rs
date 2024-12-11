@@ -1200,6 +1200,7 @@ dependencies = [
  "lampod",
  "lightning-block-sync",
  "log",
+ "serde",
  "tokio",
 ]
 
