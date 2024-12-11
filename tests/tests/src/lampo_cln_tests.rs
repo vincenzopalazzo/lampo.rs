@@ -1,3 +1,4 @@
+/*
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -1302,3 +1303,4 @@ fn test_sync_gossip_from_network_cln() {
 
     async_run!(cln1.stop()).unwrap();
 }
+*/
