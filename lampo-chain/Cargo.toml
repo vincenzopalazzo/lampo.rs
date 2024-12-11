@@ -10,3 +10,4 @@ lightning-block-sync = { version = "0.0.123", features = [ "rpc-client" ] }
 log = "0.4.17"
 tokio ={ version = "*"}
 base64 = "*"
+serde = "*"
