@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
-lampo-bitcoind = { path = "../lampo-bitcoind" }
+lampo-chain = { path = "../lampo-chain" }
 lampo-core-wallet = { path = "../lampo-core-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
 tokio = { version = "1.22.0", features = ["rt", "macros"] }

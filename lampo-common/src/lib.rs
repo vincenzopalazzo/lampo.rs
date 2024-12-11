@@ -13,6 +13,7 @@ pub mod wallet;
 pub mod ldk {
     pub use lightning::*;
     pub use lightning_background_processor as processor;
+    pub use lightning_block_sync as block_sync;
     pub use lightning_invoice as invoice;
     pub use lightning_net_tokio as net;
     pub use lightning_persister as persister;
@@ -21,6 +22,8 @@ pub mod ldk {
 pub mod error {
     pub use anyhow::*;
 }
+
+pub use serde;
 
 pub mod json {
     pub use serde::de::DeserializeOwned;
@@ -37,6 +40,7 @@ pub mod chan {
     pub use crossbeam_channel::*;
 }
 
+pub use async_trait::async_trait;
 pub use bitcoin;
 pub use bitcoin::secp256k1;
 
