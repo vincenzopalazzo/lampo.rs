@@ -2,15 +2,16 @@
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
-use bdk::bitcoin::bip32::Xpriv;
-use bdk::bitcoin::consensus::serialize;
-use bdk::bitcoin::{Amount, ScriptBuf};
-use bdk::keys::bip39::{Language, Mnemonic, WordCount};
-use bdk::keys::GeneratableKey;
-use bdk::keys::{DerivableKey, ExtendedKey, GeneratedKey};
-use bdk::template::Bip84;
-use bdk::wallet::{ChangeSet, Update};
-use bdk::{KeychainKind, SignOptions, Wallet};
+use bdk_wallet::bitcoin::bip32::Xpriv;
+use bdk_wallet::bitcoin::consensus::serialize;
+use bdk_wallet::bitcoin::{Amount, ScriptBuf, FeeRate};
+use bdk_wallet::bip39::{Language, Mnemonic};
+use bdk_wallet::keys::GeneratableKey;
+use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratedKey};
+use bdk_wallet::keys::bip39::WordCount;
+use bdk_wallet::template::Bip84;
+use bdk_wallet::{ChangeSet, Update};
+use bdk_wallet::{KeychainKind, SignOptions, Wallet, PersistedWallet};
 use bdk_file_store::Store;
 
 use lampo_common::bitcoin::consensus::deserialize;
@@ -44,10 +45,10 @@ impl BDKWalletManager {
         // Generate the extended key
         let xkey: ExtendedKey = mnemonic.into_extended_key()?;
         let network = match conf.network.to_string().as_str() {
-            "bitcoin" => bdk::bitcoin::Network::Bitcoin,
-            "testnet" => bdk::bitcoin::Network::Testnet,
-            "signet" => bdk::bitcoin::Network::Signet,
-            "regtest" => bdk::bitcoin::Network::Regtest,
+            "bitcoin" => bdk_wallet::bitcoin::Network::Bitcoin,
+            "testnet" => bdk_wallet::bitcoin::Network::Testnet,
+            "signet" => bdk_wallet::bitcoin::Network::Signet,
+            "regtest" => bdk_wallet::bitcoin::Network::Regtest,
             _ => unreachable!(),
         };
         // Get xprv from the extended key
@@ -57,13 +58,15 @@ impl BDKWalletManager {
 
         let ldk_kesy = LampoKeys::new(xprv.private_key.secret_bytes());
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
-        let wallet = Wallet::new(
-            Bip84(xprv, KeychainKind::External),
-            Some(Bip84(xprv, KeychainKind::Internal)),
-            db,
-            network,
-        )?;
-        let descriptor = wallet.public_descriptor(KeychainKind::Internal).unwrap();
+        let wallet = Wallet::create(
+            Bip84(xprv.clone(), KeychainKind::External),
+            Bip84(xprv, KeychainKind::Internal),
+        )
+            .network(network)
+            .create_wallet_no_persist()?;
+        // TODO: persistence
+        // .create_wallet(&mut create_db(&file_path)?)?;
+        let descriptor = wallet.public_descriptor(KeychainKind::Internal);
         log::info!("descriptor: {descriptor}");
         Ok((wallet, ldk_kesy))
     }
@@ -72,7 +75,8 @@ impl BDKWalletManager {
     fn build_from_private_key(
         xprv: PrivateKey,
         channel_keys: Option<String>,
-    ) -> error::Result<(Wallet, LampoKeys)> {
+    ) -> error::Result<(PersistedWallet<Store<ChangeSet>>, LampoKeys)> {
+
         let ldk_keys = if channel_keys.is_some() {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
         } else {
@@ -82,15 +86,24 @@ impl BDKWalletManager {
         // FIXME: Get a tmp path
         let db = Store::open_or_create_new("lampo".as_bytes(), "/tmp/onchain")?;
         let network = match xprv.network.to_string().as_str() {
-            "bitcoin" => bdk::bitcoin::Network::Bitcoin,
-            "testnet" => bdk::bitcoin::Network::Testnet,
-            "signet" => bdk::bitcoin::Network::Signet,
-            "regtest" => bdk::bitcoin::Network::Regtest,
+            "bitcoin" => bdk_wallet::bitcoin::Network::Bitcoin,
+            "testnet" => bdk_wallet::bitcoin::Network::Testnet,
+            "signet" => bdk_wallet::bitcoin::Network::Signet,
+            "regtest" => bdk_wallet::bitcoin::Network::Regtest,
             _ => unreachable!(),
         };
         let key = Xpriv::new_master(network, &xprv.inner.secret_bytes())?;
         let key = ExtendedKey::from(key);
-        let wallet = Wallet::new(Bip84(key, KeychainKind::External), None, db, network)?;
+        let key = key
+            .into_xprv(network)
+            .ok_or(error::anyhow!("wrong convertion to a private key"))?;
+        // let wallet = Wallet::create(Bip84(key, KeychainKind::External), None, db, network);
+        let wallet = Wallet::create(
+            Bip84(key.clone(), KeychainKind::External),
+            Bip84(key, KeychainKind::Internal),
+        )
+            .network(network)
+            .create_wallet(&mut db)?;
         Ok((wallet, ldk_keys))
     }
 }
@@ -98,7 +111,7 @@ impl BDKWalletManager {
 impl WalletManager for BDKWalletManager {
     fn new(conf: Arc<LampoConf>) -> error::Result<(Self, String)> {
         // Generate fresh mnemonic
-        let mnemonic: GeneratedKey<_, bdk::miniscript::Tap> =
+        let mnemonic: GeneratedKey<_, bdk_wallet::miniscript::Tap> =
             Mnemonic::generate((WordCount::Words12, Language::English))
                 .map_err(|e| error::anyhow!("{:?}", e))?;
         // Convert mnemonic to string
@@ -134,7 +147,7 @@ impl WalletManager for BDKWalletManager {
             .borrow_mut()
             .lock()
             .unwrap()
-            .get_address(bdk::wallet::AddressIndex::New);
+            .reveal_next_address(KeychainKind::External);
         Ok(NewAddress {
             address: address.address.to_string(),
         })
@@ -142,31 +155,34 @@ impl WalletManager for BDKWalletManager {
 
     fn get_onchain_balance(&self) -> error::Result<u64> {
         self.sync()?;
-        let balance = self.wallet.borrow().lock().unwrap().get_balance();
-        Ok(balance.confirmed)
+        let balance = self.wallet.borrow().lock().unwrap().balance();
+        Ok(balance.confirmed.to_sat())
     }
 
     fn create_transaction(
         &self,
         script: Script,
-        amount: u64,
+        sat_amount: u64,
         fee_rate: u32,
     ) -> error::Result<Transaction> {
         self.sync()?;
         let wallet = self.wallet.borrow_mut();
         let mut wallet = wallet.lock().unwrap();
-        let mut tx = wallet.build_tx();
-        tx.add_recipient(ScriptBuf::from_bytes(script.into_bytes()), amount)
-            .fee_rate(FeeRate::from_sat_per_kvb(fee_rate as f32))
-            .enable_rbf();
-        let mut psbt = tx.finish()?;
+        let mut builder = wallet.build_tx();
+        let amount = Amount::from_sat(sat_amount);
+        builder
+            .add_recipient(ScriptBuf::from_bytes(script.to_bytes()), amount)
+            .fee_rate(FeeRate::from_sat_per_vb_unchecked(fee_rate as u64));
+            // TODO: check what's this
+            //  .enable_rbf();
+        let mut psbt = builder.finish()?;
         if !wallet.sign(&mut psbt, SignOptions::default())? {
             error::bail!("wallet not able to sing the psbt {psbt}");
         }
         if !wallet.finalize_psbt(&mut psbt, SignOptions::default())? {
             error::bail!("wallet impossible finalize the psbt: {psbt}");
         };
-        let tx: Transaction = deserialize(&serialize(&psbt.extract_tx()))?;
+        let tx: Transaction = deserialize(&serialize(&psbt.extract_tx()?))?;
         Ok(tx)
     }
 
@@ -177,11 +193,11 @@ impl WalletManager for BDKWalletManager {
         let txs = wallet
             .list_unspent()
             .map(|tx| Utxo {
-                txid: tx.outpoint.txid.to_hex(),
+                txid: format!("{:x}", tx.outpoint.txid),
                 vout: tx.outpoint.vout,
                 reserved: tx.is_spent,
                 confirmed: 0,
-                amount_msat: Amount::from_btc(tx.txout.value as f64).unwrap().to_sat() * 1000_u64,
+                amount_msat: tx.txout.value.to_sat() * 1000_u64,
             })
             .collect::<Vec<_>>();
         Ok(txs)
@@ -198,7 +214,7 @@ impl WalletManager for BDKWalletManager {
         };
         let wallet = self.wallet.borrow();
         let mut wallet = wallet.lock().unwrap();
-        let client = bdk_esplora::esplora_client::Builder::new(esplora_url).build_blocking()?;
+        let client = bdk_esplora::esplora_client::Builder::new(esplora_url).build_blocking();
         let checkpoints = wallet.latest_checkpoint();
         let spks = wallet
             .spks_of_all_keychains()
