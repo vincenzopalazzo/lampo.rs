@@ -14,7 +14,7 @@ lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 lampo-bitcoind = { path = "../lampo-bitcoind" }
-lampo-core-wallet = { path = "../lampo-core-wallet" }
+lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
 
 
 [target.'cfg(target_os = "android")'.dependencies]
