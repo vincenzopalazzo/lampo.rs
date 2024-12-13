@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 log = "*"
 lampo-common = { path = "../lampo-common" }
-bdk = { version = "1.0.0-alpha.11", features = ["keys-bip39"] }
+bdk_wallet = { version = "1.0.0-beta.5", features = ["keys-bip39"] }
 bdk_chain = { version = "0.17" }
 bdk_esplora = { version = "0.16", features = ["blocking"]  }
-bdk_file_store = { version = "0.14" }
+bdk_file_store = { version = "0.17" }
