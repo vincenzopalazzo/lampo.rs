@@ -60,7 +60,7 @@ pub mod response {
     }
 
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct InvoiceInfo {
+    pub struct Bolt11InvoiceInfo {
         pub issuer_id: Option<String>,
         pub expiry_time: Option<u64>,
         pub description: Option<String>,
@@ -68,6 +68,22 @@ pub mod response {
         pub hints: Vec<String>,
         pub network: String,
         pub amount_msat: Option<u64>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Bolt12InvoiceInfo {
+        pub issuer: String,
+        pub offer_id: String,
+        pub offer_chains: Vec<String>,
+        pub description: String,
+        pub offer_paths: Vec<BlindedPath>,
+        pub network: String,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct BlindedPath {
+        pub blinded_hops: Vec<String>,
+        pub blinding_points: String,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
