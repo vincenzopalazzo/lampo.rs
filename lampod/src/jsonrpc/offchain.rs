@@ -8,14 +8,14 @@ use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::ldk;
 use lampo_common::ldk::offers::offer;
-use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
 use lampo_common::model::request::Pay;
 use lampo_common::model::response;
+use lampo_common::model::response::BlindedPath;
 use lampo_common::model::response::PayResult;
-use lampo_common::model::response::{Invoice, InvoiceInfo};
+use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
 use lampo_common::{json, model::request::DecodeInvoice};
 use lampo_jsonrpc::errors::{Error, RpcError};
 
@@ -62,12 +62,11 @@ pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Valu
 pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: DecodeInvoice = json::from_value(request.clone())?;
-
-    let invoice = if let Ok(invoice) = ctx
+    if let Ok(invoice) = ctx
         .offchain_manager()
         .decode::<ldk::invoice::Bolt11Invoice>(&request.invoice_str)
     {
-        InvoiceInfo {
+        let bolt11_invoice = Bolt11InvoiceInfo {
             issuer_id: invoice.payee_pub_key().map(|id| id.to_string()),
             amount_msat: invoice.amount_milli_satoshis(),
             network: invoice.network().to_string(),
@@ -80,40 +79,69 @@ pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<j
             routes: Vec::new(),
             hints: Vec::new(),
             expiry_time: Some(invoice.expiry_time().as_millis() as u64),
-        }
-    } else if let Ok(offer) = ctx
+        };
+
+        return Ok(json::to_value(&bolt11_invoice)?);
+    }
+
+    if let Ok(offer) = ctx
         .offchain_manager()
         .decode::<ldk::offers::offer::Offer>(&request.invoice_str)
     {
-        // FIXME: simplify this chain;
-        let network = offer
+        let chains = offer
             .chains()
             .iter()
-            .map(|chain| Network::from_chain_hash(chain.clone()).unwrap().to_string())
-            .collect::<Vec<String>>()
-            .first()
-            .unwrap_or(&Network::Bitcoin.to_string())
-            .clone();
-        InvoiceInfo {
-            issuer_id: offer.issuer().map(|id| id.to_string()),
-            amount_msat: offer.amount().map(|a| {
-                if let Amount::Bitcoin { amount_msats } = a {
-                    amount_msats.clone()
-                } else {
-                    unimplemented!()
-                }
-            }),
-            network: network.to_string(),
-            description: offer.description().map(|str| str.to_string()),
-            routes: Vec::new(),
-            hints: Vec::new(),
-            expiry_time: offer.absolute_expiry().map(|a| a.as_millis() as u64),
-        }
-    } else {
-        unreachable!()
-    };
+            .map(|chain| chain.to_string())
+            .collect::<Vec<String>>();
 
-    Ok(json::to_value(&invoice)?)
+        let network = offer
+            .chains()
+            .first()
+            .map(|hash| Network::from_chain_hash(*hash))
+            .unwrap_or(Some(Network::Bitcoin));
+
+        let paths = offer
+            .paths()
+            .to_vec()
+            .iter()
+            .map(|path| BlindedPath {
+                blinded_hops: path
+                    .blinded_hops
+                    .iter()
+                    .map(|node| node.blinded_node_id.to_string())
+                    .collect::<Vec<String>>(),
+                blinding_points: path.blinding_point.to_string(),
+            })
+            .collect::<Vec<BlindedPath>>();
+
+        //FIXME: Convert this to hex
+        let offer_id = format!("{:?}", offer.id().0);
+        let desc = offer
+            .description()
+            .map(|desc| desc.to_string())
+            .unwrap_or_else(|| "Description not provided".to_string());
+
+        let issuer_id = offer
+            .issuer()
+            .map(|issuer| issuer.to_string())
+            .unwrap_or_else(|| "No issuer id provided".to_string());
+
+        let bolt12_invoice = Bolt12InvoiceInfo {
+            offer_id,
+            network: network.unwrap().to_string(),
+            description: desc,
+            offer_chains: chains,
+            offer_paths: paths,
+            issuer: issuer_id,
+        };
+        return Ok(json::to_value(&bolt12_invoice)?);
+    } else {
+        Err(Error::Rpc(RpcError {
+            code: -1,
+            message: "Not able to decode invoice".to_string(),
+            data: None,
+        }))
+    }
 }
 
 pub fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
