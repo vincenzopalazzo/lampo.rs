@@ -7,7 +7,7 @@ edition = "2021"
 lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 lampo-bitcoind = { path = "../lampo-bitcoind" }
-lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
+lampo-core-wallet = { path = "../lampo-core-wallet" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 clightning-testing = { git = "https://github.com/laanwj/cln4rust.git" }
 log = "0.4.18"

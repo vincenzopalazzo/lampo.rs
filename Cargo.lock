@@ -207,6 +207,12 @@ dependencies = [
 
 [[package]]
 name = "bech32"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf9ff0bbfd639f15c74af777d81383cf53efb7c93613f6cab67c6c11e05bbf8b"
+
+[[package]]
+name = "bech32"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d86b93f97252c47b41663388e6d155714a9d0c398b99f1005cbc5f978b29f445"
@@ -268,6 +274,15 @@ dependencies = [
  "hex_lit",
  "secp256k1 0.29.1",
  "serde",
+]
+
+[[package]]
+name = "bitcoin-bech32"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754eb4c7f35c031f33c95cc257b4c4192a5c9d3de637d3ee78ab052a3f35da57"
+dependencies = [
+ "bech32 0.8.1",
 ]
 
 [[package]]
@@ -1176,9 +1191,9 @@ name = "lampo-c-ffi"
 version = "0.1.0"
 dependencies = [
  "android_logger",
- "lampo-bdk-wallet",
  "lampo-bitcoind",
  "lampo-common",
+ "lampo-core-wallet",
  "lampo-jsonrpc",
  "lampod",
  "libc",
@@ -1231,6 +1246,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lampo-core-wallet"
+version = "0.1.0"
+dependencies = [
+ "bdk_wallet",
+ "bitcoin-bech32",
+ "bitcoin_hashes 0.12.0",
+ "bitcoincore-rpc",
+ "lampo-common",
+ "log",
+ "serde",
+]
+
+[[package]]
 name = "lampo-jsonrpc"
 version = "0.0.1-alpha.1"
 dependencies = [
@@ -1249,9 +1277,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clightning-testing",
- "lampo-bdk-wallet",
  "lampo-bitcoind",
  "lampo-common",
+ "lampo-core-wallet",
  "lampo-jsonrpc",
  "lampod",
  "log",
@@ -1282,9 +1310,9 @@ version = "0.1.0"
 dependencies = [
  "ctrlc",
  "filelock-rs",
- "lampo-bdk-wallet",
  "lampo-bitcoind",
  "lampo-common",
+ "lampo-core-wallet",
  "lampo-jsonrpc",
  "lampod",
  "lexopt",

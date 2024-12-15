@@ -2,6 +2,7 @@
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
+use bdk_esplora::EsploraExt;
 use bdk_wallet::bitcoin::bip32::Xpriv;
 use bdk_wallet::bitcoin::consensus::serialize;
 use bdk_wallet::bitcoin::{Amount, ScriptBuf, FeeRate};
@@ -10,17 +11,20 @@ use bdk_wallet::keys::GeneratableKey;
 use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratedKey};
 use bdk_wallet::keys::bip39::WordCount;
 use bdk_wallet::template::Bip84;
+use bdk_wallet::descriptor::Legacy;
 use bdk_wallet::{ChangeSet, Update};
 use bdk_wallet::{KeychainKind, SignOptions, Wallet, PersistedWallet};
 use bdk_file_store::Store;
 
 use lampo_common::bitcoin::consensus::deserialize;
-use lampo_common::bitcoin::{PrivateKey, Script, Transaction};
+use lampo_common::bitcoin::{PrivateKey, Transaction};
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::error;
 use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::{NewAddress, Utxo};
 use lampo_common::wallet::WalletManager;
+
+const PARALLEL_REQUESTS: usize = 3;
 
 pub struct BDKWalletManager {
     pub wallet: RefCell<Mutex<Wallet>>,
@@ -75,7 +79,8 @@ impl BDKWalletManager {
     fn build_from_private_key(
         xprv: PrivateKey,
         channel_keys: Option<String>,
-    ) -> error::Result<(PersistedWallet<Store<ChangeSet>>, LampoKeys)> {
+    ) -> error::Result<(Wallet, LampoKeys)> {
+    // ) -> error::Result<(PersistedWallet<Store<ChangeSet>>, LampoKeys)> {
 
         let ldk_keys = if channel_keys.is_some() {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
@@ -84,7 +89,7 @@ impl BDKWalletManager {
         };
 
         // FIXME: Get a tmp path
-        let db = Store::open_or_create_new("lampo".as_bytes(), "/tmp/onchain")?;
+        // let db: Store<ChangeSet> = Store::open_or_create_new("lampo".as_bytes(), "/tmp/onchain")?;
         let network = match xprv.network.to_string().as_str() {
             "bitcoin" => bdk_wallet::bitcoin::Network::Bitcoin,
             "testnet" => bdk_wallet::bitcoin::Network::Testnet,
@@ -93,7 +98,7 @@ impl BDKWalletManager {
             _ => unreachable!(),
         };
         let key = Xpriv::new_master(network, &xprv.inner.secret_bytes())?;
-        let key = ExtendedKey::from(key);
+        let key: ExtendedKey<Legacy> = ExtendedKey::from(key);
         let key = key
             .into_xprv(network)
             .ok_or(error::anyhow!("wrong convertion to a private key"))?;
@@ -103,7 +108,8 @@ impl BDKWalletManager {
             Bip84(key, KeychainKind::Internal),
         )
             .network(network)
-            .create_wallet(&mut db)?;
+            // .create_wallet(&mut db)?;
+            .create_wallet_no_persist()?;
         Ok((wallet, ldk_keys))
     }
 }
@@ -161,7 +167,7 @@ impl WalletManager for BDKWalletManager {
 
     fn create_transaction(
         &self,
-        script: Script,
+        script: lampo_common::bitcoin::ScriptBuf,
         sat_amount: u64,
         fee_rate: u32,
     ) -> error::Result<Transaction> {
@@ -214,37 +220,17 @@ impl WalletManager for BDKWalletManager {
         };
         let wallet = self.wallet.borrow();
         let mut wallet = wallet.lock().unwrap();
-        let client = bdk_esplora::esplora_client::Builder::new(esplora_url).build_blocking();
-        let checkpoints = wallet.latest_checkpoint();
-        let spks = wallet
-            .spks_of_all_keychains()
-            .into_iter()
-            .map(|(k, spks)| {
-                let mut first = true;
-                (
-                    k,
-                    spks.inspect(move |(_spk_i, _)| {
-                        if first {
-                            first = false;
-                        }
-                    }),
-                )
-            })
-            .collect();
+        let sync_request = wallet.start_sync_with_revealed_spks(); // .inspect
         log::info!("bdk start to sync");
 
-        let (update_graph, last_active_indices) =
-            client.scan_txs_with_keychains(spks, None, None, 50, 2)?;
-        let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
-        let chain_update = client.update_local_chain(checkpoints, missing_heights)?;
-        let update = Update {
-            last_active_indices,
-            graph: update_graph,
-            chain: Some(chain_update),
-        };
+        let client = bdk_esplora::esplora_client::Builder::new(esplora_url).build_blocking();
+        let response = client.sync(sync_request, PARALLEL_REQUESTS)?;
+        let update = Update::from(response);
 
         wallet.apply_update(update)?;
-        wallet.commit()?;
+        // TODO: persistence
+        // let mut db = Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), DB_PATH)?;
+        // wallet.persist(&mut db)?;
         log::info!("bdk in sync at height {}!", client.get_height()?);
         Ok(())
     }
