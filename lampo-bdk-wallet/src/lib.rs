@@ -168,14 +168,14 @@ impl WalletManager for BDKWalletManager {
     fn create_transaction(
         &self,
         script: lampo_common::bitcoin::ScriptBuf,
-        sat_amount: u64,
+        amount_sat: u64,
         fee_rate: u32,
     ) -> error::Result<Transaction> {
         self.sync()?;
         let wallet = self.wallet.borrow_mut();
         let mut wallet = wallet.lock().unwrap();
         let mut builder = wallet.build_tx();
-        let amount = Amount::from_sat(sat_amount);
+        let amount = Amount::from_sat(amount_sat);
         builder
             .add_recipient(ScriptBuf::from_bytes(script.to_bytes()), amount)
             .fee_rate(FeeRate::from_sat_per_vb_unchecked(fee_rate as u64));
