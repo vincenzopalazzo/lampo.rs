@@ -2,7 +2,6 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use lampo_common::conf::Network;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
@@ -13,7 +12,6 @@ use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
 use lampo_common::model::request::Pay;
 use lampo_common::model::response;
-use lampo_common::model::response::BlindedPath;
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
 use lampo_common::{json, model::request::DecodeInvoice};
@@ -88,52 +86,7 @@ pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<j
         .offchain_manager()
         .decode::<ldk::offers::offer::Offer>(&request.invoice_str)
     {
-        let chains = offer
-            .chains()
-            .iter()
-            .map(|chain| chain.to_string())
-            .collect::<Vec<String>>();
-
-        let network = offer
-            .chains()
-            .first()
-            .map(|hash| Network::from_chain_hash(*hash))
-            .unwrap_or(Some(Network::Bitcoin));
-
-        let paths = offer
-            .paths()
-            .to_vec()
-            .iter()
-            .map(|path| BlindedPath {
-                blinded_hops: path
-                    .blinded_hops
-                    .iter()
-                    .map(|node| node.blinded_node_id.to_string())
-                    .collect::<Vec<String>>(),
-                blinding_points: path.blinding_point.to_string(),
-            })
-            .collect::<Vec<BlindedPath>>();
-
-        //FIXME: Convert this to hex
-        let offer_id = format!("{:?}", offer.id().0);
-        let desc = offer
-            .description()
-            .map(|desc| desc.to_string())
-            .unwrap_or_else(|| "Description not provided".to_string());
-
-        let issuer_id = offer
-            .issuer()
-            .map(|issuer| issuer.to_string())
-            .unwrap_or_else(|| "No issuer id provided".to_string());
-
-        let bolt12_invoice = Bolt12InvoiceInfo {
-            offer_id,
-            network: network.unwrap().to_string(),
-            description: desc,
-            offer_chains: chains,
-            offer_paths: paths,
-            issuer: issuer_id,
-        };
+        let bolt12_invoice: Bolt12InvoiceInfo = offer.into();
         return Ok(json::to_value(&bolt12_invoice)?);
     } else {
         Err(Error::Rpc(RpcError {
