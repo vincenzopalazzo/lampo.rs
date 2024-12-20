@@ -207,8 +207,8 @@ impl WalletManager for BDKWalletManager {
         Ok(txs)
     }
 
+    
     fn sync(&self) -> error::Result<()> {
-        // Scanning the chain...
         let esplora_url = match self.network {
             Network::Bitcoin => "https://mempool.space/api",
             Network::Testnet => "https://mempool.space/testnet/api",
@@ -216,40 +216,35 @@ impl WalletManager for BDKWalletManager {
                 error::bail!("network `{:?}` not supported", self.network);
             }
         };
+
         let wallet = self.wallet.borrow();
         let mut wallet = wallet.lock().unwrap();
-        let client = bdk_esplora::esplora_client::Builder::new(esplora_url).build_blocking()?;
-        let checkpoints = wallet.latest_checkpoint();
-        let spks = wallet
-            .spks_of_all_keychains()
-            .into_iter()
-            .map(|(k, spks)| {
-                let mut first = true;
-                (
-                    k,
-                    spks.inspect(move |(_spk_i, _)| {
-                        if first {
-                            first = false;
-                        }
-                    }),
-                )
-            })
-            .collect();
+        let client = bdk_esplora::esplora_client::Builder::new(esplora_url).build_blocking();
+        
+        let height = client.get_height()?;
+    
+        let external_spk = wallet.get_address(AddressIndex::New)?
+            .script_pubkey();
+        
+        let internal_spk = wallet.get_address(AddressIndex::LastUnused)?
+            .script_pubkey();
+    
+        let all_spks = vec![external_spk, internal_spk];
+        
         log::info!("bdk start to sync");
-
-        let (update_graph, last_active_indices) =
-            client.scan_txs_with_keychains(spks, None, None, 50, 2)?;
-        let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
-        let chain_update = client.update_local_chain(checkpoints, missing_heights)?;
-        let update = Update {
-            last_active_indices,
-            graph: update_graph,
-            chain: Some(chain_update),
-        };
-
-        wallet.apply_update(update)?;
-        wallet.commit()?;
-        log::info!("bdk in sync at height {}!", client.get_height()?);
+        
+        //FIXME!
+        //probably feature = esplora doesn't function well
+        //but using cargo build, this can download esplora and make it useful
+        let scan_request = FullScanRequestBuilder::default();
+        let txs = client.full_scan(scan_request, 20, 10)?;
+        wallet.sync(&EsploraBlockchain::new(esplora_url, 20)?, Default::default())?;
+        
+        // Update the wallet with new transactions    
+        log::info!(
+            "bdk in sync at height {}!",
+            client.get_height()?
+        );
         Ok(())
     }
 }
