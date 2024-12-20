@@ -76,7 +76,9 @@ impl BDKWalletManager {
     fn build_from_private_key(
         xprv: PrivateKey,
         channel_keys: Option<String>,
-    ) -> error::Result<(Wallet, LampoKeys)> {
+    ) -> error::Result<(Wallet<MemoryDatabase>, LampoKeys)> {
+        use bdk::bitcoin::bip32::ExtendedPrivKey;
+
         let ldk_keys = if channel_keys.is_some() {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
         } else {
@@ -84,7 +86,8 @@ impl BDKWalletManager {
         };
 
         // FIXME: Get a tmp path
-        let db = Store::open_or_create_new("lampo".as_bytes(), "/tmp/onchain")?;
+         let db = MemoryDatabase::new();   
+
         let network = match xprv.network.to_string().as_str() {
             "bitcoin" => bdk::bitcoin::Network::Bitcoin,
             "testnet" => bdk::bitcoin::Network::Testnet,
@@ -92,9 +95,16 @@ impl BDKWalletManager {
             "regtest" => bdk::bitcoin::Network::Regtest,
             _ => unreachable!(),
         };
-        let key = Xpriv::new_master(network, &xprv.inner.secret_bytes())?;
-        let key = ExtendedKey::from(key);
-        let wallet = Wallet::new(Bip84(key, KeychainKind::External), None, db, network)?;
+        let xprv = ExtendedPrivKey::new_master(network, &[0u8; 32])?; 
+        let external_key = ExtendedKey::Private((xprv, std::marker::PhantomData));
+        let internal_key = ExtendedKey::Private((xprv, std::marker::PhantomData));
+        
+        let wallet = Wallet::new(
+            Bip84(external_key, KeychainKind::External),
+            Some(Bip84(internal_key, KeychainKind::Internal)),
+            network,
+            db,
+        )?;
         Ok((wallet, ldk_keys))
     }
 }
