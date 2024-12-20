@@ -159,32 +159,33 @@ impl WalletManager for BDKWalletManager {
 
     fn get_onchain_balance(&self) -> error::Result<u64> {
         self.sync()?;
-        let balance = self.wallet.borrow().lock().unwrap().get_balance();
+        let balance = self.wallet.borrow().lock().unwrap().get_balance()?;
         Ok(balance.confirmed)
     }
 
     fn create_transaction(
         &self,
-        script: Script,
+        script: ScriptBuf,
         amount: u64,
         fee_rate: u32,
     ) -> error::Result<Transaction> {
         self.sync()?;
         let wallet = self.wallet.borrow_mut();
-        let mut wallet = wallet.lock().unwrap();
+        let wallet = wallet.lock().unwrap();
         let mut tx = wallet.build_tx();
         tx.add_recipient(ScriptBuf::from_bytes(script.into_bytes()), amount)
             .fee_rate(FeeRate::from_sat_per_kvb(fee_rate as f32))
             .enable_rbf();
         let mut psbt = tx.finish()?;
-        if !wallet.sign(&mut psbt, SignOptions::default())? {
-            error::bail!("wallet not able to sing the psbt {psbt}");
+        if !wallet.sign(&mut psbt.0, SignOptions::default())? {
+            error::bail!("wallet not able to sign the psbt {:?}", psbt);
         }
-        if !wallet.finalize_psbt(&mut psbt, SignOptions::default())? {
-            error::bail!("wallet impossible finalize the psbt: {psbt}");
-        };
-        let tx: Transaction = deserialize(&serialize(&psbt.extract_tx()))?;
+        if !wallet.finalize_psbt(&mut psbt.0, SignOptions::default())? {
+            error::bail!("wallet impossible finalize the psbt: {:?}", psbt);
+        }
+        let tx: Transaction = deserialize(&serialize(&psbt.0.extract_tx()))?;
         Ok(tx)
+        
     }
 
     fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
