@@ -25,13 +25,11 @@ use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::{NewAddress, Utxo};
 use lampo_common::wallet::WalletManager;
 
-
 pub struct BDKWalletManager {
-    pub wallet: RefCell<Mutex<Wallet>>,
+    pub wallet:  RefCell<Mutex<Wallet<MemoryDatabase>>>,//solve RefCell<Mutex<Wallet>>  
     pub keymanager: Arc<LampoKeys>,
     pub network: Network,
 }
-
 // SAFETY: It is safe to do because the `LampoWalletManager`
 // is not send and sync due the RefCell, but we use the Mutex
 // inside, so we are safe to share across threads.
@@ -43,7 +41,7 @@ impl BDKWalletManager {
     fn build_wallet(
         conf: Arc<LampoConf>,
         mnemonic_words: &str,
-    ) -> error::Result<(Wallet, LampoKeys)> {
+    ) -> error::Result<(Wallet<MemoryDatabase>, LampoKeys)> {
         // Parse a mnemonic
         let mnemonic = Mnemonic::parse(mnemonic_words)?;
         // Generate the extended key
@@ -59,17 +57,18 @@ impl BDKWalletManager {
         let xprv = xkey
             .into_xprv(network)
             .ok_or(error::anyhow!("wrong convertion to a private key"))?;
-
+       
         let ldk_kesy = LampoKeys::new(xprv.private_key.secret_bytes());
+         let db = MemoryDatabase::new();       
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
         let wallet = Wallet::new(
             Bip84(xprv, KeychainKind::External),
             Some(Bip84(xprv, KeychainKind::Internal)),
-            db,
             network,
+            db,
         )?;
         let descriptor = wallet.public_descriptor(KeychainKind::Internal).unwrap();
-        log::info!("descriptor: {descriptor}");
+        log::info!("descriptor: {:?}", descriptor);
         Ok((wallet, ldk_kesy))
     }
 
