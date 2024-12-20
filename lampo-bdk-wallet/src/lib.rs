@@ -2,24 +2,29 @@
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
-use bdk::bitcoin::bip32::Xpriv;
 use bdk::bitcoin::consensus::serialize;
 use bdk::bitcoin::{Amount, ScriptBuf};
 use bdk::keys::bip39::{Language, Mnemonic, WordCount};
 use bdk::keys::GeneratableKey;
 use bdk::keys::{DerivableKey, ExtendedKey, GeneratedKey};
 use bdk::template::Bip84;
-use bdk::wallet::{ChangeSet, Update};
-use bdk::{KeychainKind, SignOptions, Wallet};
-use bdk_file_store::Store;
+use bdk::blockchain::esplora::EsploraBlockchain;
+use bdk::{Wallet, KeychainKind};
+use bdk::SignOptions;
+use bdk::FeeRate;
+use bdk::wallet::AddressIndex;
+use bdk::database::MemoryDatabase;
+use bdk_chain::spk_client::FullScanRequestBuilder;
+use bdk_esplora::EsploraExt;
 
 use lampo_common::bitcoin::consensus::deserialize;
-use lampo_common::bitcoin::{PrivateKey, Script, Transaction};
+use lampo_common::bitcoin::{PrivateKey, Transaction};
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::error;
 use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::{NewAddress, Utxo};
 use lampo_common::wallet::WalletManager;
+
 
 pub struct BDKWalletManager {
     pub wallet: RefCell<Mutex<Wallet>>,
