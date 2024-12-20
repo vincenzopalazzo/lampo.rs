@@ -188,14 +188,16 @@ impl WalletManager for BDKWalletManager {
         
     }
 
+   
     fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
         self.sync()?;
         let wallet = self.wallet.borrow();
         let wallet = wallet.lock().unwrap();
         let txs = wallet
-            .list_unspent()
+            .list_unspent()?
+            .into_iter()
             .map(|tx| Utxo {
-                txid: tx.outpoint.txid.to_hex(),
+                txid: tx.outpoint.txid.to_string(),
                 vout: tx.outpoint.vout,
                 reserved: tx.is_spent,
                 confirmed: 0,
