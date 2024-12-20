@@ -149,9 +149,12 @@ impl WalletManager for BDKWalletManager {
             .lock()
             .unwrap()
             .get_address(bdk::wallet::AddressIndex::New);
-        Ok(NewAddress {
-            address: address.address.to_string(),
-        })
+        match address{
+            Ok(info) => Ok(NewAddress {
+                address: format!("{:?}", info.payload), 
+            }),
+            Err(e) => Err(e.into()), 
+        }
     }
 
     fn get_onchain_balance(&self) -> error::Result<u64> {
