@@ -21,7 +21,7 @@ pub fn json_network_channels(ctx: &LampoDaemon, _: &json::Value) -> Result<json:
         let Some(channel) = network_graph.channel(*short_id) else {
             continue;
         };
-        network_channels.push(NetworkChannel::from(channel.clone()));
+        network_channels.push(NetworkChannel::from(channel));
     }
     Ok(json::to_value(NetworkChannels {
         channels: network_channels,
