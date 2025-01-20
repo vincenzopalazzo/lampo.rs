@@ -1348,9 +1348,9 @@ checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 
 [[package]]
 name = "popol"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93406933502e4446250941cf95d5e62851feb62a25b742acf7ffce96755c53e3"
+checksum = "eaac4c1cff8bea6334f5c2646ca0f007648dc14d0471cf3e522cd34900126568"
 dependencies = [
  "libc",
 ]
