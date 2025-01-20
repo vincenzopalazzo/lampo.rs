@@ -10,7 +10,7 @@ lampo-bitcoind = { path = "../lampo-bitcoind" }
 lampo-core-wallet = { path = "../lampo-core-wallet" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 clightning-testing = { git = "https://github.com/laanwj/cln4rust.git" }
-log = "0.4.18"
+log = "0.4.25"
 tempfile = "3.6.0"
 port-selector = "0.1.6"
 anyhow = "1.0.94"

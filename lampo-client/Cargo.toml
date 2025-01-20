@@ -8,4 +8,4 @@ lampo-common = { path = "../lampo-common" }
 clightningrpc-common = { version = "0.3.0-beta.3" }
 serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
-log = "0.4.17"
+log = "0.4.25"
