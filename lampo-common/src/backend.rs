@@ -29,7 +29,6 @@ pub enum TxResult {
 /// Backend kind supported by the lampo
 pub enum BackendKind {
     Core,
-    Nakamoto,
 }
 
 /// Bakend Trait specification

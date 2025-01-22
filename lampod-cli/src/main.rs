@@ -140,9 +140,6 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
                 lampo_common::backend::BackendKind::Core => {
                     CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic)?
                 }
-                lampo_common::backend::BackendKind::Nakamoto => {
-                    error::bail!("wallet is not implemented for nakamoto")
-                }
             };
             wallet
         } else {
@@ -159,9 +156,6 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
                     // before.
                     CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic)?
                 }
-                lampo_common::backend::BackendKind::Nakamoto => {
-                    error::bail!("wallet is not implemented for nakamoto")
-                }
             };
 
             write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
@@ -177,18 +171,12 @@ fn run(args: LampoCliArgs) -> error::Result<()> {
                 lampo_common::backend::BackendKind::Core => {
                     CoreWalletManager::restore(Arc::new(lampo_conf.clone()), &mnemonic)?
                 }
-                lampo_common::backend::BackendKind::Nakamoto => {
-                    error::bail!("wallet is not implemented for nakamoto")
-                }
             };
             wallet
         } else {
             let (wallet, mnemonic) = match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
                     CoreWalletManager::new(Arc::new(lampo_conf.clone()))?
-                }
-                lampo_common::backend::BackendKind::Nakamoto => {
-                    error::bail!("wallet is not implemented for nakamoto")
                 }
             };
 
