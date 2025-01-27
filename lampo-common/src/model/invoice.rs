@@ -89,12 +89,16 @@ pub mod response {
                 .map(|chain| chain.to_string())
                 .collect::<Vec<String>>();
 
-            // Reference: https://github.com/lightning/bolts/blob/master/12-offer-encoding.md
+            // Reference: https://github.com/lightning/bolts/blob/master/12-offer-encoding.md#requirements-for-offers
+            // if the chain for the invoice is not solely bitcoin:
+            // MUST specify offer_chains the offer is valid for.
+            // otherwise:
+            // SHOULD omit offer_chains, implying that bitcoin is only chain.
             let network = offer
                 .chains()
                 .first()
-                .map(|hash| Network::from_chain_hash(*hash))
-                .unwrap_or(Some(Network::Bitcoin));
+                .and_then(|hash| Network::from_chain_hash(*hash))
+                .or(Some(Network::Bitcoin));
 
             let paths = offer
                 .paths()

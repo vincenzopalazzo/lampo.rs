@@ -89,11 +89,7 @@ pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<j
         let bolt12_invoice: Bolt12InvoiceInfo = offer.into();
         return Ok(json::to_value(&bolt12_invoice)?);
     } else {
-        Err(Error::Rpc(RpcError {
-            code: -1,
-            message: "Not able to decode invoice".to_string(),
-            data: None,
-        }))
+        Err(crate::rpc_error!("Not able to decode invoice"))
     }
 }
 

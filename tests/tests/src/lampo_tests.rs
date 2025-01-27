@@ -509,3 +509,28 @@ pub fn decode_offer() -> error::Result<()> {
     log::info!(target: &node2.info.node_id, "decode offer `{:?}`", decode);
     Ok(())
 }
+
+#[test]
+pub fn decode_offer_hex() -> error::Result<()> {
+    init();
+    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
+    let btc = Arc::new(btc);
+    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
+
+    // For now I am hardcoding this offer as generating an `offer` from test is broken at this point.
+    let decode: response::Bolt12InvoiceInfo = node1.lampod().call(
+        "decode",
+        request::DecodeInvoice {
+            invoice_str: "lno1qgsyxjtl6luzd9t3pr62xr7eemp6awnejusgf6gw45q75vcfqqqqqqqsespexwyy4tcadvgg89l9aljus6709kx235hhqrk6n8dey98uyuftzdqzrtkahuum7m56dxlnx8r6tffy54004l7kvs7pylmxx7xs4n54986qyqeeuhhunayntt50snmdkq4t7fzsgghpl69v9csgparek8kv7dlp5uqr8ymp5s4z9upmwr2s8xu020d45t5phqc8nljrq8gzsjmurzevawjz6j6rc95xwfvnhgfx6v4c3jha7jwynecrz3y092nn25ek4yl7xp9yu9ry9zqagt0ktn4wwvqg52v9ss9ls22sqyqqestzp2l6decpn87pq96udsvx".to_string(),
+        },
+    )?;
+
+    assert_eq!(
+        decode.offer_id,
+        "34460869549e37748ceaabdcff6284a98266c18052ab2a7e9eb5a1af0a5e5b7d"
+    );
+    // Checks if all the character inside the offer_id is hex.
+    let res = decode.offer_id.chars().all(|c| c.is_ascii_hexdigit());
+    assert!(res);
+    Ok(())
+}
