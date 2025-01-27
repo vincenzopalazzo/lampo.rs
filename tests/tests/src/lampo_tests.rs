@@ -498,14 +498,14 @@ pub fn decode_offer() -> error::Result<()> {
 
     log::info!(target: &node2.info.node_id, "offer generated `{:?}`", offer);
 
-    let decode: response::InvoiceInfo = node2.lampod().call(
+    let decode: response::Bolt12InvoiceInfo = node2.lampod().call(
         "decode",
         request::DecodeInvoice {
             invoice_str: offer.bolt12,
         },
     )?;
 
-    assert_eq!(decode.issuer_id, Some(node2.info.node_id.clone()));
+    assert_eq!(decode.issuer_id.clone(), Some(node2.info.node_id.clone()));
     log::info!(target: &node2.info.node_id, "decode offer `{:?}`", decode);
     Ok(())
 }
