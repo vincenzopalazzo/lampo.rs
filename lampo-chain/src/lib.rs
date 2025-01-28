@@ -160,8 +160,22 @@ impl Backend for LampoChainSync {
         unimplemented!()
     }
 
+    // TODO: specify what kind of format the result should be!
     async fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
-        unimplemented!()
+        #[derive(Debug, Deserialize)]
+        struct MempoolInfo {
+            loaded: bool,
+            mempoolminfee: f64,
+        };
+        let mempool_info = self
+            .rpc_client
+            .call_method::<json::Value>("getmempoolinfo", &[])
+            .await?;
+        let mempool_info: MempoolInfo = json::from_value(mempool_info)?;
+        if mempool_info.loaded {
+            log::warn!("mempool is still loading, so the fee may be not accurate!");
+        }
+        Ok((mempool_info.mempoolminfee * (100_000_000 as f64)) as u32)
     }
 
     fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {
