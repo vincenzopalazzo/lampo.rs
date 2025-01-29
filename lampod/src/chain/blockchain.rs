@@ -133,7 +133,7 @@ unsafe impl Sync for LampoChainManager {}
 #[async_trait]
 impl Backend for LampoChainManager {
     async fn brodcast_tx(&self, tx: &Transaction) {
-        self.backend.brodcast_tx(tx);
+        self.backend.brodcast_tx(tx).await;
     }
 
     async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
