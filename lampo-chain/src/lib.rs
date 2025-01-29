@@ -1,7 +1,8 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use lampo_common::model::response;
+use lampo_common::event::onchain::OnChainEvent;
+use lampo_common::event::Event;
 use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::init;
 use lightning_block_sync::rpc::RpcClient;
@@ -114,12 +115,20 @@ impl Backend for LampoChainSync {
             .call_method::<json::Value>("sendrawtransaction", &[serialize_hex(tx).into()])
             .await;
         log::info!("Broadcasting tx result: {:?}", resp);
+        if resp.is_ok() {
+            let handler = self.handler.borrow();
+            let Some(handler) = handler.as_ref() else {
+                return;
+            };
+            handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
+        }
+        // FIXME: emit the brodcast event for lampo in case of errors, just to unlock the client
     }
 
     async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
         #[derive(Deserialize)]
         pub struct FeeRate {
-            feerate: Option<u32>,
+            feerate: Option<f64>,
             errors: Option<Vec<String>>,
         }
         let resp = self
@@ -134,7 +143,7 @@ impl Backend for LampoChainSync {
             return Err(error::anyhow!("No fee rate estimation available").into());
         };
         // estimate fee rate in BTC/kvB
-        Ok(feerate)
+        Ok((feerate * (100_000_000 as f64)) as u32)
     }
 
     async fn get_transaction(
