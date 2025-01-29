@@ -21,7 +21,7 @@ use lampo_common::{json, model::request::DecodeInvoice};
 
 use crate::LampoDaemon;
 
-pub fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: GenerateInvoice = json::from_value(request.clone())?;
     let invoice = ctx.offchain_manager().generate_invoice(
@@ -35,7 +35,7 @@ pub fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Va
     Ok(json::to_value(&invoice)?)
 }
 
-pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `offer` with request `{:?}`", request);
     let request: GenerateOffer = json::from_value(request.clone())?;
     let manager = ctx.channel_manager().manager();
@@ -59,7 +59,7 @@ pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Valu
     Ok(json::to_value(&offer)?)
 }
 
-pub fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: DecodeInvoice = json::from_value(request.clone())?;
 
@@ -116,7 +116,7 @@ pub fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Val
     Ok(json::to_value(&invoice)?)
 }
 
-pub fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `pay` with request `{:?}`", request);
     let request: Pay = json::from_value(request.clone())?;
     let events = ctx.handler().events();
@@ -155,7 +155,7 @@ pub fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value,
     }
 }
 
-pub fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::debug!("call for `keysend` with request `{:?}`", request);
     let request: KeySend = json::from_value(request.clone())?;
     ctx.offchain_manager()
