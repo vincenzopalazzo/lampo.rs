@@ -9,7 +9,7 @@ use lampo_common::handler::Handler;
 use lampo_common::json;
 use lampo_common::model::request;
 use lampo_common::model::response;
-use lampo_common::model::response::InvoiceInfo;
+use lampo_common::model::response::Bolt11InvoiceInfo;
 use lampo_common::model::response::NetworkChannels;
 use lampo_common::model::response::Offer;
 use lampo_common::model::Connect;
@@ -625,9 +625,9 @@ pub fn decode_invoice_from_cln() {
             None,
         )
         .unwrap();
-    let decode: InvoiceInfo = lampo
+    let decode: Bolt11InvoiceInfo = lampo
         .call(
-            "decode_invoice",
+            "decode",
             json::json!({
                 "invoice_str": invoce.bolt11,
             }),

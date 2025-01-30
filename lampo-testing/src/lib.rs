@@ -116,9 +116,7 @@ impl LampoTesting {
         server.add_rpc("funds", json_funds).unwrap();
         server.add_rpc("invoice", json_invoice).unwrap();
         server.add_rpc("offer", json_offer).unwrap();
-        server
-            .add_rpc("decode_invoice", json_decode_invoice)
-            .unwrap();
+        server.add_rpc("decode", json_decode_invoice).unwrap();
 
         server.add_rpc("pay", json_pay).unwrap();
         server.add_rpc("keysend", json_keysend).unwrap();

@@ -31,7 +31,8 @@ pub mod request {
 pub mod response {
     use std::vec::Vec;
 
-    use bitcoin::secp256k1::PublicKey;
+    use bitcoin::{secp256k1::PublicKey, Network};
+    use lightning::offers::offer::Offer as LDKOffer;
     use lightning::routing::router::RouteHop;
     use serde::{Deserialize, Serialize};
 
@@ -60,7 +61,7 @@ pub mod response {
     }
 
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct InvoiceInfo {
+    pub struct Bolt11InvoiceInfo {
         pub issuer_id: Option<String>,
         pub expiry_time: Option<u64>,
         pub description: Option<String>,
@@ -68,6 +69,66 @@ pub mod response {
         pub hints: Vec<String>,
         pub network: String,
         pub amount_msat: Option<u64>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Bolt12InvoiceInfo {
+        pub issuer_id: Option<String>,
+        pub offer_id: String,
+        pub offer_chains: Vec<String>,
+        pub description: Option<String>,
+        pub offer_paths: Vec<BlindedPath>,
+        pub network: String,
+    }
+
+    impl From<LDKOffer> for Bolt12InvoiceInfo {
+        fn from(offer: LDKOffer) -> Self {
+            let chains = offer
+                .chains()
+                .iter()
+                .map(|chain| chain.to_string())
+                .collect::<Vec<String>>();
+
+            // Reference: https://github.com/lightning/bolts/blob/master/12-offer-encoding.md
+            let network = offer
+                .chains()
+                .first()
+                .map(|hash| Network::from_chain_hash(*hash))
+                .unwrap_or(Some(Network::Bitcoin));
+
+            let paths = offer
+                .paths()
+                .to_vec()
+                .iter()
+                .map(|path| BlindedPath {
+                    blinded_hops: path
+                        .blinded_hops
+                        .iter()
+                        .map(|node| node.blinded_node_id.to_string())
+                        .collect::<Vec<String>>(),
+                    blinding_points: path.blinding_point.to_string(),
+                })
+                .collect::<Vec<BlindedPath>>();
+
+            let offer_id = hex::encode(offer.id().0);
+            let desc = offer.description().map(|desc| desc.to_string());
+            let issuer_id = offer.issuer().map(|id| id.to_string());
+
+            Bolt12InvoiceInfo {
+                offer_id,
+                network: network.unwrap().to_string(),
+                description: desc,
+                offer_chains: chains,
+                offer_paths: paths,
+                issuer_id,
+            }
+        }
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct BlindedPath {
+        pub blinded_hops: Vec<String>,
+        pub blinding_points: String,
     }
 
     #[derive(Serialize, Deserialize, Debug)]
