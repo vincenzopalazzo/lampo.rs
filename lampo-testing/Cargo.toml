@@ -11,7 +11,7 @@ lampo-core-wallet = { path = "../lampo-core-wallet" }
 lampo-jsonrpc = { path = "../lampo-jsonrpc" }
 clightning-testing = { git = "https://github.com/laanwj/cln4rust.git" }
 log = "0.4.18"
-tempfile = "3.15.0"
+tempfile = "3.16.0"
 port-selector = "0.1.6"
 anyhow = "1.0.94"
 tokio = { version = "1.22.0", features = ["process", "time", "fs"] }
