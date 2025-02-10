@@ -205,6 +205,7 @@ impl LampoPeerManager {
     pub async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
         let Some(close_callback) = net::connect_outbound(self.manager(), node_id, host).await
         else {
+            log::warn!("impossible connect with the peer `{node_id}`");
             error::bail!("impossible connect with the peer `{node_id}`");
         };
         let mut connection_closed_future = Box::pin(close_callback);
