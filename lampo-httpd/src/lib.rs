@@ -10,14 +10,69 @@ use actix_web::{App, HttpResponse, HttpServer, ResponseError};
 use paperclip::actix::{self, CreatedJson};
 
 use lampo_common::error;
+use lampo_common::json;
 use lampod::LampoDaemon;
 
 use commands::inventory::{rest_funds, rest_getinfo, rest_networkchannels};
 use commands::offchain::{rest_decode, rest_invoice, rest_pay};
 use commands::onchain::rest_new_addr;
 use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel};
+
 /// Result type for json responses
 pub type ResultJson<T> = std::result::Result<CreatedJson<T>, actix_web::Error>;
+
+#[derive(Debug)]
+struct JsonRPCError {
+    code: i32,
+    message: String,
+    data: Option<json::Value>,
+}
+
+impl Display for JsonRPCError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "code: {}, message: {}", self.code, self.message)
+    }
+}
+
+impl ResponseError for JsonRPCError {
+    fn status_code(&self) -> actix_web::http::StatusCode {
+        actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+    }
+
+    fn error_response(&self) -> actix_web::HttpResponse {
+        let status_code = self.status_code().clone();
+        let body = json::json!({
+            "code": self.code,
+            "message": self.message,
+            "data": self.data,
+        });
+        let body = json::to_string(&body).unwrap();
+        log::warn!(
+            "error response from inside the ResponseError trait: {}",
+            body
+        );
+        actix_web::HttpResponse::new(status_code).set_body(actix_web::body::BoxBody::new(
+            actix_web::web::Bytes::from(body),
+        ))
+    }
+}
+
+impl From<lampo_common::jsonrpc::Error> for JsonRPCError {
+    fn from(err: lampo_common::jsonrpc::Error) -> Self {
+        match err {
+            lampo_common::jsonrpc::Error::Rpc(err) => Self {
+                code: err.code,
+                message: err.message,
+                data: err.data,
+            },
+            _ => Self {
+                code: -1,
+                message: format!("{err}"),
+                data: None,
+            },
+        }
+    }
+}
 
 /// This struct represents app state and it is pass on every
 /// endpoint.
@@ -132,7 +187,9 @@ macro_rules! post {
             ) -> ResultJson<$res_ty> {
                 let response = [<json_$name>](&state.lampod, &json::json!({})).await;
                 if let Err(err) = response {
-                    return Err(actix_web::error::ErrorInternalServerError(err));
+                    let err: crate::JsonRPCError = err.into();
+                    log::error!(target: "httpd", "error from backend {}", err);
+                    return Err(err.into());
                 }
                 let response = json::from_value::<$res_ty>(response.unwrap());
                 let response = response.unwrap();
@@ -150,13 +207,17 @@ macro_rules! post {
             ) -> ResultJson<$res_ty> {
                 let request = json::from_value::<$req_ty>(body.into_inner());
                 if let Err(err) = request {
-                    return Err(actix_web::error::ErrorBadRequest(err));
+                    let err = crate::JsonRPCError{ code: -1, message: format!("{err}"), data: None };
+                    log::error!(target: "httpd", "error from backend {}", err);
+                    return Err(err.into());
                 }
                 let request = request.unwrap();
                 let request = json::to_value(&request).unwrap();
                 let response = [<json_$name>](&state.lampod, &request).await;
                 if let Err(err) = response {
-                    return Err(actix_web::error::ErrorInternalServerError(err));
+                    let err: crate::JsonRPCError = err.into();
+                    log::error!(target: "httpd", "error from backend {}", err);
+                    return Err(err.into());
                 }
                 let response = json::from_value::<$res_ty>(response.unwrap());
                 let response = response.unwrap();
