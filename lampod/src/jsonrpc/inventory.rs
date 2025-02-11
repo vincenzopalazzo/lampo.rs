@@ -8,14 +8,14 @@ use lampo_common::model::GetInfo;
 use crate::LampoDaemon;
 
 // FIXME: change the name to `json_get_info`
-pub fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("calling `getinfo` with request `{:?}`", request);
     let chain = ctx.conf.network.to_string();
     let alias = ctx.conf.alias.clone();
     // we have to put "" in case of alias missing as cln provide us with a random alias.
     let alias = alias.unwrap_or_default();
-    let (_, height) = ctx.onchain_manager().backend.get_best_block()?;
-    let blockheight = height.unwrap_or_default();
+    // FIXME: blockheight should be fetched from the blockchain
+    let blockheight = 0;
     let lampo_dir = ctx.conf.root_path.to_string();
     // We provide a vector here as there may be other types of address in future like tor and ipv6.
     let mut address_vec = Vec::new();
@@ -48,7 +48,10 @@ pub fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Va
 }
 
 // FIXME: check the request
-pub fn json_networkchannels(ctx: &LampoDaemon, _: &json::Value) -> Result<json::Value, Error> {
+pub async fn json_networkchannels(
+    ctx: &LampoDaemon,
+    _: &json::Value,
+) -> Result<json::Value, Error> {
     let network_graph = ctx.channel_manager().graph();
     let network_graph = network_graph.read_only();
     let channels = network_graph.channels().unordered_keys();

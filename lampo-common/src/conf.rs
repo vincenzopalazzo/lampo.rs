@@ -43,7 +43,7 @@ impl Default for LampoConf {
             // default port is 19735 for testnet
             port: 19735,
             root_path: lampo_home,
-            node: "nakamoto".to_owned(),
+            node: "core".to_owned(),
             core_url: None,
             core_user: None,
             core_pass: None,
