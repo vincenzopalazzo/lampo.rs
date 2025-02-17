@@ -97,8 +97,7 @@ pub mod response {
             let network = offer
                 .chains()
                 .first()
-                .and_then(|hash| Network::from_chain_hash(*hash))
-                .or(Some(Network::Bitcoin));
+                .and_then(|hash| Network::from_chain_hash(*hash));
 
             let paths = offer
                 .paths()

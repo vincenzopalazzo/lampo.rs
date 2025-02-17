@@ -529,8 +529,5 @@ pub fn decode_offer_hex() -> error::Result<()> {
         decode.offer_id,
         "34460869549e37748ceaabdcff6284a98266c18052ab2a7e9eb5a1af0a5e5b7d"
     );
-    // Checks if all the character inside the offer_id is hex.
-    let res = decode.offer_id.chars().all(|c| c.is_ascii_hexdigit());
-    assert!(res);
     Ok(())
 }
