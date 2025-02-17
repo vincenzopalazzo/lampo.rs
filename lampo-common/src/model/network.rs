@@ -15,8 +15,8 @@ pub mod response {
         pub node_two: String,
     }
 
-    impl From<ChannelInfo> for NetworkChannel {
-        fn from(value: ChannelInfo) -> Self {
+    impl From<&ChannelInfo> for NetworkChannel {
+        fn from(value: &ChannelInfo) -> Self {
             Self {
                 node_one: value.node_one.to_string(),
                 node_two: value.node_two.to_string(),
