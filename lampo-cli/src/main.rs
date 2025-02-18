@@ -1,24 +1,23 @@
 mod args;
 
-use std::process::exit;
-
-use radicle_term as term;
-
 use lampo_client::errors::Error;
 use lampo_client::UnixClient;
 use lampo_common::error;
 use lampo_common::json;
+use radicle_term as term;
+use std::process::exit;
 
-use crate::args::LampoCliArgs;
+use crate::args::{parse_args, LampoCliArgs};
 
 fn main() -> error::Result<()> {
-    let args = match args::parse_args() {
+    let args = match parse_args() {
         Ok(args) => args,
         Err(err) => {
-            term::error(format!("{err}"));
+            term::error(format!("Error parsing arguments: {}", err));
             exit(1);
         }
     };
+
     let resp = run(args);
     match resp {
         Ok(resp) => {

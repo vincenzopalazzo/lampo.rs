@@ -9,3 +9,4 @@ lampo-client = { path = "../lampo-client" }
 log = { version = "0.4", features = ["std"] }
 lexopt = { version = "0.3" }
 radicle-term = { git = "https://github.com/radicle-dev/heartwood.git" }
+clap = { version = "4.5", features = ["derive"] }
