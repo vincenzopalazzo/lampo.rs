@@ -61,7 +61,7 @@ impl InventoryHandler for LampoInventoryManager {
                     blockheight,
                     lampo_dir,
                     address: address_vec,
-                    block_hash: block_hash.to_string()
+                    block_hash: block_hash.to_string(),
                 };
                 let getinfo = json::to_value(getinfo)?;
                 chan.send(getinfo)?;
