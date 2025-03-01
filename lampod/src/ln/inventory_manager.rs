@@ -37,7 +37,7 @@ impl InventoryHandler for LampoInventoryManager {
                 let alias = self.channel_manager.conf.alias.clone();
                 // we have to put "" in case of alias missing as cln provide us with a random alias.
                 let alias = alias.unwrap_or_default();
-                let (_, height) = self.channel_manager.onchain.backend.get_best_block()?;
+                let (block_hash, height) = self.channel_manager.onchain.backend.get_best_block()?;
                 let blockheight = height.unwrap_or_default();
                 let lampo_dir = self.channel_manager.conf.root_path.to_string();
                 // We provide a vector here as there may be other types of address in future like tor and ipv6.
@@ -61,6 +61,7 @@ impl InventoryHandler for LampoInventoryManager {
                     blockheight,
                     lampo_dir,
                     address: address_vec,
+                    block_hash: block_hash.to_string()
                 };
                 let getinfo = json::to_value(getinfo)?;
                 chan.send(getinfo)?;
