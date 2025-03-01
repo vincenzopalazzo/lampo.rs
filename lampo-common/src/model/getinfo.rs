@@ -10,6 +10,7 @@ pub struct GetInfo {
     pub blockheight: u32,
     pub lampo_dir: String,
     pub address: Vec<NetworkInfo>,
+    pub block_hash: String
 }
 
 #[derive(Debug, Deserialize, Serialize)]
