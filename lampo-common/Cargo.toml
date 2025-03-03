@@ -16,7 +16,7 @@ lightning-invoice = { version = "0.31" }
 bitcoin = { version = "0.30.2", features = ["serde"] }
 clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
 crossbeam-channel = "0.5.8"
-anyhow = "1.0.94"
+anyhow = "1.0.97"
 colored = "2.1"
 log = { version = "0.4", features = ["std"] }
 chrono = { version = "0.4", features = ["std"], default-features = false }
