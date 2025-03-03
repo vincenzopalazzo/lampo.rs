@@ -1,163 +1,182 @@
-use std::collections::HashMap;
-
-use radicle_term as term;
-
+use clap::{ArgAction, Parser, Subcommand};
 use lampo_common::error;
 use lampo_common::json;
+use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Parser, Debug)]
+#[command(
+    name = "lampod-cli",
+    about = "Lampo Daemon command line",
+    version,
+    long_about = None
+)]
+pub struct Cli {
+    #[arg(short = 'd', long = "data-dir")]
+    pub data_dir: Option<String>,
+
+    #[arg(short = 'n', long, default_value = "testnet")]
+    pub network: String,
+
+    #[arg(short, long)]
+    pub socket: Option<String>,
+
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    GetInfo,
+    ListChannels,
+    OpenChannel {
+        #[arg(short, long)]
+        node_id: String,
+
+        #[arg(long)]
+        capacity: u64,
+
+        #[arg(long)]
+        push_msat: Option<u64>,
+
+        #[arg(long, action = ArgAction::SetTrue)]
+        announce: Option<bool>,
+    },
+
+    Connect {
+        #[arg(short, long)]
+        node_id: String,
+        #[arg(short, long)]
+        addr: String,
+    },
+
+    CreateInvoice {
+        #[arg(short, long)]
+        amount_msat: Option<u64>,
+
+        #[arg(short, long)]
+        description: String,
+
+        #[arg(long, default_value = "3600")]
+        expiry: u32,
+    },
+
+    PayInvoice {
+        #[arg(short, long)]
+        invoice: String,
+        #[arg(long)]
+        amount_msat: Option<u64>,
+    },
+
+    Call {
+        method: String,
+        #[arg(allow_hyphen_values = true)]
+        params: Vec<String>,
+    },
+}
+
 pub struct LampoCliArgs {
     pub socket: String,
     pub method: String,
     pub args: HashMap<String, json::Value>,
 }
 
-struct Help {
-    name: &'static str,
-    description: &'static str,
-    version: &'static str,
-    usage: &'static str,
-}
-
-const HELP: Help = Help {
-    name: "lampod-cli",
-    description: "Lampo Daemon command line",
-    version: env!("CARGO_PKG_VERSION"),
-    usage: r#"
-Usage
-
-    lampod-cli [<option> ...] <method> [arg=value]
-
-Options
-
-    -d | --data-dir     Specify lampo data directory (used to get socket path)
-    -n | --network      Set the network for lampo (default: testnet)
-    -s | --socket       Specify Unix Socket patch of the lampod node directely
-    -h | --help         Print help
-"#,
-};
-
-pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
-    use lexopt::prelude::*;
-
-    let mut data_dir: Option<String> = None;
-    let mut network: Option<String> = None;
-    let mut socket: Option<String> = None;
-    let mut method: Option<String> = None;
-    let mut args = HashMap::<String, json::Value>::new();
-
-    let mut parser = lexopt::Parser::from_env();
-    while let Some(arg) = parser.next()? {
-        match arg {
-            Short('d') | Long("data-dir") => {
-                let val: String = parser.value()?.parse()?;
-                data_dir = Some(val);
-            }
-            Short('n') | Long("network") => {
-                let val: String = parser.value()?.parse()?;
-                network = Some(val);
-            }
-            Short('s') | Long("socket") => {
-                let val: String = parser.value()?.parse()?;
-                socket = Some(val);
-            }
-            Long("help") => {
-                let _ = print_help();
-                std::process::exit(0);
-            }
-            Long(val) => {
-                if method.is_none() {
-                    return Err(lexopt::Error::MissingValue {
-                        option: Some("method is not specified".to_owned()),
-                    });
-                }
-                log::debug!("look for args {:?}", val);
-                match arg {
-                    Long(val) => {
-                        let key = val.to_string();
-                        let val: String = parser.value()?.parse()?;
-                        if let Ok(val) = val.parse::<u64>() {
-                            let val = json::json!(val);
-                            args.insert(key.clone(), val);
-                        } else if let Ok(val) = val.parse::<bool>() {
-                            let val = json::json!(val);
-                            args.insert(key.clone(), val);
-                        } else {
-                            let val = json::json!(val);
-                            args.insert(key, val);
-                        }
-                    }
-                    _ => return Err(arg.unexpected()),
-                }
-            }
-            Value(ref val) => {
-                if args.is_empty() && method.is_none() {
-                    method = Some(val.clone().string()?);
-                    log::debug!("find a method {:?}", method);
-                    continue;
-                }
-                return Err(arg.unexpected());
-            }
-            _ => return Err(arg.unexpected()),
-        }
-    }
+pub fn parse_args() -> error::Result<LampoCliArgs> {
+    let cli = Cli::parse();
 
     // If data-dir is specified and socket is not specified,
     // we need to get the socket path from it
     // by appending the network name (default: testnet) to the path
     // and adding the socket path (lampod.socket)
-    if socket.is_none() {
-        let data_dir = data_dir
-            .or_else(|| {
+    let socket = match cli.socket {
+        Some(s) => s,
+        None => {
+            let data_dir = cli.data_dir.unwrap_or_else(|| {
                 #[allow(deprecated)]
-                std::env::home_dir().map(|path| path.to_string_lossy().to_string())
-            })
-            .unwrap();
-        let data_dir = format!("{data_dir}/.lampo");
-        let network = network.unwrap_or_else(|| "testnet".to_owned());
-        let socket_path = format!("{}/{}{}", data_dir, network, "/lampod.socket");
-        log::debug!("socket path is {:?}", socket_path);
-        socket = Some(socket_path);
-    }
+                std::env::home_dir()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .unwrap_or_else(|| ".".to_string())
+            });
+            let data_dir = format!("{data_dir}/.lampo");
+            format!("{}/{}/lampod.socket", data_dir, cli.network)
+        }
+    };
 
-    log::debug!("args parser are {:?} {:?}", method, args);
+    let (method, args) = match cli.command {
+        Commands::GetInfo => ("getinfo".to_string(), HashMap::new()),
+
+        Commands::ListChannels => ("listchannels".to_string(), HashMap::new()),
+
+        Commands::OpenChannel {
+            node_id,
+            capacity,
+            push_msat,
+            announce,
+        } => {
+            let mut args = HashMap::new();
+            args.insert("node_id".to_string(), json::json!(node_id));
+            args.insert("capacity".to_string(), json::json!(capacity));
+            if let Some(push) = push_msat {
+                args.insert("push_msat".to_string(), json::json!(push));
+            }
+            if let Some(announce) = announce {
+                args.insert("announce".to_string(), json::json!(announce));
+            }
+            ("openchannel".to_string(), args)
+        }
+
+        Commands::Connect { node_id, addr } => {
+            let mut args = HashMap::new();
+            args.insert("node_id".to_string(), json::json!(node_id));
+            args.insert("addr".to_string(), json::json!(addr));
+            ("connect".to_string(), args)
+        }
+
+        Commands::CreateInvoice {
+            amount_msat,
+            description,
+            expiry,
+        } => {
+            let mut args = HashMap::new();
+            if let Some(amount) = amount_msat {
+                args.insert("amount_msat".to_string(), json::json!(amount));
+            }
+            args.insert("description".to_string(), json::json!(description));
+            args.insert("expiry".to_string(), json::json!(expiry));
+            ("createinvoice".to_string(), args)
+        }
+
+        Commands::PayInvoice {
+            invoice,
+            amount_msat,
+        } => {
+            let mut args = HashMap::new();
+            args.insert("invoice".to_string(), json::json!(invoice));
+            if let Some(amount) = amount_msat {
+                args.insert("amount_msat".to_string(), json::json!(amount));
+            }
+            ("payinvoice".to_string(), args)
+        }
+
+        Commands::Call { method, params } => {
+            let mut args = HashMap::new();
+            for param in params {
+                if let Some((key, value)) = param.split_once('=') {
+                    if let Ok(val) = value.parse::<u64>() {
+                        args.insert(key.to_string(), json::json!(val));
+                    } else if let Ok(val) = value.parse::<bool>() {
+                        args.insert(key.to_string(), json::json!(val));
+                    } else {
+                        args.insert(key.to_string(), json::json!(value));
+                    }
+                }
+            }
+            (method, args)
+        }
+    };
+
     Ok(LampoCliArgs {
-        socket: socket.ok_or_else(|| lexopt::Error::MissingValue {
-            option: Some("Socket path need to be specified".to_owned()),
-        })?,
-        method: method.ok_or_else(|| lexopt::Error::MissingValue {
-            option: Some(
-                "Too few params, a method need to be specified. Try run `lampo-cli --help`"
-                    .to_owned(),
-            ),
-        })?,
+        socket,
+        method,
         args,
     })
-}
-
-// Print helps
-pub fn print_help() -> error::Result<()> {
-    println!(
-        "{}",
-        term::format::secondary("Common `lampod-cli` commands used to init the lampo daemon")
-    );
-    println!(
-        "\n{} {}",
-        term::format::bold("Usage:"),
-        term::format::dim("lampod-cli [<option> ...] <method> [arg=value]")
-    );
-    println!();
-
-    println!(
-        "\t{} version {}",
-        term::format::bold("lampo-cli"),
-        term::format::dim(HELP.version)
-    );
-    println!(
-        "\t{} {}",
-        term::format::bold(format!("{:-12}", HELP.name)),
-        term::format::dim(HELP.description)
-    );
-    println!("{}", term::format::bold(HELP.usage));
-    Ok(())
 }
