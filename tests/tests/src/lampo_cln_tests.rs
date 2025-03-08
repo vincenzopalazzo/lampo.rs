@@ -15,6 +15,7 @@ use lampo_common::model::response::Offer;
 use lampo_common::model::Connect;
 use lampo_common::secp256k1::PublicKey;
 use lampo_testing::prelude::bitcoincore_rpc::RpcApi;
+use lampo_testing::prelude::btc::BtcNode;
 use lampo_testing::prelude::*;
 
 use lampo_testing::wait;
@@ -265,7 +266,7 @@ pub fn decode_cln_offer_from_lampo() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--developer --experimental-onion-messages --experimental-offers --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -372,7 +373,7 @@ pub fn decode_cln_offer_from_lampo_minimal_offer() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--developer --experimental-onion-messages --experimental-offers --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -473,7 +474,7 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--developer --experimental-onion-messages --experimental-offers --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
