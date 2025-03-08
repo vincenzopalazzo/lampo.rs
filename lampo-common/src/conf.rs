@@ -23,6 +23,8 @@ pub struct LampoConf {
     pub log_level: String,
     pub alias: Option<String>,
     pub announce_addr: Option<String>,
+    pub api_host: String,
+    pub api_port: u64,
 }
 
 impl Default for LampoConf {
@@ -51,6 +53,8 @@ impl Default for LampoConf {
             log_file: None,
             alias: None,
             announce_addr: None,
+            api_host: "127.0.0.1".to_owned(),
+            api_port: 7878,
         }
     }
 }
@@ -220,7 +224,10 @@ impl TryFrom<String> for LampoConf {
         let log_file = conf.get_conf("log-file").unwrap_or(None);
         let alias = conf.get_conf("alias").unwrap_or(None);
         let announce_addr = conf.get_conf("announce-addr").unwrap_or(None);
-
+        let api_host = conf.get_conf("api-host").unwrap_or(None);
+        let api_port = conf.get_conf("api-port").unwrap_or(None);
+        let api_host = api_host.unwrap_or("http://127.0.0.1".to_owned());
+        let api_port: u64 = api_port.unwrap_or("7979".to_owned()).parse()?;
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -237,6 +244,8 @@ impl TryFrom<String> for LampoConf {
             log_level: level,
             alias,
             announce_addr,
+            api_host,
+            api_port,
         })
     }
 }

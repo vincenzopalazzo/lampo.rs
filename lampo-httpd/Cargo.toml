@@ -1,0 +1,17 @@
+[package]
+name = "lampo-httpd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4"
+paperclip = { version = "0.8.0", features = ["actix4"] }
+log = "*"
+paste = "1.0.15"
+serde = "*"
+
+lampo-common = { path = "../lampo-common" }
+lampod = { path = "../lampod" }
+
+# FIXME: this should be optional
+elite-rpc =  { version = "0.0.4", features = ["curl"] }

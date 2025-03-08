@@ -1,9 +1,10 @@
 //! Model for the invoice stuff
 
 pub mod request {
+    use paperclip::actix::Apiv2Schema;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct GenerateInvoice {
         pub amount_msat: Option<u64>,
         pub description: String,
@@ -16,12 +17,12 @@ pub mod request {
         pub description: Option<String>,
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
     pub struct DecodeInvoice {
         pub invoice_str: String,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Apiv2Schema)]
     pub struct Pay {
         pub invoice_str: String,
         pub amount: Option<u64>,
@@ -34,11 +35,12 @@ pub mod response {
     use bitcoin::{secp256k1::PublicKey, Network};
     use lightning::offers::offer::Offer as LDKOffer;
     use lightning::routing::router::RouteHop;
+    use paperclip::actix::Apiv2Schema;
     use serde::{Deserialize, Serialize};
 
     use crate::ldk;
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct Invoice {
         pub bolt11: String,
     }
@@ -60,7 +62,7 @@ pub mod response {
         }
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
     pub struct Bolt11InvoiceInfo {
         pub issuer_id: Option<String>,
         pub expiry_time: Option<u64>,
@@ -134,7 +136,7 @@ pub mod response {
         pub blinding_points: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct PayResult {
         pub path: Vec<PaymentHop>,
         pub payment_hash: Option<String>,
@@ -142,14 +144,14 @@ pub mod response {
         // FIXME: missing payment preimage
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, Apiv2Schema)]
     pub enum PaymentState {
         Success,
         Pending,
         Failure,
     }
 
-    #[derive(Clone, Serialize, Deserialize, Debug)]
+    #[derive(Clone, Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct PaymentHop {
         pub node_id: String,
         pub short_channel_id: u64,

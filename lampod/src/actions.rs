@@ -1,38 +1,16 @@
 //! Actions crate implementation
 pub mod handler;
 
-use crossbeam_channel as chan;
-
+use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::ldk::events::Event;
 
-use crate::command::{Command, InventoryCommand};
+use crate::command::Command;
 
 pub trait Handler {
     fn handle(&self, event: Event) -> error::Result<()>;
 
     fn react(&self, event: Command) -> error::Result<()>;
-}
-
-pub struct DummyHandler;
-
-impl Handler for DummyHandler {
-    fn handle(&self, _: Event) -> error::Result<()> {
-        Ok(())
-    }
-
-    fn react(&self, _: Command) -> error::Result<()> {
-        Ok(())
-    }
-}
-
-/// The Handler that need to be implemented to handle
-/// inventory event
-///
-/// This is necessary because ldk does not have any
-/// concept of Inventory Manager.
-pub trait InventoryHandler {
-    fn handle(&self, event: InventoryCommand) -> error::Result<()>;
 }
 
 pub trait EventHandler: Sized + Send + Sync + Clone {

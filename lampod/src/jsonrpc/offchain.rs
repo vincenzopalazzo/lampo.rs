@@ -5,6 +5,7 @@ use std::time::Duration;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
+use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::ldk;
 use lampo_common::ldk::offers::offer;
 use lampo_common::model::request::GenerateInvoice;
@@ -15,7 +16,6 @@ use lampo_common::model::response;
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
 use lampo_common::{json, model::request::DecodeInvoice};
-use lampo_jsonrpc::errors::{Error, RpcError};
 
 use crate::LampoDaemon;
 
@@ -57,7 +57,7 @@ pub fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Valu
     Ok(json::to_value(&offer)?)
 }
 
-pub fn json_decode_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+pub fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `invoice` with request `{:?}`", request);
     let request: DecodeInvoice = json::from_value(request.clone())?;
     if let Ok(invoice) = ctx

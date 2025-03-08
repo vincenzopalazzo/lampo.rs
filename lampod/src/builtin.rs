@@ -17,3 +17,14 @@ macro_rules! sync {
         Box::pin(async move { $expr })
     };
 }
+
+#[macro_export]
+macro_rules! rpc_error {
+    ($($msg:tt)*) => {{
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!($($msg)*),
+            data: None,
+        })
+    }};
+}
