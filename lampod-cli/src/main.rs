@@ -60,17 +60,6 @@ fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
 
 /// Return the root directory.
 async fn run(args: LampoCliArgs) -> error::Result<()> {
-    let mnemonic = if args.restore_wallet {
-        let inputs: String = term::input(
-            "BIP 39 Mnemonic",
-            None,
-            Some("To restore the wallet, lampo needs a BIP39 mnemonic with words separated by spaces."),
-        )?;
-        Some(inputs)
-    } else {
-        None
-    };
-
     let restore_wallet = args.restore_wallet;
     let dev_force_poll = args.dev_force_poll;
 
