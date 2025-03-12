@@ -15,7 +15,6 @@ use lampo_common::model::response::Offer;
 use lampo_common::model::Connect;
 use lampo_common::secp256k1::PublicKey;
 use lampo_testing::prelude::bitcoincore_rpc::RpcApi;
-use lampo_testing::prelude::btc::BtcNode;
 use lampo_testing::prelude::*;
 
 use lampo_testing::wait;

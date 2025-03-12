@@ -582,7 +582,7 @@ dependencies = [
 [[package]]
 name = "clightning-testing"
 version = "0.1.0"
-source = "git+https://github.com/laanwj/cln4rust.git#a20c7a2729b0d5e70aee46b97dcaaa297c88334a"
+source = "git+https://github.com/laanwj/cln4rust.git?rev=b4e5db582b474b31e1c280f09969ab148feee04f#b4e5db582b474b31e1c280f09969ab148feee04f"
 dependencies = [
  "anyhow",
  "bitcoincore-rpc",
@@ -596,7 +596,7 @@ dependencies = [
 [[package]]
 name = "clightningrpc"
 version = "0.3.0-beta.8"
-source = "git+https://github.com/laanwj/cln4rust.git#a20c7a2729b0d5e70aee46b97dcaaa297c88334a"
+source = "git+https://github.com/laanwj/cln4rust.git?rev=b4e5db582b474b31e1c280f09969ab148feee04f#b4e5db582b474b31e1c280f09969ab148feee04f"
 dependencies = [
  "clightningrpc-common",
  "serde",
@@ -1266,6 +1266,7 @@ dependencies = [
  "lampo-bitcoind",
  "lampo-common",
  "lampo-core-wallet",
+ "lampo-httpd",
  "lampod",
  "log",
  "port-selector",
