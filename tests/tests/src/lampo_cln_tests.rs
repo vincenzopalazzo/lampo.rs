@@ -266,7 +266,7 @@ pub fn decode_cln_offer_from_lampo() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --experimental-onion-messages --experimental-offers --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -373,7 +373,7 @@ pub fn decode_cln_offer_from_lampo_minimal_offer() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --experimental-onion-messages --experimental-offers --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();
@@ -474,7 +474,7 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
     init();
 
     let mut cln = async_run!(cln::Node::with_params(
-        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
+        "--developer --experimental-onion-messages --experimental-offers --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
         "regtest"
     ))
     .unwrap();

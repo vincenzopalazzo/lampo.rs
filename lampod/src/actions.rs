@@ -4,6 +4,7 @@ pub mod handler;
 use async_trait::async_trait;
 use lampo_common::chan;
 use lampo_common::error;
+use lampo_common::json;
 use lampo_common::ldk::events::Event;
 
 use crate::command::Command;
@@ -12,7 +13,7 @@ use crate::command::Command;
 pub trait Handler {
     async fn handle(&self, event: Event) -> error::Result<()>;
 
-    async fn react(&self, event: Command) -> error::Result<()>;
+    async fn react(&self, event: Command) -> error::Result<json::Value>;
 }
 
 pub trait EventHandler: Sized + Send + Sync + Clone {
