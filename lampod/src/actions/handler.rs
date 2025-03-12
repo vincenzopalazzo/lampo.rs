@@ -70,11 +70,9 @@ impl LampoHandler {
     ) -> error::Result<R> {
         let args = json::to_value(args)?;
         let request = Request::new(method, args);
-        let (sender, receiver) = chan::bounded::<json::Value>(1);
-        let command = Command::from_req(&request, &sender)?;
+        let command = Command::from_req(&request)?;
         log::info!("received {:?}", command);
-        self.react(command).await?;
-        let result = receiver.recv()?;
+        let result = self.react(command).await?;
         Ok(json::from_value::<R>(result)?)
     }
 }
@@ -93,15 +91,15 @@ impl EventHandler for LampoHandler {
 
 #[async_trait]
 impl Handler for LampoHandler {
-    async fn react(&self, event: crate::command::Command) -> error::Result<()> {
+    async fn react(&self, event: crate::command::Command) -> error::Result<json::Value> {
         let handler = self.external_handlers.borrow();
         match event {
-            Command::ExternalCommand(req, chan) => {
+            Command::ExternalCommand(req) => {
                 log::debug!(target: "lampo", "external handler size {}", handler.len());
                 for handler in handler.iter() {
+                    // FIXME: this is blocking the async execution!!
                     if let Some(resp) = handler.handle(&req)? {
-                        chan.send(resp)?;
-                        return Ok(());
+                        return Ok(resp);
                     }
                 }
                 error::bail!("method `{}` not found", req.method);

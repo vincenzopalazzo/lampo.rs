@@ -43,6 +43,7 @@ impl LampoChainSync {
             "Core Password is missing from the configuration file"
         ))?;
 
+        log::debug!("Core URL: {:?}", core_url);
         // FIXME: somehow we should fix this
         let url_parts: Vec<&str> = core_url.split(':').collect();
         let host = url_parts[1];

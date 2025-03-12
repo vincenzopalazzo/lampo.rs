@@ -11,10 +11,10 @@ use std::sync::Arc;
 
 use clightning_testing::btc::BtcNode;
 use clightning_testing::prelude::*;
+use lampo_chain::LampoChainSync;
 use lampo_httpd::handler::HttpdHandler;
 use tempfile::TempDir;
 
-use lampo_bitcoind::BitcoinCore;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
@@ -23,6 +23,26 @@ use lampo_core_wallet::CoreWalletManager;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
+
+#[macro_export]
+macro_rules! async_wait {
+    ($callback:expr, $timeout:expr) => {{
+        let mut success = false;
+        for _ in 0..4 {
+            let result = $callback.await;
+            if let Err(_) = result {
+                tokio::time::sleep(std::time::Duration::from_secs($timeout)).await;
+                continue;
+            }
+            success = true;
+            break;
+        }
+        assert!(success, "callback got a timeout");
+    }};
+    ($callback:expr) => {
+        $crate::async_wait!($callback, 5);
+    };
+}
 
 #[macro_export]
 macro_rules! wait {
@@ -68,7 +88,7 @@ pub struct LampoTesting {
 }
 
 impl LampoTesting {
-    pub fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
+    pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -83,7 +103,7 @@ impl LampoTesting {
         )?;
         lampo_conf.api_port = port::random_free_port().unwrap().into();
         log::info!("listening on port `{}`", lampo_conf.api_port);
-        let core_url = format!("127.0.0.1:{}", btc.port);
+        let core_url: String = format!("http://127.0.0.1:{}", btc.port);
         lampo_conf.core_pass = Some(btc.pass.clone());
         lampo_conf.core_url = Some(core_url);
         lampo_conf.core_user = Some(btc.user.clone());
@@ -92,46 +112,39 @@ impl LampoTesting {
             .channel_handshake_limits
             .force_announced_channel_preference = false;
         log::info!("creating bitcoin core wallet");
-        let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
+        let lampo_conf = Arc::new(lampo_conf);
+        let (wallet, mnemonic) = CoreWalletManager::new(lampo_conf.clone())?;
         let wallet = Arc::new(wallet);
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
-        let node = BitcoinCore::new(
-            &format!("127.0.0.1:{}", btc.port),
-            &btc.user,
-            &btc.pass,
-            Arc::new(false),
-            Some(1),
-        )?;
-        lampo.init(Arc::new(node))?;
+        let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
+        lampo.init(node.clone()).await?;
         log::info!("bitcoin core added inside lampo");
 
         // run httpd and create the handler that will connect to it
         let handler = Arc::new(HttpdHandler::new(format!(
-            "{}:{}",
+            "http://{}:{}",
             lampo_conf.api_host, lampo_conf.api_port
         ))?);
         lampo.add_external_handler(handler.clone())?;
         log::info!("Handler added to lampo");
         let lampo = Arc::new(lampo);
-        tokio::spawn(run_httpd(lampo.clone()));
+        run_httpd(lampo.clone()).await?;
         log::info!("httpd started");
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
-        std::thread::spawn(move || lampo.listen().unwrap().join());
+        tokio::spawn(lampo.listen());
 
         // wait that lampo starts
-        wait!(|| {
-            let info = handler.call::<json::Value, response::GetInfo>("getinfo", json::json!({}));
-            log::warn!("info {:?}", info);
-            if info.is_err() {
-                return Err(());
-            }
-            Ok(())
-        });
+        while let Err(err) = handler
+            .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
+            .await
+        {
+            log::error!("error: `{}`", err);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
 
-        // FIXME: wait that lampo starts
-        let info: response::GetInfo = handler.call("getinfo", json::json!({}))?;
+        let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
         log::info!("ready `{:#?}` for integration testing!", info);
         Ok(Self {
             inner: handler,
@@ -144,11 +157,18 @@ impl LampoTesting {
         })
     }
 
-    pub fn fund_wallet(&self, blocks: u64) -> error::Result<bitcoincore_rpc::bitcoin::Address> {
+    pub async fn fund_wallet(
+        &self,
+        blocks: u64,
+    ) -> error::Result<bitcoincore_rpc::bitcoin::Address> {
         use clightning_testing::prelude::bitcoincore_rpc::RpcApi;
 
         // mine some bitcoin inside the lampo address
-        let address: response::NewAddress = self.lampod().call("newaddr", json::json!({})).unwrap();
+        let address: response::NewAddress = self
+            .lampod()
+            .call("newaddr", json::json!({}))
+            .await
+            .unwrap();
         let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
             .unwrap()
             .assume_checked();
@@ -158,8 +178,8 @@ impl LampoTesting {
             .generate_to_address(blocks, &address)
             .unwrap();
 
-        wait!(|| {
-            let funds: response::Utxos = self.inner.call("funds", json::json!({})).unwrap();
+        async_wait!(async {
+            let funds: response::Utxos = self.inner.call("funds", json::json!({})).await.unwrap();
             if !funds.transactions.is_empty() {
                 return Ok(());
             }

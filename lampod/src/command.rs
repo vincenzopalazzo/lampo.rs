@@ -21,16 +21,13 @@ pub enum Command {
     /// Core Lightning Plugins works this way and we want
     /// keep this freedom, but we do not want people
     /// that are couple with our design choice.
-    ExternalCommand(Request<json::Value>, chan::Sender<json::Value>),
+    ExternalCommand(Request<json::Value>),
 }
 
 impl Command {
-    pub fn from_req(
-        req: &Request<json::Value>,
-        chan: &chan::Sender<json::Value>,
-    ) -> error::Result<Self> {
+    pub fn from_req(req: &Request<json::Value>) -> error::Result<Self> {
         match req.method.as_str() {
-            _ => Ok(Command::ExternalCommand(req.clone(), chan.clone())),
+            _ => Ok(Command::ExternalCommand(req.clone())),
         }
     }
 }
