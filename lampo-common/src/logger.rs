@@ -73,7 +73,6 @@ pub fn init(level: &str, file: Option<PathBuf>) -> anyhow::Result<()> {
     } else {
         None
     };
-    eprintln!("{level}",);
     let level = Level::from_str(level).map_err(|err| anyhow::anyhow!("{err}"))?;
     let logger = Logger { level, file };
 

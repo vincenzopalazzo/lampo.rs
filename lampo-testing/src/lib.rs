@@ -8,12 +8,10 @@ pub mod prelude {
 
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use clightning_testing::btc::BtcNode;
 use clightning_testing::prelude::*;
 use lampo_httpd::handler::HttpdHandler;
-use lampod::async_run;
 use tempfile::TempDir;
 
 use lampo_bitcoind::BitcoinCore;
@@ -84,7 +82,7 @@ impl LampoTesting {
             Some(port.into()),
         )?;
         lampo_conf.api_port = port::random_free_port().unwrap().into();
-
+        log::info!("listening on port `{}`", lampo_conf.api_port);
         let core_url = format!("127.0.0.1:{}", btc.port);
         lampo_conf.core_pass = Some(btc.pass.clone());
         lampo_conf.core_url = Some(core_url);
@@ -115,12 +113,22 @@ impl LampoTesting {
         lampo.add_external_handler(handler.clone())?;
         log::info!("Handler added to lampo");
         let lampo = Arc::new(lampo);
-        async_run!(run_httpd(lampo.clone()))?;
+        tokio::spawn(run_httpd(lampo.clone()));
         log::info!("httpd started");
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
         std::thread::spawn(move || lampo.listen().unwrap().join());
+
+        // wait that lampo starts
+        wait!(|| {
+            let info = handler.call::<json::Value, response::GetInfo>("getinfo", json::json!({}));
+            log::warn!("info {:?}", info);
+            if info.is_err() {
+                return Err(());
+            }
+            Ok(())
+        });
 
         // FIXME: wait that lampo starts
         let info: response::GetInfo = handler.call("getinfo", json::json!({}))?;
