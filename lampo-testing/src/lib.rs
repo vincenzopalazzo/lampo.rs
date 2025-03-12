@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use clightning_testing::btc::BtcNode;
 use clightning_testing::prelude::*;
+use lampo_httpd::handler::HttpdHandler;
+use lampod::async_run;
 use tempfile::TempDir;
 
 use lampo_bitcoind::BitcoinCore;
@@ -44,6 +46,19 @@ macro_rules! wait {
     };
 }
 
+pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+    let url = format!("{}:{}", lampod.conf().api_host, lampod.conf().api_port);
+    let mut http_hosting = url.clone();
+    if let Some(clean_url) = url.strip_prefix("http://") {
+        http_hosting = clean_url.to_string();
+    } else if let Some(clean_url) = url.strip_prefix("https://") {
+        http_hosting = clean_url.to_string();
+    }
+    log::info!("preparing httpd api on addr `{url}`");
+    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
+    Ok(())
+}
+
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     root_path: Arc<TempDir>,
@@ -68,6 +83,8 @@ impl LampoTesting {
             Some(lampo_common::bitcoin::Network::Regtest),
             Some(port.into()),
         )?;
+        lampo_conf.api_port = port::random_free_port().unwrap().into();
+
         let core_url = format!("127.0.0.1:{}", btc.port);
         lampo_conf.core_pass = Some(btc.pass.clone());
         lampo_conf.core_url = Some(core_url);
@@ -76,6 +93,7 @@ impl LampoTesting {
             .ldk_conf
             .channel_handshake_limits
             .force_announced_channel_preference = false;
+        log::info!("creating bitcoin core wallet");
         let (wallet, mnemonic) = CoreWalletManager::new(Arc::new(lampo_conf.clone()))?;
         let wallet = Arc::new(wallet);
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
@@ -87,19 +105,26 @@ impl LampoTesting {
             Some(1),
         )?;
         lampo.init(Arc::new(node))?;
+        log::info!("bitcoin core added inside lampo");
 
-        // Configuring the JSON RPC over unix
+        // run httpd and create the handler that will connect to it
+        let handler = Arc::new(HttpdHandler::new(format!(
+            "{}:{}",
+            lampo_conf.api_host, lampo_conf.api_port
+        ))?);
+        lampo.add_external_handler(handler.clone())?;
+        log::info!("Handler added to lampo");
         let lampo = Arc::new(lampo);
-
-        // FIXME: We should install the server at some point
+        async_run!(run_httpd(lampo.clone()))?;
+        log::info!("httpd started");
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
         std::thread::spawn(move || lampo.listen().unwrap().join());
-        // wait that lampo starts
-        std::thread::sleep(Duration::from_secs(1));
+
+        // FIXME: wait that lampo starts
         let info: response::GetInfo = handler.call("getinfo", json::json!({}))?;
-        log::info!("ready for integration testing!");
+        log::info!("ready `{:#?}` for integration testing!", info);
         Ok(Self {
             inner: handler,
             mnemonic,
