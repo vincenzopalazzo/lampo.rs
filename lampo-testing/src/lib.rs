@@ -8,6 +8,7 @@ pub mod prelude {
 
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clightning_testing::btc::BtcNode;
 use clightning_testing::prelude::*;
@@ -166,7 +167,7 @@ impl LampoTesting {
         // mine some bitcoin inside the lampo address
         let address: response::NewAddress = self
             .lampod()
-            .call("newaddr", json::json!({}))
+            .call("new_addr", json::json!({}))
             .await
             .unwrap();
         let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
@@ -178,8 +179,10 @@ impl LampoTesting {
             .generate_to_address(blocks, &address)
             .unwrap();
 
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let funds: response::Utxos = self.inner.call("funds", json::json!({})).await.unwrap();
+
         async_wait!(async {
-            let funds: response::Utxos = self.inner.call("funds", json::json!({})).await.unwrap();
             if !funds.transactions.is_empty() {
                 return Ok(());
             }
