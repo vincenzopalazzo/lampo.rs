@@ -1,25 +1,24 @@
-import json
-import socket
+import requests
 
 
 class LampoClient:
     """
-    A simple Lampo client that communicates via a Unix socket.
+    A simple Lampo client that communicates via HTTP.
     """
 
-    def __init__(self, socket_path: str):
+    def __init__(self, base_url: str):
         """
         Initializes the LampoClient instance.
 
         Args:
-          socket_path: The path to the Lampo socket.
+          base_url: The base URL of the Lampo server.
         """
 
-        self.socket_path = socket_path
+        self.base_url = base_url
 
     def call(self, method: str, params: dict = None) -> dict:
         """
-        Calls a method on the Lampo client over the Unix socket.
+        Calls a method on the Lampo client over HTTP.
 
         Args:
           method: The name of the Lampo method to call.
@@ -32,33 +31,16 @@ class LampoClient:
           Exception: If there is an error communicating with the Lampo client.
         """
 
+        url = f"{self.base_url}/{method}"
         request = {
-            "method": method,
             "params": params if params else {},
             "id": "pylampo-client/1",
             "jsonrpc": "2.0",
         }
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                sock.connect(self.socket_path)
-                sock.sendall(json.dumps(request).encode())
-
-                response = ""
-                while True:
-                    data = sock.recv(1024)
-                    if not data:
-                        break
-                    response += data.decode()
-
-                # ad this point of the execution the response looks like
-                # the following one
-                # `{'result': {'node_id': '03f37129559621cbb4f8f4d4be5dff76ec21c220d7d274a6407683eafb996d97ae', 'peers': 0, 'channels': 0, 'chain': 'regtest', 'alias': '', 'blockheight': 101, 'lampo_dir': '/tmp/lnpt-lampo-2wi7vr28/lampo'}, 'error': None, 'id': 'pylampo-client/1', 'jsonrpc': '2.0'}`
-                response = json.loads(response)
-                if "result" in response:
-                    return response["result"]
-                elif "error" in response:
-                    raise Exception(f"{response['error']}")
-                else:
-                    raise Exception("Invalid JSON RPC 2.0 response: `{response}`")
+            headers = {"accept": "application/json"}
+            response = requests.post(url, json=request, headers=headers)
+            response.raise_for_status()
+            return response
         except Exception as e:
             raise Exception(f"Error communicating with Lampo client: {e}")

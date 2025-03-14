@@ -7,7 +7,12 @@ authors = ["Tarek <tareknaser360@gmail.com>"]
 [tool.poetry.dependencies]
 python = "^3.8"
 black = "^24.4.2"
+requests = "^2.32.3"
 
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+lnprototest = "^0.0.6"
 
 [build-system]
 requires = ["poetry-core"]
