@@ -255,7 +255,9 @@ impl LampoDaemon {
                 |d| {
                     Box::pin(async move {
                         tokio::time::sleep(d).await;
-                        true
+                        // if we return true, ldk is going to stop the processor
+                        // so we should use this when we have the stop command
+                        false
                     })
                 },
                 false,
