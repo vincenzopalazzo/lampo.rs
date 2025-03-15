@@ -13,7 +13,6 @@ use radicle_term as term;
 use crate::args::LampoCliArgs;
 
 fn main() -> error::Result<()> {
-    lampo_common::logger::init("debug", None)?;
     let args = match args::parse_args() {
         Ok(args) => args,
         Err(err) => {
@@ -29,6 +28,7 @@ fn main() -> error::Result<()> {
         }
         Err(err) => {
             term::error(format!("{err}"));
+            exit(1);
         }
     }
     Ok(())
