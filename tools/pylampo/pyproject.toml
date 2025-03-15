@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pylampo-client"
-version = "0.0.1"
+version = "0.0.3"
 description = "A simple Lampo client that communicates via a Unix socket"
 authors = ["Tarek <tareknaser360@gmail.com>"]
 
