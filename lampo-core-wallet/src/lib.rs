@@ -12,16 +12,16 @@ use bdk::keys::GeneratableKey;
 use bdk::keys::GeneratedKey;
 use bdk::template::Bip84;
 use bdk::KeychainKind;
-use bitcoin_hashes::hex::HexIterator;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
-use lampo_common::async_trait;
+use lampo_common::bitcoin::Transaction;
 
 #[cfg(debug_assertions)]
 use crate::bitcoin::PrivateKey;
 
+use lampo_common::async_trait;
 use lampo_common::bitcoin;
-use lampo_common::bitcoin::consensus::Decodable;
-use lampo_common::conf::{LampoConf, Network};
+use lampo_common::conf::LampoConf;
+use lampo_common::conf::Network;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::json::Deserialize;
@@ -45,9 +45,9 @@ impl CoreWalletManager {
         let mnemonic = Mnemonic::parse(mnemonic_words).map_err(|err| error::anyhow!("{err}"))?;
         // Generate the extended key
         let xkey: ExtendedKey = mnemonic.into_extended_key()?;
-        let network = match conf.network.to_string().as_str() {
-            "bitcoin" => bdk::bitcoin::Network::Bitcoin,
-            "testnet" => bdk::bitcoin::Network::Testnet,
+        let network = match conf.network.to_core_arg() {
+            "main" => bdk::bitcoin::Network::Bitcoin,
+            "test" => bdk::bitcoin::Network::Testnet,
             "signet" => bdk::bitcoin::Network::Signet,
             "regtest" => bdk::bitcoin::Network::Regtest,
             _ => unreachable!(),
@@ -74,18 +74,17 @@ impl CoreWalletManager {
         channel_keys: Option<String>,
     ) -> error::Result<(bdk::Wallet, LampoKeys)> {
         use bdk::bitcoin::bip32::Xpriv;
+        use lampo_common::bitcoin::NetworkKind;
 
         let ldk_keys = if let Some(channel_keys) = channel_keys {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys)
         } else {
             LampoKeys::new(xprv.inner.secret_bytes())
         };
-        let network = match xprv.network.to_string().as_str() {
-            "bitcoin" => bdk::bitcoin::Network::Bitcoin,
-            "testnet" => bdk::bitcoin::Network::Testnet,
-            "signet" => bdk::bitcoin::Network::Signet,
-            "regtest" => bdk::bitcoin::Network::Regtest,
-            _ => unreachable!(),
+        // FIXME: we should also support other network we are missing information here!
+        let network = match xprv.network {
+            NetworkKind::Main => bdk::bitcoin::Network::Bitcoin,
+            _ => bdk::bitcoin::Network::Signet,
         };
         let key = Xpriv::new_master(network, &xprv.inner.secret_bytes())?;
         let key = ExtendedKey::from(key);
@@ -274,9 +273,8 @@ impl WalletManager for CoreWalletManager {
             .rpc
             .call("signrawtransactionwithwallet", &[json::json!(tx.hex)])?;
         let hex = hex.hex.unwrap();
-        let mut reader = HexIterator::new(&hex)?;
-        let object = Decodable::consensus_decode(&mut reader)?;
-        Ok(object)
+        let tx: Result<Transaction, bitcoin::consensus::encode::Error> = serialize!(&hex.as_str());
+        Ok(tx.unwrap())
     }
 
     async fn get_onchain_address(&self) -> error::Result<NewAddress> {
