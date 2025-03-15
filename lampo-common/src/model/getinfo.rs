@@ -12,6 +12,7 @@ pub struct GetInfo {
     pub lampo_dir: String,
     pub address: Vec<NetworkInfo>,
     pub block_hash: String,
+    pub wallet_height: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Apiv2Schema)]

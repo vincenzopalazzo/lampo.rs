@@ -61,7 +61,6 @@ fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
 /// Return the root directory.
 async fn run(args: LampoCliArgs) -> error::Result<()> {
     let restore_wallet = args.restore_wallet;
-    let dev_force_poll = args.dev_force_poll;
 
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
@@ -158,8 +157,13 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         }
     };
 
+    let wallet = Arc::new(wallet);
+
     log::debug!(target: "lampod-cli", "wallet created with success");
-    let mut lampod = LampoDaemon::new(lampo_conf.clone(), Arc::new(wallet));
+    let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+
+    // Do wallet syncing in the background!
+    wallet.listen().await?;
 
     // Init the lampod
     lampod.init(client).await?;

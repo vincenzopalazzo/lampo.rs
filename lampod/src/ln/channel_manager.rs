@@ -121,6 +121,10 @@ impl LampoChannelManager {
         self.monitor.borrow().clone().unwrap()
     }
 
+    pub fn wallet_manager(&self) -> Arc<dyn WalletManager> {
+        self.wallet_manager.clone()
+    }
+
     pub fn manager(&self) -> Arc<LampoChannel> {
         self.channeld.borrow().clone().unwrap()
     }

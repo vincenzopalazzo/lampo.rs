@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 lampo-common = { path = "../lampo-common" }
-bdk = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["keys-bip39"] }
-bdk_chain = { git = "https://github.com/bitcoindevkit/bdk.git" }
-bdk_esplora = { git = "https://github.com/bitcoindevkit/bdk.git", features = ["blocking"]  }
-bdk_file_store = { git = "https://github.com/bitcoindevkit/bdk.git" }
-tokio = { version = "^1.29.1", features = ["rt-multi-thread", "parking_lot"] }
-log = "0.4.17"
+bdk_wallet = { version = "1", features = ["rusqlite", "keys-bip39"] }
+bdk_bitcoind_rpc = { version = "0.18" }
+tokio = { version = "^1.29.1", features = ["rt-multi-thread", "parking_lot", "signal"] }
+tokio-cron-scheduler = { version = "*", features = ["signal"] }
+chrono = { version = "0.4", default-features = false }
+log = "*"
