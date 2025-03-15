@@ -34,6 +34,9 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         };
         address_vec.push(address_info);
     }
+
+    let wallet_tips = ctx.wallet_manager().wallet_tips().await?;
+
     let getinfo = GetInfo {
         node_id: ctx
             .channel_manager()
@@ -48,6 +51,7 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         block_hash: block_hash.to_string(),
         lampo_dir,
         address: address_vec,
+        wallet_height: wallet_tips.to_consensus_u32() as u64,
     };
 
     Ok(json::to_value(getinfo)?)

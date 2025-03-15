@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bitcoin::absolute::Height;
+use bitcoin::{Amount, FeeRate};
 
 use crate::bitcoin::{ScriptBuf, Transaction};
 use crate::conf::LampoConf;
@@ -36,13 +38,21 @@ pub trait WalletManager: Send + Sync {
     async fn create_transaction(
         &self,
         script: ScriptBuf,
-        amount_sat: u64,
-        fee_rate: u32,
+        amount_sat: Amount,
+        fee_rate: FeeRate,
     ) -> error::Result<Transaction>;
 
     /// Return the list of transaction stored inside the wallet
     async fn list_transactions(&self) -> error::Result<Vec<Utxo>>;
 
+    /// Return the last block height of the wallet, but we can abstract
+    /// in the future the wallet tips info that we will need.
+    async fn wallet_tips(&self) -> error::Result<Height>;
+
     /// Sync the wallet.
     async fn sync(&self) -> error::Result<()>;
+
+    /// Run a task for wallet sync operation, this usually need to
+    /// be run in a `tokio::spawn(wallet.listen())`.
+    async fn listen(self: Arc<Self>) -> error::Result<()>;
 }

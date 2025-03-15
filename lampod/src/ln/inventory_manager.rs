@@ -52,6 +52,8 @@ impl LampoInventoryManager {
             };
             address_vec.push(address_info);
         }
+
+        let wallet_tips = self.channel_manager.wallet_manager().wallet_tips().await?;
         let getinfo = GetInfo {
             node_id: self.channel_manager.manager().get_our_node_id().to_string(),
             peers: self.peer_manager.manager().list_peers().len(),
@@ -62,6 +64,7 @@ impl LampoInventoryManager {
             lampo_dir,
             address: address_vec,
             block_hash: block_hash.to_string(),
+            wallet_height: wallet_tips.to_consensus_u32() as u64,
         };
         Ok(getinfo)
     }

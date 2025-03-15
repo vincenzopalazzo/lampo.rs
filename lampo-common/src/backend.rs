@@ -40,6 +40,8 @@ pub trait Backend: BlockSource + Send + Sync {
     fn kind(&self) -> BackendKind;
 
     /// Fetch feerate give a number of blocks
+    ///
+    /// FIXME: use `FeeRate` instead of `u32`
     async fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32>;
 
     async fn minimum_mempool_fee(&self) -> error::Result<u32>;

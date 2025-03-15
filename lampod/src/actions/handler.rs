@@ -3,6 +3,8 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use lampo_common::async_trait;
+use lampo_common::bitcoin::Amount;
+use lampo_common::bitcoin::FeeRate;
 use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::error::Ok;
@@ -175,8 +177,8 @@ impl Handler for LampoHandler {
                 log::info!("fee estimated {:?} sats", fee);
                 let transaction = self.wallet_manager.create_transaction(
                     output_script,
-                    channel_value_satoshis,
-                    fee,
+                    Amount::from_sat(channel_value_satoshis),
+                    FeeRate::from_sat_per_vb_unchecked(fee as u64),
                 ).await?;
                 log::info!("funding transaction created `{}`", transaction.compute_txid());
                 log::info!(

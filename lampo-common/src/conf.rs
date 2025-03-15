@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use bitcoin::absolute::Height;
 use clightningrpc_conf::{CLNConf, SyncCLNConf};
 
 pub use bitcoin::Network;
@@ -25,6 +26,7 @@ pub struct LampoConf {
     pub announce_addr: Option<String>,
     pub api_host: String,
     pub api_port: u64,
+    pub reindex: Option<Height>,
 }
 
 impl Default for LampoConf {
@@ -55,6 +57,7 @@ impl Default for LampoConf {
             announce_addr: None,
             api_host: "127.0.0.1".to_owned(),
             api_port: 7878,
+            reindex: None,
         }
     }
 }
@@ -197,6 +200,16 @@ impl TryFrom<String> for LampoConf {
                 .map_err(|err| anyhow::anyhow!("{err}"))?;
             core_pass = core_pass.map(|pass| pass.to_trimmed());
         }
+
+        let reindex: Option<String> = conf
+            .get_conf("reindex")
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        let reindex = if let Some(reindex) = reindex {
+            let reindex = Height::from_str(&reindex)?;
+            Some(reindex)
+        } else {
+            None
+        };
         // Dev options
         #[allow(unused_mut, unused_assignments)]
         let mut private_key: Option<String> = None;
@@ -246,6 +259,7 @@ impl TryFrom<String> for LampoConf {
             announce_addr,
             api_host,
             api_port,
+            reindex,
         })
     }
 }
