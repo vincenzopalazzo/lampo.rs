@@ -6,13 +6,13 @@ use crate::LampoDaemon;
 
 pub async fn json_new_addr(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `new_addr` with request {:?}", request);
-    let resp = ctx.wallet_manager().get_onchain_address()?;
+    let resp = ctx.wallet_manager().get_onchain_address().await?;
     Ok(json::to_value(resp)?)
 }
 
 pub async fn json_funds(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `funds` with request `{:?}`", request);
-    let txs = ctx.wallet_manager().list_transactions()?;
+    let txs = ctx.wallet_manager().list_transactions().await?;
     Ok(json::json!({
         "transactions": txs,
     }))

@@ -175,7 +175,7 @@ impl Handler for LampoHandler {
                     output_script,
                     channel_value_satoshis,
                     fee,
-                )?;
+                ).await?;
                 log::info!("funding transaction created `{}`", transaction.txid());
                 log::info!(
                     "transaction hex `{}`",

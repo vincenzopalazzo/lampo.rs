@@ -14,6 +14,7 @@ use bdk::template::Bip84;
 use bdk::KeychainKind;
 use bitcoin_hashes::hex::HexIterator;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
+use lampo_common::async_trait;
 
 #[cfg(debug_assertions)]
 use crate::bitcoin::PrivateKey;
@@ -199,8 +200,9 @@ struct Tx {
     hex: Option<String>,
 }
 
+#[async_trait]
 impl WalletManager for CoreWalletManager {
-    fn new(conf: Arc<LampoConf>) -> error::Result<(Self, String)>
+    async fn new(conf: Arc<LampoConf>) -> error::Result<(Self, String)>
     where
         Self: Sized,
     {
@@ -223,7 +225,7 @@ impl WalletManager for CoreWalletManager {
         ))
     }
 
-    fn create_transaction(
+    async fn create_transaction(
         &self,
         script: bitcoin::ScriptBuf,
         amount_sat: u64,
@@ -277,13 +279,13 @@ impl WalletManager for CoreWalletManager {
         Ok(object)
     }
 
-    fn get_onchain_address(&self) -> error::Result<NewAddress> {
+    async fn get_onchain_address(&self) -> error::Result<NewAddress> {
         let addr = self.rpc.call("getnewaddress", &["lampo-addr".into()])?;
         log::debug!(target: "core-wallet", "addr generated: {addr}" );
         Ok(NewAddress { address: addr })
     }
 
-    fn get_onchain_balance(&self) -> error::Result<u64> {
+    async fn get_onchain_balance(&self) -> error::Result<u64> {
         let balance = self.rpc.get_balance(None, Some(true))?;
         Ok(balance.to_sat() * 1000)
     }
@@ -292,7 +294,7 @@ impl WalletManager for CoreWalletManager {
         self.keymanager.clone()
     }
 
-    fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
+    async fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
         let unspend = self
             .rpc
             .list_unspent(None, None, None, Some(true), None)?
@@ -308,7 +310,7 @@ impl WalletManager for CoreWalletManager {
         Ok(unspend)
     }
 
-    fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self>
+    async fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self>
     where
         Self: Sized,
     {
@@ -337,7 +339,7 @@ impl WalletManager for CoreWalletManager {
         })
     }
 
-    fn sync(&self) -> error::Result<()> {
+    async fn sync(&self) -> error::Result<()> {
         Ok(())
     }
 }

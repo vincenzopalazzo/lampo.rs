@@ -111,7 +111,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
             let wallet = match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
-                    CoreWalletManager::restore(lampo_conf.clone(), &mnemonic)?
+                    CoreWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
             wallet
@@ -127,7 +127,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
                 lampo_common::backend::BackendKind::Core => {
                     // SAFETY: It is safe to unwrap the mnemonic because we check it
                     // before.
-                    CoreWalletManager::restore(lampo_conf.clone(), &mnemonic)?
+                    CoreWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
 
@@ -142,14 +142,14 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
             let wallet = match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
-                    CoreWalletManager::restore(lampo_conf.clone(), &mnemonic)?
+                    CoreWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
             wallet
         } else {
             let (wallet, mnemonic) = match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
-                    CoreWalletManager::new(lampo_conf.clone())?
+                    CoreWalletManager::new(lampo_conf.clone()).await?
                 }
             };
 

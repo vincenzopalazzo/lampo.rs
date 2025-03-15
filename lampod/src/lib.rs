@@ -76,9 +76,6 @@ unsafe impl Sync for LampoDaemon {}
 impl LampoDaemon {
     pub fn new(config: Arc<LampoConf>, wallet_manager: Arc<dyn WalletManager>) -> Self {
         let root_path = config.path();
-        //FIXME: sync some where else
-        let wallet = wallet_manager.clone();
-        let _ = std::thread::spawn(move || wallet.sync().unwrap());
         LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),

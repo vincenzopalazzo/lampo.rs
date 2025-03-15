@@ -114,7 +114,7 @@ impl LampoTesting {
             .force_announced_channel_preference = false;
         log::info!("creating bitcoin core wallet");
         let lampo_conf = Arc::new(lampo_conf);
-        let (wallet, mnemonic) = CoreWalletManager::new(lampo_conf.clone())?;
+        let (wallet, mnemonic) = CoreWalletManager::new(lampo_conf.clone()).await?;
         let wallet = Arc::new(wallet);
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
