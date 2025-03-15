@@ -7,8 +7,9 @@ members = [
         "lampo-httpd",
         "lampo-core-wallet",
         "lampo-testing",
-        "tests/tests", 
+        "tests/tests",
         "lampo-chain",
+        "lampo-bdk-wallet"
 ]
 
 default-members = [
@@ -19,5 +20,6 @@ default-members = [
         "lampo-httpd",
         "lampo-core-wallet",
         "lampo-chain",
+        "lampo-bdk-wallet"
 ]
 resolver = "2"
