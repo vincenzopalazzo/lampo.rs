@@ -114,8 +114,10 @@ impl Handler for LampoHandler {
                 temporary_channel_id,
                 counterparty_node_id,
                 funding_satoshis,
-                push_msat,
                 channel_type,
+                channel_negotiation_type: _,
+                is_announced: _,
+                params: _
             } => {
                 Err(error::anyhow!("Request for open a channel received, unfortunatly we do not support this feature yet."))
             }
@@ -176,7 +178,7 @@ impl Handler for LampoHandler {
                     channel_value_satoshis,
                     fee,
                 ).await?;
-                log::info!("funding transaction created `{}`", transaction.txid());
+                log::info!("funding transaction created `{}`", transaction.compute_txid());
                 log::info!(
                     "transaction hex `{}`",
                     lampo_common::bitcoin::consensus::encode::serialize_hex(&transaction)
@@ -190,8 +192,8 @@ impl Handler for LampoHandler {
                 self.channel_manager
                     .manager()
                     .funding_transaction_generated(
-                        &temporary_channel_id,
-                        &counterparty_node_id,
+                        temporary_channel_id,
+                        counterparty_node_id,
                         transaction,
                     )
                     .map_err(|err| error::anyhow!("{:?}", err))?;
@@ -225,6 +227,7 @@ impl Handler for LampoHandler {
                 via_channel_id,
                 via_user_channel_id,
                 claim_deadline,
+                payment_id: _,
             } => {
                 let preimage = match purpose {
                     ldk::events::PaymentPurpose::Bolt11InvoicePayment  {

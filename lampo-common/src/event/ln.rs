@@ -1,5 +1,6 @@
+use lightning::types::features::ChannelTypeFeatures;
+
 use crate::bitcoin::{OutPoint, Transaction};
-use crate::ldk::ln::features::ChannelTypeFeatures;
 use crate::model::response::{PaymentHop, PaymentState};
 use crate::types::{ChannelId, NodeId};
 
