@@ -12,12 +12,12 @@ use std::sync::Arc;
 
 use radicle_term as term;
 
+use lampo_bdk_wallet::BDKWalletManager;
 use lampo_chain::LampoChainSync;
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
-use lampo_core_wallet::CoreWalletManager;
 use lampo_httpd::handler::HttpdHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -110,7 +110,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
             let wallet = match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
-                    CoreWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
             wallet
@@ -126,7 +126,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
                 lampo_common::backend::BackendKind::Core => {
                     // SAFETY: It is safe to unwrap the mnemonic because we check it
                     // before.
-                    CoreWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
 
@@ -141,14 +141,14 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
             let wallet = match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
-                    CoreWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
             wallet
         } else {
             let (wallet, mnemonic) = match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
-                    CoreWalletManager::new(lampo_conf.clone()).await?
+                    BDKWalletManager::new(lampo_conf.clone()).await?
                 }
             };
 

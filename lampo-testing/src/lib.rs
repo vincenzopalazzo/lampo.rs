@@ -16,11 +16,11 @@ use lampo_chain::LampoChainSync;
 use lampo_httpd::handler::HttpdHandler;
 use tempfile::TempDir;
 
+use lampo_bdk_wallet::BDKWalletManager;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::model::response;
-use lampo_core_wallet::CoreWalletManager;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -114,7 +114,7 @@ impl LampoTesting {
             .force_announced_channel_preference = false;
         log::info!("creating bitcoin core wallet");
         let lampo_conf = Arc::new(lampo_conf);
-        let (wallet, mnemonic) = CoreWalletManager::new(lampo_conf.clone()).await?;
+        let (wallet, mnemonic) = BDKWalletManager::new(lampo_conf.clone()).await?;
         let wallet = Arc::new(wallet);
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
