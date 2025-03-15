@@ -32,7 +32,7 @@ Options
 
     -d | --data-dir     Specify lampo data directory (used to get socket path)
     -n | --network      Set the network for lampo (default: testnet)
-    -s | --socket       Specify Unix Socket patch of the lampod node directely
+    -u | --url        Specify API endipoint
     -h | --help         Print help
 "#,
 };
