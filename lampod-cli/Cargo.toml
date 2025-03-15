@@ -8,7 +8,7 @@ edition = "2021"
 lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 lampo-chain = { path = "../lampo-chain" }
-lampo-core-wallet = { path = "../lampo-core-wallet" }
+lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
 tokio = { version = "1.22.0", features = ["rt", "macros"] }
 lexopt = { version = "0.3" }
