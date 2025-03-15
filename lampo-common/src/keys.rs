@@ -119,8 +119,8 @@ impl NodeSigner for LampoKeysManager {
         self.inner.ecdh(recipient, other_key, tweak)
     }
 
-    fn get_inbound_payment_key_material(&self) -> lightning::sign::KeyMaterial {
-        self.inner.get_inbound_payment_key_material()
+    fn get_inbound_payment_key(&self) -> lightning::ln::inbound_payment::ExpandedKey {
+        self.inner.get_inbound_payment_key()
     }
 
     fn get_node_id(
@@ -137,13 +137,6 @@ impl NodeSigner for LampoKeysManager {
         self.inner.sign_bolt12_invoice(invoice)
     }
 
-    fn sign_bolt12_invoice_request(
-        &self,
-        invoice_request: &lightning::offers::invoice_request::UnsignedInvoiceRequest,
-    ) -> Result<bitcoin::secp256k1::schnorr::Signature, ()> {
-        self.inner.sign_bolt12_invoice_request(invoice_request)
-    }
-
     fn sign_gossip_message(
         &self,
         msg: lightning::ln::msgs::UnsignedGossipMessage,
@@ -153,11 +146,10 @@ impl NodeSigner for LampoKeysManager {
 
     fn sign_invoice(
         &self,
-        hrp_bytes: &[u8],
-        invoice_data: &[bitcoin::bech32::u5],
+        invoice: &lightning_invoice::RawBolt11Invoice,
         recipient: lightning::sign::Recipient,
     ) -> Result<bitcoin::secp256k1::ecdsa::RecoverableSignature, ()> {
-        self.inner.sign_invoice(hrp_bytes, invoice_data, recipient)
+        self.inner.sign_invoice(invoice, recipient)
     }
 }
 

@@ -19,21 +19,24 @@ pub mod ln;
 pub mod persistence;
 
 use std::cell::Cell;
-use std::io;
 use std::sync::Arc;
 use std::time::SystemTime;
+
+use lampo_common::ldk::ln::peer_handler::IgnoringMessageHandler;
+use lampo_common::ldk::onion_message::messenger::OnionMessenger;
+use tokio::task::JoinHandle;
 
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
-use lampo_common::ldk::events::Event;
+use lampo_common::ldk::events::{Event, ReplayEvent};
+use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, BackgroundProcessor, GossipSync};
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
 use lampo_common::{error, ldk};
-use tokio::task::JoinHandle;
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
@@ -244,6 +247,7 @@ impl LampoDaemon {
                 |env| self.handler_ldk_events(env),
                 self.channel_manager().chain_monitor(),
                 self.channel_manager().manager(),
+                Some(self.peer_manager().onion_messager()),
                 GossipSync::p2p(gossip_sync),
                 self.peer_manager().manager(),
                 self.logger.clone(),
@@ -251,10 +255,10 @@ impl LampoDaemon {
                 |d| {
                     Box::pin(async move {
                         tokio::time::sleep(d).await;
-                        false
+                        true
                     })
                 },
-                true,
+                false,
                 || {
                     Some(
                         SystemTime::now()
@@ -268,10 +272,12 @@ impl LampoDaemon {
         })
     }
 
-    async fn handler_ldk_events(&self, env: Event) {
+    // FIXME: what about replay event?
+    async fn handler_ldk_events(&self, env: Event) -> Result<(), ReplayEvent> {
         if let Err(err) = self.handler().handle(env).await {
             log::error!(target: "lampod", "Error handling event: {:?}", err);
         }
+        Ok(())
     }
 
     /// Call any method supported by the lampod configuration. This includes

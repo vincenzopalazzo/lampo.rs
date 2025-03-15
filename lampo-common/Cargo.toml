@@ -6,20 +6,20 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { version = "0.0.123", features = ["max_level_trace"] }
-lightning-block-sync = { version = "0.0.123" }
-lightning-persister = { version = "0.0.123" }
-lightning-background-processor = { version = "0.0.123", features = ["futures"] }
-lightning-net-tokio = { version = "0.0.123" }
-lightning-rapid-gossip-sync = { version = "0.0.123" }
-lightning-invoice = { version = "0.31" }
+lightning = { version = "0.1.1", features = [] }
+lightning-block-sync = { version = "0.1.0" }
+lightning-persister = { version = "0.1.0" }
+lightning-background-processor = { version = "0.1", features = ["futures"] }
+lightning-net-tokio = { version = "0.1.0" }
+lightning-rapid-gossip-sync = { version = "0.1.0" }
+lightning-invoice = { version = "0.33" }
 
 async-trait = "0.1"
-bitcoin = { version = "0.30.2", features = ["serde"] }
+bitcoin = { version = "0.32", features = ["serde"] }
 clightningrpc-conf = { git = "https://github.com/laanwj/cln4rust.git", branch = "master" }
 crossbeam-channel = "0.5.8"
 anyhow = "1.0.94"
-colored = "2.1"
+colored = "3"
 log = { version = "0.4", features = ["std"] }
 chrono = { version = "0.4", features = ["std"], default-features = false }
 serde_json = "1.0"

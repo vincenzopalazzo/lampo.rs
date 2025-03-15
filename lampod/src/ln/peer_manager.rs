@@ -32,6 +32,8 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<LampoKeysManager>>>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
+    IgnoringMessageHandler,
+    IgnoringMessageHandler,
 >;
 
 pub type SimpleArcPeerManager<M, T, L> = PeerManager<
@@ -52,6 +54,7 @@ pub struct LampoPeerManager {
     channel_manager: Option<Arc<LampoChannelManager>>,
     conf: LampoConf,
     logger: Arc<LampoLogger>,
+    onion_messenger: Option<Arc<LampoArcOnionMessenger<LampoLogger>>>,
 }
 
 impl LampoPeerManager {
@@ -61,11 +64,16 @@ impl LampoPeerManager {
             conf: conf.to_owned(),
             logger,
             channel_manager: None,
+            onion_messenger: None,
         }
     }
 
     pub fn manager(&self) -> Arc<InnerLampoPeerManager> {
         self.peer_manager.clone().unwrap()
+    }
+
+    pub fn onion_messager(&self) -> Arc<LampoArcOnionMessenger<LampoLogger>> {
+        self.onion_messenger.clone().unwrap()
     }
 
     pub fn init(
@@ -90,6 +98,8 @@ impl LampoPeerManager {
             Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone())),
             IgnoringMessageHandler {},
             IgnoringMessageHandler {},
+            IgnoringMessageHandler {},
+            IgnoringMessageHandler {},
         ));
 
         let gossip_sync = Arc::new(P2PGossipSync::new(
@@ -100,7 +110,7 @@ impl LampoPeerManager {
 
         let lightning_msg_handler = MessageHandler {
             chan_handler: channel_manager.manager(),
-            onion_message_handler: onion_messenger,
+            onion_message_handler: onion_messenger.clone(),
             route_handler: gossip_sync,
             custom_message_handler: IgnoringMessageHandler {},
         };
@@ -114,6 +124,7 @@ impl LampoPeerManager {
         );
         self.peer_manager = Some(Arc::new(peer_manager));
         self.channel_manager = Some(channel_manager.clone());
+        self.onion_messenger = Some(onion_messenger);
         Ok(())
     }
 
@@ -176,7 +187,7 @@ impl LampoPeerManager {
                                         .manager()
                                         .list_channels()
                                         .iter()
-                                        .any(|chan| chan.is_public)
+                                        .any(|chan| chan.is_announced)
                                     {
                                         peer_manager.broadcast_node_announcement(
                                             [0; 3],

@@ -12,6 +12,7 @@ use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
+use lampo_common::json::de;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
@@ -19,6 +20,7 @@ use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
 use lampo_common::ldk::chain::BestBlock;
 use lampo_common::ldk::ln::channelmanager::{ChainParameters, ChannelManagerReadArgs};
+use lampo_common::ldk::onion_message::messenger::DefaultMessageRouter;
 use lampo_common::ldk::routing::gossip::NetworkGraph;
 use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
@@ -136,7 +138,7 @@ impl LampoChannelManager {
                 ready: channel.is_channel_ready,
                 amount: channel.channel_value_satoshis,
                 amount_msat: channel.next_outbound_htlc_limit_msat,
-                public: channel.is_public,
+                public: channel.is_announced,
                 available_balance_for_send_msat: channel.outbound_capacity_msat,
                 available_balance_for_recv_msat: channel.inbound_capacity_msat,
             })
@@ -285,8 +287,14 @@ impl LampoChannelManager {
         self.monitor.replace(Some(Arc::new(monitor)));
 
         let _ = self.network_graph();
-        let mut monitors = self.get_channel_monitors()?;
-        let monitors = monitors.iter_mut().collect::<Vec<_>>();
+        let monitors = self.get_channel_monitors()?;
+        let monitors = monitors.iter().collect::<Vec<_>>();
+
+        let default_message_router = DefaultMessageRouter::new(
+            self.graph(),
+            self.wallet_manager.ldk_keys().keys_manager.clone(),
+        );
+        let default_message_router = Arc::new(default_message_router);
         let read_args = ChannelManagerReadArgs::new(
             self.wallet_manager.ldk_keys().keys_manager.clone(),
             self.wallet_manager.ldk_keys().keys_manager.clone(),
@@ -295,6 +303,7 @@ impl LampoChannelManager {
             self.chain_monitor(),
             self.onchain.clone() as Arc<dyn BroadcasterInterface + Send + Sync>,
             self.router.borrow().clone().unwrap(),
+            default_message_router,
             self.logger.clone(),
             self.conf.ldk_conf,
             monitors,
@@ -322,12 +331,22 @@ impl LampoChannelManager {
         let monitor = self.build_channel_monitor();
         self.monitor.replace(Some(Arc::new(monitor)));
 
+        // FIXME: some hidden logic hidden inside the `network_graph()` so we need to call it there
+        // because calling `graph()`. However this is confusing as fuck!
+        let network_graph = self.network_graph();
+        let default_message_router = DefaultMessageRouter::new(
+            self.graph(),
+            self.wallet_manager.ldk_keys().keys_manager.clone(),
+        );
+        let default_message_router = Arc::new(default_message_router);
+
         let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
         let channeld = Arc::new(LampoArcChannelManager::new(
             self.onchain.clone(),
             self.chain_monitor(),
             self.onchain.clone(),
-            self.network_graph(),
+            network_graph,
+            default_message_router.clone(),
             self.logger.clone(),
             keymanagers.clone(),
             keymanagers.clone(),

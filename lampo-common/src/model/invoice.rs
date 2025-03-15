@@ -57,7 +57,7 @@ pub mod response {
             Self {
                 bolt12: value.to_string(),
                 metadata: value.metadata().map(hex::encode),
-                metadata_pubkey: value.signing_pubkey(),
+                metadata_pubkey: value.issuer_signing_pubkey(),
             }
         }
     }
@@ -107,11 +107,11 @@ pub mod response {
                 .iter()
                 .map(|path| BlindedPath {
                     blinded_hops: path
-                        .blinded_hops
+                        .blinded_hops()
                         .iter()
                         .map(|node| node.blinded_node_id.to_string())
                         .collect::<Vec<String>>(),
-                    blinding_points: path.blinding_point.to_string(),
+                    blinding_points: path.blinding_point().to_string(),
                 })
                 .collect::<Vec<BlindedPath>>();
 

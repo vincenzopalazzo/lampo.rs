@@ -36,7 +36,8 @@ impl LampoChainManager {
 
     fn print_ldk_target_to_string(&self, target: ConfirmationTarget) -> String {
         match target {
-            ConfirmationTarget::OnChainSweep => String::from("on_chain_sweep"),
+            ConfirmationTarget::MaximumFeeEstimate => String::from("maximum"),
+            ConfirmationTarget::UrgentOnChainSweep => String::from("urgent"),
             ConfirmationTarget::AnchorChannelFee => String::from("anchor_channel"),
             ConfirmationTarget::NonAnchorChannelFee => String::from("non_anchor_channel"),
             ConfirmationTarget::ChannelCloseMinimum => String::from("channel_close_minimum"),
@@ -52,7 +53,7 @@ impl LampoChainManager {
 
     pub fn estimated_fees(&self) -> HashMap<String, Option<u32>> {
         let fees_targets = vec![
-            ConfirmationTarget::OnChainSweep,
+            ConfirmationTarget::UrgentOnChainSweep,
             ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
             ConfirmationTarget::NonAnchorChannelFee,
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,

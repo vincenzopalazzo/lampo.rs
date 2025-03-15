@@ -38,7 +38,7 @@ pub async fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json
     let request: GenerateOffer = json::from_value(request.clone())?;
     let manager = ctx.channel_manager().manager();
     let mut offer_builder = manager
-        .create_offer_builder()
+        .create_offer_builder(None)
         .map_err(|err| crate::rpc_error!("{:?}", err))?;
 
     if let Some(description) = request.description {
@@ -69,8 +69,8 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
             amount_msat: invoice.amount_milli_satoshis(),
             network: invoice.network().to_string(),
             description: match invoice.description() {
-                ldk::invoice::Bolt11InvoiceDescription::Direct(dec) => Some(dec.to_string()),
-                ldk::invoice::Bolt11InvoiceDescription::Hash(_) => {
+                ldk::invoice::Bolt11InvoiceDescriptionRef::Direct(dec) => Some(dec.to_string()),
+                ldk::invoice::Bolt11InvoiceDescriptionRef::Hash(_) => {
                     Some("description hash provided".to_string())
                 }
             },

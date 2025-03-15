@@ -2,6 +2,7 @@
 use std::sync::{Arc, Mutex};
 
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
+use lightning::onion_message::messenger::DefaultMessageRouter;
 
 use crate::bitcoin::secp256k1::PublicKey;
 use crate::ldk::chain::chainmonitor::ChainMonitor;
@@ -17,7 +18,7 @@ use crate::keys::LampoKeysManager;
 use crate::utils::logger::LampoLogger;
 
 pub type NodeId = PublicKey;
-pub type ChannelId = crate::ldk::ln::ChannelId;
+pub type ChannelId = crate::ldk::ln::types::ChannelId;
 
 pub type LampoChainMonitor = ChainMonitor<
     InMemorySigner,
@@ -36,6 +37,7 @@ pub type LampoArcChannelManager<M, L> = ChannelManager<
     Arc<LampoKeysManager>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoRouter>,
+    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<LampoKeysManager>>>,
     Arc<L>,
 >;
 

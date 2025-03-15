@@ -55,7 +55,7 @@ impl LampoChainSync {
         let http_endpoint = HttpEndpoint::for_host(host.to_owned()).with_port(port);
         let rpc_credentials = base64::encode(format!("{}:{}", core_user, core_pass));
 
-        let rpc = RpcClient::new(&rpc_credentials, http_endpoint)?;
+        let rpc = RpcClient::new(&rpc_credentials, http_endpoint);
 
         Ok(Self {
             config: conf,
