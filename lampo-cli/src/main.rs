@@ -5,6 +5,7 @@ use std::process::exit;
 use elite_rpc::transport::curl::HttpTransport;
 use elite_rpc::transport::TransportMethod;
 use elite_rpc::EliteRPC;
+use lampo_common::logger;
 use radicle_term as term;
 
 //use lampo_common::error;

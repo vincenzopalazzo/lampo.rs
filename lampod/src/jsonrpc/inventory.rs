@@ -1,5 +1,6 @@
 //! Inventory method implementation
 use lampo_common::json;
+use lampo_common::error;
 use lampo_common::jsonrpc::Error;
 use lampo_common::model::request::NetworkInfo;
 use lampo_common::model::response::{NetworkChannel, NetworkChannels};
@@ -18,8 +19,8 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         .onchain_manager()
         .backend
         .get_best_block()
-        .await
-        .unwrap();
+        .await.map_err(|err| error::anyhow!("{:?}", err))?;
+
     let blockheight = height.unwrap_or_default();
     let lampo_dir = ctx.conf.root_path.to_string();
     // We provide a vector here as there may be other types of address in future like tor and ipv6.

@@ -41,9 +41,9 @@ def start_bitcoind(tmp_dir):
 
 
 def lampocli_check(port: int) -> bool:
-    res = subprocess.run(["lampo-cli", "getinfo"], stdout=subprocess.PIPE)
+    res = subprocess.run(["lampo-cli", "-u", f"http://127.0.0.1:{port}", "getinfo"], stdout=subprocess.PIPE)
     logging.debug(
-        f"lampo-cli -u http://127.0.0.1:{port} getinfo -> {res.returncode} stdout: {res.stdout} stderr: {res.stderr}"
+        f"lampo-cli -u 'http://127.0.0.1:{port}' getinfo -> {res.returncode} stdout: {res.stdout} stderr: {res.stderr}"
     )
     return res.returncode == 0
 
@@ -118,7 +118,6 @@ def setup_environment():
     """Setup the environment by starting the necessary daemons."""
     directory = tempfile.mkdtemp(prefix="lnpt-cl-")
     bitcoind = start_bitcoind(directory)
-    logging.info(bitcoind.rpc.getblockchaininfo())
     api_port = start_lampo(bitcoind, directory)
     yield directory, api_port, bitcoind
     # print lampo logs
