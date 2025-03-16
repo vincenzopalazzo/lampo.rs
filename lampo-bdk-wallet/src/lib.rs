@@ -242,6 +242,7 @@ impl WalletManager for BDKWalletManager {
                 amount_msat: tx.txout.value.to_sat() * 1000_u64,
             })
             .collect::<Vec<_>>();
+        log::debug!("transactions: {:?}", txs);
         Ok(txs)
     }
 
