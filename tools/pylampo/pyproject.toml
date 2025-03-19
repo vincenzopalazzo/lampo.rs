@@ -1,17 +1,16 @@
 [tool.poetry]
 name = "pylampo-client"
-version = "0.0.3"
-description = "A simple Lampo client that communicates via a Unix socket"
-authors = ["Tarek <tareknaser360@gmail.com>"]
+version = "0.0.4"
+description = "A simple Lampo client that communicates via Rest API, and provide utils to run lampod"
+authors = ["Tarek <tareknaser360@gmail.com>", "Vincenzo Palazzo <vincenzopalazzodev@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
-black = "^24.4.2"
 requests = "^2.32.3"
-
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
+black = "^25"
 lnprototest = "^0.0.6"
 
 [build-system]
