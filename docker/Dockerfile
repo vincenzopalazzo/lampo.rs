@@ -23,7 +23,10 @@ RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN echo 'source $HOME/.cargo/env' >> $HOME/.bashrc
 
-WORKDIR /workdir
+# Install bitcoin core
+RUN add-apt-repository ppa:luke-jr/bitcoincore
+RUN apt-get update && apt-get install -y bitcoind pkg-config python3 python3-pip
+WORKDIR workdir
 COPY . .
 
 RUN chmod +x ./docker/install-bitcoind.sh
