@@ -10,26 +10,25 @@ Autor: Vincenzo Palazzo <vincenzopalazzodev@gmail.com>
 import os
 import tempfile
 import logging
-import socket
-import time
 
 import pyln
-import shutil
 
 from typing import Any, Optional, List, cast
 
 from contextlib import closing
 from concurrent import futures
 
+from pylampo_client.deamon import start_bitcoind, start_lampo, lampocli_check, reserve_port
+from pylampo_client.client import LampoClient
+
 from lnprototest import KeySet, Conn
-from lnprototest.backend import Bitcoind
 from lnprototest.runner import Runner
 from lnprototest.event import Event, MustNotMsg
-
-from lampo_py import LampoDaemon
+from lnprototest.utils import wait_for
 
 # FIXME: move this in the Runner
 TIMEOUT = int(os.getenv("TIMEOUT", "30"))
+LIGHTNING_SRC = os.path.join(os.getcwd(), os.getenv("LIGHTNING_SRC", "../../target/debug/lampod-cli"))
 
 
 class LampoConn(Conn):
@@ -38,7 +37,11 @@ class LampoConn(Conn):
         # FIXME: pyln.proto.wire should just use coincurve PrivateKey!
         self.connection = pyln.proto.wire.connect(
             pyln.proto.wire.PrivateKey(bytes.fromhex(self.connprivkey.to_hex())),
-            pyln.proto.wire.PublicKey(bytes.fromhex(public_key)),
+            pyln.proto.wire.PublicKey(
+                bytes.fromhex(
+                    "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+                )
+            ),
             "127.0.0.1",
             port,
         )
@@ -65,38 +68,6 @@ class LampoRunner(Runner):
         self.cleanup_callbacks: List[Callable[[], None]] = []
         self.is_fundchannel_kill = False
 
-    def __lampod_config_file(self) -> None:
-        self.lightning_dir = os.path.join(self.directory, "lampo")
-        if not os.path.exists(self.lightning_dir):
-            os.makedirs(self.lightning_dir)
-        self.lightning_port = self.reserve_port()
-        f = open(f"{self.lightning_dir}/lampo.conf", "w")
-        f.write(
-            f"port={self.lightning_port}\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001\ndev-force-channel-secrets={self.get_node_bitcoinkey()}/0000000000000000000000000000000000000000000000000000000000000010/0000000000000000000000000000000000000000000000000000000000000011/0000000000000000000000000000000000000000000000000000000000000012/0000000000000000000000000000000000000000000000000000000000000013/0000000000000000000000000000000000000000000000000000000000000014/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n"
-        )
-        # configure bitcoin core
-        f.write(
-            f"backend=core\ncore-url=localhost:{self.bitcoind.port}\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest\n"
-        )
-        f.flush()
-        f.close()
-
-    # FIXME: move this in lnprototest runner API
-    def reserve_port(self) -> int:
-        """
-        Reserve a port.
-
-        When python asks for a free port from the os, it is possible that
-        with concurrent access, the port that is picked is a port that is not free
-        anymore when we go to bind the daemon like bitcoind port.
-
-        Source: https://stackoverflow.com/questions/1365265/on-localhost-how-do-i-pick-a-free-port-number
-        """
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            s.bind(("", 0))
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            return s.getsockname()[1]
-
     def check_error(self, event: Event, conn: Conn) -> Optional[str]:
         conn.expected_error = True
         return None
@@ -108,7 +79,7 @@ class LampoRunner(Runner):
         pass
 
     def connect(self, event: Event, connprivkey: str) -> None:
-        self.add_conn(LampoConn(connprivkey, self.public_key, self.lightning_port))
+        self.add_conn(LampoConn(connprivkey, None, self.lightning_port))
 
     def disconnect(self, event: Event, conn: Conn) -> None:
         if conn is None:
@@ -127,19 +98,20 @@ class LampoRunner(Runner):
 
     def start(self) -> None:
         """Start the Runner."""
-        self.bitcoind = Bitcoind(self.directory, with_wallet="lampo-wallet")
-        try:
-            self.bitcoind.start()
-        except Exception as ex:
-            logging.debug(f"Exception with message {ex}")
+        self.bitcoind = start_bitcoind(self.directory)
         logging.debug(f"running bitcoin core on port {self.bitcoind.port}")
-        self.__lampod_config_file()
-        self.node = LampoDaemon(self.lightning_dir)
-        self.node.register_unix_rpc()
-        self.node.listen()
-        time.sleep(10)
+        # FIXME: define the last lampod-cli version in the rust target dir
+        self.lightning_port = reserve_port()
+        api_port = start_lampo(
+            self.bitcoind, self.directory, lampod_cli_path=LIGHTNING_SRC, conf_lines=f"announce-addr=127.0.0.1:{self.lightning_port}"
+        )
 
-        self.public_key = self.node.call("getinfo", {})["node_id"]
+        wait_for(lambda: lampocli_check(api_port), timeout=TIMEOUT)
+
+        self.node = LampoClient(f"http://127.0.0.1:{api_port}")
+        node_info = self.node.call("getinfo", {})
+        logging.info(f"node info {node_info}")
+        self.public_key = node_info["node_id"]
         self.running = True
         logging.info(f"run lampod with node id {self.public_key}")
 
@@ -161,8 +133,10 @@ class LampoRunner(Runner):
         self.running = False
         for c in self.conns.values():
             cast(LampoConn, c).connection.connection.close()
-        del self.node
-        shutil.rmtree(self.lightning_dir)
+        # Printing the log file in `self.directory`/lampo/regtest/lampo.log
+        if print_logs:
+            with open(os.path.join(self.directory, "lampo", "regtest", "lampod.log")) as f:
+                logging.info(f.read())
 
     def recv(self, event: Event, conn: Conn, outbuf: bytes) -> None:
         try:
@@ -171,7 +145,7 @@ class LampoRunner(Runner):
             # This happens when they've sent an error and closed; try
             # reading it to figure out what went wrong.
             fut = self.executor.submit(
-                cast(CLightningConn, conn).connection.read_message
+                cast(LampoConn, conn).connection.read_message
             )
             try:
                 msg = fut.result(1)
