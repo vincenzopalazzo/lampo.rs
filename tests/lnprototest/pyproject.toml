@@ -6,9 +6,9 @@ authors = ["Vincenzo Palazzo <vincenzopalazzodev@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
-lnprototest = "0.0.5"
-lampo-py = "0.0.1a7"
+lnprototest = "0.0.6"
 python-bitcoinlib = "^0.11.2"
+pylampo-client = { path = "../../tools/pylampo" }
 
 [tool.poetry.group.dev.dependencies]
 pytest = "7.0.1"
