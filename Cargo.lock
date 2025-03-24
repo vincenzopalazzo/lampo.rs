@@ -724,7 +724,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1417,7 +1417,7 @@ dependencies = [
  "lampo-common",
  "lexopt",
  "log",
- "radicle-term 0.11.0",
+ "radicle-term",
  "serde",
 ]
 
@@ -1504,7 +1504,7 @@ dependencies = [
  "lampod",
  "lexopt",
  "log",
- "radicle-term 0.12.0",
+ "radicle-term",
  "tokio",
 ]
 
@@ -2121,28 +2121,6 @@ checksum = "7fba65f6ed964e6e8d34d935f83d40c506f14bf45e60c635042ca4ad4185f149"
 dependencies = [
  "crossbeam-channel",
  "libc",
-]
-
-[[package]]
-name = "radicle-term"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2cf3256980e3fddcd135f6e755022df8b385b842cdcbbfce059f47e87caec18"
-dependencies = [
- "anstyle-query",
- "anyhow",
- "crossbeam-channel",
- "git2",
- "inquire",
- "libc",
- "once_cell",
- "radicle-signals",
- "shlex",
- "termion 3.0.0",
- "thiserror",
- "unicode-display-width",
- "unicode-segmentation",
- "zeroize",
 ]
 
 [[package]]
