@@ -7,7 +7,7 @@ edition = "2021"
 lampo-common = { path = "../lampo-common" }
 lampod = { path = "../lampod" }
 lightning-block-sync = { version = "0.1", features = [ "rpc-client" ] }
-log = "0.4.17"
+log = "0.4.27"
 tokio ={ version = "*"}
 base64 = "*"
 serde = "*"
