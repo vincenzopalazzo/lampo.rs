@@ -11,7 +11,7 @@ lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
 
 clightning-testing = { git = "https://github.com/laanwj/cln4rust.git", rev = "b4e5db582b474b31e1c280f09969ab148feee04f"}
-log = "0.4.18"
+log = "0.4.27"
 tempfile = "3.17.1"
 port-selector = "0.1.6"
 anyhow = "1.0.94"
