@@ -712,7 +712,7 @@ dependencies = [
 [[package]]
 name = "clightningrpc-conf"
 version = "0.0.3"
-source = "git+https://github.com/laanwj/cln4rust.git?branch=master#a20c7a2729b0d5e70aee46b97dcaaa297c88334a"
+source = "git+https://github.com/laanwj/cln4rust.git?branch=master#b4e5db582b474b31e1c280f09969ab148feee04f"
 dependencies = [
  "albert_stream",
  "indexmap 1.9.3",
