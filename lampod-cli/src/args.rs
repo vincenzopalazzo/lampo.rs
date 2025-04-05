@@ -79,13 +79,13 @@ impl TryInto<LampoConf> for LampoCliArgs {
             conf.node = node.clone();
         }
         if self.bitcoind_url.is_some() {
-            conf.core_url = self.bitcoind_url;
+            conf.core_url = self.bitcoind_url.unwrap();
         }
         if self.bitcoind_user.is_some() {
-            conf.core_user = self.bitcoind_user;
+            conf.core_user = self.bitcoind_user.unwrap();
         }
         if self.bitcoind_pass.is_some() {
-            conf.core_pass = self.bitcoind_pass;
+            conf.core_pass = self.bitcoind_pass.unwrap();
         }
         if self.log_file.is_some() {
             conf.log_file = self.log_file;

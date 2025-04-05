@@ -136,15 +136,9 @@ impl BDKWalletManager {
     }
 
     pub fn build_client(conf: Arc<LampoConf>) -> error::Result<Client> {
-        let url = conf.core_url.as_ref().ok_or(error::anyhow!(
-            "RPC URL is missing from the configuration file"
-        ))?;
-        let user = conf.core_user.as_ref().ok_or(error::anyhow!(
-            "RPC User is missing from the configuration file"
-        ))?;
-        let pass = conf.core_pass.as_ref().ok_or(error::anyhow!(
-            "RPC Password is missing from the configuration file"
-        ))?;
+        let url = &conf.core_url;
+        let user = &conf.core_user;
+        let pass = &conf.core_pass;
         let client = Client::new(url, Auth::UserPass(user.clone(), pass.clone()))?;
         Ok(client)
     }

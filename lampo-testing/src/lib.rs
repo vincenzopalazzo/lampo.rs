@@ -105,9 +105,9 @@ impl LampoTesting {
         lampo_conf.api_port = port::random_free_port().unwrap().into();
         log::info!("listening on port `{}`", lampo_conf.api_port);
         let core_url: String = format!("http://127.0.0.1:{}", btc.port);
-        lampo_conf.core_pass = Some(btc.pass.clone());
-        lampo_conf.core_url = Some(core_url);
-        lampo_conf.core_user = Some(btc.user.clone());
+        lampo_conf.core_pass = btc.pass.clone();
+        lampo_conf.core_url = core_url;
+        lampo_conf.core_user = btc.user.clone();
         lampo_conf
             .ldk_conf
             .channel_handshake_limits

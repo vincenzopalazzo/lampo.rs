@@ -15,9 +15,9 @@ pub struct LampoConf {
     pub root_path: String,
     /// The backend implementation
     pub node: String,
-    pub core_url: Option<String>,
-    pub core_user: Option<String>,
-    pub core_pass: Option<String>,
+    pub core_url: String,
+    pub core_user: String,
+    pub core_pass: String,
     pub private_key: Option<String>,
     pub channels_keys: Option<String>,
     pub log_file: Option<String>,
@@ -46,9 +46,9 @@ impl Default for LampoConf {
             port: 19735,
             root_path: lampo_home,
             node: "core".to_owned(),
-            core_url: None,
-            core_user: None,
-            core_pass: None,
+            core_url: "".to_string(),
+            core_user: "".to_string(),
+            core_pass: "".to_string(),
             private_key: None,
             channels_keys: None,
             log_level: "info".to_string(),
@@ -180,26 +180,26 @@ impl TryFrom<String> for LampoConf {
         // Strip the value of whitespace
         let node = node.to_trimmed();
 
-        let mut core_url = None;
-        let mut core_user = None;
-        let mut core_pass = None;
-        if node == "core" {
-            core_url = conf
-                .get_conf("core-url")
-                .map_err(|err| anyhow::anyhow!("{err}"))?;
-            // If the value isn't none, strip the value of whitespace
-            core_url = core_url.map(|url| url.to_trimmed());
+        let Some(core_url) = conf
+            .get_conf("core-url")
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+        else {
+            anyhow::bail!("Core URL must be specified")
+        };
 
-            core_user = conf
-                .get_conf("core-user")
-                .map_err(|err| anyhow::anyhow!("{err}"))?;
-            core_user = core_user.map(|user| user.to_trimmed());
+        let Some(core_user) = conf
+            .get_conf("core-user")
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+        else {
+            anyhow::bail!("Core user must be specified")
+        };
 
-            core_pass = conf
-                .get_conf("core-pass")
-                .map_err(|err| anyhow::anyhow!("{err}"))?;
-            core_pass = core_pass.map(|pass| pass.to_trimmed());
-        }
+        let Some(core_pass) = conf
+            .get_conf("core-pass")
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+        else {
+            anyhow::bail!("Core Password must be specified")
+        };
 
         let reindex: Option<String> = conf
             .get_conf("reindex")
