@@ -724,7 +724,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1586,9 +1586,9 @@ dependencies = [
 
 [[package]]
 name = "lightning"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3224b577def19c2bb3dcf2c35a95d94909183204c061746d1245ecc6e889e8e"
+checksum = "bc3225b37b2081fec068c481bbc80bd153bec905ada13379f58d462c00da9158"
 dependencies = [
  "bech32 0.11.0",
  "bitcoin 0.32.5",
