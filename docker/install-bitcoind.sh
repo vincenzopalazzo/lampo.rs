@@ -2,7 +2,7 @@
 
 set -e
 
-export BITCOIN_VERSION=27.1
+export BITCOIN_VERSION=25.1
 
 DIRNAME="bitcoin-${BITCOIN_VERSION}"
 FILENAME="${DIRNAME}-x86_64-linux-gnu.tar.gz"
