@@ -60,6 +60,10 @@ def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_
             f.write(conf_lines)
     f.flush()
     f.close()
+
+    # print the file
+    logging.debug(f"lampo.conf: {open(f'{network_dir}/lampo.conf').read()}")
+
     api_port = reserve_port()
 
     lampod_cli_path = lampod_cli_path if lampod_cli_path is not None else "lampod-cli"
