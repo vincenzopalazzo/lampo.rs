@@ -95,7 +95,7 @@ impl BDKWalletManager {
         conf: Arc<LampoConf>,
         xprv: PrivateKey,
         channel_keys: Option<String>,
-    ) -> error::Result<(PersistedWallet<Connection>, Arc<Connection>, LampoKeys)> {
+    ) -> error::Result<(PersistedWallet<Connection>, Connection, LampoKeys)> {
         let ldk_keys = if channel_keys.is_some() {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
         } else {
@@ -132,7 +132,7 @@ impl BDKWalletManager {
 
         let descriptor = wallet.public_descriptor(KeychainKind::Internal);
         log::info!("descriptor: {descriptor}");
-        Ok((wallet, Arc::new(db), ldk_keys))
+        Ok((wallet, db, ldk_keys))
     }
 
     pub fn build_client(conf: Arc<LampoConf>) -> error::Result<Client> {
@@ -177,6 +177,21 @@ impl WalletManager for BDKWalletManager {
     async fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self> {
         let (wallet, db, keymanager) =
             BDKWalletManager::build_wallet(conf.clone(), mnemonic_words).await?;
+        let client = BDKWalletManager::build_client(conf.clone())?;
+        Ok(Self {
+            wallet: Mutex::new(wallet),
+            wallet_db: Mutex::new(db),
+            keymanager: Arc::new(keymanager),
+            network: conf.network,
+            rpc: Arc::new(client),
+            guard: Mutex::new(false),
+            reindex_from: conf.reindex,
+        })
+    }
+
+    async fn create_using_private_key(conf: Arc<LampoConf>, xprv: PrivateKey, channel_keys: Option<String> )  -> error::Result<Self> {
+        let (wallet, db, keymanager) =
+            BDKWalletManager::build_from_private_key(conf.clone(), xprv, channel_keys).await?;
         let client = BDKWalletManager::build_client(conf.clone())?;
         Ok(Self {
             wallet: Mutex::new(wallet),

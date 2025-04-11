@@ -18,6 +18,9 @@ use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
+use lampo_common::bitcoin::PrivateKey;
+use lampo_common::secp256k1::SecretKey;
+use lampo_common::bitcoin::NetworkKind;
 use lampo_httpd::handler::HttpdHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -91,68 +94,97 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", client),
     };
 
-    if let Some(ref _private_key) = lampo_conf.private_key {
-        error::bail!("Option to force a private key not available at the moment")
-    }
-
-    let words_path = format!("{}/", lampo_conf.path());
-    // There are several case in this if-else, that are:
-    // 1. lampo is running on a fresh os:
-    //   1.1: the user has a wallet, so need to specify `--restore-wallet`
-    //   1.2: the user does not have a wallet so lampo should generate a new seed for it and store it in a file.
-    // 2. lampo is running on os where there is a wallet, lampo will load the seeds from wallet:
-    //   2.1: The user keep specify --restore-wallet, so lampo should return an error an tell the user that there is already a wallet
-    //   2.2: The user do not specify the --restore-wallet, so lampo load from disk the file, if there is no file it return an error
-    // FIXME: there is a problem of code duplication here, we should move this code in utils functions.
-    let wallet = if restore_wallet {
-        if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
-            // Load the mnemonic from the file
-            let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
-            let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
-                }
+    let wallet = match (lampo_conf.private_key.clone(), lampo_conf.channels_keys.clone()) {
+        (Some(private_key), Some(channels_keys)) => {
+            // Create wallet with both key and secrets
+            let secret_key = SecretKey::from_str(&private_key);
+            let private_key = PrivateKey {
+                compressed: true,
+                network: NetworkKind::from(lampo_conf.network.clone()), // change to Mainnet/Testnet if needed
+                inner: secret_key.unwrap(),
             };
-            wallet
-        } else {
-            // If file doesn't exist, ask for user input
-            let mnemonic: String = term::input(
-                "BIP 39 Mnemonic",
-                None,
-                Some("To restore the wallet, lampo needs the BIP39 mnemonic with words separated by spaces."),
-            )?;
-            // FIXME: make some sanity check about the mnemonic string
-            let wallet = match client.kind() {
+            match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
-                    // SAFETY: It is safe to unwrap the mnemonic because we check it
-                    // before.
-                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+                    BDKWalletManager::create_using_private_key(lampo_conf.clone(), private_key, Some(channels_keys)).await?
                 }
-            };
-
-            write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
-            wallet
+            }
         }
-    } else {
-        // If there is a file, we load the wallet with a warning
-        if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
-            // Load the mnemonic from the file
-            log::warn!("Loading from existing wallet");
-            let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
-            let wallet = match client.kind() {
+        (Some(private_key), None) => {
+            // Create wallet with just the key
+            let secret_key = SecretKey::from_str(&private_key);
+            let private_key = PrivateKey {
+                compressed: true,
+                network: NetworkKind::from(lampo_conf.network.clone()), // change to Mainnet/Testnet if needed
+                inner: secret_key.unwrap(),
+            };
+            match client.kind() {
                 lampo_common::backend::BackendKind::Core => {
-                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+                    BDKWalletManager::create_using_private_key(lampo_conf.clone(), private_key, None).await?
+                }
+            }
+        }
+        _ => {
+            let words_path = format!("{}/", lampo_conf.path());
+            // There are several case in this if-else, that are:
+            // 1. lampo is running on a fresh os:
+            //   1.1: the user has a wallet, so need to specify `--restore-wallet`
+            //   1.2: the user does not have a wallet so lampo should generate a new seed for it and store it in a file.
+            // 2. lampo is running on os where there is a wallet, lampo will load the seeds from wallet:
+            //   2.1: The user keep specify --restore-wallet, so lampo should return an error an tell the user that there is already a wallet
+            //   2.2: The user do not specify the --restore-wallet, so lampo load from disk the file, if there is no file it return an error
+            // FIXME: there is a problem of code duplication here, we should move this code in utils functions.
+            let wallet = if restore_wallet {
+                if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
+                    // Load the mnemonic from the file
+                    let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
+                    let wallet = match client.kind() {
+                        lampo_common::backend::BackendKind::Core => {
+                            BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+                        }
+                    };
+                    wallet
+                } else {
+                    // If file doesn't exist, ask for user input
+                    let mnemonic: String = term::input(
+                        "BIP 39 Mnemonic",
+                        None,
+                        Some("To restore the wallet, lampo needs the BIP39 mnemonic with words separated by spaces."),
+                    )?;
+                    // FIXME: make some sanity check about the mnemonic string
+                    let wallet = match client.kind() {
+                        lampo_common::backend::BackendKind::Core => {
+                            // SAFETY: It is safe to unwrap the mnemonic because we check it
+                            // before.
+                            BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+                        }
+                    };
+    
+                    write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
+                    wallet
+                }
+            } else {
+                // If there is a file, we load the wallet with a warning
+                if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
+                    // Load the mnemonic from the file
+                    log::warn!("Loading from existing wallet");
+                    let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
+                    let wallet = match client.kind() {
+                        lampo_common::backend::BackendKind::Core => {
+                            BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+                        }
+                    };
+                    wallet
+                } else {
+                    let (wallet, mnemonic) = match client.kind() {
+                        lampo_common::backend::BackendKind::Core => {
+                            BDKWalletManager::new(lampo_conf.clone()).await?
+                        }
+                    };
+    
+                    write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
+                    wallet
                 }
             };
-            wallet
-        } else {
-            let (wallet, mnemonic) = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    BDKWalletManager::new(lampo_conf.clone()).await?
-                }
-            };
-
-            write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
             wallet
         }
     };

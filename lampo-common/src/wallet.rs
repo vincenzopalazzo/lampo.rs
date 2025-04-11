@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bitcoin::absolute::Height;
 use bitcoin::{Amount, FeeRate};
 
-use crate::bitcoin::{ScriptBuf, Transaction};
+use crate::bitcoin::{PrivateKey, ScriptBuf, Transaction};
 use crate::conf::LampoConf;
 use crate::error;
 use crate::keys::LampoKeys;
@@ -21,6 +21,11 @@ pub trait WalletManager: Send + Sync {
 
     /// Restore a previous created wallet from a network and a mnemonic_words
     async fn restore(network: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self>
+    where
+        Self: Sized;
+
+    /// generate a new wallet from a private key and channel secrets 
+    async fn create_using_private_key(conf: Arc<LampoConf>, xprv: PrivateKey, channel_keys: Option<String> )  -> error::Result<Self>
     where
         Self: Sized;
 
