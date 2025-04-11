@@ -91,10 +91,6 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", client),
     };
 
-    if let Some(ref _private_key) = lampo_conf.private_key {
-        error::bail!("Option to force a private key not available at the moment")
-    }
-
     let words_path = format!("{}/", lampo_conf.path());
     // There are several case in this if-else, that are:
     // 1. lampo is running on a fresh os:
