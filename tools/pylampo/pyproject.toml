@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pylampo-client"
-version = "0.0.5.beta2"
+version = "0.0.5.beta3"
 description = "A simple Lampo client that communicates via Rest API, and provide utils to run lampod"
 authors = ["Tarek <tareknaser360@gmail.com>", "Vincenzo Palazzo <vincenzopalazzodev@gmail.com>"]
 
