@@ -41,6 +41,6 @@ class LampoClient:
             headers = {"accept": "application/json"}
             response = requests.post(url, json=request, headers=headers)
             response.raise_for_status()
-            return response
+            return response.json()
         except Exception as e:
             raise Exception(f"Error communicating with Lampo client: {e}")
