@@ -26,7 +26,7 @@ impl LampoKeys {
         }
     }
 
-    #[cfg(debug_assertions)]
+    // FIXME: add this under a feature flag
     pub fn with_channel_keys(seed: [u8; 32], channels_keys: String) -> Self {
         // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.
         let start_time = SystemTime::now()
