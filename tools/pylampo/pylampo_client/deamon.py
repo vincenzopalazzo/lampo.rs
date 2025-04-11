@@ -56,6 +56,8 @@ def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_
     f.write(
         f"backend=core\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest\ncore-url=http://127.0.0.1:{bitcoind.port}\n"
     )
+    if conf_lines is not None:
+            f.write(conf_lines)
     f.flush()
     f.close()
     api_port = reserve_port()
@@ -67,8 +69,6 @@ def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_
     f.write(
         f"nohup {lampod_cli_path} --data-dir={lightning_dir} --network=regtest --log-level=debug --api-port={api_port} --log-file={network_dir}/lampod.log &> {network_dir}/daemon.log &"
     )
-    if conf_lines is not None:
-            f.write(conf_lines)
     f.close()
     ret = subprocess.run(["chmod", "+x", f"{lightning_dir}/start.sh"])
     # print the content of the file
