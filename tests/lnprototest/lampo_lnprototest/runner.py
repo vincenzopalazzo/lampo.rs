@@ -102,8 +102,9 @@ class LampoRunner(Runner):
         logging.debug(f"running bitcoin core on port {self.bitcoind.port}")
         # FIXME: define the last lampod-cli version in the rust target dir
         self.lightning_port = reserve_port()
+        secrets = f"\ndev-private-key=0000000000000000000000000000000000000000000000000000000000000001\ndev-force-channel-secrets={self.get_node_bitcoinkey()}/0000000000000000000000000000000000000000000000000000000000000010/0000000000000000000000000000000000000000000000000000000000000011/0000000000000000000000000000000000000000000000000000000000000012/0000000000000000000000000000000000000000000000000000000000000013/0000000000000000000000000000000000000000000000000000000000000014/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF\n"
         api_port = start_lampo(
-            self.bitcoind, self.directory, lampod_cli_path=LIGHTNING_SRC, lightning_port=self.lightning_port
+            self.bitcoind, self.directory, lampod_cli_path=LIGHTNING_SRC, lightning_port=self.lightning_port, conf_lines=secrets
         )
 
         wait_for(lambda: lampocli_check(api_port), timeout=TIMEOUT)
