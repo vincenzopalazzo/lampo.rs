@@ -42,16 +42,18 @@ def lampocli_check(port: int) -> bool:
     return res.returncode == 0
 
 
-def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_lines = None) -> int:
+def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_lines = None, lightning_port: None) -> int:
     lightning_dir = os.path.join(tmp_file, "lampo")
     if not os.path.exists(lightning_dir):
         os.makedirs(lightning_dir)
     network_dir = os.path.join(lightning_dir, "regtest")
     if not os.path.exists(network_dir):
         os.makedirs(network_dir)
-    lightning_port = reserve_port()  # get a random one
     f = open(f"{network_dir}/lampo.conf", "w")
+    if lightning_port is None:
+        lightning_port = reserve_port()  # get a random one
     f.write(f"port={lightning_port}\n")
+
     # configure bitcoin core
     f.write(
         f"backend=core\ncore-user=rpcuser\ncore-pass=rpcpass\nnetwork=regtest\ncore-url=http://127.0.0.1:{bitcoind.port}\n"
