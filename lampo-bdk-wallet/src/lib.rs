@@ -100,7 +100,7 @@ impl BDKWalletManager {
         Ok((wallet, db, ldk_keys))
     }
 
-    #[cfg(debug_assertions)]
+    // FIXME: put this under a cfg
     async fn build_from_private_key(
         conf: Arc<LampoConf>,
         xprv: PrivateKey,
