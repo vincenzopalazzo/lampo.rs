@@ -103,7 +103,7 @@ class LampoRunner(Runner):
         # FIXME: define the last lampod-cli version in the rust target dir
         self.lightning_port = reserve_port()
         api_port = start_lampo(
-            self.bitcoind, self.directory, lampod_cli_path=LIGHTNING_SRC, conf_lines=f"announce-addr=127.0.0.1:{self.lightning_port}"
+            self.bitcoind, self.directory, lampod_cli_path=LIGHTNING_SRC, lightning_port=self.lightning_port
         )
 
         wait_for(lambda: lampocli_check(api_port), timeout=TIMEOUT)

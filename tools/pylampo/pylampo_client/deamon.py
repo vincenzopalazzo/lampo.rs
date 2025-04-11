@@ -42,7 +42,7 @@ def lampocli_check(port: int) -> bool:
     return res.returncode == 0
 
 
-def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_lines = None, lightning_port: None) -> int:
+def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_lines = None, lightning_port = None) -> int:
     lightning_dir = os.path.join(tmp_file, "lampo")
     if not os.path.exists(lightning_dir):
         os.makedirs(lightning_dir)
@@ -89,7 +89,5 @@ def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    stdout, stderr = ret.communicate()
-    logging.info(f"stdout: {stdout} stderr: {stderr}")
     logging.info(f"{open(f'{network_dir}/daemon.log').read()}")
     return api_port
