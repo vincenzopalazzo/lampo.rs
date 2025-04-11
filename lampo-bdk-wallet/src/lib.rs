@@ -1,4 +1,5 @@
 //! Wallet Manager implementation with BDK
+use std::str::FromStr;
 use std::sync::Arc;
 
 use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client};
@@ -9,6 +10,7 @@ use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
 use bdk_wallet::rusqlite::Connection;
 use bdk_wallet::template::Bip84;
 use bdk_wallet::{KeychainKind, PersistedWallet, SignOptions, Wallet};
+use lampo_common::secp256k1::SecretKey;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
@@ -49,6 +51,14 @@ impl BDKWalletManager {
         conf: Arc<LampoConf>,
         mnemonic_words: &str,
     ) -> error::Result<(PersistedWallet<Connection>, Connection, LampoKeys)> {
+        if let Some(ref priv_key) = conf.private_key {
+            log::warn!(target: "lampo-wallet", "Using a private key to create the wallet");
+            let key = SecretKey::from_str(priv_key)?;
+            let key = PrivateKey::new(key, conf.network);
+            let channels_keys = conf.channels_keys.clone();
+            return Self::build_from_private_key(conf, key, channels_keys).await;
+        }
+
         // Parse a mnemonic
         let mnemonic = Mnemonic::parse(mnemonic_words)?;
         // Generate the extended key
@@ -95,7 +105,7 @@ impl BDKWalletManager {
         conf: Arc<LampoConf>,
         xprv: PrivateKey,
         channel_keys: Option<String>,
-    ) -> error::Result<(PersistedWallet<Connection>, Arc<Connection>, LampoKeys)> {
+    ) -> error::Result<(PersistedWallet<Connection>, Connection, LampoKeys)> {
         let ldk_keys = if channel_keys.is_some() {
             LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
         } else {
@@ -132,7 +142,7 @@ impl BDKWalletManager {
 
         let descriptor = wallet.public_descriptor(KeychainKind::Internal);
         log::info!("descriptor: {descriptor}");
-        Ok((wallet, Arc::new(db), ldk_keys))
+        Ok((wallet, db, ldk_keys))
     }
 
     pub fn build_client(conf: Arc<LampoConf>) -> error::Result<Client> {
