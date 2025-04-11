@@ -61,7 +61,6 @@ fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
 /// Return the root directory.
 async fn run(args: LampoCliArgs) -> error::Result<()> {
     let restore_wallet = args.restore_wallet;
-
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
 

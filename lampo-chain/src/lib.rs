@@ -33,9 +33,9 @@ unsafe impl Sync for LampoChainSync {}
 
 impl LampoChainSync {
     pub fn new(conf: Arc<LampoConf>) -> error::Result<Self> {
-        let core_url = &conf.core_url;
-        let core_user = &conf.core_user;
-        let core_pass = &conf.core_pass;
+        let core_url = &conf.bitcoind_conf.get_url();
+        let core_user = &conf.bitcoind_conf.get_user();
+        let core_pass = &conf.bitcoind_conf.get_pass();
 
         log::debug!("Core URL: {:?}", core_url);
         // FIXME: somehow we should fix this
