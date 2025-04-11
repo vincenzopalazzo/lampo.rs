@@ -71,6 +71,8 @@ def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_
             f.write(conf_lines)
     f.close()
     ret = subprocess.run(["chmod", "+x", f"{lightning_dir}/start.sh"])
+    # print the content of the file
+    logging.debug(f"start.sh: {open(f'{lightning_dir}/start.sh').read()}")
     logging.info(f"ret: {ret}")
     # run lampod-cli deamon with the --data-dir = lampo_dir and --network=regtest
     ret = subprocess.Popen(
