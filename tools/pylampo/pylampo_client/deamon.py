@@ -86,8 +86,6 @@ def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_
             "sh",
             f"{lightning_dir}/start.sh",
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
     )
-    logging.info(f"{open(f'{network_dir}/daemon.log').read()}")
+    wait_for(lambda: lampocli_check(api_port))
     return api_port
