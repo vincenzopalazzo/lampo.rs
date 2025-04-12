@@ -34,10 +34,13 @@ def start_bitcoind(tmp_dir):
     return bitcoind
 
 
-def lampocli_check(port: int) -> bool:
+def lampocli_check(port: int, lightning_path = None) -> bool:
     res = subprocess.run(["lampo-cli", "-u", f"http://127.0.0.1:{port}", "getinfo"], stdout=subprocess.PIPE)
+
+    lightning_path = lightning_path if lightning_path is not None else "lampod-cli"
+
     logging.debug(
-        f"lampo-cli -u 'http://127.0.0.1:{port}' getinfo -> {res.returncode} stdout: {res.stdout} stderr: {res.stderr}"
+        f"{lightning_path} -u 'http://127.0.0.1:{port}' getinfo -> {res.returncode} stdout: {res.stdout} stderr: {res.stderr}"
     )
     return res.returncode == 0
 
@@ -87,5 +90,5 @@ def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_
             f"{lightning_dir}/start.sh",
         ],
     )
-    wait_for(lambda: lampocli_check(api_port))
+    wait_for(lambda: lampocli_check(api_port, lightning_path=lampod_cli_path))
     return api_port
