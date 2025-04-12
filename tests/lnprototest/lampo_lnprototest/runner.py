@@ -106,9 +106,9 @@ class LampoRunner(Runner):
         api_port = start_lampo(
             self.bitcoind, self.directory, lampod_cli_path=LIGHTNING_SRC, lightning_port=self.lightning_port, conf_lines=secrets
         )
-
+        logging.info(f"lampod-cli running on port {api_port}")
         wait_for(lambda: lampocli_check(api_port), timeout=TIMEOUT)
-
+        logging.info(f"lampo-cli listening on port {api_port}")
         self.node = LampoClient(f"http://127.0.0.1:{api_port}")
         node_info = self.node.call("getinfo", {})
         logging.info(f"node info {node_info}")
@@ -136,6 +136,10 @@ class LampoRunner(Runner):
             cast(LampoConn, c).connection.connection.close()
         # Printing the log file in `self.directory`/lampo/regtest/lampo.log
         if print_logs:
+            logging.info("Printing daemon logs")
+            with open(os.path.join(self.directory, "lampo", "regtest", "daemon.log")) as f:
+                logging.info(f.read())
+            logging.info("Printing lampod logs")
             with open(os.path.join(self.directory, "lampo", "regtest", "lampod.log")) as f:
                 logging.info(f.read())
 
