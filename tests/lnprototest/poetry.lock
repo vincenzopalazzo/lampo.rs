@@ -1243,14 +1243,16 @@ name = "pylampo-client"
 version = "0.0.5"
 description = "A simple Lampo client that communicates via Rest API, and provide utils to run lampod"
 optional = false
-python-versions = "<4.0,>=3.8"
-files = [
-    {file = "pylampo_client-0.0.5-py3-none-any.whl", hash = "sha256:a4b33f1031732fef1dd486e4496e9027be2717ef70e2b9740b4797b3dc1c9e75"},
-    {file = "pylampo_client-0.0.5.tar.gz", hash = "sha256:c8043c0afbb18de65c3af083db47069b41565e1d75d5aab47c667f454082d00f"},
-]
+python-versions = "^3.8"
+files = []
+develop = true
 
 [package.dependencies]
-requests = ">=2.32.3,<3.0.0"
+requests = "^2.32.3"
+
+[package.source]
+type = "directory"
+url = "../../tools/pylampo"
 
 [[package]]
 name = "pyln-bolt1"
@@ -1688,4 +1690,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "596b60c9358cf49a6c70dddbb4871cf193cba454bfee8ea292d446f75be170d8"
+content-hash = "f77a108441c13f33002a61af9b609f5553b327c756e78448daed99671ad7ebb0"
