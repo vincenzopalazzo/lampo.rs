@@ -54,8 +54,12 @@ impl BDKWalletManager {
         if let Some(ref priv_key) = conf.private_key {
             log::warn!(target: "lampo-wallet", "Using a private key to create the wallet");
             let key = SecretKey::from_str(priv_key)?;
+            log::info!(target: "lampo-wallet", "Using a private key for network {:?}", conf.network);
             let key = PrivateKey::new(key, conf.network);
             let channels_keys = conf.channels_keys.clone();
+            log::info!(target: "lampo-wallet", "channels_keys: {channels_keys:?}");
+            log::info!(target: "lampo-wallet", "key: {key:?}");
+            assert!(channels_keys.is_some());
             return Self::build_from_private_key(conf, key, channels_keys).await;
         }
 
