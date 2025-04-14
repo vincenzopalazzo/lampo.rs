@@ -1,5 +1,6 @@
 import subprocess
 import os
+import time
 import socket
 import logging
 
@@ -89,5 +90,21 @@ def start_lampo(bitcoind: Bitcoind, tmp_file: str, lampod_cli_path = None, conf_
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+
+    daemon_log_path = f"{network_dir}/daemon.log"
+    lampod_log_path = f"{network_dir}/lampod.log"   
+    if wait_for_file(daemon_log_path) and wait_for_file(lampod_log_path):
+        logging.info(f"{open(daemon_log_path).read()}")
+    else:
+        logging.warning("Log files did not appear in time.")
+
     logging.info(f"{open(f'{network_dir}/daemon.log').read()}")
     return api_port
+
+def wait_for_file(path, timeout=5):
+    """Wait for a file to exist, with a timeout."""
+    for _ in range(timeout * 10):
+        if os.path.exists(path):
+            return True
+        time.sleep(0.1)
+    return False
