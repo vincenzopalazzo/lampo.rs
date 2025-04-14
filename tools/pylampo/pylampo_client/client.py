@@ -30,17 +30,16 @@ class LampoClient:
         Raises:
           Exception: If there is an error communicating with the Lampo client.
         """
+        import logging
 
         url = f"{self.base_url}/{method}"
-        request = {
-            "params": params if params else {},
-            "id": "pylampo-client/1",
-            "jsonrpc": "2.0",
-        }
+        request = params
+        logging.debug(f"Calling Lampo client at {url} with request: {request}")
         try:
             headers = {"accept": "application/json"}
             response = requests.post(url, json=request, headers=headers)
             response.raise_for_status()
             return response.json()
-        except Exception as e:
-            raise Exception(f"Error communicating with Lampo client: {e}")
+        except requests.exceptions.RequestException as e:
+            error_message = e.response.text if e.response else str(e)
+            raise Exception(f"Error communicating with Lampo client: {error_message}")
