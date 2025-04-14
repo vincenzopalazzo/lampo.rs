@@ -96,7 +96,7 @@ def test_open_channel_from_accepter_side(runner: Runner) -> None:
             max_htlc_value_in_flight_msat=4294967295,
             channel_reserve_satoshis=9998,
             htlc_minimum_msat=0,
-            feerate_per_kw=253,
+            feerate_per_kw=256,
             # We use 5, because c-lightning runner uses 6, so this is different.
             to_self_delay=5,
             max_accepted_htlcs=483,
