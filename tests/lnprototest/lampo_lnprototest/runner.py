@@ -109,7 +109,7 @@ class LampoRunner(Runner):
         wait_for(lambda: lampocli_check(api_port), timeout=TIMEOUT)
         logging.info(f"lampo-cli listening on port {api_port}")
         self.node = LampoClient(f"http://127.0.0.1:{api_port}")
-        node_info = self.node.call("getinfo", {})
+        node_info = self.node.call("getinfo")
         logging.info(f"node info {node_info}")
         self.public_key = node_info["node_id"]
         self.running = True
@@ -244,7 +244,7 @@ class LampoRunner(Runner):
                 return (
                     runner.node.call(
                         "fundchannel",
-                        {
+                        params={
                             "node_id": peer_id,
                             "amount": amount,
                             "public": True,
