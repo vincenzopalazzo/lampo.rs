@@ -38,9 +38,7 @@ class LampoConn(Conn):
         self.connection = pyln.proto.wire.connect(
             pyln.proto.wire.PrivateKey(bytes.fromhex(self.connprivkey.to_hex())),
             pyln.proto.wire.PublicKey(
-                bytes.fromhex(
-                    "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
-                )
+                bytes.fromhex(public_key)
             ),
             "127.0.0.1",
             port,
@@ -79,7 +77,7 @@ class LampoRunner(Runner):
         pass
 
     def connect(self, event: Event, connprivkey: str) -> None:
-        self.add_conn(LampoConn(connprivkey, None, self.lightning_port))
+        self.add_conn(LampoConn(connprivkey, self.public_key, self.lightning_port))
 
     def disconnect(self, event: Event, conn: Conn) -> None:
         if conn is None:
