@@ -125,7 +125,6 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_pay)
             .service(rest_funds)
             .service(rest_new_addr)
-            .with_json_spec_at("/api/v1")
             .build()
     })
     .bind(host)?;
@@ -185,6 +184,7 @@ macro_rules! post {
             pub async fn [<rest_$name>](
                 state: web::Data<AppState>,
             ) -> ResultJson<$res_ty> {
+                log::debug!(target: "httpd", "request with empty json body");
                 let response = [<json_$name>](&state.lampod, &json::json!({})).await;
                 if let Err(err) = response {
                     let err: crate::JsonRPCError = err.into();
@@ -205,6 +205,7 @@ macro_rules! post {
                 state: web::Data<AppState>,
                 body: Json<json::Value>,
             ) -> ResultJson<$res_ty> {
+                log::debug!(target: "httpd", "request with json body {:?}", body);
                 let request = json::from_value::<$req_ty>(body.into_inner());
                 if let Err(err) = request {
                     let err = crate::JsonRPCError{ code: -1, message: format!("{err}"), data: None };
