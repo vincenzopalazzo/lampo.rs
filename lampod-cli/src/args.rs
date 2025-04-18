@@ -78,14 +78,14 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if let Some(node) = self.client {
             conf.node = node.clone();
         }
-        if self.bitcoind_url.is_some() {
-            conf.core_url = self.bitcoind_url;
+        if let Some(btc_url) = self.bitcoind_url {
+            conf.bitcoind_conf.set_url(btc_url);
         }
-        if self.bitcoind_user.is_some() {
-            conf.core_user = self.bitcoind_user;
+        if let Some(btc_user) = self.bitcoind_user {
+            conf.bitcoind_conf.set_user(btc_user);
         }
-        if self.bitcoind_pass.is_some() {
-            conf.core_pass = self.bitcoind_pass;
+        if let Some(btc_pass) = self.bitcoind_pass {
+            conf.bitcoind_conf.set_pass(btc_pass);
         }
         if self.log_file.is_some() {
             conf.log_file = self.log_file;

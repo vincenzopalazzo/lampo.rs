@@ -6,6 +6,7 @@ use clightningrpc_conf::{CLNConf, SyncCLNConf};
 pub use bitcoin::Network;
 pub use lightning::util::config::UserConfig;
 
+pub use crate::btc_conf::BitcoindConf;
 #[derive(Clone, Debug)]
 pub struct LampoConf {
     pub inner: Option<CLNConf>,
@@ -15,9 +16,7 @@ pub struct LampoConf {
     pub root_path: String,
     /// The backend implementation
     pub node: String,
-    pub core_url: Option<String>,
-    pub core_user: Option<String>,
-    pub core_pass: Option<String>,
+    pub bitcoind_conf: BitcoindConf,
     pub private_key: Option<String>,
     pub channels_keys: Option<String>,
     pub log_file: Option<String>,
@@ -46,9 +45,6 @@ impl Default for LampoConf {
             port: 19735,
             root_path: lampo_home,
             node: "core".to_owned(),
-            core_url: None,
-            core_user: None,
-            core_pass: None,
             private_key: None,
             channels_keys: None,
             log_level: "info".to_string(),
@@ -58,6 +54,8 @@ impl Default for LampoConf {
             api_host: "127.0.0.1".to_owned(),
             api_port: 7878,
             reindex: None,
+            // By default network is testnet as mentioned above
+            bitcoind_conf: BitcoindConf::get_default_conf(Network::Testnet),
         }
     }
 }
@@ -179,27 +177,32 @@ impl TryFrom<String> for LampoConf {
             .unwrap_or("nakamoto".to_owned());
         // Strip the value of whitespace
         let node = node.to_trimmed();
+        let network = Network::from_str(&network)?;
 
-        let mut core_url = None;
-        let mut core_user = None;
-        let mut core_pass = None;
-        if node == "core" {
-            core_url = conf
-                .get_conf("core-url")
-                .map_err(|err| anyhow::anyhow!("{err}"))?;
-            // If the value isn't none, strip the value of whitespace
-            core_url = core_url.map(|url| url.to_trimmed());
+        // Get the default conf
+        let mut bitcoind_conf = BitcoindConf::get_default_conf(network);
 
-            core_user = conf
-                .get_conf("core-user")
-                .map_err(|err| anyhow::anyhow!("{err}"))?;
-            core_user = core_user.map(|user| user.to_trimmed());
+        // Override if there is some config specified!
+        if let Some(bitcoin_url) = conf
+            .get_conf("core-url")
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+        {
+            bitcoind_conf.set_url(bitcoin_url);
+        };
 
-            core_pass = conf
-                .get_conf("core-pass")
-                .map_err(|err| anyhow::anyhow!("{err}"))?;
-            core_pass = core_pass.map(|pass| pass.to_trimmed());
-        }
+        if let Some(bitcoin_pass) = conf
+            .get_conf("core-pass")
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+        {
+            bitcoind_conf.set_pass(bitcoin_pass);
+        };
+
+        if let Some(bitcoin_user) = conf
+            .get_conf("core-user")
+            .map_err(|err| anyhow::anyhow!("{err}"))?
+        {
+            bitcoind_conf.set_user(bitcoin_user);
+        };
 
         let reindex: Option<String> = conf
             .get_conf("reindex")
@@ -227,7 +230,6 @@ impl TryFrom<String> for LampoConf {
                 .map_err(|err| anyhow::anyhow!("{err}"))?;
         }
 
-        let network = Network::from_str(&network)?;
         let root_path = Self::normalize_root_dir(&value, network);
         let log_level = conf.get_conf("log-level");
         let level = match log_level {
@@ -248,9 +250,6 @@ impl TryFrom<String> for LampoConf {
             ldk_conf: UserConfig::default(),
             port: u64::from_str(&port)?,
             node,
-            core_url,
-            core_user,
-            core_pass,
             private_key,
             channels_keys,
             log_file,
@@ -260,6 +259,7 @@ impl TryFrom<String> for LampoConf {
             api_host,
             api_port,
             reindex,
+            bitcoind_conf,
         })
     }
 }
