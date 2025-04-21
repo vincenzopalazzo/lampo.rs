@@ -9,6 +9,7 @@ paperclip = { version = "0.9.5", features = ["actix4"] }
 log = "*"
 paste = "1.0.15"
 serde = "*"
+tokio = { version = "1", features = ["rt"] }
 
 lampo-common = { path = "../lampo-common" }
 lampod = { path = "../lampod" }
