@@ -260,7 +260,6 @@ impl WalletManager for BDKWalletManager {
         Ok(txs)
     }
 
-    // FIXME: the code should have a timer that trigger the sync every 5 minutes
     async fn sync(&self) -> error::Result<()> {
         #[derive(Debug)]
         enum Emission {
