@@ -2,11 +2,9 @@
 //!
 //! Author: Vincenzo Palazzo <vincenzopalazzo@member.fsf.org>
 use std::sync::Arc;
-use std::time::Duration;
 
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
-use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::json;
@@ -40,8 +38,7 @@ pub async fn init_connection_test_between_lampo() -> error::Result<()> {
     Ok(())
 }
 
-#[ignore = "For some reason this test is blocking, so this need a better looking"]
-#[tokio_test_shutdown_timeout::test(160)]
+#[tokio_test_shutdown_timeout::test(60)]
 pub async fn fund_a_simple_channel_from() -> error::Result<()> {
     init();
     let btc = btc::BtcNode::tmp("regtest").await?;
@@ -62,19 +59,7 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
         .unwrap();
     log::debug!("node 1 -> connected with node 2 {:?}", response);
 
-    let mut events = node1.lampod().events();
-    let _ = node1.fund_wallet(101).await.unwrap();
-    async_wait!(async {
-        let Some(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) = events.recv().await
-        else {
-            return Err(());
-        };
-        if height.to_consensus_u32() == 101 {
-            return Ok(());
-        }
-        Err(())
-    });
-
+    let mut events = node2.lampod().events();
     let response: json::Value = node1
         .lampod()
         .call(
@@ -91,9 +76,9 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
         .unwrap();
     assert!(response.get("tx").is_some());
 
-    let mut events = node2.lampod().events();
     async_wait!(async {
         while let Some(event) = events.recv().await {
+            log::info!(target: "tests", "Event received {:?}", event);
             node2.fund_wallet(1).await.unwrap();
             if let Event::Lightning(LightningEvent::ChannelReady {
                 counterparty_node_id,

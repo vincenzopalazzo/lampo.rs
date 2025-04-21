@@ -1,6 +1,8 @@
 //! Handler module implementation that
 use std::sync::Arc;
 
+use lampo_common::bitcoin::absolute::Height;
+use lampo_common::ldk::block_sync::BlockSource;
 use tokio::sync::RwLock;
 
 use lampo_common::async_trait;
@@ -115,6 +117,7 @@ impl Handler for LampoHandler {
 
     /// method used to handle the incoming event from ldk
     async fn handle(&self, event: ldk::events::Event) -> error::Result<()> {
+        log::debug!(target: "lampo", "handle ldk event: {:?}", event);
         match event {
             ldk::events::Event::OpenChannelRequest {
                 temporary_channel_id,
@@ -179,10 +182,14 @@ impl Handler for LampoHandler {
                     err
                 })?;
                 log::info!("fee estimated {:?} sats", fee);
+
+                let best_block = self.channel_manager.manager().current_best_block().height;
                 let transaction = self.wallet_manager.create_transaction(
                     output_script,
                     Amount::from_sat(channel_value_satoshis),
                     FeeRate::from_sat_per_vb_unchecked(fee as u64),
+                    // FIXME: remove unwrap
+                    Height::from_consensus(best_block).unwrap(),
                 ).await?;
                 log::info!("funding transaction created `{}`", transaction.compute_txid());
                 log::info!(
