@@ -5,6 +5,7 @@ use lampo_common::json;
 use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::model::request;
 use lampo_common::model::response;
+use tokio::time::timeout;
 
 use crate::rpc_error;
 use crate::LampoDaemon;
@@ -17,15 +18,16 @@ pub async fn json_channels(ctx: &LampoDaemon, request: &json::Value) -> Result<j
 
 pub async fn json_close(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `closechannel` with request {:?}", request);
-    let mut request: request::CloseChannel = json::from_value(request.clone())?;
-    let events = ctx.handler().events();
+    let close_request: request::CloseChannel = json::from_value(request.clone())?;
+    let mut receiver = ctx.handler().events();
+
     // This gives all the channels with associated peer
     let channels: response::Channels = ctx
         .handler()
         .call(
             "channels",
             json::json!({
-                "peer_id": request.node_id,
+                "peer_id": close_request.node_id,
             }),
         )
         .await?;
@@ -33,17 +35,17 @@ pub async fn json_close(ctx: &LampoDaemon, request: &json::Value) -> Result<json
     let res = if channels.channels.len() > 1 {
         // check the channel_id if it is not none, if it is return an error
         // and if it is not none then we need to have the channel_id that needs to be shut
-        if request.channel_id.is_none() {
+        if close_request.channel_id.is_none() {
             return Err(rpc_error!("Channels > 1, provide `channel_id`"));
         } else {
-            request
+            close_request
         }
     } else if !channels.channels.is_empty() {
         // This is the case where channel with the given node_id = 1
         // SAFETY: it is safe to unwrap because the channels is not empty
-        let channel = channels.channels.first().unwrap();
-        request.channel_id = Some(channel.channel_id.clone());
-        request
+        let mut final_request = close_request.clone();
+        final_request.channel_id = Some(channels.channels.first().unwrap().channel_id.clone());
+        final_request
     } else {
         // No channels with the given peer.
         return Err(rpc_error!("No channels with associated peer"));
@@ -53,24 +55,32 @@ pub async fn json_close(ctx: &LampoDaemon, request: &json::Value) -> Result<json
     // FIXME: would be good to have some sort of macros, because
     // this is a common patter across lampo
     let (message, channel_id, node_id, funding_utxo) = loop {
-        let event = events
-            // FIXME: find a way to map this error
-            .recv_timeout(std::time::Duration::from_secs(30))
-            .map_err(|err| {
-                Error::Rpc(RpcError {
+        match timeout(std::time::Duration::from_secs(30), receiver.recv()).await {
+            Ok(Some(event)) => {
+                if let Event::Lightning(LightningEvent::CloseChannelEvent {
+                    message,
+                    channel_id,
+                    counterparty_node_id,
+                    funding_utxo,
+                }) = event
+                {
+                    break (message, channel_id, counterparty_node_id, funding_utxo);
+                }
+            }
+            Ok(None) => {
+                return Err(Error::Rpc(RpcError {
                     code: -1,
-                    message: format!("{err}"),
+                    message: "Event channel closed while waiting for CloseChannelEvent".to_string(),
                     data: None,
-                })
-            })?;
-        if let Event::Lightning(LightningEvent::CloseChannelEvent {
-            message,
-            channel_id,
-            counterparty_node_id,
-            funding_utxo,
-        }) = event
-        {
-            break (message, channel_id, counterparty_node_id, funding_utxo);
+                }));
+            }
+            Err(_) => {
+                return Err(Error::Rpc(RpcError {
+                    code: -1,
+                    message: "Timeout while waiting for CloseChannelEvent".to_string(),
+                    data: None,
+                }));
+            }
         }
     };
 

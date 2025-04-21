@@ -17,6 +17,8 @@ use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
 use lampo_common::{json, model::request::DecodeInvoice};
 
+use tokio::time::timeout;
+
 use crate::LampoDaemon;
 
 pub async fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
@@ -96,38 +98,48 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
 pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `pay` with request `{:?}`", request);
     let request: Pay = json::from_value(request.clone())?;
-    let events = ctx.handler().events();
+    let mut reciever = ctx.handler().events();
     if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
         ctx.offchain_manager()
-            .pay_offer(&request.invoice_str, request.amount)?;
+            .pay_offer(&request.invoice_str, request.amount)
+            .await?;
     } else {
         ctx.offchain_manager()
-            .pay_invoice(&request.invoice_str, request.amount)?;
+            .pay_invoice(&request.invoice_str, request.amount)
+            .await?;
     }
     // FIXME: this will loop when the Payment event is not generated
     loop {
-        let event = events
-            .recv_timeout(Duration::from_secs(30))
-            // FIXME: this should be avoided, the `?` should be used here
-            .map_err(|err| {
-                Error::Rpc(RpcError {
+        match timeout(std::time::Duration::from_secs(30), reciever.recv()).await {
+            Ok(Some(event)) => {
+                if let Event::Lightning(LightningEvent::PaymentEvent {
+                    payment_hash,
+                    path,
+                    state,
+                }) = event
+                {
+                    return Ok(json::to_value(PayResult {
+                        state,
+                        path,
+                        payment_hash,
+                    })?);
+                }
+            }
+            Ok(None) => {
+                // Channel closed before receiving the expected event
+                return Err(Error::Rpc(RpcError {
                     code: -1,
-                    message: format!("{err}"),
+                    message: "Event channel closed while waiting for PaymentEvent".to_string(),
                     data: None,
-                })
-            })?;
-
-        if let Event::Lightning(LightningEvent::PaymentEvent {
-            payment_hash,
-            path,
-            state,
-        }) = event
-        {
-            return Ok(json::to_value(PayResult {
-                state,
-                path,
-                payment_hash,
-            })?);
+                }));
+            }
+            Err(_) => {
+                return Err(Error::Rpc(RpcError {
+                    code: -1,
+                    message: "Timeout while waiting for PaymentEvent".to_string(),
+                    data: None,
+                }));
+            }
         }
     }
 }
@@ -136,7 +148,8 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     log::debug!("call for `keysend` with request `{:?}`", request);
     let request: KeySend = json::from_value(request.clone())?;
     ctx.offchain_manager()
-        .keysend(request.destination, request.amount_msat)?;
+        .keysend(request.destination, request.amount_msat)
+        .await?;
     // FIXME: return a better response
     Ok(json::json!({}))
 }

@@ -94,7 +94,7 @@ impl OffchainManager {
         Ok(invoice)
     }
 
-    pub fn pay_offer(&self, offer_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
+    pub async fn pay_offer(&self, offer_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         // check if it is an invoice or an offer
         let offer_hash = Sha256::hash(offer_str.as_bytes());
         let payment_id = PaymentId(*offer_hash.as_ref());
@@ -124,7 +124,11 @@ impl OffchainManager {
         Ok(())
     }
 
-    pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
+    pub async fn pay_invoice(
+        &self,
+        invoice_str: &str,
+        amount_msat: Option<u64>,
+    ) -> error::Result<()> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
         let payment_id = PaymentId((*invoice.payment_hash()).to_byte_array());
@@ -147,7 +151,11 @@ impl OffchainManager {
         Ok(())
     }
 
-    pub fn keysend(&self, destination: pubkey, amount_msat: u64) -> error::Result<PaymentHash> {
+    pub async fn keysend(
+        &self,
+        destination: pubkey,
+        amount_msat: u64,
+    ) -> error::Result<PaymentHash> {
         let payment_preimage = PaymentPreimage(
             self.chain_manager
                 .wallet_manager

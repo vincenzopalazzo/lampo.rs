@@ -1,11 +1,15 @@
 //! Implementation of all the peers events
 use std::net::SocketAddr;
 
-use crossbeam_channel as chan;
+use tokio::sync::oneshot;
 
-use lampo_common::{model::Connect, types::NodeId};
+use lampo_common::{error, model::Connect, types::NodeId};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PeerCommand {
-    Connect(NodeId, SocketAddr, chan::Sender<Connect>),
+    Connect(
+        NodeId,
+        SocketAddr,
+        oneshot::Sender<Result<Connect, error::Error>>,
+    ),
 }

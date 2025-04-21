@@ -36,9 +36,7 @@ pub mod json {
     }
 }
 
-pub mod chan {
-    pub use crossbeam_channel::*;
-}
+pub use tokio;
 
 pub use async_trait::async_trait;
 pub use bitcoin;

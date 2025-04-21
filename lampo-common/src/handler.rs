@@ -1,11 +1,11 @@
-use crate::chan;
 use crate::error;
 use crate::event::Event;
 use crate::json;
 use crate::jsonrpc::Request;
+use tokio::sync::mpsc;
 
 pub trait Handler: Send + Sync {
-    fn events(&self) -> chan::Receiver<Event>;
+    fn events(&self) -> mpsc::UnboundedReceiver<Event>;
     fn emit(&self, event: Event);
 }
 

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use lampo_common::async_trait;
 use lampo_common::bitcoin::Amount;
 use lampo_common::bitcoin::FeeRate;
-use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::error::Ok;
 use lampo_common::event::ln::LightningEvent;
@@ -17,6 +16,7 @@ use lampo_common::jsonrpc::Request;
 use lampo_common::ldk;
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
+use tokio::sync::mpsc;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
@@ -65,7 +65,7 @@ impl LampoHandler {
     /// Call any method supported by the lampod configuration. This includes
     /// a lot of handler code. This function serves as a broker pattern in some ways,
     /// but it may also function as a chain of responsibility pattern in certain cases.
-    pub async fn call<T: json::Serialize, R: json::DeserializeOwned>(
+    pub async fn call<T: json::Serialize + Send, R: json::DeserializeOwned>(
         &self,
         method: &str,
         args: T,
@@ -85,7 +85,7 @@ impl EventHandler for LampoHandler {
         self.emitter.emit(event)
     }
 
-    fn events(&self) -> chan::Receiver<Event> {
+    fn events(&self) -> mpsc::UnboundedReceiver<Event> {
         log::debug!(target: "listener", "subscribe for events");
         self.subscriber.subscribe()
     }

@@ -2,10 +2,10 @@
 pub mod handler;
 
 use async_trait::async_trait;
-use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::ldk::events::Event;
+use tokio::sync::mpsc;
 
 use crate::command::Command;
 
@@ -17,5 +17,5 @@ pub trait Handler {
 }
 
 pub trait EventHandler: Sized + Send + Sync + Clone {
-    fn events(&self) -> chan::Receiver<Event>;
+    fn events(&self) -> mpsc::UnboundedReceiver<Event>;
 }

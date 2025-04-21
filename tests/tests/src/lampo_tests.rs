@@ -15,7 +15,21 @@ use lampo_common::model::{request, response};
 use lampo_testing::LampoTesting;
 use lampo_testing::{async_wait, prelude::*};
 
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::time::timeout;
+
 use crate::init;
+
+async fn recv_event_timeout(
+    receiver: &mut UnboundedReceiver<Event>,
+    duration: Duration,
+) -> Result<Event, String> {
+    match timeout(duration, receiver.recv()).await {
+        Ok(Some(event)) => Ok(event),
+        Ok(None) => Err("Channel closed".to_string()),
+        Err(_) => Err("Timeout".to_string()),
+    }
+}
 
 #[tokio_test_shutdown_timeout::test(60)]
 pub async fn init_connection_test_between_lampo() -> error::Result<()> {
@@ -62,18 +76,19 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
         .unwrap();
     log::debug!("node 1 -> connected with node 2 {:?}", response);
 
-    let events = node1.lampod().events();
+    let mut events_node1 = node1.lampod().events();
     let _ = node1.fund_wallet(101).await.unwrap();
     async_wait!(async {
-        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
-            events.recv_timeout(Duration::from_millis(100))
-        else {
-            return Err(());
-        };
-        if height.to_consensus_u32() == 101 {
-            return Ok(());
+        match recv_event_timeout(&mut events_node1, Duration::from_millis(100)).await {
+            Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) => {
+                if height.to_consensus_u32() == 101 {
+                    return Ok(());
+                }
+            }
+            Ok(_) => { /* Ignorined other events */ }
+            Err(e) => log::trace!("recv_event_timeout error: {}", e),
         }
-        Err(())
+        Err::<(), ()>(()) // Using generic Err type for async_wait macro
     });
 
     let response: json::Value = node1
@@ -92,37 +107,58 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
         .unwrap();
     assert!(response.get("tx").is_some());
 
-    let events = node2.lampod().events();
-    async_wait!(async {
-        while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
-            node2.fund_wallet(1).await.unwrap();
-            if let Event::Lightning(LightningEvent::ChannelReady {
-                counterparty_node_id,
-                ..
-            }) = event
-            {
-                if counterparty_node_id.to_string() == node1.info.node_id {
+    let mut events_node2 = node2.lampod().events();
+    async_wait!(
+        async {
+            match recv_event_timeout(&mut events_node2, Duration::from_millis(10)).await {
+                Ok(event) => {
+                    if let Event::Lightning(LightningEvent::ChannelReady {
+                        counterparty_node_id,
+                        ..
+                    }) = event
+                    {
+                        // it should succeed if the counterparty IS node1
+                        if counterparty_node_id.to_string() == node1.info.node_id {
+                            log::info!("ChannelReady event received from correct peer.");
+                            // Additional check: Ensure channel is listed and ready
+                            let channels: response::Channels = node2
+                                .lampod()
+                                .call("channels", json::json!({}))
+                                .await
+                                .unwrap();
+                            if !channels.channels.is_empty()
+                                && channels.channels.first().unwrap().ready
+                            {
+                                log::info!("Channel confirmed ready in listchannels.");
+                                return Ok(());
+                            } else {
+                                log::warn!("ChannelReady event received, but channel not ready in listchannels yet.");
+                            }
+                        } else {
+                            log::warn!(
+                                "ChannelReady received, but from unexpected peer: {}",
+                                counterparty_node_id
+                            );
+                        }
+                    } else {
+                        log::trace!("Received other event: {:?}", event);
+                    }
+                }
+                Err(ref msg) if msg == "Timeout" => {
+                    log::trace!("No event received, mining block...");
+                }
+                Err(ref msg) => {
+                    log::error!("Error receiving event: {}", msg);
                     return Err(());
                 }
-                return Ok(());
-            };
-            // check if lampo see the channel
-            let channels: response::Channels = node2
-                .lampod()
-                .call("channels", json::json!({}))
-                .await
-                .unwrap();
-            if !channels.channels.is_empty() {
-                return Ok(());
             }
 
-            if channels.channels.first().unwrap().ready {
-                return Ok(());
-            }
-        }
-        node2.fund_wallet(6).await.unwrap();
-        Err(())
-    });
+            node2.fund_wallet(1).await.unwrap();
+            Err::<(), ()>(())
+        },
+        10
+    );
+
     Ok(())
 }
 

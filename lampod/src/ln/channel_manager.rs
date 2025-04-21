@@ -31,6 +31,7 @@ use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel, Channels};
+use lampo_common::tokio::time::timeout;
 use lampo_common::types::LampoChannel;
 use lampo_common::types::LampoGraph;
 use lampo_common::types::LampoRouter;
@@ -230,10 +231,11 @@ impl LampoChannelManager {
         Arc::new(NetworkGraph::new(self.conf.network, self.logger.clone()))
     }
 
-    pub fn open_channel(
+    pub async fn open_channel(
         &self,
         open_channel: request::OpenChannel,
     ) -> error::Result<response::OpenChannel> {
+        let mut reciever = self.handler().events();
         self.manager()
             .create_channel(
                 open_channel.node_id()?,
@@ -247,12 +249,28 @@ impl LampoChannelManager {
 
         // Wait for SendRawTransaction to be received so to get the funding transaction
         // FIXME: we can loop forever here
+        let tx_timeout_secs = 30;
         let tx: Option<Transaction> = loop {
-            let events = self.handler().events();
-            let event = events.recv_timeout(std::time::Duration::from_secs(30))?;
-
-            if let Event::OnChain(OnChainEvent::SendRawTransaction(tx)) = event {
-                break Some(tx);
+            match timeout(
+                std::time::Duration::from_secs(tx_timeout_secs),
+                reciever.recv(),
+            )
+            .await
+            {
+                Ok(Some(event)) => {
+                    if let Event::OnChain(OnChainEvent::SendRawTransaction(tx)) = event {
+                        break Some(tx);
+                    }
+                }
+                Ok(None) => {
+                    // Channel closed before receiving the expected event
+                    return Err(error::anyhow!(
+                        "Event channel closed while waiting for SendRawTransaction"
+                    ));
+                }
+                Err(_) => {
+                    return Err(error::anyhow!("Timeout while waiting for {}s for SendRawTransaction event after opening channel", tx_timeout_secs));
+                }
             }
         };
 
