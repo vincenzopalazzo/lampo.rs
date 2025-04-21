@@ -18,7 +18,7 @@ pub async fn json_channels(ctx: &LampoDaemon, request: &json::Value) -> Result<j
 pub async fn json_close(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `closechannel` with request {:?}", request);
     let mut request: request::CloseChannel = json::from_value(request.clone())?;
-    let events = ctx.handler().events();
+    let mut events = ctx.handler().events();
     // This gives all the channels with associated peer
     let channels: response::Channels = ctx
         .handler()
@@ -54,8 +54,14 @@ pub async fn json_close(ctx: &LampoDaemon, request: &json::Value) -> Result<json
     // this is a common patter across lampo
     let (message, channel_id, node_id, funding_utxo) = loop {
         let event = events
+            .recv()
+            .await
+            .ok_or(Error::Rpc(RpcError {
+                code: -1,
+                message: format!("No event received"),
+                data: None,
+            }))
             // FIXME: find a way to map this error
-            .recv_timeout(std::time::Duration::from_secs(30))
             .map_err(|err| {
                 Error::Rpc(RpcError {
                     code: -1,

@@ -30,6 +30,6 @@ pub async fn json_fundchannel(
     // - When there is an error how we return back to the user?
     // - In this case there is some feedback that ldk need to give us
     // before return the message, so we should design a solution for this.
-    let resp = ctx.channel_manager().open_channel(request)?;
+    let resp = ctx.channel_manager().open_channel(request).await?;
     Ok(json::to_value(resp)?)
 }

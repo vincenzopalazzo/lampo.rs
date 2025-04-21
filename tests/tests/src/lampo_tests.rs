@@ -62,11 +62,10 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
         .unwrap();
     log::debug!("node 1 -> connected with node 2 {:?}", response);
 
-    let events = node1.lampod().events();
+    let mut events = node1.lampod().events();
     let _ = node1.fund_wallet(101).await.unwrap();
     async_wait!(async {
-        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
-            events.recv_timeout(Duration::from_millis(100))
+        let Some(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) = events.recv().await
         else {
             return Err(());
         };
@@ -92,9 +91,9 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
         .unwrap();
     assert!(response.get("tx").is_some());
 
-    let events = node2.lampod().events();
+    let mut events = node2.lampod().events();
     async_wait!(async {
-        while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
+        while let Some(event) = events.recv().await {
             node2.fund_wallet(1).await.unwrap();
             if let Event::Lightning(LightningEvent::ChannelReady {
                 counterparty_node_id,

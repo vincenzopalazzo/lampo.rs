@@ -37,7 +37,7 @@ pub mod json {
 }
 
 pub mod chan {
-    pub use crossbeam_channel::*;
+    pub use tokio::sync::mpsc::*;
 }
 
 pub use async_trait::async_trait;
