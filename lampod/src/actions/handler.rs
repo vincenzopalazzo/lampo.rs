@@ -1,6 +1,7 @@
 //! Handler module implementation that
-use std::cell::RefCell;
 use std::sync::Arc;
+
+use tokio::sync::RwLock;
 
 use lampo_common::async_trait;
 use lampo_common::bitcoin::Amount;
@@ -31,7 +32,7 @@ pub struct LampoHandler {
     inventory_manager: Arc<LampoInventoryManager>,
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
-    external_handlers: RefCell<Vec<Arc<dyn ExternalHandler>>>,
+    external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
     subscriber: Subscriber<Event>,
@@ -50,15 +51,18 @@ impl LampoHandler {
             inventory_manager: lampod.inventory_manager(),
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
-            external_handlers: RefCell::new(Vec::new()),
+            external_handlers: RwLock::new(Vec::new()),
             emitter,
             subscriber,
         }
     }
 
-    pub fn add_external_handler(&self, handler: Arc<dyn ExternalHandler>) -> error::Result<()> {
-        let mut vect = self.external_handlers.borrow_mut();
-        vect.push(handler);
+    pub async fn add_external_handler(
+        &self,
+        handler: Arc<dyn ExternalHandler>,
+    ) -> error::Result<()> {
+        let mut external_handlers = self.external_handlers.write().await;
+        external_handlers.push(handler);
         Ok(())
     }
 
@@ -93,14 +97,14 @@ impl EventHandler for LampoHandler {
 
 #[async_trait]
 impl Handler for LampoHandler {
+    // FIXME: this is not needed anymore? we can assume that all command are external?
     async fn react(&self, event: crate::command::Command) -> error::Result<json::Value> {
-        let handler = self.external_handlers.borrow();
+        let handler = self.external_handlers.read().await;
         match event {
             Command::ExternalCommand(req) => {
                 log::debug!(target: "lampo", "external handler size {}", handler.len());
                 for handler in handler.iter() {
-                    // FIXME: this is blocking the async execution!!
-                    if let Some(resp) = handler.handle(&req)? {
+                    if let Some(resp) = handler.handle(&req).await? {
                         return Ok(resp);
                     }
                 }

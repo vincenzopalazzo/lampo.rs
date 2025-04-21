@@ -1,3 +1,4 @@
+use crate::async_trait;
 use crate::chan;
 use crate::error;
 use crate::event::Event;
@@ -9,6 +10,7 @@ pub trait Handler: Send + Sync {
     fn emit(&self, event: Event);
 }
 
-pub trait ExternalHandler {
-    fn handle(&self, req: &Request<json::Value>) -> error::Result<Option<json::Value>>;
+#[async_trait]
+pub trait ExternalHandler: Send + Sync {
+    async fn handle(&self, req: &Request<json::Value>) -> error::Result<Option<json::Value>>;
 }

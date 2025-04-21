@@ -126,7 +126,7 @@ impl LampoTesting {
             "http://{}:{}",
             lampo_conf.api_host, lampo_conf.api_port
         ))?);
-        lampo.add_external_handler(handler.clone())?;
+        lampo.add_external_handler(handler.clone()).await?;
         log::info!("Handler added to lampo");
         let lampo = Arc::new(lampo);
         run_httpd(lampo.clone()).await?;
