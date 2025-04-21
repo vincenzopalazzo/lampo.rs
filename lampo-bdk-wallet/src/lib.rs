@@ -2,7 +2,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client};
+use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client, RpcApi};
 use bdk_bitcoind_rpc::Emitter;
 use bdk_wallet::keys::bip39::Mnemonic;
 use bdk_wallet::keys::bip39::{Language, WordCount};
@@ -10,7 +10,6 @@ use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
 use bdk_wallet::rusqlite::Connection;
 use bdk_wallet::template::Bip84;
 use bdk_wallet::{KeychainKind, PersistedWallet, SignOptions, Wallet};
-use lampo_common::secp256k1::SecretKey;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
@@ -25,6 +24,7 @@ use lampo_common::conf::{LampoConf, Network};
 use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::NewAddress;
 use lampo_common::model::response::Utxo;
+use lampo_common::secp256k1::SecretKey;
 use lampo_common::wallet::WalletManager;
 use lampo_common::{async_trait, error};
 
@@ -290,7 +290,20 @@ impl WalletManager for BDKWalletManager {
         }
 
         tokio::spawn(async move {
-            let height = emitter_tip.height();
+            let mut height = emitter_tip.height();
+            // FIXME: we are assuming that if the wallet as height 0 is a new wallet and
+            // we are not in the case where the user is restoring from a lightning backup (aka emergency backup)
+            if height == 0 {
+                log::warn!(target: "lampo-bdk-wallet", "the wallet is empty, we need to reindex or there is anything to reindex");
+                height = match rpc_client.get_block_count() {
+                    Ok(block_count) => block_count as u32,
+                    Err(err) => {
+                        log::warn!(target: "lampo-bdk-wallet", " error while calling `block_count`: `{err}`");
+                        log::warn!(target: "lampo-bdk-wallet", "Assuming the wallet is empty and start re-indexing");
+                        0
+                    }
+                };
+            }
             let mut emitter = Emitter::new(rpc_client.as_ref(), emitter_tip, height);
             while let Some(emission) = emitter.next_block()? {
                 sender.send(Emission::Block(emission))?;
