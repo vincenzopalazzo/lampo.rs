@@ -1465,6 +1465,7 @@ dependencies = [
  "paperclip",
  "paste",
  "serde",
+ "tokio",
 ]
 
 [[package]]

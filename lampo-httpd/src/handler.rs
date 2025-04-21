@@ -1,4 +1,5 @@
 use std::io::Cursor;
+use std::sync::Arc;
 
 use elite_rpc::protocol::Protocol;
 use elite_rpc::transport::curl::HttpTransport;
@@ -12,13 +13,15 @@ use lampo_common::json;
 use lampo_common::jsonrpc::Request;
 
 pub struct HttpdHandler {
-    inner: EliteRPC<HttpTransport<RestProtocol>, RestProtocol>,
+    inner: Arc<EliteRPC<HttpTransport<RestProtocol>, RestProtocol>>,
 }
 
 impl HttpdHandler {
     pub fn new(host: String) -> error::Result<Self> {
         let inner = EliteRPC::new(&host)?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
     }
 }
 
@@ -27,8 +30,17 @@ impl ExternalHandler for HttpdHandler {
     async fn handle(&self, req: &Request<json::Value>) -> error::Result<Option<json::Value>> {
         let method = req.method.clone();
         let body = req.params.clone();
-        let response = self.inner.call(TransportMethod::Post(method), &body)?;
-        Ok(Some(response))
+        let inner = self.inner.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            let result = inner.call(TransportMethod::Post(method), &body);
+            match result {
+                Ok(response) => Ok(Some(response)),
+                Err(e) => Err(e),
+            }
+        })
+        .await;
+        let task = task.map_err(|err| error::anyhow!("task error: {}", err))?;
+        task
     }
 }
 
