@@ -230,7 +230,7 @@ impl LampoChannelManager {
         Arc::new(NetworkGraph::new(self.conf.network, self.logger.clone()))
     }
 
-    pub fn open_channel(
+    pub async fn open_channel(
         &self,
         open_channel: request::OpenChannel,
     ) -> error::Result<response::OpenChannel> {
@@ -248,8 +248,13 @@ impl LampoChannelManager {
         // Wait for SendRawTransaction to be received so to get the funding transaction
         // FIXME: we can loop forever here
         let tx: Option<Transaction> = loop {
-            let events = self.handler().events();
-            let event = events.recv_timeout(std::time::Duration::from_secs(30))?;
+            let mut events = self.handler().events();
+            // FIXME: put the receive code inside a macro, in this way we do not need
+            // to repeat the same code
+            let event = events
+                .recv()
+                .await
+                .ok_or(error::anyhow!("Channel close no event received"))?;
 
             if let Event::OnChain(OnChainEvent::SendRawTransaction(tx)) = event {
                 break Some(tx);

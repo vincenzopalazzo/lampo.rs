@@ -1439,7 +1439,6 @@ dependencies = [
  "chrono",
  "clightningrpc-conf",
  "colored",
- "crossbeam-channel",
  "hex",
  "lightning",
  "lightning-background-processor",
@@ -1451,6 +1450,7 @@ dependencies = [
  "paperclip",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1489,7 +1489,6 @@ name = "lampod"
 version = "0.0.1"
 dependencies = [
  "async-trait",
- "crossbeam-channel",
  "futures",
  "lampo-common",
  "log",

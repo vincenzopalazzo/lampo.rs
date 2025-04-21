@@ -85,7 +85,7 @@ impl EventHandler for LampoHandler {
         self.emitter.emit(event)
     }
 
-    fn events(&self) -> chan::Receiver<Event> {
+    fn events(&self) -> chan::UnboundedReceiver<Event> {
         log::debug!(target: "listener", "subscribe for events");
         self.subscriber.subscribe()
     }

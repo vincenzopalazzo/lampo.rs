@@ -11,7 +11,7 @@ use crate::event::onchain::OnChainEvent;
 /// Publishes events to subscribers.
 #[derive(Clone)]
 pub struct Emitter<T> {
-    subscribers: Arc<Mutex<Vec<chan::Sender<T>>>>,
+    subscribers: Arc<Mutex<Vec<chan::UnboundedSender<T>>>>,
 }
 
 impl<T> Default for Emitter<T> {
@@ -28,7 +28,7 @@ impl<T: Clone> Emitter<T> {
         self.subscribers
             .lock()
             .unwrap()
-            .retain(|s| s.try_send(event.clone()).is_ok());
+            .retain(|s| s.send(event.clone()).is_ok());
     }
 
     /// Drop all subscribers.
@@ -47,13 +47,13 @@ impl<T: Clone> Emitter<T> {
 /// Subscribes to events.
 #[derive(Clone)]
 pub struct Subscriber<T> {
-    subscribers: Arc<Mutex<Vec<chan::Sender<T>>>>,
+    subscribers: Arc<Mutex<Vec<chan::UnboundedSender<T>>>>,
 }
 
 impl<T: Clone> Subscriber<T> {
     /// Add a subscription to receive broadcast events.
-    pub fn subscribe(&self) -> chan::Receiver<T> {
-        let (sender, receiver) = chan::unbounded();
+    pub fn subscribe(&self) -> chan::UnboundedReceiver<T> {
+        let (sender, receiver) = chan::unbounded_channel::<T>();
         let mut subs = self.subscribers.lock().unwrap();
         subs.push(sender);
         receiver

@@ -1,6 +1,5 @@
 //! Offchain RPC methods
 use std::str::FromStr;
-use std::time::Duration;
 
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
@@ -96,7 +95,7 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
 pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `pay` with request `{:?}`", request);
     let request: Pay = json::from_value(request.clone())?;
-    let events = ctx.handler().events();
+    let mut events = ctx.handler().events();
     if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
         ctx.offchain_manager()
             .pay_offer(&request.invoice_str, request.amount)?;
@@ -106,16 +105,11 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     }
     // FIXME: this will loop when the Payment event is not generated
     loop {
-        let event = events
-            .recv_timeout(Duration::from_secs(30))
-            // FIXME: this should be avoided, the `?` should be used here
-            .map_err(|err| {
-                Error::Rpc(RpcError {
-                    code: -1,
-                    message: format!("{err}"),
-                    data: None,
-                })
-            })?;
+        let event = events.recv().await.ok_or(Error::Rpc(RpcError {
+            code: -1,
+            message: format!("No event received, communication channel dropped"),
+            data: None,
+        }))?;
 
         if let Event::Lightning(LightningEvent::PaymentEvent {
             payment_hash,

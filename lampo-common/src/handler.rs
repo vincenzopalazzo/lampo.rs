@@ -5,7 +5,7 @@ use crate::json;
 use crate::jsonrpc::Request;
 
 pub trait Handler: Send + Sync {
-    fn events(&self) -> chan::Receiver<Event>;
+    fn events(&self) -> chan::UnboundedReceiver<Event>;
     fn emit(&self, event: Event);
 }
 
