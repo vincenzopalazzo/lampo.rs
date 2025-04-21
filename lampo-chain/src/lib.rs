@@ -132,6 +132,11 @@ impl Backend for LampoChainSync {
             feerate: Option<f64>,
             errors: Option<Vec<String>>,
         }
+
+        if self.config.network == lampo_common::bitcoin::Network::Regtest {
+            return Ok(256);
+        }
+
         let resp = self
             .rpc_client
             .call_method::<json::Value>("estimatesmartfee", &[blocks.into()])

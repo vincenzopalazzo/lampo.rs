@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bitcoin::absolute::Height;
-use bitcoin::{Amount, FeeRate};
 
+use crate::bitcoin::absolute::Height;
+use crate::bitcoin::{Amount, FeeRate};
 use crate::bitcoin::{ScriptBuf, Transaction};
 use crate::conf::LampoConf;
 use crate::error;
@@ -40,6 +40,7 @@ pub trait WalletManager: Send + Sync {
         script: ScriptBuf,
         amount_sat: Amount,
         fee_rate: FeeRate,
+        best_block: Height,
     ) -> error::Result<Transaction>;
 
     /// Return the list of transaction stored inside the wallet

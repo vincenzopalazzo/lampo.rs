@@ -18,6 +18,7 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::bip32::Xpriv;
+use lampo_common::bitcoin::blockdata::locktime::absolute::LockTime;
 use lampo_common::bitcoin::PrivateKey;
 use lampo_common::bitcoin::{Amount, Block, FeeRate, ScriptBuf, Transaction};
 use lampo_common::conf::{LampoConf, Network};
@@ -208,11 +209,10 @@ impl WalletManager for BDKWalletManager {
     }
 
     async fn get_onchain_address(&self) -> error::Result<NewAddress> {
-        let address = self
-            .wallet
-            .lock()
-            .await
-            .reveal_next_address(KeychainKind::External);
+        let mut wallet = self.wallet.lock().await;
+        let mut wallet_db = self.wallet_db.lock().await;
+        let address = wallet.reveal_next_address(KeychainKind::External);
+        wallet.persist(&mut wallet_db)?;
         Ok(NewAddress {
             address: address.address.to_string(),
         })
@@ -221,6 +221,7 @@ impl WalletManager for BDKWalletManager {
     // Return in satoshis
     async fn get_onchain_balance(&self) -> error::Result<u64> {
         let balance = self.wallet.lock().await.balance();
+        log::warn!(target: "lampo-wallet", "balance: {balance:?}");
         Ok(balance.confirmed.to_sat())
     }
 
@@ -229,23 +230,30 @@ impl WalletManager for BDKWalletManager {
         script: ScriptBuf,
         amount: Amount,
         fee_rate: FeeRate,
+        best_block: Height,
     ) -> error::Result<Transaction> {
         let mut wallet = self.wallet.lock().await;
+
+        // We set nLockTime to the current height to discourage fee sniping.
+        let locktime =
+            LockTime::from_height(best_block.to_consensus_u32()).unwrap_or(LockTime::ZERO);
+
         let mut tx = wallet.build_tx();
-        tx.add_recipient(ScriptBuf::from_bytes(script.into_bytes()), amount)
-            .fee_rate(fee_rate);
+        tx.add_recipient(script, amount)
+            .fee_rate(fee_rate)
+            .nlocktime(locktime);
         let mut psbt = tx.finish()?;
-        if !wallet.sign(&mut psbt, SignOptions::default())? {
+        let opts = SignOptions::default();
+        if !wallet.sign(&mut psbt, opts.clone())? {
             error::bail!("wallet not able to sing the psbt {psbt}");
         }
-        if !wallet.finalize_psbt(&mut psbt, SignOptions::default())? {
-            error::bail!("wallet impossible finalize the psbt: {psbt}");
-        };
         Ok(psbt.extract_tx()?)
     }
 
     async fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
+        log::info!("lampo-wallet: list transactions");
         let wallet = self.wallet.lock().await;
+        log::info!("lampo-wallet: wallet lock taken");
         let txs = wallet
             .list_unspent()
             .map(|tx| Utxo {
@@ -256,7 +264,6 @@ impl WalletManager for BDKWalletManager {
                 amount_msat: tx.txout.value.to_sat() * 1000_u64,
             })
             .collect::<Vec<_>>();
-        log::debug!("transactions: {:?}", txs);
         Ok(txs)
     }
 
@@ -268,6 +275,7 @@ impl WalletManager for BDKWalletManager {
             Mempool(Vec<(Transaction, u64)>),
         }
 
+        log::warn!(target: "lampo-wallet", "Starting the sync process");
         let (sender, mut receiver) = unbounded_channel::<Emission>();
 
         /*let signal_sender = sender.clone();
@@ -290,21 +298,8 @@ impl WalletManager for BDKWalletManager {
         }
 
         tokio::spawn(async move {
-            let mut height = emitter_tip.height();
-            // FIXME: we are assuming that if the wallet as height 0 is a new wallet and
-            // we are not in the case where the user is restoring from a lightning backup (aka emergency backup)
-            if height == 0 {
-                log::warn!(target: "lampo-bdk-wallet", "the wallet is empty, we need to reindex or there is anything to reindex");
-                height = match rpc_client.get_block_count() {
-                    Ok(block_count) => block_count as u32,
-                    Err(err) => {
-                        log::warn!(target: "lampo-bdk-wallet", " error while calling `block_count`: `{err}`");
-                        log::warn!(target: "lampo-bdk-wallet", "Assuming the wallet is empty and start re-indexing");
-                        0
-                    }
-                };
-            }
-            let mut emitter = Emitter::new(rpc_client.as_ref(), emitter_tip, height);
+            // FIXME: this need to start not from 0
+            let mut emitter = Emitter::new(rpc_client.as_ref(), emitter_tip, 0);
             while let Some(emission) = emitter.next_block()? {
                 sender.send(Emission::Block(emission))?;
             }
@@ -335,6 +330,7 @@ impl WalletManager for BDKWalletManager {
                     );
                 }
                 Emission::Mempool(mempool_emission) => {
+                    log::warn!(target: "lampo-wallet", "Mempool emission: {mempool_emission:?}");
                     let start_apply_mempool = Instant::now();
                     wallet.apply_unconfirmed_txs(mempool_emission);
                     wallet.persist(&mut wallet_db)?;
