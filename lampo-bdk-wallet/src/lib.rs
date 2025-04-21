@@ -394,20 +394,3 @@ impl WalletManager for BDKWalletManager {
         Ok(())
     }
 }
-
-/*
-#[cfg(debug_assertions)]
-impl TryFrom<(PrivateKey, Option<String>)> for BDKWalletManager {
-    type Error = bdk::Error;
-
-    fn try_from(value: (PrivateKey, Option<String>)) -> Result<Self, Self::Error> {
-        let (wallet, keymanager) = BDKWalletManager::build_from_private_key(value.0, value.1)?;
-        Ok(Self {
-            wallet: RefCell::new(Mutex::new(wallet)),
-            keymanager: Arc::new(keymanager),
-            // This should be possible only during integration testing
-            // FIXME: fix the sync method in bdk, the esplora client will crash!
-            network: Network::Regtest,
-        })
-    }
-}   */
