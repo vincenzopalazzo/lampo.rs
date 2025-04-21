@@ -179,7 +179,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         "{}:{}",
         lampo_conf.api_host, lampo_conf.api_port
     ))?);
-    lampod.add_external_handler(handler)?;
+    lampod.add_external_handler(handler).await?;
 
     // Handle the shutdown signal and pass down to the lampod.listen()
     ctrlc::set_handler(move || {

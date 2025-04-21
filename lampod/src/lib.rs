@@ -22,8 +22,7 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use lampo_common::ldk::ln::peer_handler::IgnoringMessageHandler;
-use lampo_common::ldk::onion_message::messenger::OnionMessenger;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use lampo_common::backend::Backend;
@@ -218,11 +217,14 @@ impl LampoDaemon {
     /// Additionally, the registered handler serves as the entry point for
     /// the Chain of Responsibility pattern that handles all unsupported commands that the Lampod daemon
     /// may receive from external sources (assuming the user has defined a handler for them).
-    pub fn add_external_handler(&self, ext_handler: Arc<dyn ExternalHandler>) -> error::Result<()> {
+    pub async fn add_external_handler(
+        &self,
+        ext_handler: Arc<dyn ExternalHandler>,
+    ) -> error::Result<()> {
         let Some(ref handler) = self.handler else {
             error::bail!("Initial handler is None");
         };
-        handler.add_external_handler(ext_handler)?;
+        handler.add_external_handler(ext_handler).await?;
         Ok(())
     }
 

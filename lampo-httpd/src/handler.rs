@@ -5,6 +5,7 @@ use elite_rpc::transport::curl::HttpTransport;
 use elite_rpc::transport::TransportMethod;
 use elite_rpc::EliteRPC;
 
+use lampo_common::async_trait;
 use lampo_common::error;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
@@ -21,8 +22,9 @@ impl HttpdHandler {
     }
 }
 
+#[async_trait]
 impl ExternalHandler for HttpdHandler {
-    fn handle(&self, req: &Request<json::Value>) -> error::Result<Option<json::Value>> {
+    async fn handle(&self, req: &Request<json::Value>) -> error::Result<Option<json::Value>> {
         let method = req.method.clone();
         let body = req.params.clone();
         let response = self.inner.call(TransportMethod::Post(method), &body)?;
