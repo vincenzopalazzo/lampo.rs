@@ -1,0 +1,43 @@
+FROM ubuntu:25.04
+LABEL mantainer="Vincenzo Palazzo vincenzopalazzodev@gmail.com"
+
+ENV TZ=Europe/Minsk
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+ENV BITCOIN_VERSION=25.1
+
+# Ubuntu utils
+RUN apt-get update && apt-get install -y \
+    software-properties-common \
+    build-essential \
+    curl wget git \
+    python3 python3-pip libssl-dev \
+    autoconf automake pkg-config \
+    pipx \
+    libtool \
+    autoconf \
+    automake \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+## Install Rust
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN echo 'source $HOME/.cargo/env' >> $HOME/.bashrc
+
+WORKDIR /workdir
+COPY . .
+
+RUN cd /tmp/ && \
+    wget https://bitcoincore.org/bin/bitcoin-core-$BITCOIN_VERSION/bitcoin-$BITCOIN_VERSION-x86_64-linux-gnu.tar.gz -O bitcoin.tar.gz && \
+    tar -xvzf bitcoin.tar.gz && \
+    mv /tmp/bitcoin-$BITCOIN_VERSION/bin/bitcoin* /usr/local/bin/ && \
+    rm -rf bitcoin.tar.gz /tmp/bitcoin-$BITCOIN_VERSION
+
+
+RUN pipx ensurepath
+RUN pipx completions
+RUN echo "eval \"\$(register-python-argcomplete pipx)\"" >> ~/.bashrc
+RUN pipx install poetry --global
+
+CMD ["./docker/lnprototest-entrypoint.sh"]

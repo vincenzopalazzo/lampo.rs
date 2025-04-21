@@ -17,5 +17,5 @@ jobs:
         env:
           PROTO_TEST: 1
         run: |
-          docker build -f docker/Dockerfile -t lampo-ci-ubuntu .
+          docker build -f docker/Dockerfile.lnprototest -t lampo-ci-ubuntu .
           docker run -e PROTO_TEST=1 lampo-ci-ubuntu
