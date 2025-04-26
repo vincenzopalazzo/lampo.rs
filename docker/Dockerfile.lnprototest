@@ -4,7 +4,7 @@ LABEL mantainer="Vincenzo Palazzo vincenzopalazzodev@gmail.com"
 ENV TZ=Europe/Minsk
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-ENV BITCOIN_VERSION=25.1
+ENV BITCOIN_VERSION=27.1
 
 # Ubuntu utils
 RUN apt-get update && apt-get install -y \
