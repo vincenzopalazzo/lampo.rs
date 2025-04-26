@@ -1,5 +1,6 @@
 //! Lampo test framework.
 pub mod prelude {
+    pub use clightning_testing::prelude::btc::Node as BtcNode;
     pub use clightning_testing::prelude::*;
     pub use clightning_testing::*;
     pub use lampod;
@@ -10,8 +11,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use clightning_testing::btc::BtcNode;
-use clightning_testing::prelude::bitcoincore_rpc::RpcApi;
+use clightning_testing::prelude::btc::Conf;
+use clightning_testing::prelude::btc::Node as BtcNode;
 use clightning_testing::prelude::*;
 use lampo_chain::LampoChainSync;
 use lampo_httpd::handler::HttpdHandler;
@@ -74,7 +75,7 @@ macro_rules! mine {
         let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
             .unwrap()
             .assume_checked();
-        let _ = rpc.generate_to_address(blocks, &address).unwrap();
+        let _ = rpc.generate_to_address($blocks, &address).unwrap();
         self.wallet.sync().await.unwrap();
     };
 }
@@ -103,6 +104,28 @@ pub struct LampoTesting {
 }
 
 impl LampoTesting {
+    pub async fn tmp() -> error::Result<Self> {
+        let mut conf = Conf::default();
+        conf.wallet = None;
+        let conf = Arc::new(conf);
+        Self::with_conf(conf).await
+    }
+
+    pub async fn with_conf(conf: Arc<Conf<'static>>) -> error::Result<Self> {
+        let conf_clone = conf.clone();
+        let btc = tokio::task::spawn_blocking(move || {
+            if let Ok(exec_path) = btc::exe_path() {
+                let btc = BtcNode::with_conf(exec_path, conf_clone.as_ref())?;
+                Ok(btc)
+            } else {
+                anyhow::bail!("corepc-node exec path not found");
+            }
+        })
+        .await??;
+        let btc = Arc::new(btc);
+        Self::new(btc).await
+    }
+
     pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
@@ -118,10 +141,13 @@ impl LampoTesting {
         )?;
         lampo_conf.api_port = port::random_free_port().unwrap().into();
         log::info!("listening on port `{}`", lampo_conf.api_port);
-        let core_url: String = format!("http://127.0.0.1:{}", btc.port);
-        lampo_conf.core_pass = Some(btc.pass.clone());
+        let core_url = btc.rpc_url();
+
+        let values = btc.params.get_cookie_values().unwrap();
         lampo_conf.core_url = Some(core_url);
-        lampo_conf.core_user = Some(btc.user.clone());
+        lampo_conf.core_user = values.as_ref().and_then(|v| Some(v.user.to_owned()));
+        lampo_conf.core_pass = values.and_then(|v| Some(v.password));
+
         lampo_conf
             .ldk_conf
             .channel_handshake_limits
@@ -175,22 +201,22 @@ impl LampoTesting {
     }
 
     async fn mine(&self, blocks: u64) -> error::Result<()> {
-        use clightning_testing::prelude::bitcoincore_rpc::RpcApi;
-
-        let rpc = Arc::new(self.btc.rpc());
-
-        // mine some bitcoin inside the lampo address
-        let address = self.wallet.get_onchain_address().await?;
-        let address = bitcoincore_rpc::bitcoin::Address::from_str(&address.address)
+        let addr = self.wallet.get_onchain_address().await?;
+        let addr = lampo_common::bitcoin::Address::from_str(&addr.address)
             .unwrap()
             .assume_checked();
-        let _ = rpc.generate_to_address(blocks, &address).unwrap();
+        // mine some bitcoin inside the lampo address
+        let _ = self
+            .btc
+            .client
+            .generate_to_address(blocks as usize, &addr)
+            .unwrap();
         self.wallet.sync().await?;
         Ok(())
     }
 
     pub async fn fund_wallet(&self, blocks: u64) -> error::Result<()> {
-        let rpc = Arc::new(self.btc.rpc());
+        let rpc = self.btc.clone();
 
         self.mine(blocks).await?;
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -204,17 +230,22 @@ impl LampoTesting {
             }
 
             let tip = wallet.wallet_tips().await.unwrap();
-            let bitcoind_tip = rpc.get_blockchain_info().unwrap();
-            if tip.to_consensus_u32() as u64 != bitcoind_tip.blocks {
-                log::warn!(
-                    "tip mismatch: wallet tip `{}` and bitcoind tip `{}`",
-                    tip,
-                    bitcoind_tip.blocks
-                );
-                self.mine(1).await.unwrap();
-                return Err(());
-            }
+            // FIXME: we do not need to fail if there is an error in this RPC call
+            // but some json error will happen so, lets skip it if we have an error.
+            let bitcoind_tip = rpc.client.get_blockchain_info();
+            if let Ok(bitcoind_tip) = bitcoind_tip {
+                log::info!("bitcoind tip: {:?}", bitcoind_tip);
 
+                if tip.to_consensus_u32() as i64 != bitcoind_tip.blocks {
+                    log::warn!(
+                        "tip mismatch: wallet tip `{}` and bitcoind tip `{}`",
+                        tip,
+                        bitcoind_tip.blocks
+                    );
+                    self.mine(1).await.unwrap();
+                    return Err(());
+                }
+            }
             if wallet.get_onchain_balance().await.unwrap() == 0 {
                 self.mine(1).await.unwrap();
                 return Err(());

@@ -18,10 +18,8 @@ use crate::init;
 #[tokio_test_shutdown_timeout::test(60)]
 pub async fn init_connection_test_between_lampo() -> error::Result<()> {
     init();
-    let btc = btc::BtcNode::tmp("regtest").await?;
-    let btc = Arc::new(btc);
-    let node1 = LampoTesting::new(btc.clone()).await?;
-    let node2 = LampoTesting::new(btc.clone()).await?;
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = LampoTesting::new(node1.btc.clone()).await?;
     let response: response::Connect = node2
         .lampod()
         .call(
@@ -41,9 +39,8 @@ pub async fn init_connection_test_between_lampo() -> error::Result<()> {
 #[tokio_test_shutdown_timeout::test(60)]
 pub async fn fund_a_simple_channel_from() -> error::Result<()> {
     init();
-    let btc = btc::BtcNode::tmp("regtest").await?;
-    let btc = Arc::new(btc);
-    let node1 = Arc::new(LampoTesting::new(btc.clone()).await?);
+    let node1 = LampoTesting::tmp().await?;
+    let btc = node1.btc.clone();
     let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
     let response: response::Connect = node2
         .lampod()
