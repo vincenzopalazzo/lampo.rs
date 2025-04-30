@@ -200,7 +200,11 @@ impl ChannelSigner for LampoKeysManager {
     fn get_funding_spk(&self) -> ScriptBuf {
         let wallet_manager_guard = self.wallet_manager.blocking_lock();
         let wallet_manager = wallet_manager_guard.as_ref().unwrap();
-        wallet_manager.build_funding_transaction().unwrap()
+
+        let channel_parameters = self.get_channel_parameters().unwrap();
+        wallet_manager
+            .build_funding_transaction(channel_parameters)
+            .unwrap()
     }
 
     fn get_per_commitment_point(
