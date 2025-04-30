@@ -9,7 +9,7 @@ members = [
         "tests/tests",
         "lampo-chain",
         "lampo-bdk-wallet"
-]
+, "lampo-ark-wallet"]
 
 default-members = [
         "lampo-common",

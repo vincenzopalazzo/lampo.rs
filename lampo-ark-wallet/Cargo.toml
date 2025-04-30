@@ -1,0 +1,13 @@
+[package]
+name = "lampo-ark-wallet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+log = "*"
+chrono = { version = "0.4", default-features = false }
+ark-client = { git = "https://github.com/ArkLabsHQ/ark-rs.git" }
+ark-core = { git = "https://github.com/ArkLabsHQ/ark-rs.git" }
+lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
+lampo-common = { path = "../lampo-common" }
+lampo-chain = { path = "../lampo-chain" }

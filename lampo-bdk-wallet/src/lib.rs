@@ -2,7 +2,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client, RpcApi};
+use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client};
 use bdk_bitcoind_rpc::Emitter;
 use bdk_wallet::chain::BlockId;
 use bdk_wallet::keys::bip39::Mnemonic;
