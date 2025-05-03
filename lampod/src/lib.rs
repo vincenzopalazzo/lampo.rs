@@ -18,10 +18,11 @@ pub mod jsonrpc;
 pub mod ln;
 pub mod persistence;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use lampo_common::ldk::chain::Filter;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -70,6 +71,8 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
+
+    chain_filter: RefCell<Option<Arc<dyn Filter>>>,
 }
 
 unsafe impl Send for LampoDaemon {}
@@ -90,6 +93,7 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             process: Cell::new(None),
+            chain_filter: RefCell::new(None),
         }
     }
 
@@ -99,6 +103,10 @@ impl LampoDaemon {
 
     pub fn conf(&self) -> Arc<LampoConf> {
         self.conf.clone()
+    }
+
+    pub fn set_chain_filter(&self, chain_filter: Arc<dyn Filter>) {
+        self.chain_filter.borrow_mut().replace(chain_filter);
     }
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
@@ -114,12 +122,16 @@ impl LampoDaemon {
 
     pub async fn init_channeld(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init channeld ...");
+
+        // We are taking out the channel_monitor from it
+        let chain_monitor = self.chain_filter.take();
         let manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
             self.onchain_manager(),
             self.wallet_manager.clone(),
             self.persister.clone(),
+            chain_monitor,
         );
         self.channel_manager = Some(Arc::new(manager));
         self.channel_manager().listen().await?;

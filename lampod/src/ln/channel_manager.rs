@@ -12,13 +12,12 @@ use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
-use lampo_common::json::de;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
-use lampo_common::ldk::chain::BestBlock;
+use lampo_common::ldk::chain::{BestBlock, Filter};
 use lampo_common::ldk::ln::channelmanager::{ChainParameters, ChannelManagerReadArgs};
 use lampo_common::ldk::onion_message::messenger::DefaultMessageRouter;
 use lampo_common::ldk::routing::gossip::NetworkGraph;
@@ -38,7 +37,6 @@ use lampo_common::types::LampoScorer;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
 
 use crate::actions::handler::LampoHandler;
-use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
@@ -51,6 +49,8 @@ pub struct LampoChannelManager {
     score: RefCell<Option<Arc<Mutex<LampoScorer>>>>,
     handler: RefCell<Option<Arc<LampoHandler>>>,
     router: RefCell<Option<Arc<LampoRouter>>>,
+    // everything that it is implementing Filter
+    chain_filter: Option<Arc<dyn Filter>>,
 
     pub(crate) onchain: Arc<LampoChainManager>,
     pub(crate) conf: LampoConf,
@@ -73,6 +73,7 @@ impl LampoChannelManager {
         onchain: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
         persister: Arc<LampoPersistence>,
+        chain_filter: Option<Arc<dyn Filter>>,
     ) -> Self {
         LampoChannelManager {
             conf: conf.to_owned(),
@@ -82,6 +83,8 @@ impl LampoChannelManager {
             wallet_manager,
             logger,
             persister,
+            chain_filter,
+
             handler: RefCell::new(None),
             graph: RefCell::new(None),
             score: RefCell::new(None),

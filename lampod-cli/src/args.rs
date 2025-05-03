@@ -49,6 +49,7 @@ pub struct LampoCliArgs {
     pub dev_force_poll: bool,
     pub api_host: Option<String>,
     pub api_port: Option<u64>,
+    pub ark_enabled: Option<bool>,
 }
 
 impl TryInto<LampoConf> for LampoCliArgs {
@@ -118,6 +119,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
     let mut dev_force_poll = false;
     let mut api_host: Option<String> = None;
     let mut api_port: Option<u64> = None;
+    let mut enable_ark: Option<bool> = None;
 
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
@@ -167,6 +169,9 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
                 let var: u64 = parser.value()?.parse()?;
                 api_port = Some(var);
             }
+            Long("enable-ark") => {
+                enable_ark = Some(true);
+            }
             Long("help") => {
                 let _ = print_help();
                 std::process::exit(0);
@@ -190,6 +195,7 @@ pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
         dev_force_poll,
         api_host,
         api_port,
+        ark_enabled: enable_ark,
     })
 }
 

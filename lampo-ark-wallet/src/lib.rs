@@ -1,21 +1,32 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use lampo_bdk_wallet::BDKWalletManager;
 use lampo_chain::LampoChainSync;
-use lampo_common::backend::{AsyncBlockSourceResult, Backend, BlockData, BlockHeaderData};
+use lampo_common::backend::BackendKind;
+use lampo_common::backend::TxResult;
+use lampo_common::backend::{
+    AsyncBlockSourceResult, Backend, BlockData, BlockHeaderData, WatchedOutput,
+};
 use lampo_common::bitcoin::absolute::Height;
-use lampo_common::bitcoin::{Amount, BlockHash, FeeRate, Script, ScriptBuf, Transaction};
+use lampo_common::bitcoin::{Amount, BlockHash, FeeRate, Script, ScriptBuf, Transaction, Txid};
 use lampo_common::conf::LampoConf;
 use lampo_common::keys::LampoKeys;
 use lampo_common::ldk::block_sync::BlockSource;
+use lampo_common::ldk::chain::Filter;
+use lampo_common::ldk::routing::utxo::UtxoResult;
 use lampo_common::model::response::{NewAddress, Utxo};
-use lampo_common::types::{LampoChainMonitor, LampoChannel};
 use lampo_common::wallet::WalletManager;
 use lampo_common::{async_trait, error};
 
 pub struct LampoArkWallet {
-    pub inner: BDKWalletManager,
+    pub inner: Arc<BDKWalletManager>,
     pub backend: LampoChainSync,
+
+    pub outputs_queue: Mutex<HashSet<WatchedOutput>>,
+    pub txids: Mutex<HashMap<Txid, ScriptBuf>>,
 }
 
 #[async_trait]
@@ -25,8 +36,11 @@ impl WalletManager for LampoArkWallet {
         let backend = LampoChainSync::new(conf.clone())?;
         Ok((
             Self {
-                inner: wallet,
+                inner: Arc::new(wallet),
                 backend,
+
+                outputs_queue: Mutex::new(HashSet::new()),
+                txids: Mutex::new(HashMap::new()),
             },
             mnemonic_words,
         ))
@@ -36,8 +50,11 @@ impl WalletManager for LampoArkWallet {
         let wallet = BDKWalletManager::restore(conf.clone(), mnemonic_words).await?;
         let backend = LampoChainSync::new(conf.clone())?;
         Ok(Self {
-            inner: wallet,
+            inner: Arc::new(wallet),
             backend,
+
+            outputs_queue: Mutex::new(HashSet::new()),
+            txids: Mutex::new(HashMap::new()),
         })
     }
 
@@ -79,61 +96,53 @@ impl WalletManager for LampoArkWallet {
     }
 
     async fn listen(self: Arc<Self>) -> error::Result<()> {
-        self.inner.listen().await
+        self.inner.clone().listen().await
     }
 }
 
 #[async_trait]
 impl Backend for LampoArkWallet {
-    fn kind(&self) -> lampo_common::backend::BackendKind {
-        lampo_common::backend::BackendKind::Core
+    /// Return the kind of backend
+    fn kind(&self) -> BackendKind {
+        BackendKind::Core
+    }
+
+    /// Fetch feerate give a number of blocks
+    ///
+    /// FIXME: use `FeeRate` instead of `u32`
+    async fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32> {
+        todo!()
+    }
+
+    async fn minimum_mempool_fee(&self) -> error::Result<u32> {
+        todo!()
     }
 
     async fn brodcast_tx(&self, tx: &Transaction) {
-        self.backend.brodcast_tx(tx).await;
+        todo!()
     }
 
-    async fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32> {
-        self.backend.fee_rate_estimation(blocks).await
+    async fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult {
+        todo!()
     }
 
-    async fn get_transaction(&self, txid: &str) -> error::Result<Transaction> {
-        unimplemented!("This is not needed with the current LDK interface")
+    async fn get_utxo_by_txid(&self, txid: &Txid, script: &Script) -> error::Result<TxResult> {
+        todo!()
     }
 
-    async fn get_utxo(&self, txid: &str, vout: u32) -> error::Result<Utxo> {
-        unimplemented!("This is not needed with the current LDK interface")
+    /// Get the information of a transaction inside the blockchain.
+    async fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult> {
+        todo!()
     }
 
-    async fn get_utxo_by_txid(
-        &self,
-        txid: &lampo_common::bitcoin::Txid,
-        script: &lampo_common::bitcoin::Script,
-    ) -> lampo_common::error::Result<lampo_common::backend::TxResult> {
-        unimplemented!()
-    }
-
-    async fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
-        self.backend.minimum_mempool_fee().await
-    }
-
-    fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {
-        self.backend.set_handler(handler);
-    }
-
-    fn set_channel_manager(&self, channel_manager: Arc<LampoChannel>) {
-        self.backend.set_channel_manager(channel_manager);
-    }
-
-    fn set_chain_monitor(&self, chain_monitor: Arc<LampoChainMonitor>) {
-        self.backend.set_chain_monitor(chain_monitor);
-    }
-
-    async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
-        self.backend.listen().await
+    /// Spawn a thread and start polling the backend and notify
+    /// the listener through the handler.
+    async fn listen(self: Arc<Self>) -> error::Result<()> {
+        todo!()
     }
 }
 
+// FIXME: If we use the Filter we can drop the BlockSource?
 impl BlockSource for LampoArkWallet {
     fn get_header<'a>(
         &'a self,
@@ -152,5 +161,18 @@ impl BlockSource for LampoArkWallet {
 
     fn get_best_block<'a>(&'a self) -> AsyncBlockSourceResult<(BlockHash, Option<u32>)> {
         self.backend.get_best_block()
+    }
+}
+
+impl Filter for LampoArkWallet {
+    fn register_output(&self, output: lampo_common::backend::WatchedOutput) {
+        self.outputs_queue.lock().unwrap().insert(output);
+    }
+
+    fn register_tx(&self, txid: &lampo_common::bitcoin::Txid, script_pubkey: &Script) {
+        self.txids
+            .lock()
+            .unwrap()
+            .insert(*txid, script_pubkey.into());
     }
 }

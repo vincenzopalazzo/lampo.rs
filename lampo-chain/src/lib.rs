@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
+use lampo_common::ldk::chain::Filter;
 use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::init;
 use lightning_block_sync::rpc::RpcClient;
