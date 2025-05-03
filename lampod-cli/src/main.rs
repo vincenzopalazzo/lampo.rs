@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use lampo_ark_wallet::LampoArkWallet;
 use radicle_term as term;
 
 use lampo_bdk_wallet::BDKWalletManager;
@@ -61,6 +62,7 @@ fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
 /// Return the root directory.
 async fn run(args: LampoCliArgs) -> error::Result<()> {
     let restore_wallet = args.restore_wallet;
+    let ark_enabled = args.ark_enabled;
 
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
@@ -104,10 +106,14 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
             // Load the mnemonic from the file
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
-            let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+            let wallet: Arc<dyn WalletManager> = match client.kind() {
+                lampo_common::backend::BackendKind::Core if ark_enabled.is_none() => {
+                    Arc::new(BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?)
                 }
+                lampo_common::backend::BackendKind::Core if ark_enabled.is_some() => {
+                    Arc::new(LampoArkWallet::restore(lampo_conf.clone(), &mnemonic).await?)
+                }
+                _ => unreachable!(),
             };
             wallet
         } else {
@@ -118,12 +124,16 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
                 Some("To restore the wallet, lampo needs the BIP39 mnemonic with words separated by spaces."),
             )?;
             // FIXME: make some sanity check about the mnemonic string
-            let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
+            let wallet: Arc<dyn WalletManager> = match client.kind() {
+                lampo_common::backend::BackendKind::Core if ark_enabled.is_none() => {
                     // SAFETY: It is safe to unwrap the mnemonic because we check it
                     // before.
-                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+                    Arc::new(BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?)
                 }
+                lampo_common::backend::BackendKind::Core if ark_enabled.is_some() => {
+                    Arc::new(LampoArkWallet::restore(lampo_conf.clone(), &mnemonic).await?)
+                }
+                _ => unreachable!(),
             };
 
             write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
@@ -135,25 +145,35 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             // Load the mnemonic from the file
             log::warn!("Loading from existing wallet");
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
-            let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
+            let wallet: Arc<dyn WalletManager> = match client.kind() {
+                lampo_common::backend::BackendKind::Core if ark_enabled.is_none() => {
+                    Arc::new(BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?)
                 }
+                lampo_common::backend::BackendKind::Core if ark_enabled.is_some() => {
+                    Arc::new(LampoArkWallet::restore(lampo_conf.clone(), &mnemonic).await?)
+                }
+                _ => unreachable!(),
             };
             wallet
         } else {
             let (wallet, mnemonic) = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    BDKWalletManager::new(lampo_conf.clone()).await?
+                lampo_common::backend::BackendKind::Core if ark_enabled.is_none() => {
+                    let (wallet, mnemonic) = BDKWalletManager::new(lampo_conf.clone()).await?;
+                    (Arc::new(wallet).as_wallet_manager(), mnemonic)
                 }
+                // TODO: implementing the upper cast of on the Wallet manager interface
+                // like discussed in https://quinedot.github.io/rust-learning/dyn-trait-combining.html#manual-supertrait-upcasting
+                lampo_common::backend::BackendKind::Core if ark_enabled.is_some() => {
+                    let (wallet, mnemonic) = LampoArkWallet::new(lampo_conf.clone()).await?;
+                    (Arc::new(wallet).as_wallet_manager(), mnemonic)
+                }
+                _ => unreachable!(),
             };
 
             write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
             wallet
         }
     };
-
-    let wallet = Arc::new(wallet);
 
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());

@@ -9,6 +9,8 @@ lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 lampo-chain = { path = "../lampo-chain" }
 lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
+# FIXME: make the ark wallet optional
+lampo-ark-wallet = { path = "../lampo-ark-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
 tokio = { version = "1.45.1", features = ["rt", "macros"] }
 lexopt = { version = "0.3" }

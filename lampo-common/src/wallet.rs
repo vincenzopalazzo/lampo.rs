@@ -56,4 +56,7 @@ pub trait WalletManager: Send + Sync {
     /// Run a task for wallet sync operation, this usually need to
     /// be run in a `tokio::spawn(wallet.listen())`.
     async fn listen(self: Arc<Self>) -> error::Result<()>;
+
+    /// Allow to upper cust the concrete type.
+    fn as_wallet_manager(self: Arc<Self>) -> Arc<dyn WalletManager>;
 }

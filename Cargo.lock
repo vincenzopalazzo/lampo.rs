@@ -1967,6 +1967,7 @@ version = "0.1.0"
 dependencies = [
  "ctrlc",
  "filelock-rs",
+ "lampo-ark-wallet",
  "lampo-bdk-wallet",
  "lampo-chain",
  "lampo-common",

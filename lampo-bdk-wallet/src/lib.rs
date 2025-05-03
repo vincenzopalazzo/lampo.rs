@@ -205,6 +205,10 @@ impl WalletManager for BDKWalletManager {
         })
     }
 
+    fn as_wallet_manager(self: Arc<Self>) -> Arc<dyn WalletManager> {
+        self
+    }
+
     fn ldk_keys(&self) -> Arc<LampoKeys> {
         self.keymanager.clone()
     }
