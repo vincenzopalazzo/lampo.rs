@@ -13,6 +13,7 @@ use std::time::Duration;
 use clightning_testing::btc::BtcNode;
 use clightning_testing::prelude::*;
 use lampo_chain::LampoChainSync;
+use lampo_common::conf::BitcoindConf;
 use lampo_httpd::handler::HttpdHandler;
 use tempfile::TempDir;
 
@@ -105,9 +106,13 @@ impl LampoTesting {
         lampo_conf.api_port = port::random_free_port().unwrap().into();
         log::info!("listening on port `{}`", lampo_conf.api_port);
         let core_url: String = format!("http://127.0.0.1:{}", btc.port);
-        lampo_conf.bitcoind_conf.set_pass(btc.pass.clone());
-        lampo_conf.bitcoind_conf.set_url(core_url);
-        lampo_conf.bitcoind_conf.set_user(btc.user.clone());
+
+        let mut bitcoin_conf = BitcoindConf::get_default_conf(lampod::chain::Network::Regtest)?;
+        bitcoin_conf.user = Some(btc.user.clone());
+        bitcoin_conf.pass = Some(btc.pass.clone());
+        bitcoin_conf.url = core_url;
+
+        lampo_conf.bitcoind_conf = Some(bitcoin_conf);
         lampo_conf
             .ldk_conf
             .channel_handshake_limits

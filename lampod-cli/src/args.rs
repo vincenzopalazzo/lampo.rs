@@ -74,18 +74,25 @@ impl TryInto<LampoConf> for LampoCliArgs {
 
         log::debug!(target: "lampod-cli", "lampo data dir `{}`", conf.path());
         log::debug!(target: "lampod-cli", "client from args {:?}", self.client);
+
+        // We would be assigning new values to this struct and then
+        // assign this to conf.bitcoinf_conf later
+        let mut bitcoind_conf = conf
+            .bitcoind_conf
+            .clone()
+            .ok_or(error::anyhow!("No bitcoin conf present"))?;
         // Override the lampo conf with the args from the cli
         if let Some(node) = self.client {
             conf.node = node.clone();
         }
         if let Some(btc_url) = self.bitcoind_url {
-            conf.bitcoind_conf.set_url(btc_url);
+            bitcoind_conf.url = btc_url;
         }
         if let Some(btc_user) = self.bitcoind_user {
-            conf.bitcoind_conf.set_user(btc_user);
+            bitcoind_conf.user = Some(btc_user);
         }
         if let Some(btc_pass) = self.bitcoind_pass {
-            conf.bitcoind_conf.set_pass(btc_pass);
+            bitcoind_conf.pass = Some(btc_pass);
         }
         if self.log_file.is_some() {
             conf.log_file = self.log_file;
@@ -99,6 +106,8 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if let Some(api_port) = self.api_port {
             conf.api_port = api_port;
         }
+
+        conf.bitcoind_conf = Some(bitcoind_conf);
         Ok(conf)
     }
 }

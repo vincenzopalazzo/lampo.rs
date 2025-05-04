@@ -136,9 +136,19 @@ impl BDKWalletManager {
     }
 
     pub fn build_client(conf: Arc<LampoConf>) -> error::Result<Client> {
-        let url = &conf.bitcoind_conf.get_url();
-        let user = &conf.bitcoind_conf.get_user();
-        let pass = &conf.bitcoind_conf.get_pass();
+        let bitcoin_conf = conf
+            .bitcoind_conf
+            .clone()
+            .ok_or(error::anyhow!("Bitcoin conf missing"))?;
+        let url = &bitcoin_conf.url;
+
+        let user = &bitcoin_conf
+            .user
+            .ok_or(error::anyhow!("User not provided"))?;
+        let pass = bitcoin_conf
+            .pass
+            .ok_or(error::anyhow!("Pass not provided"))?;
+
         let client = Client::new(url, Auth::UserPass(user.clone(), pass.clone()))?;
         Ok(client)
     }

@@ -16,7 +16,7 @@ pub struct LampoConf {
     pub root_path: String,
     /// The backend implementation
     pub node: String,
-    pub bitcoind_conf: BitcoindConf,
+    pub bitcoind_conf: Option<BitcoindConf>,
     pub private_key: Option<String>,
     pub channels_keys: Option<String>,
     pub log_file: Option<String>,
@@ -55,7 +55,7 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             // By default network is testnet as mentioned above
-            bitcoind_conf: BitcoindConf::get_default_conf(Network::Testnet),
+            bitcoind_conf: None,
         }
     }
 }
@@ -138,6 +138,10 @@ impl LampoConf {
 
         Ok(conf)
     }
+
+    pub fn get_bitcoind(&self) -> BitcoindConf {
+        self.bitcoind_conf.clone().unwrap()
+    }
 }
 
 impl TryFrom<String> for LampoConf {
@@ -180,29 +184,33 @@ impl TryFrom<String> for LampoConf {
         let network = Network::from_str(&network)?;
 
         // Get the default conf
-        let mut bitcoind_conf = BitcoindConf::get_default_conf(network);
+        let mut bitcoind_conf = BitcoindConf::get_default_conf(network)?;
 
         // Override if there is some config specified!
-        if let Some(bitcoin_url) = conf
+        let bitcoin_url = conf
             .get_conf("core-url")
-            .map_err(|err| anyhow::anyhow!("{err}"))?
-        {
-            bitcoind_conf.set_url(bitcoin_url);
-        };
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
 
-        if let Some(bitcoin_pass) = conf
+        // Only set if there is some URL present, don't set None
+        if let Some(bitcoin_url) = bitcoin_url {
+            bitcoind_conf.url = bitcoin_url;
+        }
+
+        let bitcoin_pass = conf
             .get_conf("core-pass")
-            .map_err(|err| anyhow::anyhow!("{err}"))?
-        {
-            bitcoind_conf.set_pass(bitcoin_pass);
-        };
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
 
-        if let Some(bitcoin_user) = conf
+        if let Some(bitcoin_pass) = bitcoin_pass {
+            bitcoind_conf.pass = Some(bitcoin_pass);
+        }
+
+        let bitcoin_user = conf
             .get_conf("core-user")
-            .map_err(|err| anyhow::anyhow!("{err}"))?
-        {
-            bitcoind_conf.set_user(bitcoin_user);
-        };
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+
+        if let Some(bitcoin_user) = bitcoin_user {
+            bitcoind_conf.user = Some(bitcoin_user);
+        }
 
         let reindex: Option<String> = conf
             .get_conf("reindex")
@@ -259,7 +267,7 @@ impl TryFrom<String> for LampoConf {
             api_host,
             api_port,
             reindex,
-            bitcoind_conf,
+            bitcoind_conf: Some(bitcoind_conf),
         })
     }
 }

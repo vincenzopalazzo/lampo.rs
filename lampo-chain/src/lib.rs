@@ -33,9 +33,18 @@ unsafe impl Sync for LampoChainSync {}
 
 impl LampoChainSync {
     pub fn new(conf: Arc<LampoConf>) -> error::Result<Self> {
-        let core_url = &conf.bitcoind_conf.get_url();
-        let core_user = &conf.bitcoind_conf.get_user();
-        let core_pass = &conf.bitcoind_conf.get_pass();
+        let bitcoin_conf = conf
+            .bitcoind_conf
+            .clone()
+            .ok_or(error::anyhow!("Bitcoin conf missing"))?;
+
+        let core_url = &bitcoin_conf.url;
+        let core_user = &bitcoin_conf
+            .user
+            .ok_or(error::anyhow!("User not provided"))?;
+        let core_pass = bitcoin_conf
+            .pass
+            .ok_or(error::anyhow!("Pass not provided"))?;
 
         log::debug!("Core URL: {:?}", core_url);
         // FIXME: somehow we should fix this
