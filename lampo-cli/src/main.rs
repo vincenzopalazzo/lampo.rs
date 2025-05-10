@@ -1,28 +1,33 @@
 mod args;
 
+use std::collections::HashMap;
 use std::process::exit;
 
 use elite_rpc::transport::curl::HttpTransport;
 use elite_rpc::transport::TransportMethod;
 use elite_rpc::EliteRPC;
-use lampo_common::logger;
 use radicle_term as term;
 
-//use lampo_common::error;
-//use lampo_common::json;
+use lampo_common::error;
+use lampo_common::json;
 
 use crate::args::LampoCliArgs;
 
 fn main() -> error::Result<()> {
-    let args = match args::parse_args() {
+    let args: LampoCliArgs = match args::parse_args() {
         Ok(args) => args,
         Err(err) => {
             term::error(format!("{err}"));
             exit(1);
         }
     };
-    let resp = run(args);
+
+    // Get the arguments as a HashMap
+    let args_map = args.args_as_hashmap();
+
+    let resp = run(args.method, args_map, args.url);
     log::info!("{:?}", resp);
+
     match resp {
         Ok(resp) => {
             term::print(json::to_string_pretty(&resp)?);
@@ -35,12 +40,13 @@ fn main() -> error::Result<()> {
     Ok(())
 }
 
-// FIXME: we should be able to support differen kind of error in here.
-fn run(args: LampoCliArgs) -> error::Result<json::Value> {
-    let inner: EliteRPC<HttpTransport<RestProtocol>, RestProtocol> =
-        EliteRPC::new(&format!("{}", args.url))?;
-    let method = args.method;
-    let args = args.args;
+// FIXME: we should be able to support different kind of error in here.
+fn run(
+    method: String,
+    args: HashMap<String, json::Value>,
+    url: String,
+) -> error::Result<json::Value> {
+    let inner: EliteRPC<HttpTransport<RestProtocol>, RestProtocol> = EliteRPC::new(&url)?;
     inner.call(TransportMethod::Post(method), &json::to_value(args)?)
 }
 
@@ -51,9 +57,6 @@ fn run(args: LampoCliArgs) -> error::Result<json::Value> {
 use std::io::Cursor;
 
 use elite_rpc::protocol::Protocol;
-
-use lampo_common::error;
-use lampo_common::json;
 
 #[derive(Clone)]
 pub struct RestProtocol;

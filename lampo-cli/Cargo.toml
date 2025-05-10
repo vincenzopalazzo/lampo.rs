@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 lampo-common = { path = "../lampo-common" }
 log = { version = "0.4", features = ["std"] }
-lexopt = { version = "0.3" }
 radicle-term = "0.12.0"
 elite-rpc =  { version = "0.0.4", features = ["curl"] }
 serde = "*"
+clap = { version = "4.5", features = ["derive"] }
