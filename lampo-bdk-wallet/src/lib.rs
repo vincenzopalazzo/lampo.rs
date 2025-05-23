@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client, RpcApi};
 use bdk_bitcoind_rpc::Emitter;
+use bdk_wallet::chain::BlockId;
 use bdk_wallet::keys::bip39::Mnemonic;
 use bdk_wallet::keys::bip39::{Language, WordCount};
 use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
@@ -298,8 +299,18 @@ impl WalletManager for BDKWalletManager {
         }
 
         tokio::spawn(async move {
-            // FIXME: this need to start not from 0
-            let mut emitter = Emitter::new(rpc_client.as_ref(), emitter_tip, 0);
+            // Check if the wallet is free!
+            let mut emitter = if emitter_tip.height() == 0 {
+                // FIXME: this need to start not from 0
+                Emitter::new(rpc_client.as_ref(), emitter_tip, 0)
+            } else {
+                let info = rpc_client.get_blockchain_info()?;
+                let height = info.blocks;
+                let hash = rpc_client.get_block_hash(height)?;
+                let hash = BlockId::from((height as u32, hash));
+                let emitter_tip = emitter_tip.insert(hash);
+                Emitter::new(rpc_client.as_ref(), emitter_tip, 0)
+            };
             while let Some(emission) = emitter.next_block()? {
                 sender.send(Emission::Block(emission))?;
             }
