@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client, RpcApi};
 use bdk_bitcoind_rpc::Emitter;
+use bdk_wallet::chain::BlockId;
 use bdk_wallet::keys::bip39::Mnemonic;
 use bdk_wallet::keys::bip39::{Language, WordCount};
 use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
@@ -285,21 +286,15 @@ impl WalletManager for BDKWalletManager {
                 .expect("failed to send sigterm")
         });*/
 
-        let wallet = self.wallet.lock().await;
-        let tip = wallet.latest_checkpoint();
-        drop(wallet); // Drop the mutex
-        let emitter_tip = tip.clone();
         let rpc_client = self.rpc.clone();
-
-        // FIXME: this should tell the wallet, hey from now on you
-        // will have to reindex from this height
-        if let Some(height) = self.reindex_from {
-            log::warn!("lampo-wallet: reindexing from height {height} it is not implemented yet");
-        }
+        let wallet = self.wallet.lock().await;
+        let wallet_tip = wallet.latest_checkpoint();
+        let start_height = wallet_tip.height();
+        drop(wallet);
 
         tokio::spawn(async move {
-            // FIXME: this need to start not from 0
-            let mut emitter = Emitter::new(rpc_client.as_ref(), emitter_tip, 0);
+            let mut emitter = Emitter::new(rpc_client.as_ref(), wallet_tip, start_height);
+
             while let Some(emission) = emitter.next_block()? {
                 sender.send(Emission::Block(emission))?;
             }
@@ -362,6 +357,39 @@ impl WalletManager for BDKWalletManager {
             log::info!(target: "lampo-wallet", "Tick tock, time to check if we need to sync the wallet");
             wallet.sync().await?;
             Ok(())
+        }
+
+        // we need to modify the bdk wallet state in this position.
+        let rpc_client = self.rpc.clone();
+        let mut wallet = self.wallet.lock().await;
+        let wallet_tip = wallet.latest_checkpoint();
+        let start_height = wallet_tip.height();
+
+        let reindex_from = self.reindex_from.or_else(|| {
+            if start_height == 0 {
+                rpc_client.get_blockchain_info().ok().map(|info| {
+                    Height::from_consensus(info.blocks as u32)
+                        .expect("Failed to convert blockchain height to consensus height")
+                })
+            } else {
+                None
+            }
+        });
+
+        // Instruct the wallet to reindex from the specified height, ensuring it starts scanning the blockchain from this point onward.
+        if let Some(height) = reindex_from {
+            let height = height.to_consensus_u32();
+            if height > wallet_tip.height() {
+                // Insert a checkpoint into the wallet to avoid scanning the entire chain.
+                let hash = rpc_client.get_block_hash(height as u64)?;
+                let block = BlockId { height, hash };
+                let new_tip = wallet_tip.insert(block);
+                let update = bdk_wallet::Update {
+                    chain: Some(new_tip),
+                    ..Default::default()
+                };
+                wallet.apply_update(update)?;
+            }
         }
 
         let wallet = self.clone();
