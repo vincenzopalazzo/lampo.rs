@@ -18,6 +18,7 @@ use crate::init;
 #[tokio_test_shutdown_timeout::test(60)]
 pub async fn init_connection_test_between_lampo() -> error::Result<()> {
     init();
+    assert!(false);
     let node1 = LampoTesting::tmp().await?;
     let node2 = LampoTesting::new(node1.btc.clone()).await?;
     let response: response::Connect = node2
@@ -72,11 +73,11 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
         .await
         .unwrap();
     assert!(response.get("tx").is_some());
+    node2.fund_wallet(10).await.unwrap();
 
     async_wait!(async {
         while let Some(event) = events.recv().await {
             log::info!(target: "tests", "Event received {:?}", event);
-            node2.fund_wallet(1).await.unwrap();
             if let Event::Lightning(LightningEvent::ChannelReady {
                 counterparty_node_id,
                 ..
@@ -93,6 +94,7 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
                 .call("channels", json::json!({}))
                 .await
                 .unwrap();
+            log::info!(target: "tests", "Channels {:?}", channels);
             if channels.channels.is_empty() {
                 return Err(());
             }
@@ -100,7 +102,6 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
             if channels.channels.first().unwrap().ready {
                 return Ok(());
             }
-            node2.fund_wallet(6).await.unwrap();
         }
         Err(())
     });

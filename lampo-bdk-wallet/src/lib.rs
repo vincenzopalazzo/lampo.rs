@@ -37,6 +37,7 @@ pub struct BDKWalletManager {
     pub keymanager: Arc<LampoKeys>,
     pub network: Network,
     pub reindex_from: Option<Height>,
+    pub conf: Arc<LampoConf>,
 
     guard: Mutex<bool>,
 }
@@ -185,6 +186,7 @@ impl WalletManager for BDKWalletManager {
                 rpc: Arc::new(client),
                 guard: Mutex::new(false),
                 reindex_from: conf.reindex,
+                conf: conf.clone(),
             },
             mnemonic_words,
         ))
@@ -202,6 +204,7 @@ impl WalletManager for BDKWalletManager {
             rpc: Arc::new(client),
             guard: Mutex::new(false),
             reindex_from: conf.reindex,
+            conf: conf.clone(),
         })
     }
 
@@ -393,7 +396,17 @@ impl WalletManager for BDKWalletManager {
         }
 
         let wallet = self.clone();
-        let job = Job::new_async_tz("0 */2 * * * *", chrono::Utc, move |_uuid, _l| {
+
+        // Determine the sync schedule based on dev_sync configuration
+        let sync_schedule = if self.conf.dev_sync.unwrap_or(false) {
+            log::info!(target: "lampo-wallet", "Using development sync schedule: every second");
+            "* * * * * *" // Every second for development
+        } else {
+            log::info!(target: "lampo-wallet", "Using production sync schedule: every 2 minutes");
+            "0 */2 * * * *" // Every 2 minutes for production (original schedule)
+        };
+
+        let job = Job::new_async_tz(sync_schedule, chrono::Utc, move |_uuid, _l| {
             let wallet = wallet.clone();
             Box::pin(async move {
                 if let Err(err) = wallet.guard.try_lock() {

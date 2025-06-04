@@ -27,6 +27,7 @@ pub struct LampoConf {
     pub api_host: String,
     pub api_port: u64,
     pub reindex: Option<Height>,
+    pub dev_sync: Option<bool>,
 }
 
 impl Default for LampoConf {
@@ -58,6 +59,7 @@ impl Default for LampoConf {
             api_host: "127.0.0.1".to_owned(),
             api_port: 7878,
             reindex: None,
+            dev_sync: None,
         }
     }
 }
@@ -241,6 +243,12 @@ impl TryFrom<String> for LampoConf {
         let api_port = conf.get_conf("api-port").unwrap_or(None);
         let api_host = api_host.unwrap_or("http://127.0.0.1".to_owned());
         let api_port: u64 = api_port.unwrap_or("7979".to_owned()).parse()?;
+
+        // Parse dev_sync field - defaults to None (false)
+        let dev_sync = conf
+            .get_conf("dev-sync")
+            .unwrap_or(None)
+            .map(|s| s.to_lowercase() == "true" || s == "1");
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -260,6 +268,7 @@ impl TryFrom<String> for LampoConf {
             api_host,
             api_port,
             reindex,
+            dev_sync,
         })
     }
 }
