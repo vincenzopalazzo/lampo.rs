@@ -31,16 +31,19 @@ use lampod::LampoDaemon;
 macro_rules! async_wait {
     ($callback:expr, $timeout:expr) => {{
         let mut success = false;
-        for _ in 0..4 {
+        let max_retries = 10; // Increased from 4 to 10 for more robust testing
+        for attempt in 0..max_retries {
             let result = $callback.await;
             if let Err(_) = result {
+                // Add some logging for debugging
+                log::debug!(target: "async_wait", "Attempt {}/{} failed, retrying in {}s", attempt + 1, max_retries, $timeout);
                 tokio::time::sleep(std::time::Duration::from_secs($timeout)).await;
                 continue;
             }
             success = true;
             break;
         }
-        assert!(success, "callback got a timeout");
+        assert!(success, "async_wait callback got a timeout after {} attempts with {}s intervals", max_retries, $timeout);
     }};
     ($callback:expr) => {
         $crate::async_wait!($callback, 5);

@@ -82,7 +82,7 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
                 ..
             }) = event
             {
-                if counterparty_node_id.to_string() == node1.info.node_id {
+                if counterparty_node_id.to_string() != node1.info.node_id {
                     return Err(());
                 }
                 return Ok(());
@@ -93,15 +93,15 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
                 .call("channels", json::json!({}))
                 .await
                 .unwrap();
-            if !channels.channels.is_empty() {
-                return Ok(());
+            if channels.channels.is_empty() {
+                return Err(());
             }
 
             if channels.channels.first().unwrap().ready {
                 return Ok(());
             }
+            node2.fund_wallet(6).await.unwrap();
         }
-        node2.fund_wallet(6).await.unwrap();
         Err(())
     });
     Ok(())
