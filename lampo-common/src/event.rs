@@ -65,4 +65,5 @@ pub enum Event {
     Lightning(LightningEvent),
     OnChain(OnChainEvent),
     Inventory,
+    RawLDK(crate::ldk::events::Event),
 }

@@ -26,6 +26,12 @@ pub mod request {
     pub struct Pay {
         pub invoice_str: String,
         pub amount: Option<u64>,
+        pub bolt12: Option<Bolt12Pay>,
+    }
+
+    #[derive(Serialize, Deserialize, Apiv2Schema)]
+    pub struct Bolt12Pay {
+        pub payer_note: Option<String>,
     }
 }
 

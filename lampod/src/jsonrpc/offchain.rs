@@ -97,8 +97,9 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     let request: Pay = json::from_value(request.clone())?;
     let mut events = ctx.handler().events();
     if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
+        let payer_note = request.bolt12.and_then(|x| x.payer_note);
         ctx.offchain_manager()
-            .pay_offer(&request.invoice_str, request.amount)?;
+            .pay_offer(&request.invoice_str, request.amount, payer_note)?;
     } else {
         ctx.offchain_manager()
             .pay_invoice(&request.invoice_str, request.amount)?;
