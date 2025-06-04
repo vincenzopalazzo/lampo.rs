@@ -298,7 +298,7 @@ impl WalletManager for BDKWalletManager {
             while let Some(emission) = emitter.next_block()? {
                 sender.send(Emission::Block(emission))?;
             }
-            sender.send(Emission::Mempool(emitter.mempool()?))?;
+            //sender.send(Emission::Mempool(emitter.mempool()?))?;
             Ok::<_, error::Error>(())
         });
 
