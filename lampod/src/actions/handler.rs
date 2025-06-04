@@ -2,7 +2,6 @@
 use std::sync::Arc;
 
 use lampo_common::bitcoin::absolute::Height;
-use lampo_common::ldk::block_sync::BlockSource;
 use tokio::sync::RwLock;
 
 use lampo_common::async_trait;
@@ -286,7 +285,11 @@ impl Handler for LampoHandler {
                 self.emit(Event::Lightning(hop));
                 Ok(())
             },
-            _ => Err(error::anyhow!("unexpected ldk event: {:?}", event)),
+            _ => {
+                log::warn!(target: "lampo::handler", "unhandled ldk event: {:?}", event);
+                self.emit(Event::RawLDK(event));
+                Ok(())
+            },
         }
     }
 }

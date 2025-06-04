@@ -94,7 +94,12 @@ impl OffchainManager {
         Ok(invoice)
     }
 
-    pub fn pay_offer(&self, offer_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
+    pub fn pay_offer(
+        &self,
+        offer_str: &str,
+        amount_msat: Option<u64>,
+        payer_note: Option<String>,
+    ) -> error::Result<()> {
         // check if it is an invoice or an offer
         let offer_hash = Sha256::hash(offer_str.as_bytes());
         let payment_id = PaymentId(*offer_hash.as_ref());
@@ -109,13 +114,14 @@ impl OffchainManager {
             None => amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?,
         };
 
+        log::debug!(target: "lampo::offchain", "paying offer with amount `{}msat` & payer_note: `{}`", amount, payer_note.as_ref().unwrap_or(&"".to_string()));
         self.channel_manager
             .manager()
             .pay_for_offer(
                 &offer,
                 None,
                 Some(amount),
-                None,
+                payer_note,
                 payment_id,
                 Retry::Attempts(10),
                 None,
