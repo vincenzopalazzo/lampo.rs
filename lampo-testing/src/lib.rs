@@ -33,6 +33,7 @@ macro_rules! async_wait {
         let mut success = false;
         let max_retries = 10; // Increased from 4 to 10 for more robust testing
         for attempt in 0..max_retries {
+            log::debug!(target: "async_wait", "Attempt {}/{} with timeout {}s", attempt + 1, max_retries, $timeout);
             let result = $callback.await;
             if let Err(_) = result {
                 // Add some logging for debugging
@@ -150,15 +151,19 @@ impl LampoTesting {
         lampo_conf.core_url = Some(core_url);
         lampo_conf.core_user = values.as_ref().and_then(|v| Some(v.user.to_owned()));
         lampo_conf.core_pass = values.and_then(|v| Some(v.password));
+        lampo_conf.dev_sync = Some(true);
 
         lampo_conf
             .ldk_conf
             .channel_handshake_limits
             .force_announced_channel_preference = false;
         log::info!("creating bitcoin core wallet");
+
         let lampo_conf = Arc::new(lampo_conf);
         let (wallet, mnemonic) = BDKWalletManager::new(lampo_conf.clone()).await?;
         let wallet = Arc::new(wallet);
+        wallet.clone().listen().await?;
+
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
         lampo.init(node.clone()).await?;

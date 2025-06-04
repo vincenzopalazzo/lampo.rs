@@ -219,7 +219,9 @@ impl Backend for LampoChainSync {
             let mut spv_client =
                 SpvClient::new(polled_chain_tip, chain_poller, &mut cache, &chain_listener);
             loop {
+                log::debug!("Polling for new blocks...");
                 spv_client.poll_best_tip().await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
         });
         Ok(())
