@@ -214,14 +214,15 @@ impl Backend for LampoChainSync {
             .await
             .unwrap();
 
-        // FIXME: we should look at how we do
         let mut spv_client =
             SpvClient::new(polled_chain_tip, chain_poller, &mut cache, &chain_listener);
+        log::info!(target: "lampo-chain", "Start Backend ...");
         loop {
-            log::info!("***** Polling for new blocks...");
-            spv_client.poll_best_tip().await.unwrap();
+            if let Err(err) = spv_client.poll_best_tip().await {
+                log::error!(target: "lampo-chain", "Error while polling best tip: {:?}", err);
+            }
             // FIXME: make this configurable
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     }
 }
