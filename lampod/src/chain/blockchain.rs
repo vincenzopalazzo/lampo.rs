@@ -1,4 +1,3 @@
-use core::sync;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -7,6 +6,7 @@ use lampo_common::backend::Backend;
 use lampo_common::bitcoin;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::Transaction;
+use lampo_common::error;
 use lampo_common::ldk;
 use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{
@@ -68,6 +68,11 @@ impl LampoChainManager {
             map.insert(self.print_ldk_target_to_string(target), value);
         }
         map
+    }
+
+    pub fn listen(self: Arc<Self>) -> error::Result<()> {
+        tokio::spawn(async move { self.backend.clone().listen().await });
+        Ok(())
     }
 }
 

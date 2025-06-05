@@ -22,7 +22,6 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use lampo_common::backend::Backend;
@@ -237,7 +236,7 @@ impl LampoDaemon {
         ));
 
         log::info!(target: "lampo", "Stating onchaind");
-        let _ = self.onchain_manager().backend.clone().listen();
+        let _ = self.onchain_manager().listen();
         log::info!(target: "lampo", "Starting peer manager");
         let _ = self.peer_manager().run();
         log::info!(target: "lampo", "Starting channel manager");

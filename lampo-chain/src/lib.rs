@@ -206,24 +206,22 @@ impl Backend for LampoChainSync {
     }
 
     async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
-        tokio::spawn(async move {
-            let mut cache = UnboundedCache::new();
-            let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
-            let chain_listener = (self.chain_monitor(), self.channel_manager());
+        let mut cache = UnboundedCache::new();
+        let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
+        let chain_listener = (self.chain_monitor(), self.channel_manager());
 
-            let polled_chain_tip = init::validate_best_block_header(self.as_ref())
-                .await
-                .unwrap();
+        let polled_chain_tip = init::validate_best_block_header(self.as_ref())
+            .await
+            .unwrap();
 
-            // FIXME: we should look at how we do
-            let mut spv_client =
-                SpvClient::new(polled_chain_tip, chain_poller, &mut cache, &chain_listener);
-            loop {
-                log::debug!("Polling for new blocks...");
-                spv_client.poll_best_tip().await.unwrap();
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            }
-        });
-        Ok(())
+        // FIXME: we should look at how we do
+        let mut spv_client =
+            SpvClient::new(polled_chain_tip, chain_poller, &mut cache, &chain_listener);
+        loop {
+            log::info!("***** Polling for new blocks...");
+            spv_client.poll_best_tip().await.unwrap();
+            // FIXME: make this configurable
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
     }
 }
