@@ -15,10 +15,9 @@ use lampo_testing::{async_wait, prelude::*};
 
 use crate::init;
 
-#[tokio_test_shutdown_timeout::test(60)]
+#[tokio_test_shutdown_timeout::test(10)]
 pub async fn init_connection_test_between_lampo() -> error::Result<()> {
     init();
-    assert!(false);
     let node1 = LampoTesting::tmp().await?;
     let node2 = LampoTesting::new(node1.btc.clone()).await?;
     let response: response::Connect = node2
@@ -37,7 +36,7 @@ pub async fn init_connection_test_between_lampo() -> error::Result<()> {
     Ok(())
 }
 
-#[tokio_test_shutdown_timeout::test(60)]
+#[tokio_test_shutdown_timeout::test(20)]
 pub async fn fund_a_simple_channel_from() -> error::Result<()> {
     init();
     let node1 = LampoTesting::tmp().await?;
