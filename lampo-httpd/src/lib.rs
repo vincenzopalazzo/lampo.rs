@@ -18,6 +18,8 @@ use commands::offchain::{rest_decode, rest_invoice, rest_pay};
 use commands::onchain::rest_new_addr;
 use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel};
 
+use crate::commands::offchain::rest_offer;
+
 /// Result type for json responses
 pub type ResultJson<T> = std::result::Result<CreatedJson<T>, actix_web::Error>;
 
@@ -121,6 +123,7 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_close)
             .service(rest_networkchannels)
             .service(rest_invoice)
+            .service(rest_offer)
             .service(rest_decode)
             .service(rest_pay)
             .service(rest_funds)

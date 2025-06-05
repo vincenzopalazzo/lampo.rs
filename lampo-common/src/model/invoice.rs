@@ -11,7 +11,7 @@ pub mod request {
         pub expiring_in: Option<u32>,
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct GenerateOffer {
         pub amount_msat: Option<u64>,
         pub description: Option<String>,
@@ -51,11 +51,11 @@ pub mod response {
         pub bolt11: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct Offer {
         pub bolt12: String,
         pub metadata: Option<String>,
-        pub metadata_pubkey: Option<PublicKey>,
+        pub metadata_pubkey: Option<String>,
     }
 
     impl From<ldk::offers::offer::Offer> for Offer {
@@ -63,7 +63,9 @@ pub mod response {
             Self {
                 bolt12: value.to_string(),
                 metadata: value.metadata().map(hex::encode),
-                metadata_pubkey: value.issuer_signing_pubkey(),
+                metadata_pubkey: value
+                    .issuer_signing_pubkey()
+                    .map(|pubkey| hex::encode(pubkey.serialize())),
             }
         }
     }

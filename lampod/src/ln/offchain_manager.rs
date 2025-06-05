@@ -123,7 +123,7 @@ impl OffchainManager {
                 Some(amount),
                 payer_note,
                 payment_id,
-                Retry::Attempts(10),
+                Retry::Timeout(std::time::Duration::from_secs(1)),
                 None,
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;

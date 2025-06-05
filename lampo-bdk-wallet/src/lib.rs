@@ -279,7 +279,7 @@ impl WalletManager for BDKWalletManager {
             Mempool(Vec<(Transaction, u64)>),
         }
 
-        log::warn!(target: "lampo-wallet", "Starting the sync process");
+        log::info!(target: "lampo-wallet", "Checking the wallet status...");
         let (sender, mut receiver) = unbounded_channel::<Emission>();
 
         /*let signal_sender = sender.clone();
@@ -357,7 +357,7 @@ impl WalletManager for BDKWalletManager {
 
         async fn innet_sync(wallet: Arc<BDKWalletManager>) -> error::Result<()> {
             let _is_sync = wallet.guard.lock().await;
-            log::info!(target: "lampo-wallet", "Tick tock, time to check if we need to sync the wallet");
+            log::debug!(target: "lampo-wallet", "Tick tock, time to check if we need to sync the wallet");
             wallet.sync().await?;
             Ok(())
         }
