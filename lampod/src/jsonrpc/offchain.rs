@@ -53,6 +53,7 @@ pub async fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json
         // FIXME: implement display error on top of the bolt12 error
         .map_err(|err| crate::rpc_error!("{:?}", err))?
         .into();
+    log::debug!("Generated offer: {:?}", offer);
     Ok(json::to_value(&offer)?)
 }
 
@@ -96,16 +97,23 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     log::info!("call for `pay` with request `{:?}`", request);
     let request: Pay = json::from_value(request.clone())?;
     let mut events = ctx.handler().events();
+
     if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
+        log::debug!("Paying offer with bolt12 invoice: {}", request.invoice_str);
         let payer_note = request.bolt12.and_then(|x| x.payer_note);
         ctx.offchain_manager()
             .pay_offer(&request.invoice_str, request.amount, payer_note)?;
     } else {
+        log::debug!(
+            "Paying invoice with bolt11 invoice: {}",
+            request.invoice_str
+        );
         ctx.offchain_manager()
             .pay_invoice(&request.invoice_str, request.amount)?;
     }
     // FIXME: this will loop when the Payment event is not generated
     loop {
+        log::warn!("Waiting for payment event...");
         let event = events.recv().await.ok_or(Error::Rpc(RpcError {
             code: -1,
             message: format!("No event received, communication channel dropped"),

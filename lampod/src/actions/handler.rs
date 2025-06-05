@@ -277,6 +277,7 @@ impl Handler for LampoHandler {
             }
             ldk::events::Event::PaymentSent { .. } => {
                 log::info!("payment sent: `{:?}`", event);
+                self.emit(Event::RawLDK(event.clone()));
                 Ok(())
             },
             ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
@@ -286,7 +287,7 @@ impl Handler for LampoHandler {
                 Ok(())
             },
             _ => {
-                log::warn!(target: "lampo::handler", "unhandled ldk event: {:?}", event);
+                log::error!(target: "lampo::handler", "unhandled ldk event: {:?}", event);
                 self.emit(Event::RawLDK(event));
                 Ok(())
             },

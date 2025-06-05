@@ -30,7 +30,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<L>,
     Arc<EmptyNodeIdLookUp>,
     Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<LampoKeysManager>>>,
-    IgnoringMessageHandler,
+    Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
@@ -96,10 +96,10 @@ impl LampoPeerManager {
             self.logger.clone(),
             Arc::new(EmptyNodeIdLookUp {}),
             Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone())),
-            IgnoringMessageHandler {},
-            IgnoringMessageHandler {},
-            IgnoringMessageHandler {},
-            IgnoringMessageHandler {},
+            channel_manager.manager(), // Use channel manager for offers message handler
+            IgnoringMessageHandler {}, // async_payments_message_handler
+            IgnoringMessageHandler {}, // custom_onion_message_handler
+            IgnoringMessageHandler {}, // custom_onion_message_contents
         ));
 
         let gossip_sync = Arc::new(P2PGossipSync::new(
