@@ -14,15 +14,19 @@ use std::time::Duration;
 use clightning_testing::prelude::btc::Conf;
 use clightning_testing::prelude::btc::Node as BtcNode;
 use clightning_testing::prelude::*;
-use lampo_chain::LampoChainSync;
-use lampo_httpd::handler::HttpdHandler;
 use tempfile::TempDir;
 
 use lampo_bdk_wallet::BDKWalletManager;
+use lampo_chain::LampoChainSync;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::event::ln::LightningEvent;
+use lampo_common::event::Event;
+use lampo_common::handler::Handler;
 use lampo_common::json;
+use lampo_common::model::request;
 use lampo_common::model::response;
+use lampo_httpd::handler::HttpdHandler;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -260,6 +264,62 @@ impl LampoTesting {
             }
 
             Ok(())
+        });
+        Ok(())
+    }
+
+    pub async fn fund_channel_with(
+        &self,
+        counterparty: Arc<LampoTesting>,
+        amount: u64,
+    ) -> error::Result<()> {
+        let mut events = self.lampod().events();
+        let response: json::Value = counterparty
+            .lampod()
+            .call(
+                "fundchannel",
+                request::OpenChannel {
+                    node_id: self.info.node_id.clone(),
+                    amount: 100000,
+                    public: true,
+                    port: Some(self.port.into()),
+                    addr: Some("127.0.0.1".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(response.get("tx").is_some(), "{:?}", response);
+        self.fund_wallet(10).await.unwrap();
+
+        async_wait!(async {
+            while let Some(event) = events.recv().await {
+                log::info!(target: "tests", "Event received {:?}", event);
+                if let Event::Lightning(LightningEvent::ChannelReady {
+                    counterparty_node_id,
+                    ..
+                }) = event
+                {
+                    if counterparty_node_id.to_string() != counterparty.info.node_id.to_string() {
+                        return Err(());
+                    }
+                    return Ok(());
+                };
+                // check if lampo see the channel
+                let channels: response::Channels = self
+                    .lampod()
+                    .call("channels", json::json!({}))
+                    .await
+                    .unwrap();
+                log::info!(target: "tests", "Channels {:?}", channels);
+                if channels.channels.is_empty() {
+                    return Err(());
+                }
+
+                if channels.channels.first().unwrap().ready {
+                    return Ok(());
+                }
+            }
+            Err(())
         });
         Ok(())
     }
