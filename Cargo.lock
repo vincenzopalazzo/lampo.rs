@@ -1695,7 +1695,7 @@ dependencies = [
 [[package]]
 name = "lightning"
 version = "0.0.124"
-source = "git+https://github.com/tankyleo/rust-lightning.git?rev=ad462bd9c8237e505f463c227c9ac98ebd3fbb16#ad462bd9c8237e505f463c227c9ac98ebd3fbb16"
+source = "git+https://github.com/tankyleo/rust-lightning.git?branch=2025-01-signer-spks#bb13acbab0542b1025b2cc22a0311e246cd7e026"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -1711,7 +1711,7 @@ dependencies = [
 [[package]]
 name = "lightning-background-processor"
 version = "0.0.124"
-source = "git+https://github.com/tankyleo/rust-lightning.git?rev=ad462bd9c8237e505f463c227c9ac98ebd3fbb16#ad462bd9c8237e505f463c227c9ac98ebd3fbb16"
+source = "git+https://github.com/tankyleo/rust-lightning.git?branch=2025-01-signer-spks#bb13acbab0542b1025b2cc22a0311e246cd7e026"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -1723,7 +1723,7 @@ dependencies = [
 [[package]]
 name = "lightning-block-sync"
 version = "0.0.124"
-source = "git+https://github.com/tankyleo/rust-lightning.git?rev=ad462bd9c8237e505f463c227c9ac98ebd3fbb16#ad462bd9c8237e505f463c227c9ac98ebd3fbb16"
+source = "git+https://github.com/tankyleo/rust-lightning.git?branch=2025-01-signer-spks#bb13acbab0542b1025b2cc22a0311e246cd7e026"
 dependencies = [
  "bitcoin",
  "chunked_transfer",
@@ -1734,7 +1734,7 @@ dependencies = [
 [[package]]
 name = "lightning-invoice"
 version = "0.32.0"
-source = "git+https://github.com/tankyleo/rust-lightning.git?rev=ad462bd9c8237e505f463c227c9ac98ebd3fbb16#ad462bd9c8237e505f463c227c9ac98ebd3fbb16"
+source = "git+https://github.com/tankyleo/rust-lightning.git?branch=2025-01-signer-spks#bb13acbab0542b1025b2cc22a0311e246cd7e026"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -1744,7 +1744,7 @@ dependencies = [
 [[package]]
 name = "lightning-net-tokio"
 version = "0.0.124"
-source = "git+https://github.com/tankyleo/rust-lightning.git?rev=ad462bd9c8237e505f463c227c9ac98ebd3fbb16#ad462bd9c8237e505f463c227c9ac98ebd3fbb16"
+source = "git+https://github.com/tankyleo/rust-lightning.git?branch=2025-01-signer-spks#bb13acbab0542b1025b2cc22a0311e246cd7e026"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -1754,7 +1754,7 @@ dependencies = [
 [[package]]
 name = "lightning-persister"
 version = "0.0.124"
-source = "git+https://github.com/tankyleo/rust-lightning.git?rev=ad462bd9c8237e505f463c227c9ac98ebd3fbb16#ad462bd9c8237e505f463c227c9ac98ebd3fbb16"
+source = "git+https://github.com/tankyleo/rust-lightning.git?branch=2025-01-signer-spks#bb13acbab0542b1025b2cc22a0311e246cd7e026"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -1764,7 +1764,7 @@ dependencies = [
 [[package]]
 name = "lightning-rapid-gossip-sync"
 version = "0.0.124"
-source = "git+https://github.com/tankyleo/rust-lightning.git?rev=ad462bd9c8237e505f463c227c9ac98ebd3fbb16#ad462bd9c8237e505f463c227c9ac98ebd3fbb16"
+source = "git+https://github.com/tankyleo/rust-lightning.git?branch=2025-01-signer-spks#bb13acbab0542b1025b2cc22a0311e246cd7e026"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -1775,7 +1775,7 @@ dependencies = [
 [[package]]
 name = "lightning-types"
 version = "0.1.0"
-source = "git+https://github.com/tankyleo/rust-lightning.git?rev=ad462bd9c8237e505f463c227c9ac98ebd3fbb16#ad462bd9c8237e505f463c227c9ac98ebd3fbb16"
+source = "git+https://github.com/tankyleo/rust-lightning.git?branch=2025-01-signer-spks#bb13acbab0542b1025b2cc22a0311e246cd7e026"
 dependencies = [
  "bitcoin",
 ]
@@ -2155,7 +2155,7 @@ dependencies = [
 [[package]]
 name = "possiblyrandom"
 version = "0.2.0"
-source = "git+https://github.com/tankyleo/rust-lightning.git?rev=ad462bd9c8237e505f463c227c9ac98ebd3fbb16#ad462bd9c8237e505f463c227c9ac98ebd3fbb16"
+source = "git+https://github.com/tankyleo/rust-lightning.git?branch=2025-01-signer-spks#bb13acbab0542b1025b2cc22a0311e246cd7e026"
 dependencies = [
  "getrandom 0.2.16",
 ]
