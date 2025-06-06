@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 lampo-common = { path = "../lampo-common" }
 lampod = { path = "../lampod" }
-lightning-block-sync = { version = "0.1", features = [ "rpc-client" ] }
+lightning-block-sync = { git = "https://github.com/tankyleo/rust-lightning.git", rev = "ad462bd9c8237e505f463c227c9ac98ebd3fbb16", features = [ "rpc-client" ] }
 log = "0.4.17"
 tokio ={ version = "*"}
 base64 = "*"

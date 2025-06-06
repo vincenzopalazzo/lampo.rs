@@ -1,9 +1,9 @@
 use std::{sync::Arc, time::SystemTime};
 
 use bitcoin::secp256k1::{Secp256k1, SecretKey};
-use lightning::bolt11_invoice;
 use lightning::sign::{InMemorySigner, NodeSigner, OutputSpender, SignerProvider};
 
+use crate::ldk::invoice;
 use crate::ldk::sign::{EntropySource, KeysManager};
 
 /// Lampo keys implementations
@@ -146,7 +146,7 @@ impl NodeSigner for LampoKeysManager {
 
     fn sign_invoice(
         &self,
-        invoice: &bolt11_invoice::RawBolt11Invoice,
+        invoice: &invoice::RawBolt11Invoice,
         recipient: lightning::sign::Recipient,
     ) -> Result<bitcoin::secp256k1::ecdsa::RecoverableSignature, ()> {
         self.inner.sign_invoice(invoice, recipient)
