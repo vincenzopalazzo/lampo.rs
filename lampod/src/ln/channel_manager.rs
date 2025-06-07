@@ -40,13 +40,14 @@ use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
 use crate::actions::handler::LampoHandler;
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
-use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
+
+use lampo_common::ldk::util::persist::KVStore;
 
 pub struct LampoChannelManager {
     monitor: RefCell<Option<Arc<LampoChainMonitor>>>,
     wallet_manager: Arc<dyn WalletManager>,
-    persister: Arc<LampoPersistence>,
+    persister: Arc<dyn KVStore + Send + Sync>,
     graph: RefCell<Option<Arc<LampoGraph>>>,
     score: RefCell<Option<Arc<Mutex<LampoScorer>>>>,
     handler: RefCell<Option<Arc<LampoHandler>>>,
@@ -72,7 +73,7 @@ impl LampoChannelManager {
         logger: Arc<LampoLogger>,
         onchain: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
-        persister: Arc<LampoPersistence>,
+        persister: Arc<dyn KVStore + Send + Sync>,
     ) -> Self {
         LampoChannelManager {
             conf: conf.to_owned(),

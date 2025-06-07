@@ -28,6 +28,10 @@ pub struct LampoConf {
     pub api_port: u64,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
+    pub persistence_backend: String,
+    pub vss_endpoint: Option<String>,
+    pub vss_store_id: Option<String>,
+    pub vss_auth_token: Option<String>,
 }
 
 impl Default for LampoConf {
@@ -60,6 +64,10 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             dev_sync: None,
+            persistence_backend: "filesystem".to_owned(),
+            vss_endpoint: None,
+            vss_store_id: None,
+            vss_auth_token: None,
         }
     }
 }
@@ -249,6 +257,16 @@ impl TryFrom<String> for LampoConf {
             .get_conf("dev-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+
+        // Parse persistence configuration
+        let persistence_backend = conf
+            .get_conf("persistence-backend")
+            .unwrap_or(None)
+            .unwrap_or("filesystem".to_owned());
+        let vss_endpoint = conf.get_conf("vss-endpoint").unwrap_or(None);
+        let vss_store_id = conf.get_conf("vss-store-id").unwrap_or(None);
+        let vss_auth_token = conf.get_conf("vss-auth-token").unwrap_or(None);
+
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -269,6 +287,10 @@ impl TryFrom<String> for LampoConf {
             api_port,
             reindex,
             dev_sync,
+            persistence_backend,
+            vss_endpoint,
+            vss_store_id,
+            vss_auth_token,
         })
     }
 }

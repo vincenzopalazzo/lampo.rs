@@ -41,8 +41,9 @@ use crate::actions::Handler;
 use crate::chain::LampoChainManager;
 use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::persistence::LampoPersistence;
+use crate::persistence::{LampoPersistence, PersistenceFactory, VSSConfig};
 use crate::utils::logger::LampoLogger;
+use lampo_common::persist::Persister;
 
 pub(crate) type P2PGossipSync =
     ldk::routing::gossip::P2PGossipSync<Arc<LampoGraph>, Arc<LampoChainManager>, Arc<LampoLogger>>;
@@ -67,6 +68,7 @@ pub struct LampoDaemon {
     offchain_manager: Option<Arc<OffchainManager>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
+    generic_persister: Option<Arc<dyn Persister>>,
     handler: Option<Arc<LampoHandler>>,
     process: Cell<Option<BackgroundProcessor>>,
 }
@@ -81,6 +83,7 @@ impl LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
             persister: Arc::new(LampoPersistence::new(root_path.into())),
+            generic_persister: None,
             peer_manager: None,
             onchain_manager: None,
             channel_manager: None,
@@ -90,6 +93,51 @@ impl LampoDaemon {
             handler: None,
             process: Cell::new(None),
         }
+    }
+
+    /// Initialize the persistence layer based on configuration
+    pub async fn init_persistence(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "initializing persistence backend: {}", self.conf.persistence_backend);
+
+        let persister: Arc<dyn Persister> = match self.conf.persistence_backend.as_str() {
+            "filesystem" => {
+                let fs_persister = PersistenceFactory::filesystem(&self.conf.path());
+                fs_persister.initialize().await?;
+                fs_persister
+            }
+            "vss" => {
+                let vss_config = VSSConfig {
+                    endpoint: self
+                        .conf
+                        .vss_endpoint
+                        .clone()
+                        .ok_or_else(|| error::anyhow!("VSS endpoint not configured"))?,
+                    store_id: self
+                        .conf
+                        .vss_store_id
+                        .clone()
+                        .ok_or_else(|| error::anyhow!("VSS store ID not configured"))?,
+                    auth_token: self.conf.vss_auth_token.clone(),
+                    headers: std::collections::HashMap::new(),
+                    encryption_key: None, // TODO: Derive from wallet seed
+                };
+                let vss_persister = PersistenceFactory::vss(vss_config);
+                vss_persister.initialize().await?;
+                vss_persister
+            }
+            backend => {
+                error::bail!("Unsupported persistence backend: {}", backend);
+            }
+        };
+
+        self.generic_persister = Some(persister);
+        log::info!(target: "lampod", "persistence backend '{}' initialized successfully", self.conf.persistence_backend);
+        Ok(())
+    }
+
+    /// Get the generic persister instance
+    pub fn generic_persister(&self) -> Option<Arc<dyn Persister>> {
+        self.generic_persister.clone()
     }
 
     pub fn root_path(&self) -> String {
@@ -113,12 +161,21 @@ impl LampoDaemon {
 
     pub async fn init_channeld(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init channeld ...");
+
+        // Create LDK adapter using the generic persister
+        let ldk_persister = if let Some(generic_persister) = &self.generic_persister {
+            PersistenceFactory::ldk_adapter(generic_persister.clone())
+        } else {
+            // Fallback to filesystem persister for backward compatibility
+            error::bail!("Generic persister not initialized. Call init_persistence() first.");
+        };
+
         let manager = LampoChannelManager::new(
             &self.conf,
             self.logger.clone(),
             self.onchain_manager(),
             self.wallet_manager.clone(),
-            self.persister.clone(),
+            ldk_persister,
         );
         self.channel_manager = Some(Arc::new(manager));
         self.channel_manager().listen().await?;
@@ -197,6 +254,7 @@ impl LampoDaemon {
 
     pub async fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         log::debug!(target: "lampod", "init lampod ...");
+        self.init_persistence().await?;
         self.init_onchaind(client.clone())?;
         self.init_channeld().await?;
         self.init_offchain_manager()?;

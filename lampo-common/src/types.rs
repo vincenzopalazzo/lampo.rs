@@ -13,6 +13,7 @@ use crate::ldk::routing::gossip::NetworkGraph;
 use crate::ldk::routing::router::DefaultRouter;
 use crate::ldk::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
 use crate::ldk::sign::InMemorySigner;
+use crate::ldk::util::persist::KVStore;
 
 use crate::keys::LampoKeysManager;
 use crate::utils::logger::LampoLogger;
@@ -26,7 +27,7 @@ pub type LampoChainMonitor = ChainMonitor<
     Arc<dyn BroadcasterInterface + Send + Sync>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoLogger>,
-    Arc<FilesystemStore>,
+    Arc<dyn KVStore + Send + Sync>,
 >;
 
 pub type LampoArcChannelManager<M, L> = ChannelManager<
