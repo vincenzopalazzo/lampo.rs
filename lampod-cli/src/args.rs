@@ -1,53 +1,62 @@
-use radicle_term as term;
+use clap::Parser;
 
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::error;
 
-struct Help {
-    name: &'static str,
-    description: &'static str,
-    version: &'static str,
-    usage: &'static str,
-}
-
-const HELP: Help = Help {
-    name: "lampod-cli",
-    description: "Lampo Daemon command line",
-    version: env!("CARGO_PKG_VERSION"),
-    usage: r#"
-Usage
-
-    lampod-cli [<option> ...]
-
-Options
-
-    -d | --data-dir    Override the default path of the config field
-    -n | --network     Set the network for lampo
-    -h | --help        Print help
-
-    --log-file         Redirect the lampo logs on the file
-    --log-level        Set the log level, by default is `info`
-    --client           Set the default lampo bitcoin backend
-    --core-url         Set the url of the bitcoin core backend
-    --core-user        Set the username of the bitcoin core backend
-    --core-pass        Set the password of the bitcoin core backend
-    --restore-wallet   Restore a wallet from a mnemonic
-"#,
-};
-
-#[derive(Debug)]
+#[derive(Parser, Debug)]
+#[command(
+    name = "lampod-cli",
+    about = "Lampo Daemon command line",
+    version = env!("CARGO_PKG_VERSION"),
+    long_about = None
+)]
 pub struct LampoCliArgs {
+    /// Override the default path of the config field
+    #[arg(short = 'd', long = "data-dir")]
     pub data_dir: Option<String>,
+
+    /// Set the network for lampo
+    #[arg(short = 'n', long = "network")]
     pub network: Option<String>,
+
+    /// Set the default lampo bitcoin backend
+    #[arg(long = "client")]
     pub client: Option<String>,
+
+    /// Restore a wallet from a mnemonic
+    #[arg(long = "restore-wallet")]
     pub restore_wallet: bool,
+
+    /// Set the log level, by default is `info`
+    #[arg(long = "log-level")]
     pub log_level: Option<String>,
+
+    /// Redirect the lampo logs on the file
+    #[arg(long = "log-file")]
     pub log_file: Option<String>,
+
+    /// Set the url of the bitcoin core backend
+    #[arg(long = "core-url")]
     pub bitcoind_url: Option<String>,
+
+    /// Set the username of the bitcoin core backend
+    #[arg(long = "core-user")]
     pub bitcoind_user: Option<String>,
+
+    /// Set the password of the bitcoin core backend
+    #[arg(long = "core-pass")]
     pub bitcoind_pass: Option<String>,
+
+    /// Force polling in development mode
+    #[arg(long = "dev-force-poll", hide = true)]
     pub dev_force_poll: bool,
+
+    /// Set the API host
+    #[arg(long = "api-host")]
     pub api_host: Option<String>,
+
+    /// Set the API port
+    #[arg(long = "api-port")]
     pub api_port: Option<u64>,
 }
 
@@ -103,114 +112,6 @@ impl TryInto<LampoConf> for LampoCliArgs {
     }
 }
 
-pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
-    use lexopt::prelude::*;
-
-    let mut data_dir: Option<String> = None;
-    let mut log_file: Option<String> = None;
-    let mut level: Option<String> = None;
-    let mut network: Option<String> = None;
-    let mut client: Option<String> = None;
-    let mut bitcoind_url: Option<String> = None;
-    let mut bitcoind_user: Option<String> = None;
-    let mut bitcoind_pass: Option<String> = None;
-    let mut restore_wallet = false;
-    let mut dev_force_poll = false;
-    let mut api_host: Option<String> = None;
-    let mut api_port: Option<u64> = None;
-
-    let mut parser = lexopt::Parser::from_env();
-    while let Some(arg) = parser.next()? {
-        match arg {
-            Short('d') | Long("data-dir") => {
-                let val: String = parser.value()?.parse()?;
-                data_dir = Some(val);
-            }
-            Long("log-file") => {
-                let val: String = parser.value()?.parse()?;
-                log_file = Some(val);
-            }
-            Long("log-level") => {
-                let val: String = parser.value()?.parse()?;
-                level = Some(val);
-            }
-            Short('n') | Long("network") => {
-                let val: String = parser.value()?.parse()?;
-                network = Some(val);
-            }
-            Long("client") => {
-                let var: String = parser.value()?.parse()?;
-                client = Some(var);
-            }
-            Long("core-url") => {
-                let var: String = parser.value()?.parse()?;
-                bitcoind_url = Some(var);
-            }
-            Long("core-user") => {
-                let var: String = parser.value()?.parse()?;
-                bitcoind_user = Some(var);
-            }
-            Long("core-pass") => {
-                let var: String = parser.value()?.parse()?;
-                bitcoind_pass = Some(var);
-            }
-            Long("restore-wallet") => {
-                restore_wallet = true;
-            }
-            // FIXME: allow only in debug mode
-            Long("dev-force-poll") => dev_force_poll = true,
-            Long("api-host") => {
-                let var: String = parser.value()?.parse()?;
-                api_host = Some(var);
-            }
-            Long("api-port") => {
-                let var: u64 = parser.value()?.parse()?;
-                api_port = Some(var);
-            }
-            Long("help") => {
-                let _ = print_help();
-                std::process::exit(0);
-            }
-            _ => return Err(arg.unexpected()),
-        }
-    }
-
-    Ok(LampoCliArgs {
-        data_dir,
-        network,
-        client,
-        restore_wallet,
-        log_file,
-        bitcoind_url,
-        bitcoind_pass,
-        bitcoind_user,
-        // Default log level is info if it is not specified
-        // in the command line
-        log_level: level,
-        dev_force_poll,
-        api_host,
-        api_port,
-    })
-}
-
-// Print helps
-pub fn print_help() -> error::Result<()> {
-    println!(
-        "{}",
-        term::format::secondary("Common `lampod-cli` commands used to init the lampo daemon")
-    );
-    println!(
-        "\n{} {}",
-        term::format::bold("Usage:"),
-        term::format::dim("lampod-cli <command> [--help]")
-    );
-    println!();
-
-    println!(
-        "\t{} {}",
-        term::format::bold(format!("{:-12}", HELP.name)),
-        term::format::dim(HELP.description)
-    );
-    println!("{}", term::format::bold(HELP.usage));
-    Ok(())
+pub fn parse_args() -> Result<LampoCliArgs, error::Error> {
+    Ok(LampoCliArgs::parse())
 }
