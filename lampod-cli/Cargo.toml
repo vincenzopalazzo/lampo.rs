@@ -11,7 +11,7 @@ lampo-chain = { path = "../lampo-chain" }
 lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
 tokio = { version = "1.45.1", features = ["rt", "macros"] }
-lexopt = { version = "0.3" }
+clap = { version = "4.0", features = ["derive"] }
 filelock-rs = "0.1.0-beta.2"
 log = { version = "0.4", features = ["std"] }
 ctrlc = "3.4.0"
