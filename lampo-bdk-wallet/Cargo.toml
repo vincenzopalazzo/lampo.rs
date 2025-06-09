@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 lampo-common = { path = "../lampo-common" }
-bdk_wallet = { version = "1.2", features = ["rusqlite", "keys-bip39"] }
+bdk_wallet = { version = "2.0", features = ["rusqlite", "keys-bip39"] }
 bdk_bitcoind_rpc = { version = "0.18" }
 tokio = { version = "^1.45.1", features = ["rt-multi-thread", "parking_lot", "signal"] }
 tokio-cron-scheduler = { version = "*", features = ["signal"] }
