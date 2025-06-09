@@ -7,6 +7,7 @@ use lightning::types::payment::PaymentPreimage;
 use tokio::sync::Mutex;
 
 use crate::ldk::invoice;
+use crate::ldk::sign::ecdsa::EcdsaChannelSigner;
 use crate::ldk::sign::{EntropySource, KeysManager};
 use crate::wallet::WalletManager;
 
@@ -74,7 +75,8 @@ pub struct LampoKeysManager {
     htlc_base_secret: Option<SecretKey>,
     shachain_seed: Option<[u8; 32]>,
 
-    channel_signer: Option<InMemorySigner>,
+    channel_signer: std::sync::Mutex<Option<InMemorySigner>>,
+    channel_parameters: Mutex<Option<lightning::ln::chan_utils::ChannelTransactionParameters>>,
     /// For customizing the funding transaction we will need to access
     /// the wallet manager if we want to customize the funding transaction
     /// with some special additional information.
@@ -94,8 +96,9 @@ impl LampoKeysManager {
             delayed_payment_base_secret: None,
             htlc_base_secret: None,
             shachain_seed: None,
-            channel_signer: None,
+            channel_signer: std::sync::Mutex::new(None),
             wallet_manager: Mutex::new(None),
+            channel_parameters: Mutex::new(None),
         }
     }
 
@@ -196,23 +199,50 @@ impl OutputSpender for LampoKeysManager {
     }
 }
 
-impl ChannelSigner for LampoKeysManager {
-    fn get_funding_spk(&self) -> ScriptBuf {
-        let wallet_manager_guard = self.wallet_manager.blocking_lock();
-        let wallet_manager = wallet_manager_guard.as_ref().unwrap();
+pub struct LampoChannelSigner {
+    signer: InMemorySigner,
+    channel_parameters: Option<lightning::ln::chan_utils::ChannelTransactionParameters>,
+    pubkeys: lightning::ln::chan_utils::ChannelPublicKeys,
 
-        let channel_parameters = self.get_channel_parameters().unwrap();
-        wallet_manager
-            .build_funding_transaction(channel_parameters)
+    wallet_manager: Arc<dyn WalletManager>,
+}
+
+impl LampoChannelSigner {
+    pub fn new(signer: InMemorySigner, wallet_manager: Arc<dyn WalletManager>) -> Self {
+        let channel_parameters = signer.get_channel_parameters().map(|p| p.clone());
+        let pubkeys = signer.pubkeys().clone();
+        Self {
+            signer,
+            channel_parameters,
+            wallet_manager,
+            pubkeys,
+        }
+    }
+}
+
+impl ChannelSigner for LampoChannelSigner {
+    fn get_funding_spk(&self) -> ScriptBuf {
+        // Access the wallet manager without blocking_lock
+        let rt = tokio::runtime::Handle::current();
+        let wallet_manager_guard = rt.block_on(async { self.wallet_manager.clone() });
+
+        let channel_parameters = self
+            .signer
+            .get_channel_parameters()
+            .map(|p| p.clone())
+            .expect("Channel parameters not set");
+
+        wallet_manager_guard
+            .build_funding_transaction(&channel_parameters)
             .unwrap()
     }
 
     fn get_per_commitment_point(
         &self,
-        _idx: u64,
-        _secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
+        idx: u64,
+        secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
     ) -> Result<bitcoin::secp256k1::PublicKey, ()> {
-        unimplemented!()
+        self.signer.get_per_commitment_point(idx, secp_ctx)
     }
 
     fn validate_holder_commitment(
@@ -221,11 +251,12 @@ impl ChannelSigner for LampoKeysManager {
         _preimages: Vec<PaymentPreimage>,
         _secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
     ) -> Result<(), ()> {
-        unimplemented!()
+        self.signer
+            .validate_holder_commitment(_commitment_tx, _preimages, _secp_ctx)
     }
 
     fn release_commitment_secret(&self, _idx: u64) -> Result<[u8; 32], ()> {
-        unimplemented!()
+        self.signer.release_commitment_secret(_idx)
     }
 
     fn validate_counterparty_revocation(
@@ -233,47 +264,48 @@ impl ChannelSigner for LampoKeysManager {
         _idx: u64,
         _secret: &bitcoin::secp256k1::SecretKey,
     ) -> Result<(), ()> {
-        unimplemented!()
+        self.signer.validate_counterparty_revocation(_idx, _secret)
     }
 
     fn pubkeys(&self) -> &lightning::ln::chan_utils::ChannelPublicKeys {
-        unimplemented!()
+        &self.pubkeys
     }
 
     fn channel_keys_id(&self) -> [u8; 32] {
-        unimplemented!()
+        self.signer.channel_keys_id()
     }
 
     fn provide_channel_parameters(
         &mut self,
-        _channel_parameters: &lightning::ln::chan_utils::ChannelTransactionParameters,
+        channel_parameters: &lightning::ln::chan_utils::ChannelTransactionParameters,
     ) {
-        unimplemented!()
+        self.signer.provide_channel_parameters(channel_parameters);
     }
 
     // New required methods
     fn provide_counterparty_parameters(
         &mut self,
-        _channel_parameters: &lightning::ln::chan_utils::ChannelTransactionParameters,
+        channel_parameters: &lightning::ln::chan_utils::ChannelTransactionParameters,
     ) {
-        unimplemented!()
+        self.signer
+            .provide_counterparty_parameters(channel_parameters);
     }
 
     fn provide_funding_outpoint(
         &mut self,
-        _channel_parameters: &lightning::ln::chan_utils::ChannelTransactionParameters,
+        channel_parameters: &lightning::ln::chan_utils::ChannelTransactionParameters,
     ) {
-        unimplemented!()
+        self.signer.provide_funding_outpoint(channel_parameters);
     }
 
     fn get_channel_parameters(
         &self,
     ) -> Option<&lightning::ln::chan_utils::ChannelTransactionParameters> {
-        unimplemented!()
+        self.signer.get_channel_parameters()
     }
 
     fn get_channel_value_satoshis(&self) -> u64 {
-        unimplemented!()
+        self.signer.get_channel_value_satoshis()
     }
 
     fn punish_revokeable_output(
@@ -285,7 +317,14 @@ impl ChannelSigner for LampoKeysManager {
         _secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
         _revocation_pubkey: &bitcoin::secp256k1::PublicKey,
     ) -> Result<bitcoin::Witness, ()> {
-        unimplemented!()
+        self.signer.punish_revokeable_output(
+            _spending_tx,
+            _input,
+            _amount,
+            _per_commitment_key,
+            _secp_ctx,
+            _revocation_pubkey,
+        )
     }
 
     fn punish_htlc_output(
@@ -298,7 +337,15 @@ impl ChannelSigner for LampoKeysManager {
         _revocation_pubkey: &bitcoin::secp256k1::PublicKey,
         _htlc: &lightning::ln::chan_utils::HTLCOutputInCommitment,
     ) -> Result<bitcoin::Witness, ()> {
-        unimplemented!()
+        self.signer.punish_htlc_output(
+            _spending_tx,
+            _input,
+            _amount,
+            _per_commitment_key,
+            _secp_ctx,
+            _revocation_pubkey,
+            _htlc,
+        )
     }
 
     fn sweep_counterparty_htlc_output(
@@ -311,7 +358,15 @@ impl ChannelSigner for LampoKeysManager {
         _htlc: &lightning::ln::chan_utils::HTLCOutputInCommitment,
         _preimage: Option<&PaymentPreimage>,
     ) -> Result<bitcoin::Witness, ()> {
-        unimplemented!()
+        self.signer.sweep_counterparty_htlc_output(
+            _spending_tx,
+            _input,
+            _amount,
+            _secp_ctx,
+            _per_commitment_point,
+            _htlc,
+            _preimage,
+        )
     }
 
     fn sign_holder_commitment(
@@ -319,7 +374,8 @@ impl ChannelSigner for LampoKeysManager {
         _commitment_tx: &lightning::ln::chan_utils::HolderCommitmentTransaction,
         _secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
     ) -> Result<bitcoin::Witness, ()> {
-        unimplemented!()
+        self.signer
+            .sign_holder_commitment(_commitment_tx, _secp_ctx)
     }
 
     fn sign_holder_htlc_transaction(
@@ -329,7 +385,8 @@ impl ChannelSigner for LampoKeysManager {
         _htlc_descriptor: &lightning::sign::HTLCDescriptor,
         _secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
     ) -> Result<bitcoin::Witness, ()> {
-        unimplemented!()
+        self.signer
+            .sign_holder_htlc_transaction(_htlc_tx, _input, _htlc_descriptor, _secp_ctx)
     }
 
     fn spend_holder_anchor_output(
@@ -338,7 +395,8 @@ impl ChannelSigner for LampoKeysManager {
         _input: usize,
         _secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
     ) -> Result<bitcoin::Witness, ()> {
-        unimplemented!()
+        self.signer
+            .spend_holder_anchor_output(_anchor_tx, _input, _secp_ctx)
     }
 
     fn sign_closing_transaction(
@@ -346,26 +404,68 @@ impl ChannelSigner for LampoKeysManager {
         _closing_tx: &lightning::ln::chan_utils::ClosingTransaction,
         _secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
     ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
-        unimplemented!()
+        self.signer.sign_closing_transaction(_closing_tx, _secp_ctx)
+    }
+}
+
+impl EcdsaChannelSigner for LampoChannelSigner {
+    fn sign_counterparty_commitment(
+        &self,
+        commitment_tx: &lightning::ln::chan_utils::CommitmentTransaction,
+        inbound_htlc_preimages: Vec<PaymentPreimage>,
+        outbound_htlc_preimages: Vec<PaymentPreimage>,
+        secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<
+        (
+            bitcoin::secp256k1::ecdsa::Signature,
+            Vec<bitcoin::secp256k1::ecdsa::Signature>,
+        ),
+        (),
+    > {
+        self.signer.sign_counterparty_commitment(
+            commitment_tx,
+            inbound_htlc_preimages,
+            outbound_htlc_preimages,
+            secp_ctx,
+        )
+    }
+
+    fn sign_channel_announcement_with_funding_key(
+        &self,
+        msg: &lightning::ln::msgs::UnsignedChannelAnnouncement,
+        secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.signer
+            .sign_channel_announcement_with_funding_key(msg, secp_ctx)
+    }
+
+    fn sign_splicing_funding_input(
+        &self,
+        tx: &bitcoin::Transaction,
+        input_index: usize,
+        input_value: u64,
+        secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
+    ) -> Result<bitcoin::secp256k1::ecdsa::Signature, ()> {
+        self.signer
+            .sign_splicing_funding_input(tx, input_index, input_value, secp_ctx)
     }
 }
 
 impl SignerProvider for LampoKeysManager {
-    // FIXME: this should be the same of the inner
-    type EcdsaSigner = InMemorySigner;
+    type EcdsaSigner = LampoChannelSigner;
 
     fn derive_channel_signer(
         &self,
         channel_value_satoshis: u64,
         channel_keys_id: [u8; 32],
     ) -> Self::EcdsaSigner {
-        if self.funding_key.is_some() {
+        let signer = if self.funding_key.is_some() {
             // FIXME(vincenzopalazzo): make this a general
             let commitment_seed = [
                 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
                 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
             ];
-            return InMemorySigner::new(
+            InMemorySigner::new(
                 &Secp256k1::new(),
                 self.funding_key.unwrap(),
                 self.revocation_base_secret.unwrap(),
@@ -376,10 +476,15 @@ impl SignerProvider for LampoKeysManager {
                 channel_value_satoshis,
                 channel_keys_id,
                 self.shachain_seed.unwrap(),
-            );
-        }
-        self.inner
-            .derive_channel_signer(channel_value_satoshis, channel_keys_id)
+            )
+        } else {
+            self.inner
+                .derive_channel_signer(channel_value_satoshis, channel_keys_id)
+        };
+
+        // Get wallet manager safely with runtime blocking
+        let wallet_manager = self.wallet_manager.blocking_lock().clone().unwrap();
+        LampoChannelSigner::new(signer, wallet_manager)
     }
 
     fn generate_channel_keys_id(
@@ -404,6 +509,13 @@ impl SignerProvider for LampoKeysManager {
         &self,
         reader: &[u8],
     ) -> Result<Self::EcdsaSigner, lightning::ln::msgs::DecodeError> {
-        self.inner.read_chan_signer(reader)
+        let inner_signer = self.inner.read_chan_signer(reader)?;
+
+        // Get wallet manager safely with runtime blocking
+        let rt = tokio::runtime::Handle::current();
+        let wallet_manager =
+            rt.block_on(async { self.wallet_manager.lock().await.clone().unwrap() });
+
+        Ok(LampoChannelSigner::new(inner_signer, wallet_manager))
     }
 }
