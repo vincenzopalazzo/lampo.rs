@@ -13,12 +13,6 @@ use crate::wallet::WalletManager;
 /// Lampo keys implementations
 pub struct LampoKeys {
     pub keys_manager: Arc<LampoKeysManager>,
-    /// For customizing the funding transaction we will need to access
-    /// the wallet manager if we want to customize the funding transaction
-    /// with some special additional information.
-    ///
-    /// E.g: Allowing ARK factory channels!
-    pub wallet_manager: Mutex<Option<Arc<dyn WalletManager>>>,
 }
 
 impl LampoKeys {
@@ -34,13 +28,11 @@ impl LampoKeys {
                 start_time.as_secs(),
                 start_time.subsec_nanos(),
             )),
-            wallet_manager: Mutex::new(None),
         }
     }
 
-    pub async fn with_wallet_manager(self, wallet_manager: Arc<dyn WalletManager>) -> Self {
-        self.wallet_manager.lock().await.replace(wallet_manager);
-        self
+    pub async fn with_wallet_manager(&self, wallet_manager: Arc<dyn WalletManager>) {
+        self.keys_manager.with_wallet_manager(wallet_manager).await;
     }
 
     // FIXME: add this under a feature flag
@@ -64,7 +56,6 @@ impl LampoKeys {
         );
         LampoKeys {
             keys_manager: Arc::new(manager),
-            wallet_manager: Mutex::new(None),
         }
     }
 
@@ -84,6 +75,12 @@ pub struct LampoKeysManager {
     shachain_seed: Option<[u8; 32]>,
 
     channel_signer: Option<InMemorySigner>,
+    /// For customizing the funding transaction we will need to access
+    /// the wallet manager if we want to customize the funding transaction
+    /// with some special additional information.
+    ///
+    /// E.g: Allowing ARK factory channels!
+    wallet_manager: Mutex<Option<Arc<dyn WalletManager>>>,
 }
 
 impl LampoKeysManager {
@@ -98,7 +95,12 @@ impl LampoKeysManager {
             htlc_base_secret: None,
             shachain_seed: None,
             channel_signer: None,
+            wallet_manager: Mutex::new(None),
         }
+    }
+
+    pub async fn with_wallet_manager(&self, wallet_manager: Arc<dyn WalletManager>) {
+        *self.wallet_manager.lock().await = Some(wallet_manager);
     }
 
     // FIXME: put this under a debug a feature flag like `unsafe_channel_keys`
@@ -196,8 +198,9 @@ impl OutputSpender for LampoKeysManager {
 
 impl ChannelSigner for LampoKeysManager {
     fn get_funding_spk(&self) -> ScriptBuf {
-        // TODO: this should be the one that will be customized by the wallet manager
-        unimplemented!()
+        let wallet_manager_guard = self.wallet_manager.blocking_lock();
+        let wallet_manager = wallet_manager_guard.as_ref().unwrap();
+        wallet_manager.build_funding_transaction().unwrap()
     }
 
     fn get_per_commitment_point(
