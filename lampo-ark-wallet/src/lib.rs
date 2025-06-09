@@ -7,7 +7,10 @@ use lampo_common::bitcoin::PublicKey;
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::{
     Amount, BlockHash, FeeRate, Script, ScriptBuf, Sequence, Transaction, XOnlyPublicKey,
-    opcodes::all::{OP_CHECKMULTISIG, OP_CSV, OP_DROP, OP_PUSHNUM_1, OP_PUSHNUM_2, OP_PUSHNUM_3},
+    opcodes::all::{
+        OP_CHECKMULTISIG, OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CSV, OP_DROP, OP_PUSHNUM_1,
+        OP_PUSHNUM_2, OP_PUSHNUM_3,
+    },
     secp256k1::Secp256k1,
     taproot::TaprootBuilder,
 };
@@ -113,12 +116,12 @@ impl LampoArkWallet {
         server: XOnlyPublicKey,
     ) -> ScriptBuf {
         ScriptBuf::builder()
-            .push_opcode(OP_PUSHNUM_3) // 3-of-3 multisig
             .push_x_only_key(&pk_0)
+            .push_opcode(OP_CHECKSIGVERIFY)
             .push_x_only_key(&pk_1)
+            .push_opcode(OP_CHECKSIGVERIFY)
             .push_x_only_key(&server)
-            .push_opcode(OP_PUSHNUM_3) // 3-of-3 multisig
-            .push_opcode(OP_CHECKMULTISIG)
+            .push_opcode(OP_CHECKSIG)
             .into_script()
     }
 
@@ -131,12 +134,10 @@ impl LampoArkWallet {
             .push_int(locktime.to_consensus_u32() as i64)
             .push_opcode(OP_CSV)
             .push_opcode(OP_DROP)
-            // FIXME: this is correct
-            .push_opcode(OP_PUSHNUM_2)
             .push_x_only_key(&alice)
+            .push_opcode(OP_CHECKSIGVERIFY)
             .push_x_only_key(&bob)
-            .push_opcode(OP_PUSHNUM_2) // 2-of-2 multisig
-            .push_opcode(OP_CHECKMULTISIG)
+            .push_opcode(OP_CHECKSIG)
             .into_script()
     }
 }
@@ -173,7 +174,7 @@ impl WalletManager for LampoArkWallet {
         &self,
         channels_keys: &ChannelTransactionParameters,
     ) -> error::Result<ScriptBuf> {
-        // 3 <pubkey1> <pubkey2> <pubkey3> OP_CHECKMULTISIG
+        // Alice checksigverify Bob checksigverify Server checksig
         let alice_pk = channels_keys.holder_pubkeys.funding_pubkey.serialize();
         let bob_pk = channels_keys
             .counterparty_parameters
@@ -186,7 +187,7 @@ impl WalletManager for LampoArkWallet {
         let bob_pk = XOnlyPublicKey::from_slice(&bob_pk)?;
         let forfeit_script =
             Self::multisig_script(alice_pk.clone(), bob_pk.clone(), self.server_pk);
-        // 2 <pubkey1> <pubkey2> OP_CHECKSIG
+        // timelock CSV drop Alice checksigverify Bob checksig
         let redeem_script = Self::csv_sig_script(self.timelock, alice_pk, bob_pk);
 
         let unspendable_key: PublicKey = UNSPENDABLE_KEY.parse().expect("valid key");
