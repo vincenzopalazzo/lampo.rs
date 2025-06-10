@@ -117,6 +117,7 @@ impl Handler for LampoHandler {
     /// method used to handle the incoming event from ldk
     async fn handle(&self, event: ldk::events::Event) -> error::Result<()> {
         log::debug!(target: "lampo", "handle ldk event: {:?}", event);
+        self.emit(Event::RawLDK(event.clone()));
         match event {
             ldk::events::Event::OpenChannelRequest {
                 temporary_channel_id,
@@ -277,7 +278,6 @@ impl Handler for LampoHandler {
             }
             ldk::events::Event::PaymentSent { .. } => {
                 log::info!("payment sent: `{:?}`", event);
-                self.emit(Event::RawLDK(event.clone()));
                 Ok(())
             },
             ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
@@ -287,8 +287,7 @@ impl Handler for LampoHandler {
                 Ok(())
             },
             _ => {
-                log::error!(target: "lampo::handler", "unhandled ldk event: {:?}", event);
-                self.emit(Event::RawLDK(event));
+                log::warn!(target: "lampo::handler", "unhandled ldk event: {:?}", event);
                 Ok(())
             },
         }
