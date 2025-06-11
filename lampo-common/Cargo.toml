@@ -6,12 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { version = "0.1.4", features = [] }
-lightning-block-sync = { version = "0.1.0" }
-lightning-persister = { version = "0.1.0" }
-lightning-background-processor = { version = "0.1", features = ["futures"] }
-lightning-net-tokio = { version = "0.1.0" }
-lightning-rapid-gossip-sync = { version = "0.1.0" }
+lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-v0.1.4", features = [] }
+lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-v0.1.4" }
+lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-v0.1.4" }
+lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-v0.1.4", features = ["futures"] }
+lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-v0.1.4" }
+lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-v0.1.4" }
 
 async-trait = "0.1"
 bitcoin = { version = "0.32", features = ["serde"] }
