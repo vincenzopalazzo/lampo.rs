@@ -1,9 +1,16 @@
-use clap::Parser;
+// use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::error;
 
-#[derive(Parser, Debug)]
+#[derive(Subcommand, Debug, Clone)]
+pub enum LampoCliSubcommand {
+    /// Create a new wallet and print the mnemonic
+    NewWallet,
+}
+
+#[derive(Parser, Debug, Clone)]
 #[command(
     name = "lampod-cli",
     about = "Lampo Daemon command line",
@@ -58,6 +65,10 @@ pub struct LampoCliArgs {
     /// Set the API port
     #[arg(long = "api-port")]
     pub api_port: Option<u64>,
+
+    /// Subcommand to run
+    #[command(subcommand)]
+    pub subcommand: Option<LampoCliSubcommand>,
 }
 
 impl TryInto<LampoConf> for LampoCliArgs {
