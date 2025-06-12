@@ -184,205 +184,110 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
     Ok(())
 }
 
-/*
-#[ignore]
-#[test]
-pub fn pay_offer_minimal_offer() -> error::Result<()> {
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn pay_offer_minimal_offer() -> error::Result<()> {
     init();
-    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
-    let btc = Arc::new(btc);
-    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
-    let node2 = Arc::new(LampoTesting::new(btc.clone())?);
+    let node1 = LampoTesting::tmp().await?;
+    let btc = node1.btc.clone();
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
 
-    let events = node1.lampod().events();
-    let _ = node1.fund_wallet(101)?;
-    wait!(|| {
-        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
-            events.recv_timeout(Duration::from_millis(100))
-        else {
-            return Err(());
-        };
-        if height.to_consensus_u32() == 101 {
-            return Ok(());
-        }
-        Err(())
-    });
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
 
-    let response: json::Value = node1
+    let offer: response::Offer = node2
         .lampod()
         .call(
-            "fundchannel",
-            request::OpenChannel {
-                node_id: node2.info.node_id.clone(),
-                amount: 1_000_000,
-                public: true,
-                addr: Some("127.0.0.1".to_owned()),
-                port: Some(node2.port),
+            "offer",
+            request::GenerateOffer {
+                description: None,
+                amount_msat: None,
             },
         )
-        .unwrap();
-    assert!(response.get("tx").is_some());
-
-    wait!(|| {
-        while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
-            node2.fund_wallet(6).unwrap();
-            if let Event::Lightning(LightningEvent::ChannelReady {
-                counterparty_node_id,
-                ..
-            }) = event
-            {
-                if counterparty_node_id.to_string() == node1.info.node_id {
-                    return Err(());
-                }
-                return Ok(());
-            };
-            // check if lampo see the channel
-            let channels: response::Channels =
-                node2.lampod().call("channels", json::json!({})).unwrap();
-            if channels.channels.is_empty() {
-                return Err(());
-            }
-
-            if !channels.channels.first().unwrap().ready {
-                return Err(());
-            }
-
-            let channels: response::Channels =
-                node1.lampod().call("channels", json::json!({})).unwrap();
-
-            if channels.channels.is_empty() {
-                return Err(());
-            }
-
-            if channels.channels.first().unwrap().ready {
-                return Ok(());
-            }
-        }
-        node2.fund_wallet(6).unwrap();
-        Err(())
-    });
-
-    let offer: response::Offer = node2.lampod().call(
-        "offer",
-        request::GenerateOffer {
-            description: None,
-            amount_msat: None,
-        },
-    )?;
+        .await?;
 
     log::info!(target: &node2.info.node_id, "offer generated `{:?}`", offer);
 
-    let pay: response::PayResult = node1.lampod().call(
-        "pay",
-        request::Pay {
-            invoice_str: offer.bolt12,
-            amount: Some(100_000_000),
-        },
-    )?;
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: Some(100_000),
+                bolt12: None,
+            },
+        )
+        .await?;
     log::info!(target: &node1.info.node_id, "payment made `{:?}`", pay);
+    assert_eq!(pay.state, response::PaymentState::Success);
+    assert!(pay.payment_hash.is_some(), "Payment hash should be present");
+    assert_eq!(
+        pay.path.last().unwrap().node_id,
+        node2.info.node_id,
+        "Last hop should be to the destination node"
+    );
     Ok(())
 }
 
-#[ignore]
-#[test]
-pub fn decode_offer() -> error::Result<()> {
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn decode_invoice() -> error::Result<()> {
     init();
-    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
-    let btc = Arc::new(btc);
-    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
-    let node2 = Arc::new(LampoTesting::new(btc.clone())?);
+    let node1 = LampoTesting::tmp().await?;
+    let btc = node1.btc.clone();
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
 
-    let events = node1.lampod().events();
-    let _ = node1.fund_wallet(101)?;
-    wait!(|| {
-        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
-            events.recv_timeout(Duration::from_millis(100))
-        else {
-            return Err(());
-        };
-        if height.to_consensus_u32() == 101 {
-            return Ok(());
-        }
-        Err(())
-    });
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
 
-    let response: json::Value = node1
+    let invoice: response::Invoice = node2
         .lampod()
         .call(
-            "fundchannel",
-            request::OpenChannel {
-                node_id: node2.info.node_id.clone(),
-                amount: 1_000_000,
-                public: true,
-                addr: Some("127.0.0.1".to_owned()),
-                port: Some(node2.port),
+            "invoice",
+            request::GenerateInvoice {
+                description: "test decode".to_owned(),
+                amount_msat: Some(100_000),
+                expiring_in: None,
             },
         )
-        .unwrap();
-    assert!(response.get("tx").is_some());
+        .await?;
 
-    wait!(|| {
-        while let Ok(event) = events.recv_timeout(Duration::from_millis(10)) {
-            node2.fund_wallet(6).unwrap();
-            if let Event::Lightning(LightningEvent::ChannelReady {
-                counterparty_node_id,
-                ..
-            }) = event
-            {
-                if counterparty_node_id.to_string() == node1.info.node_id {
-                    return Err(());
-                }
-                return Ok(());
-            };
-            // check if lampo see the channel
-            let channels: response::Channels =
-                node2.lampod().call("channels", json::json!({})).unwrap();
-            if channels.channels.is_empty() {
-                return Err(());
-            }
+    log::info!(target: &node2.info.node_id, "invoice generated `{:?}`", invoice);
 
-            if !channels.channels.first().unwrap().ready {
-                return Err(());
-            }
-
-            let channels: response::Channels =
-                node1.lampod().call("channels", json::json!({})).unwrap();
-
-            if channels.channels.is_empty() {
-                return Err(());
-            }
-
-            if channels.channels.first().unwrap().ready {
-                return Ok(());
-            }
-        }
-        node2.fund_wallet(6).unwrap();
-        Err(())
-    });
-
-    let offer: response::Offer = node2.lampod().call(
-        "offer",
-        request::GenerateOffer {
-            description: None,
-            amount_msat: None,
-        },
-    )?;
-
-    log::info!(target: &node2.info.node_id, "offer generated `{:?}`", offer);
-
-    let decode: response::Bolt12InvoiceInfo = node2.lampod().call(
-        "decode",
-        request::DecodeInvoice {
-            invoice_str: offer.bolt12,
-        },
-    )?;
+    let decode: response::Bolt11InvoiceInfo = node2
+        .lampod()
+        .call(
+            "decode",
+            request::DecodeInvoice {
+                invoice_str: invoice.bolt11.clone(),
+            },
+        )
+        .await?;
 
     assert_eq!(decode.issuer_id.clone(), Some(node2.info.node_id.clone()));
     log::info!(target: &node2.info.node_id, "decode offer `{:?}`", decode);
+
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: invoice.bolt11,
+                amount: None,
+                bolt12: None,
+            },
+        )
+        .await?;
+    log::info!(target: &node1.info.node_id, "Payment call result from node1: {:?}", pay);
+
+    assert_eq!(pay.state, response::PaymentState::Success);
+    assert!(pay.payment_hash.is_some(), "Payment hash should be present");
+    assert_eq!(
+        pay.path.last().unwrap().node_id,
+        node2.info.node_id,
+        "Last hop should be to the destination node"
+    );
     Ok(())
 }
 
-#[ignore]
+/*
 #[test]
 pub fn decode_offer_hex() -> error::Result<()> {
     init();

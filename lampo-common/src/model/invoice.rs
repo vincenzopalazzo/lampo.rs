@@ -152,7 +152,7 @@ pub mod response {
         // FIXME: missing payment preimage
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize, Apiv2Schema)]
+    #[derive(Debug, Clone, Serialize, Deserialize, Apiv2Schema, PartialEq)]
     pub enum PaymentState {
         Success,
         Pending,
