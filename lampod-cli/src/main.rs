@@ -28,8 +28,26 @@ use crate::args::LampoCliArgs;
 async fn main() -> error::Result<()> {
     log::debug!("Started!");
     let args = args::parse_args()?;
-    run(args).await?;
-    Ok(())
+    match &args.subcommand {
+        Some(crate::args::LampoCliSubcommand::NewWallet) => {
+            // Prepare minimal config for wallet creation (no logger needed)
+            let mut lampo_conf: LampoConf = args.clone().try_into()?;
+            lampo_conf
+                .ldk_conf
+                .channel_handshake_limits
+                .force_announced_channel_preference = false;
+            let lampo_conf = Arc::new(lampo_conf);
+            let client = lampo_conf.node.clone();
+            let client: Arc<dyn Backend> = match client.as_str() {
+                "core" => Arc::new(LampoChainSync::new(lampo_conf.clone())?),
+                _ => error::bail!("client {:?} not supported", client),
+            };
+            let words_path = format!("{}/", lampo_conf.path());
+            create_new_wallet(lampo_conf, client, &words_path).await?;
+            return Ok(());
+        }
+        _ => run(args).await,
+    }
 }
 
 fn write_words_to_file<P: AsRef<Path>>(path: P, words: String) -> error::Result<()> {
@@ -56,6 +74,21 @@ fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
     } else {
         Ok(content)
     }
+}
+
+async fn create_new_wallet(
+    lampo_conf: Arc<LampoConf>,
+    client: Arc<dyn Backend>,
+    words_path: &str,
+) -> error::Result<Arc<dyn WalletManager>> {
+    let (wallet, mnemonic) = match client.kind() {
+        lampo_common::backend::BackendKind::Core => {
+            BDKWalletManager::new(lampo_conf.clone()).await?
+        }
+    };
+    write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic.clone())?;
+    println!("Your new wallet mnemonic is:\n{mnemonic}\nPLEASE BACK IT UP SECURELY!");
+    Ok(Arc::new(wallet))
 }
 
 /// Return the root directory.
@@ -92,14 +125,6 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     };
 
     let words_path = format!("{}/", lampo_conf.path());
-    // There are several case in this if-else, that are:
-    // 1. lampo is running on a fresh os:
-    //   1.1: the user has a wallet, so need to specify `--restore-wallet`
-    //   1.2: the user does not have a wallet so lampo should generate a new seed for it and store it in a file.
-    // 2. lampo is running on os where there is a wallet, lampo will load the seeds from wallet:
-    //   2.1: The user keep specify --restore-wallet, so lampo should return an error an tell the user that there is already a wallet
-    //   2.2: The user do not specify the --restore-wallet, so lampo load from disk the file, if there is no file it return an error
-    // FIXME: there is a problem of code duplication here, we should move this code in utils functions.
     let wallet = if restore_wallet {
         if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
             // Load the mnemonic from the file
@@ -125,12 +150,10 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
                     BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
-
             write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
             wallet
         }
     } else {
-        // If there is a file, we load the wallet with a warning
         if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
             // Load the mnemonic from the file
             log::warn!("Loading from existing wallet");
@@ -142,14 +165,9 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             };
             wallet
         } else {
-            let (wallet, mnemonic) = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    BDKWalletManager::new(lampo_conf.clone()).await?
-                }
-            };
-
-            write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
-            wallet
+            // Use the new function for wallet creation
+            create_new_wallet(lampo_conf.clone(), client.clone(), &words_path).await?;
+            return Ok(());
         }
     };
 
