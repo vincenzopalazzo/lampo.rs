@@ -34,6 +34,9 @@ pub enum LightningEvent {
         state: PaymentState,
         payment_hash: Option<String>,
         path: Vec<PaymentHop>,
+        // if the payment failed, we can provide a reason
+        // to help the user understand what went wrong.
+        reason: Option<String>,
     },
     ChannelEvent {
         state: String,
