@@ -124,6 +124,7 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
             payment_hash,
             path,
             state,
+            reason: _,
         }) = event
         {
             return Ok(json::to_value(PayResult {

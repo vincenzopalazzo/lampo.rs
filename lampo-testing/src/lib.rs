@@ -268,6 +268,9 @@ impl LampoTesting {
         Ok(())
     }
 
+    /// Counterparty fund channel with us
+    /// counterparty is the node that will fund the channel with us
+    /// counterparty -> self and not self -> counterparty
     pub async fn fund_channel_with(
         &self,
         counterparty: Arc<LampoTesting>,
