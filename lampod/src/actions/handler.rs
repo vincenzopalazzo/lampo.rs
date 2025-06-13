@@ -155,10 +155,68 @@ impl Handler for LampoHandler {
                 if let Some(node_id) = counterparty_node_id {
                     log::warn!("closing channels with `{node_id}`");
                 }
+
+                // Provide detailed closure reason based on the ClosureReason enum
+                let detailed_reason = match reason {
+                    ldk::events::ClosureReason::CounterpartyForceClosed { peer_msg } => {
+                        format!("Counterparty force-closed the channel. Peer message: {}", peer_msg)
+                    },
+                    ldk::events::ClosureReason::HolderForceClosed { broadcasted_latest_txn } => {
+                        let broadcast_status = match broadcasted_latest_txn {
+                            Some(true) => "with broadcasting latest transaction",
+                            Some(false) => "without broadcasting latest transaction",
+                            None => "broadcast status unknown"
+                        };
+                        format!("We force-closed the channel {}", broadcast_status)
+                    },
+                    ldk::events::ClosureReason::LegacyCooperativeClosure => {
+                        "Channel closed cooperatively (legacy closure)".to_string()
+                    },
+                    ldk::events::ClosureReason::CounterpartyInitiatedCooperativeClosure => {
+                        "Counterparty initiated cooperative channel closure".to_string()
+                    },
+                    ldk::events::ClosureReason::LocallyInitiatedCooperativeClosure => {
+                        "We initiated cooperative channel closure".to_string()
+                    },
+                    ldk::events::ClosureReason::CommitmentTxConfirmed => {
+                        "Channel closed due to commitment transaction confirmation on-chain".to_string()
+                    },
+                    ldk::events::ClosureReason::FundingTimedOut => {
+                        "Channel funding transaction failed to confirm in time".to_string()
+                    },
+                    ldk::events::ClosureReason::ProcessingError { err } => {
+                        format!("Channel closed due to processing error: {}", err)
+                    },
+                    ldk::events::ClosureReason::DisconnectedPeer => {
+                        "Peer disconnected before funding completed, channel forgotten".to_string()
+                    },
+                    ldk::events::ClosureReason::OutdatedChannelManager => {
+                        "Channel closed due to outdated ChannelManager (ChannelMonitor is newer)".to_string()
+                    },
+                    ldk::events::ClosureReason::CounterpartyCoopClosedUnfundedChannel => {
+                        "Counterparty requested cooperative close of unfunded channel".to_string()
+                    },
+                    ldk::events::ClosureReason::FundingBatchClosure => {
+                        "Channel closed because another channel in the same funding batch closed".to_string()
+                    },
+                    ldk::events::ClosureReason::HTLCsTimedOut => {
+                        "Channel closed due to HTLC timeout".to_string()
+                    },
+                    ldk::events::ClosureReason::PeerFeerateTooLow { peer_feerate_sat_per_kw, required_feerate_sat_per_kw } => {
+                        format!("Channel closed due to peer's feerate too low. Peer feerate: {} sat/kw, Required: {} sat/kw",
+                               peer_feerate_sat_per_kw, required_feerate_sat_per_kw)
+                    },
+                };
+
                 let node_id = counterparty_node_id.map(|id| id.to_string());
                 let txo = channel_funding_txo.map(|txo| txo.to_string());
-                self.emit(Event::Lightning(LightningEvent::CloseChannelEvent { channel_id: channel_id.to_string(), message: reason.to_string(), counterparty_node_id : node_id, funding_utxo : txo}));
-                log::info!("channel `{user_channel_id}` closed with reason: `{reason}`");
+                self.emit(Event::Lightning(LightningEvent::CloseChannelEvent {
+                    channel_id: channel_id.to_string(),
+                    message: detailed_reason.clone(),
+                    counterparty_node_id: node_id,
+                    funding_utxo: txo
+                }));
+                log::info!("channel `{user_channel_id}` closed: {}", detailed_reason);
                 Ok(())
             }
             ldk::events::Event::FundingGenerationReady {
@@ -282,7 +340,58 @@ impl Handler for LampoHandler {
             },
             ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
                 let path = path.hops.iter().map(|hop| PaymentHop::from(hop.clone())).collect::<Vec<PaymentHop>>();
-                let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path };
+                let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path, reason: None };
+                self.emit(Event::Lightning(hop));
+                Ok(())
+            },
+            ldk::events::Event::PaymentFailed { payment_id, payment_hash, reason } => {
+                log::error!("payment failed: {:?} with reason: {:?}", payment_id, reason);
+
+                // Provide detailed failure reason based on PaymentFailureReason enum
+                let detailed_reason = match reason {
+                    Some(ldk::events::PaymentFailureReason::RecipientRejected) => {
+                        "Payment was rejected by the recipient. The destination node refused to accept the payment.".to_string()
+                    },
+                    Some(ldk::events::PaymentFailureReason::UserAbandoned) => {
+                        "Payment was abandoned by the user before completion.".to_string()
+                    },
+                    Some(ldk::events::PaymentFailureReason::RetriesExhausted) => {
+                        "Payment failed after exhausting all retry attempts. No more routes available to try.".to_string()
+                    },
+                    Some(ldk::events::PaymentFailureReason::PaymentExpired) => {
+                        "Payment expired before it could be completed. The invoice or payment request has timed out.".to_string()
+                    },
+                    Some(ldk::events::PaymentFailureReason::RouteNotFound) => {
+                        "No route found to the destination. This could be due to insufficient liquidity, \
+                         network connectivity issues, or the destination being unreachable.".to_string()
+                    },
+                    Some(ldk::events::PaymentFailureReason::UnexpectedError) => {
+                        "Payment failed due to an unexpected error. Please check logs for more details.".to_string()
+                    },
+                    Some(ldk::events::PaymentFailureReason::UnknownRequiredFeatures) => {
+                        "Payment failed due to unknown required features. The destination requires features \
+                         that are not supported by this node.".to_string()
+                    },
+                    Some(ldk::events::PaymentFailureReason::InvoiceRequestExpired) => {
+                        "The invoice request has expired before the payment could be completed.".to_string()
+                    },
+                    Some(ldk::events::PaymentFailureReason::InvoiceRequestRejected) => {
+                        "The invoice request was rejected by the recipient.".to_string()
+                    },
+                    Some(ldk::events::PaymentFailureReason::BlindedPathCreationFailed) => {
+                        "Failed to create a blinded path for the payment. This may indicate routing issues.".to_string()
+                    },
+                    None => {
+                        "Payment failed for an unknown reason.".to_string()
+                    },
+                };
+
+                let hop = LightningEvent::PaymentEvent {
+                    state: PaymentState::Failure,
+                    payment_hash: payment_hash.map(|hash| hash.to_string()),
+                    path: vec![],
+                    reason: Some(detailed_reason)
+                };
                 self.emit(Event::Lightning(hop));
                 Ok(())
             },
