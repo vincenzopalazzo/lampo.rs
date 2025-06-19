@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use lightning::ln::chan_utils::ChannelTransactionParameters;
 
 use crate::bitcoin::absolute::Height;
 use crate::bitcoin::{Amount, FeeRate};
@@ -56,4 +57,16 @@ pub trait WalletManager: Send + Sync {
     /// Run a task for wallet sync operation, this usually need to
     /// be run in a `tokio::spawn(wallet.listen())`.
     async fn listen(self: Arc<Self>) -> error::Result<()>;
+
+    /// Build the funding transaction for a channel.
+    ///
+    /// This is used to build the funding transaction for a channel.
+    /// It is used to build the funding transaction for a channel.
+    /// It is used to build the funding transaction for a channel.
+    fn build_funding_transaction(
+        &self,
+        _channels_keys: &ChannelTransactionParameters,
+    ) -> error::Result<ScriptBuf> {
+        unimplemented!()
+    }
 }

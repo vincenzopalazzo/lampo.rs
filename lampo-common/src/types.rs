@@ -12,16 +12,15 @@ use crate::ldk::persister::fs_store::FilesystemStore;
 use crate::ldk::routing::gossip::NetworkGraph;
 use crate::ldk::routing::router::DefaultRouter;
 use crate::ldk::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
-use crate::ldk::sign::InMemorySigner;
 
-use crate::keys::LampoKeysManager;
+use crate::keys::{LampoChannelSigner, LampoKeysManager};
 use crate::utils::logger::LampoLogger;
 
 pub type NodeId = PublicKey;
 pub type ChannelId = crate::ldk::ln::types::ChannelId;
 
 pub type LampoChainMonitor = ChainMonitor<
-    InMemorySigner,
+    LampoChannelSigner,
     Arc<dyn Filter + Send + Sync>,
     Arc<dyn BroadcasterInterface + Send + Sync>,
     Arc<dyn FeeEstimator + Send + Sync>,
