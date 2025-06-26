@@ -273,17 +273,31 @@ impl LampoTesting {
         counterparty: Arc<LampoTesting>,
         amount: u64,
     ) -> error::Result<()> {
-        let mut events = self.lampod().events();
-        let response: json::Value = counterparty
+        let _: response::Connect = self
+            .lampod()
+            .call(
+                "connect",
+                request::Connect {
+                    node_id: counterparty.info.node_id.clone(),
+                    addr: "127.0.0.1".to_owned(),
+                    port: counterparty.port,
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut events = counterparty.lampod().events();
+
+        let response: json::Value = self
             .lampod()
             .call(
                 "fundchannel",
                 request::OpenChannel {
-                    node_id: self.info.node_id.clone(),
+                    node_id: counterparty.info.node_id.clone(),
                     amount: 100000,
                     public: true,
-                    port: Some(self.port.into()),
-                    addr: Some("127.0.0.1".to_string()),
+                    port: None,
+                    addr: None,
                 },
             )
             .await
@@ -299,13 +313,13 @@ impl LampoTesting {
                     ..
                 }) = event
                 {
-                    if counterparty_node_id.to_string() != counterparty.info.node_id.to_string() {
+                    if counterparty_node_id.to_string() != self.info.node_id.to_string() {
                         return Err(());
                     }
                     return Ok(());
                 };
                 // check if lampo see the channel
-                let channels: response::Channels = self
+                let channels: response::Channels = counterparty
                     .lampod()
                     .call("channels", json::json!({}))
                     .await
