@@ -326,7 +326,8 @@ impl LampoChannelManager {
     }
 
     pub async fn start(&self) -> error::Result<()> {
-        let (block_hash, block_height) = self.onchain.get_best_block().await.unwrap();
+        let (block_hash, block_height) = self.onchain.get_best_block().await
+        .map_err(|err| error::anyhow!("Failed to connect to bitcoind: {:?}. Please ensure bitcoind is running and accessible.", err))?;
         let chain_params = ChainParameters {
             network: self.conf.network,
             best_block: BestBlock {
