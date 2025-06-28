@@ -230,6 +230,8 @@ pub async fn decode_invoice() -> error::Result<()> {
 
     node1.fund_channel_with(node2.clone(), 1_000_000).await?;
 
+    let mut node1_events = node1.lampod().events();
+
     let invoice: response::Invoice = node2
         .lampod()
         .call(
@@ -249,13 +251,42 @@ pub async fn decode_invoice() -> error::Result<()> {
         .call(
             "decode",
             request::DecodeInvoice {
-                invoice_str: invoice.bolt11,
+                invoice_str: invoice.bolt11.clone(),
             },
         )
         .await?;
 
     assert_eq!(decode.issuer_id.clone(), Some(node2.info.node_id.clone()));
     log::info!(target: &node2.info.node_id, "decode offer `{:?}`", decode);
+
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: invoice.bolt11,
+                amount: None,
+                bolt12: None,
+            },
+        )
+        .await?;
+    log::info!(target: &node1.info.node_id, "Payment call result from node1: {:?}", pay);
+
+    async_wait!(async {
+        while let Some(event) = node1_events.recv().await {
+            log::info!(target: "tests", "Event received on node2: {:?}", event);
+            if let Event::Lightning(LightningEvent::PaymentEvent { state, .. }) = event {
+                match state {
+                    response::PaymentState::Success => {
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Err(())
+    });
+
     Ok(())
 }
 
