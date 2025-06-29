@@ -28,6 +28,9 @@ pub struct LampoConf {
     pub api_port: u64,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
+
+    /// Connect the ark API that
+    pub ark_server_api: Option<String>,
 }
 
 impl Default for LampoConf {
@@ -60,6 +63,7 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             dev_sync: None,
+            ark_server_api: None,
         }
     }
 }
@@ -249,6 +253,13 @@ impl TryFrom<String> for LampoConf {
             .get_conf("dev-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+
+        // Parse ark_server_api field
+        let ark_server_api = conf
+            .get_conf("ark-server-api")
+            .unwrap_or(None)
+            .map(|api| api.to_trimmed());
+
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -269,6 +280,7 @@ impl TryFrom<String> for LampoConf {
             api_port,
             reindex,
             dev_sync,
+            ark_server_api,
         })
     }
 }

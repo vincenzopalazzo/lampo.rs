@@ -6,12 +6,22 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-lightning = { version = "0.1.4", features = [] }
-lightning-block-sync = { version = "0.1.0" }
-lightning-persister = { version = "0.1.0" }
-lightning-background-processor = { version = "0.1", features = ["futures"] }
-lightning-net-tokio = { version = "0.1.0" }
-lightning-rapid-gossip-sync = { version = "0.1.0" }
+# Old lightning dependencies (commented out)
+# lightning = { version = "0.1.4", features = [] }
+# lightning-block-sync = { version = "0.1.0" }
+# lightning-persister = { version = "0.1.0" }
+# lightning-background-processor = { version = "0.1", features = ["futures"] }
+# lightning-net-tokio = { version = "0.1.0" }
+# lightning-rapid-gossip-sync = { version = "0.1.0" }
+
+# New lightning dependencies from git repository
+lightning = { git = "https://github.com/tankyleo/rust-lightning.git", branch = "2025-01-signer-spks", features = [] }
+lightning-block-sync = { git = "https://github.com/tankyleo/rust-lightning.git", branch = "2025-01-signer-spks" }
+lightning-persister = { git = "https://github.com/tankyleo/rust-lightning.git", branch = "2025-01-signer-spks" }
+lightning-background-processor = { git = "https://github.com/tankyleo/rust-lightning.git", branch = "2025-01-signer-spks", features = ["futures"] }
+lightning-net-tokio = { git = "https://github.com/tankyleo/rust-lightning.git", branch = "2025-01-signer-spks" }
+lightning-rapid-gossip-sync = { git = "https://github.com/tankyleo/rust-lightning.git", branch = "2025-01-signer-spks" }
+lightning-invoice = { git = "https://github.com/tankyleo/rust-lightning.git", branch = "2025-01-signer-spks" }
 
 async-trait = "0.1"
 bitcoin = { version = "0.32", features = ["serde"] }
