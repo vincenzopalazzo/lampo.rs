@@ -85,12 +85,15 @@ impl LampoArkWallet {
     fn parse_ark_server_info(
         server_info: &ArkServerInfo,
     ) -> error::Result<(XOnlyPublicKey, Sequence)> {
-        // Parse the server public key
+        // Parse the server public key - first decode as hex bytes
         let server_pk_bytes = hex::decode(&server_info.pubkey)
             .map_err(|e| anyhow::anyhow!("Invalid server pubkey hex: {}", e))?;
 
-        let server_pk = XOnlyPublicKey::from_slice(&server_pk_bytes)
+        // Parse as a compressed/uncompressed public key first, then extract x-only key
+        let compressed_pk = PublicKey::from_slice(&server_pk_bytes)
             .map_err(|e| anyhow::anyhow!("Invalid server pubkey: {}", e))?;
+
+        let server_pk = compressed_pk.inner.x_only_public_key().0;
 
         // Parse the unilateral exit delay
         // The API returns this in blocks, but we need to convert to 24 hours (144 blocks for 10min blocks)

@@ -82,7 +82,7 @@ pub struct LampoKeysManager {
     /// with some special additional information.
     ///
     /// E.g: Allowing ARK factory channels!
-    wallet_manager: Mutex<Option<Arc<dyn WalletManager>>>,
+    wallet_manager: std::sync::Mutex<Option<Arc<dyn WalletManager>>>,
 }
 
 impl LampoKeysManager {
@@ -97,13 +97,13 @@ impl LampoKeysManager {
             htlc_base_secret: None,
             shachain_seed: None,
             channel_signer: std::sync::Mutex::new(None),
-            wallet_manager: Mutex::new(None),
+            wallet_manager: std::sync::Mutex::new(None),
             channel_parameters: Mutex::new(None),
         }
     }
 
     pub async fn with_wallet_manager(&self, wallet_manager: Arc<dyn WalletManager>) {
-        *self.wallet_manager.lock().await = Some(wallet_manager);
+        *self.wallet_manager.lock().unwrap() = Some(wallet_manager);
     }
 
     // FIXME: put this under a debug a feature flag like `unsafe_channel_keys`
@@ -483,7 +483,7 @@ impl SignerProvider for LampoKeysManager {
         };
 
         // Get wallet manager safely with runtime blocking
-        let wallet_manager = self.wallet_manager.blocking_lock().clone().unwrap();
+        let wallet_manager = self.wallet_manager.lock().unwrap().clone().unwrap().clone();
         LampoChannelSigner::new(signer, wallet_manager)
     }
 
@@ -510,11 +510,7 @@ impl SignerProvider for LampoKeysManager {
         reader: &[u8],
     ) -> Result<Self::EcdsaSigner, lightning::ln::msgs::DecodeError> {
         let inner_signer = self.inner.read_chan_signer(reader)?;
-
-        // Get wallet manager safely with runtime blocking
-        let rt = tokio::runtime::Handle::current();
-        let wallet_manager =
-            rt.block_on(async { self.wallet_manager.lock().await.clone().unwrap() });
+        let wallet_manager = self.wallet_manager.lock().unwrap().clone().unwrap();
 
         Ok(LampoChannelSigner::new(inner_signer, wallet_manager))
     }
