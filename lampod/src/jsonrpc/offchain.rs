@@ -79,7 +79,8 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
             expiry_time: Some(invoice.expiry_time().as_millis() as u64),
         };
 
-        return Ok(json::to_value(&bolt11_invoice)?);
+        let result = response::DecodeResult::Bolt11(bolt11_invoice);
+        return Ok(json::to_value(&result)?);
     }
 
     if let Ok(offer) = ctx
@@ -87,7 +88,8 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
         .decode::<ldk::offers::offer::Offer>(&request.invoice_str)
     {
         let bolt12_invoice: Bolt12InvoiceInfo = offer.into();
-        return Ok(json::to_value(&bolt12_invoice)?);
+        let result = response::DecodeResult::Bolt12(bolt12_invoice);
+        return Ok(json::to_value(&result)?);
     } else {
         Err(crate::rpc_error!("Not able to decode invoice"))
     }
