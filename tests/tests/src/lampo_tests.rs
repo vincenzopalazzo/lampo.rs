@@ -251,7 +251,7 @@ pub async fn decode_invoice() -> error::Result<()> {
 
     log::info!(target: &node2.info.node_id, "invoice generated `{:?}`", invoice);
 
-    let decode: response::Bolt11InvoiceInfo = node2
+    let decode_result: response::DecodeResult = node2
         .lampod()
         .call(
             "decode",
@@ -260,6 +260,11 @@ pub async fn decode_invoice() -> error::Result<()> {
             },
         )
         .await?;
+
+    let decode: response::Bolt11InvoiceInfo = match decode_result {
+        response::DecodeResult::Bolt11(x) => x,
+        _ => panic!("Should be a bolt11 invoice"),
+    };
 
     assert_eq!(decode.issuer_id.clone(), Some(node2.info.node_id.clone()));
     log::info!(target: &node2.info.node_id, "decode offer `{:?}`", decode);
@@ -287,26 +292,52 @@ pub async fn decode_invoice() -> error::Result<()> {
     Ok(())
 }
 
-/*
-#[test]
-pub fn decode_offer_hex() -> error::Result<()> {
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn decode_offer_hex() -> error::Result<()> {
     init();
-    let btc = async_run!(btc::BtcNode::tmp("regtest"))?;
-    let btc = Arc::new(btc);
-    let node1 = Arc::new(LampoTesting::new(btc.clone())?);
+    let node1 = LampoTesting::tmp().await?;
+    let btc = node1.btc.clone();
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
 
-    // For now I am hardcoding this offer as generating an `offer` from test is broken at this point.
-    let decode: response::Bolt12InvoiceInfo = node1.lampod().call(
-        "decode",
-        request::DecodeInvoice {
-            invoice_str: "lno1qgsyxjtl6luzd9t3pr62xr7eemp6awnejusgf6gw45q75vcfqqqqqqqsespexwyy4tcadvgg89l9aljus6709kx235hhqrk6n8dey98uyuftzdqzrtkahuum7m56dxlnx8r6tffy54004l7kvs7pylmxx7xs4n54986qyqeeuhhunayntt50snmdkq4t7fzsgghpl69v9csgparek8kv7dlp5uqr8ymp5s4z9upmwr2s8xu020d45t5phqc8nljrq8gzsjmurzevawjz6j6rc95xwfvnhgfx6v4c3jha7jwynecrz3y092nn25ek4yl7xp9yu9ry9zqagt0ktn4wwvqg52v9ss9ls22sqyqqestzp2l6decpn87pq96udsvx".to_string(),
-        },
-    )?;
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
 
+    let offer: response::Offer = node2
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: Some("test offer for decode".to_owned()),
+                amount_msat: Some(100_000),
+            },
+        )
+        .await?;
+
+    log::info!(target: &node2.info.node_id, "offer generated `{:?}`", offer);
+
+    let decode_result: response::DecodeResult = node2
+        .lampod()
+        .call(
+            "decode",
+            request::DecodeInvoice {
+                invoice_str: offer.bolt12,
+            },
+        )
+        .await?;
+
+    let decode: response::Bolt12InvoiceInfo = match decode_result {
+        response::DecodeResult::Bolt12(x) => x,
+        _ => panic!("Should be a bolt12 invoice"),
+    };
+
+    assert!(decode.offer_id.len() > 0, "Offer ID should be present");
+    assert_eq!(decode.network, "regtest", "Network should be regtest");
     assert_eq!(
-        decode.offer_id,
-        "34460869549e37748ceaabdcff6284a98266c18052ab2a7e9eb5a1af0a5e5b7d"
+        decode.description,
+        Some("test offer for decode".to_owned()),
+        "Description should match"
     );
+
+    log::info!(target: &node1.info.node_id, "Successfully decoded offer with ID: {}", decode.offer_id);
+
     Ok(())
 }
-*/
