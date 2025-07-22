@@ -91,6 +91,13 @@ pub mod response {
         pub network: String,
     }
 
+    #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
+    #[serde(untagged)]
+    pub enum DecodeResult {
+        Bolt11(Bolt11InvoiceInfo),
+        Bolt12(Bolt12InvoiceInfo),
+    }
+
     impl From<LDKOffer> for Bolt12InvoiceInfo {
         fn from(offer: LDKOffer) -> Self {
             let chains = offer
