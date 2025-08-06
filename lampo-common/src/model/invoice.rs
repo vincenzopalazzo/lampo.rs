@@ -93,9 +93,21 @@ pub mod response {
 
     #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
     #[serde(untagged)]
-    pub enum DecodeResult {
+    pub enum Decode {
         Bolt11(Bolt11InvoiceInfo),
         Bolt12(Bolt12InvoiceInfo),
+    }
+
+    impl From<Bolt11InvoiceInfo> for Decode {
+        fn from(bolt11: Bolt11InvoiceInfo) -> Self {
+            Decode::Bolt11(bolt11)
+        }
+    }
+
+    impl From<Bolt12InvoiceInfo> for Decode {
+        fn from(bolt12: Bolt12InvoiceInfo) -> Self {
+            Decode::Bolt12(bolt12)
+        }
     }
 
     impl From<LDKOffer> for Bolt12InvoiceInfo {

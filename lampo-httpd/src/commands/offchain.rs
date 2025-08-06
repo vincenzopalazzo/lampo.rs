@@ -12,5 +12,5 @@ use crate::{post, AppState, ResultJson};
 post!(invoice, request: request::GenerateInvoice, response: response::Invoice);
 post!(offer, request: request::GenerateOffer, response: response::Offer);
 // FIXME(vincenzopalazzo): the decode should be generic over any kind of string
-post!(decode, request: request::DecodeInvoice, response: response::DecodeResult);
+post!(decode, request: request::DecodeInvoice, response: response::Decode);
 post!(pay, request: request::Pay, response: response::PayResult);

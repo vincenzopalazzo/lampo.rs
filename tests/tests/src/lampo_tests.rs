@@ -251,7 +251,7 @@ pub async fn decode_invoice() -> error::Result<()> {
 
     log::info!(target: &node2.info.node_id, "invoice generated `{:?}`", invoice);
 
-    let decode_result: response::DecodeResult = node2
+    let decode_result: response::Decode = node2
         .lampod()
         .call(
             "decode",
@@ -262,7 +262,7 @@ pub async fn decode_invoice() -> error::Result<()> {
         .await?;
 
     let decode: response::Bolt11InvoiceInfo = match decode_result {
-        response::DecodeResult::Bolt11(x) => x,
+        response::Decode::Bolt11(x) => x,
         _ => panic!("Should be a bolt11 invoice"),
     };
 
@@ -314,18 +314,18 @@ pub async fn decode_offer_hex() -> error::Result<()> {
 
     log::info!(target: &node2.info.node_id, "offer generated `{:?}`", offer);
 
-    let decode_result: response::DecodeResult = node2
+    let decode_result: response::Decode = node2
         .lampod()
         .call(
             "decode",
             request::DecodeInvoice {
-                invoice_str: offer.bolt12,
+                invoice_str: offer.bolt12.clone(),
             },
         )
         .await?;
 
     let decode: response::Bolt12InvoiceInfo = match decode_result {
-        response::DecodeResult::Bolt12(x) => x,
+        response::Decode::Bolt12(x) => x,
         _ => panic!("Should be a bolt12 invoice"),
     };
 
@@ -339,5 +339,31 @@ pub async fn decode_offer_hex() -> error::Result<()> {
 
     log::info!(target: &node1.info.node_id, "Successfully decoded offer with ID: {}", decode.offer_id);
 
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: None,
+                bolt12: None,
+            },
+        )
+        .await?;
+
+    assert_eq!(
+        pay.state,
+        response::PaymentState::Success,
+        "Payment should succeed"
+    );
+    assert!(pay.payment_hash.is_some(), "Payment hash should be present");
+    assert!(!pay.path.is_empty(), "Payment path should not be empty");
+    assert_eq!(
+        pay.path.last().unwrap().node_id,
+        node2.info.node_id,
+        "Last hop should be to the destination node"
+    );
+
+    log::info!(target: &node1.info.node_id, "Payment completed successfully: {:?}", pay);
     Ok(())
 }
