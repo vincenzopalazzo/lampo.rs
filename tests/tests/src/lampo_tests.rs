@@ -329,7 +329,7 @@ pub async fn decode_offer_hex() -> error::Result<()> {
         _ => panic!("Should be a bolt12 invoice"),
     };
 
-    assert!(decode.offer_id.len() > 0, "Offer ID should be present");
+    assert!(!decode.offer_id.is_empty(), "Offer ID should be present");
     assert_eq!(decode.network, "regtest", "Network should be regtest");
     assert_eq!(
         decode.description,
