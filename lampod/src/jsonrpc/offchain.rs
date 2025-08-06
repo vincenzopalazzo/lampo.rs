@@ -11,8 +11,8 @@ use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
 use lampo_common::model::request::Pay;
-use lampo_common::model::response;
 use lampo_common::model::response::PayResult;
+use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
 use lampo_common::{json, model::request::DecodeInvoice};
 
@@ -79,8 +79,7 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
             expiry_time: Some(invoice.expiry_time().as_millis() as u64),
         };
 
-        let result = response::DecodeResult::Bolt11(bolt11_invoice);
-        return Ok(json::to_value(&result)?);
+        return Ok(json::to_value(&Decode::from(bolt11_invoice))?);
     }
 
     if let Ok(offer) = ctx
@@ -88,8 +87,7 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
         .decode::<ldk::offers::offer::Offer>(&request.invoice_str)
     {
         let bolt12_invoice: Bolt12InvoiceInfo = offer.into();
-        let result = response::DecodeResult::Bolt12(bolt12_invoice);
-        return Ok(json::to_value(&result)?);
+        return Ok(json::to_value(&Decode::from(bolt12_invoice))?);
     } else {
         Err(crate::rpc_error!("Not able to decode invoice"))
     }
