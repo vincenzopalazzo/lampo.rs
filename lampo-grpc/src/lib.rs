@@ -1,16 +1,18 @@
+use lampod::LampoDaemon;
 use std::sync::Arc;
 use tonic::transport::Server;
-use lampod::LampoDaemon;
 
-pub const FILE_DESCRIPTOR_SET: &[u8] =
-    tonic::include_file_descriptor_set!("descriptor");
+pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("descriptor");
 
 mod server;
 
 use server::lnrpc::lightning_server::LightningServer;
 use server::GrpcServer;
 
-pub async fn run_grpc(daemon: Arc<LampoDaemon>, addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_grpc(
+    daemon: Arc<LampoDaemon>,
+    addr: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let server = GrpcServer { daemon };
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
