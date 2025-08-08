@@ -94,6 +94,8 @@ async fn create_new_wallet(
 /// Return the root directory.
 async fn run(args: LampoCliArgs) -> error::Result<()> {
     let restore_wallet = args.restore_wallet;
+    let grpc_addr = args.grpc_addr.clone();
+    let is_grpc =  args.enable_lnd_grpc;
 
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
@@ -193,9 +195,12 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let http_daemon = lampod.clone();
     let http_server_future = run_httpd(http_daemon);
     
-    let grpc_daemon = lampod.clone();
-    let grpc_addr = "127.0.0.1:10009".to_string();
-    let grpc_server_future = lampo_grpc::run_grpc(grpc_daemon, &grpc_addr);
+    let grpc_server_future = if is_grpc  {
+        let grpc_daemon = lampod.clone();
+        Some(lampo_grpc::run_grpc(grpc_daemon, &grpc_addr))
+    } else {
+        None
+    };
 
     let ldk_processor_future = lampod.clone().listen();
 
@@ -227,11 +232,18 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             }
         },
         // run the gRPC server
-        res = grpc_server_future => {
-             if let Err(e) = res {
+        res = async {
+            if let Some(fut) = grpc_server_future {
+                fut.await
+            } else {
+                futures::future::pending().await
+            }
+        } => {
+            if let Err(e) = res {
                 log::error!("gRPC server exited with an error: {:?}", e);
             }
         },
+
         _ = rx.recv() => {
             log::info!("Gracefully shutting down...");
         }
