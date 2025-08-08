@@ -17,3 +17,4 @@ filelock-rs = "0.1.0-beta.2"
 log = { version = "0.4", features = ["std"] }
 ctrlc = "3.4.0"
 radicle-term = "0.13.0"
+futures = "0.3"

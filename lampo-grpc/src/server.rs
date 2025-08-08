@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use lampod::jsonrpc::{inventory::json_getinfo, peer_control::json_connect};
 use tonic::{Request, Response, Status, Streaming};
 
 use lampod::LampoDaemon;
@@ -20,12 +21,11 @@ impl Lightning for GrpcServer {
         &self,
         _request: Request<GetInfoRequest>,
     ) -> Result<Response<GetInfoResponse>, Status> {
-        let result_json = self.daemon
-            .call("getinfo", serde_json::json!({}))
+        let result = json_getinfo(&self.daemon, &serde_json::json!({}))
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| Status::internal(format!("getinfo failed: {}", e)))?;
 
-        let lampo_info: lampo_resp::GetInfo = serde_json::from_value(result_json)
+        let lampo_info: lampo_resp::GetInfo = serde_json::from_value(result)
             .map_err(|e| Status::internal(format!("Failed to deserialize daemon response: {}", e)))?;
 
         let grpc_response = GetInfoResponse {
@@ -66,10 +66,9 @@ impl Lightning for GrpcServer {
         let req_json = serde_json::to_value(lampo_connect_req)
             .map_err(|e| Status::internal(format!("Serialization error: {}", e)))?;
 
-        self.daemon
-            .call("connect", req_json)
+        json_connect(&self.daemon, &req_json)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| Status::internal(format!("connect failed: {}", e)))?;
 
         Ok(Response::new(ConnectPeerResponse {}))
     }
