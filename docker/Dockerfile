@@ -22,6 +22,7 @@ RUN apt-get -qq update && \
     autoconf \
     locales \
     libtool \
+    libssl-dev \
     libprotobuf-c-dev \
     libsqlite3-dev \
     libgmp-dev \
@@ -45,7 +46,6 @@ RUN apt-get -qq update && \
     xsltproc \
     pipx \
     jq \
-    libssl-dev \
     zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
@@ -59,6 +59,19 @@ RUN cd /tmp/ && \
     tar -xvzf bitcoin.tar.gz && \
     mv /tmp/bitcoin-$BITCOIN_VERSION/bin/bitcoin* /usr/local/bin/ && \
     rm -rf bitcoin.tar.gz /tmp/bitcoin-$BITCOIN_VERSION
+
+RUN pipx ensurepath
+RUN pipx completions
+RUN echo "eval \"\$(register-python-argcomplete pipx)\"" >> ~/.bashrc
+RUN pipx install poetry --global
+
+RUN git config --global user.name "John Doe" && \
+	git config --global user.email johndoe@example.com && \
+	git clone https://github.com/ElementsProject/lightning.git && \
+    cd lightning && git checkout v25.02.2 && \
+    poetry install --no-root && \
+    poetry run ./configure --disable-rust && \
+    poetry run make -j$(nproc) install
 
 # Install Rust
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
