@@ -115,7 +115,7 @@ pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
     let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
 
     // There is a channel node1 -> node2
-    node1.fund_channel_with(node2.clone(), 100_000_000).await?;
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
 
     let invoice: response::Invoice = node2
         .lampod()
@@ -154,7 +154,7 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
     let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
 
     // There is a channel node1 -> node2
-    node1.fund_channel_with(node2.clone(), 100_000_000).await?;
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
 
     let offer: response::Offer = node2
         .lampod()
