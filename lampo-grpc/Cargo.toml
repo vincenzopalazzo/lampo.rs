@@ -4,15 +4,24 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tonic = "0.11"
-log = "*"
-tonic-reflection = "0.11" 
+# Core gRPC
+tonic = { version = "0.11", features = ["tls"] }
 prost = "0.12"
 serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+tonic-reflection = "0.11"
 futures = "0.3.28"
+tokio-stream = "0.1"
+
+macaroon = "0.3.0"           
+rcgen = "0.13.0"        
+hex = "0.4"
+base64 = "0.22"
+rand = "0.8"
+
 lampo-common = { path = "../lampo-common" }
 lampod = { path = "../lampod" }
-tokio = { version = "1", features = ["rt-multi-thread"] }
+log = "*"
 
 [build-dependencies]
 tonic-build = "0.11"
