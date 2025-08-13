@@ -1,4 +1,3 @@
-/*
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -15,7 +14,7 @@ use lampo_common::model::response::NetworkChannels;
 use lampo_common::model::response::Offer;
 use lampo_common::model::Connect;
 use lampo_common::secp256k1::PublicKey;
-use lampo_testing::prelude::bitcoincore_rpc::RpcApi;
+use lampo_testing::async_wait;
 use lampo_testing::prelude::*;
 
 use lampo_testing::wait;
@@ -24,39 +23,37 @@ use lampo_testing::LampoTesting;
 use crate::init;
 use crate::utils::*;
 
-#[test]
-pub fn init_connection_test() -> error::Result<()> {
+#[tokio_test_shutdown_timeout::test(1)]
+pub async fn init_connection_test_with_cln() -> error::Result<()> {
     init();
-    let cln = async_run!(cln::Node::with_params("--developer", "regtest"))?;
-    let lampo = LampoTesting::new(cln.btc())?;
+    let cln = cln::Node::with_params("--developer").await?;
+    let lampo = LampoTesting::new(cln.btc()).await?;
     let info = cln.rpc().getinfo()?;
     log::debug!("core lightning info {:?}", info);
-    let response: json::Value = lampo.lampod().call(
-        "connect",
-        Connect {
-            node_id: info.id,
-            addr: "127.0.0.1".to_owned(),
-            port: cln.port.into(),
-        },
-    )?;
+    let response: json::Value = lampo
+        .lampod()
+        .call(
+            "connect",
+            Connect {
+                node_id: info.id,
+                addr: "127.0.0.1".to_owned(),
+                port: cln.port.into(),
+            },
+        )
+        .await?;
     log::debug!("lampo connected with cln {:?}", response);
     Ok(())
 }
 
-#[test]
-pub fn fund_a_simple_channel_from_lampo() {
+#[tokio_test_shutdown_timeout::test(1)]
+pub async fn fund_a_simple_channel_from_lampo_to_cln() -> error::Result<()> {
     init();
 
-    let mut cln = async_run!(cln::Node::with_params(
-        "--developer --dev-bitcoind-poll=1 --dev-fast-gossip --dev-allow-localhost",
-        "regtest"
-    ))
-    .unwrap();
-    std::thread::sleep(Duration::from_secs(1));
+    let mut cln = cln::Node::with_params("--developer").await?;
     let btc = cln.btc();
-    let lampo_manager = LampoTesting::new(btc.clone()).unwrap();
+    let lampo_manager = LampoTesting::new(btc.clone()).await?;
     let lampo = lampo_manager.lampod();
-    let info = cln.rpc().getinfo().unwrap();
+    let info = cln.rpc().getinfo()?;
     let _: json::Value = lampo
         .call(
             "connect",
@@ -66,22 +63,9 @@ pub fn fund_a_simple_channel_from_lampo() {
                 port: cln.port.into(),
             },
         )
-        .unwrap();
+        .await?;
 
-    let events = lampo.events();
-    let address = lampo_manager.fund_wallet(101).unwrap();
-    wait!(|| {
-        let Ok(Event::OnChain(OnChainEvent::NewBestBlock((_, height)))) =
-            events.recv_timeout(Duration::from_millis(100))
-        else {
-            return Err(());
-        };
-        if height.to_consensus_u32() == 101 {
-            return Ok(());
-        }
-        Err(())
-    });
-
+    let mut events = lampo.events();
     let response: json::Value = lampo
         .call(
             "fundchannel",
@@ -93,20 +77,26 @@ pub fn fund_a_simple_channel_from_lampo() {
                 addr: Some("127.0.0.1".to_owned()),
             },
         )
-        .unwrap();
+        .await?;
     assert!(response.get("tx").is_some());
 
-    wait!(|| {
-        while let Ok(event) = events.recv_timeout(Duration::from_millis(100)) {
+    // mine some blocks but not enough to confirm the channel
+    lampo_manager.fund_wallet(3).await?;
+    async_wait!(async {
+        while let Some(event) = events.recv().await {
             log::trace!("{:?}", event);
             let Event::Lightning(LightningEvent::ChannelReady { .. }) = event else {
                 log::info!(target: "tests", "event received {:?}", event);
-                let _ = btc.rpc().generate_to_address(1, &address).unwrap();
-                continue;
+                // Confirm now the channel
+                log::warn!(target: "tests", "confirming the channel by mining 3 blocks");
+                lampo_manager.fund_wallet(3).await.unwrap();
+                return Err(());
             };
             log::info!(target: "tests", "channel ready event received");
             // check if lampo see the channel
-            let channels: response::Channels = lampo.call("channels", json::json!({})).unwrap();
+            let channels: response::Channels =
+                lampo.call("channels", json::json!({})).await.unwrap();
+            log::warn!(target: "tests", "channels {:?}", channels);
             if channels.channels.is_empty() {
                 return Err(());
             }
@@ -121,9 +111,7 @@ pub fn fund_a_simple_channel_from_lampo() {
             if channels.len() == origin_size {
                 return Ok(());
             }
-            let address = cln.rpc().newaddr(None).unwrap();
-            fund_wallet(btc.clone(), &address.bech32.unwrap(), 1).unwrap();
-            crate::wait_cln_sync!(cln);
+            log::warn!(target: "tests", "we should generate a new block to an address");
             return Err(());
         }
         Err(())
@@ -131,9 +119,11 @@ pub fn fund_a_simple_channel_from_lampo() {
 
     // looks like that rust is too fast and cln is not able to
     // index all the tx, so this will accept some errors
-    async_run!(cln.stop()).unwrap();
+    cln.stop().await?;
+    Ok(())
 }
 
+/*
 #[test]
 pub fn fund_a_simple_channel_to_lampo() {
     init();

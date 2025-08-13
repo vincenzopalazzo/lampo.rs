@@ -273,6 +273,7 @@ impl LampoTesting {
     /// counterparty -> self and not self -> counterparty
     pub async fn fund_channel_with(
         &self,
+        // FIXME: we should abstract it to a lightning trait
         counterparty: Arc<LampoTesting>,
         amount: u64,
     ) -> error::Result<()> {

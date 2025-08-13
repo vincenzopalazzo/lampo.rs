@@ -10,7 +10,7 @@ lampo-chain = { path = "../lampo-chain" }
 lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
 
-clightning-testing = { git = "https://github.com/laanwj/cln4rust.git", rev = "a4e7cfe88eb2a0bd878446de7143c0e5223318fa"}
+clightning-testing = { git = "https://github.com/laanwj/cln4rust.git"}
 log = "0.4.18"
 tempfile = "3.19.1"
 port-selector = "0.1.6"

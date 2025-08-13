@@ -696,7 +696,7 @@ checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 [[package]]
 name = "clightning-testing"
 version = "0.1.0"
-source = "git+https://github.com/laanwj/cln4rust.git?rev=a4e7cfe88eb2a0bd878446de7143c0e5223318fa#a4e7cfe88eb2a0bd878446de7143c0e5223318fa"
+source = "git+https://github.com/laanwj/cln4rust.git#a4e7cfe88eb2a0bd878446de7143c0e5223318fa"
 dependencies = [
  "anyhow",
  "clightningrpc",
@@ -710,7 +710,7 @@ dependencies = [
 [[package]]
 name = "clightningrpc"
 version = "0.3.0-beta.8"
-source = "git+https://github.com/laanwj/cln4rust.git?rev=a4e7cfe88eb2a0bd878446de7143c0e5223318fa#a4e7cfe88eb2a0bd878446de7143c0e5223318fa"
+source = "git+https://github.com/laanwj/cln4rust.git#a4e7cfe88eb2a0bd878446de7143c0e5223318fa"
 dependencies = [
  "clightningrpc-common",
  "serde",
@@ -720,7 +720,7 @@ dependencies = [
 [[package]]
 name = "clightningrpc-common"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/laanwj/cln4rust.git?rev=a4e7cfe88eb2a0bd878446de7143c0e5223318fa#a4e7cfe88eb2a0bd878446de7143c0e5223318fa"
+source = "git+https://github.com/laanwj/cln4rust.git#a4e7cfe88eb2a0bd878446de7143c0e5223318fa"
 dependencies = [
  "serde",
  "serde_json",
