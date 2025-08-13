@@ -297,7 +297,7 @@ impl LampoTesting {
                 "fundchannel",
                 request::OpenChannel {
                     node_id: counterparty.info.node_id.clone(),
-                    amount: 100000,
+                    amount: amount,
                     public: true,
                     port: None,
                     addr: None,
