@@ -94,7 +94,6 @@ async fn create_new_wallet(
 /// Return the root directory.
 async fn run(args: LampoCliArgs) -> error::Result<()> {
     let restore_wallet = args.restore_wallet;
-    let grpc_addr = args.grpc_addr.clone();
     let is_grpc = args.enable_lnd_grpc;
 
     // After this point the configuration is ready!
@@ -194,6 +193,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let lampod = Arc::new(lampod);
     let http_daemon = lampod.clone();
     let http_server_future = run_httpd(http_daemon);
+    let grpc_addr = format!("{}:{}", lampod.conf().api_host, lampod.conf().api_port);
 
     let grpc_server_future = if is_grpc {
         let grpc_daemon = lampod.clone();

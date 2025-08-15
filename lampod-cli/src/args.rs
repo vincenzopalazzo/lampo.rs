@@ -70,10 +70,6 @@ pub struct LampoCliArgs {
     #[arg(long = "lnd-grpc")]
     pub enable_lnd_grpc: bool,
 
-    /// Set the gRPC server address (default: 127.0.0.1:10009)
-    #[arg(long = "grpc-addr", default_value = "127.0.0.1:10009")]
-    pub grpc_addr: String,
-
     /// Subcommand to run
     #[command(subcommand)]
     pub subcommand: Option<LampoCliSubcommand>,

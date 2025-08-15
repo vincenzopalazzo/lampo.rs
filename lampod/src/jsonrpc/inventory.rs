@@ -49,6 +49,7 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         channels: ctx.channel_manager().manager().list_channels().len(),
         chain,
         alias,
+        color: "#000000".to_string(),
         blockheight,
         block_hash: block_hash.to_string(),
         lampo_dir,

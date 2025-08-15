@@ -49,13 +49,13 @@ impl Lightning for LightningService {
         let lampo_info: GetInfo = serde_json::from_value(result)
             .map_err(|e| Status::internal(format!("Failed to parse response: {}", e)))?;
         
-        // mapping it to lnd formatr
+        // mapping it to lnd format
         let response = GetInfoResponse {
-            version: "lampo-0.1.0-lnd-compat".to_string(),
-            commit_hash: "lampo".to_string(),
+            version: format!("{}-lnd-compat", env!("CARGO_PKG_VERSION")),
+            commit_hash: option_env!("VERGEN_GIT_SHA").unwrap_or(env!("CARGO_PKG_NAME")).to_string(),
             identity_pubkey: lampo_info.node_id,
             alias: lampo_info.alias,
-            color: "#000000".to_string(),
+            color: lampo_info.color,
             num_peers: lampo_info.peers as u32,
             num_active_channels: lampo_info.channels as u32,
             num_pending_channels: 0,
