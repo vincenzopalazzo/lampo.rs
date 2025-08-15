@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     python3 python3-pip libssl-dev \
     autoconf automake pkg-config \
     pipx \
+    protobuf-compiler \
     libtool \
     autoconf \
     automake \

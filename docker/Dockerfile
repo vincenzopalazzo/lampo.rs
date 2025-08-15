@@ -31,6 +31,7 @@ RUN apt-get -qq update && \
     python3 \
     valgrind \
     net-tools \
+    protobuf-compiler \
     python3-mako \
     python3-pip \
     python3-setuptools \

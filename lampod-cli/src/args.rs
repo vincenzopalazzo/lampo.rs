@@ -66,6 +66,10 @@ pub struct LampoCliArgs {
     #[arg(long = "api-port")]
     pub api_port: Option<u64>,
 
+    /// Enable the LND-compatible gRPC server
+    #[arg(long = "lnd-grpc")]
+    pub enable_lnd_grpc: bool,
+
     /// Subcommand to run
     #[command(subcommand)]
     pub subcommand: Option<LampoCliSubcommand>,

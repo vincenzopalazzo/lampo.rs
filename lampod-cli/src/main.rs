@@ -94,6 +94,7 @@ async fn create_new_wallet(
 /// Return the root directory.
 async fn run(args: LampoCliArgs) -> error::Result<()> {
     let restore_wallet = args.restore_wallet;
+    let is_grpc = args.enable_lnd_grpc;
 
     // After this point the configuration is ready!
     let mut lampo_conf: LampoConf = args.try_into()?;
@@ -190,25 +191,64 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
+    let http_daemon = lampod.clone();
+    let http_server_future = run_httpd(http_daemon);
+    let grpc_addr = format!("{}:{}", lampod.conf().api_host, lampod.conf().api_port);
 
-    run_httpd(lampod.clone()).await?;
+    let grpc_server_future = if is_grpc {
+        let grpc_daemon = lampod.clone();
+        Some(lampo_grpc::run_grpc(grpc_daemon, &grpc_addr))
+    } else {
+        None
+    };
+
+    let ldk_processor_future = lampod.clone().listen();
 
     let handler = Arc::new(HttpdHandler::new(format!(
-        "{}:{}",
-        lampo_conf.api_host, lampo_conf.api_port
+        "http://{}:{}",
+        lampod.conf().api_host,
+        lampod.conf().api_port
     ))?);
     lampod.add_external_handler(handler).await?;
 
-    // Handle the shutdown signal and pass down to the lampod.listen()
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
     ctrlc::set_handler(move || {
-        use std::time::Duration;
-        log::info!("Shutdown...");
-        std::thread::sleep(Duration::from_secs(5));
-        std::process::exit(0);
+        log::info!("Shutdown signal received...");
+        let _ = tx.blocking_send(());
     })?;
 
-    log::info!(target: "lampod-cli", "------------ Starting Server ------------");
-    lampod.listen().await??;
+    tokio::select! {
+        // run the LDK processor
+        res = ldk_processor_future => {
+            if let Err(e) = res {
+                log::error!("LDK processor exited with an error: {:?}", e);
+            } else {
+                log::info!("LDK processor exited gracefully.");
+            }
+        },
+        // run the HTTP server
+        res = http_server_future => {
+            if let Err(e) = res {
+                log::error!("HTTP server exited with an error: {:?}", e);
+            }
+        },
+        // run the gRPC server
+        res = async {
+            if let Some(fut) = grpc_server_future {
+                fut.await
+            } else {
+                futures::future::pending().await
+            }
+        } => {
+            if let Err(e) = res {
+                log::error!("gRPC server exited with an error: {:?}", e);
+            }
+        },
+
+        _ = rx.recv() => {
+            log::info!("Gracefully shutting down...");
+        }
+    }
     Ok(())
 }
 
@@ -221,6 +261,6 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
         http_hosting = clean_url.to_string();
     }
     log::info!("preparing httpd api on addr `{url}`");
-    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
+    lampo_httpd::run(lampod, http_hosting, url).await?;
     Ok(())
 }

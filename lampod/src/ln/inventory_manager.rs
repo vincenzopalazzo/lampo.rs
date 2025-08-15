@@ -60,6 +60,7 @@ impl LampoInventoryManager {
             channels: self.channel_manager.manager().list_channels().len(),
             chain,
             alias,
+            color: "#000000".to_string(),
             blockheight,
             lampo_dir,
             address: address_vec,
