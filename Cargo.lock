@@ -2421,9 +2421,9 @@ dependencies = [
 
 [[package]]
 name = "radicle-term"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fd82b00d1e729319fdeccc6a2e37158b01ad32cc8e4dbff40a612ca94a1e311"
+checksum = "16b3c8f129874f75b13c993b98e0b4af69ebe088f7a56a4fe0cc4856df7dde81"
 dependencies = [
  "anstyle-query",
  "anyhow",

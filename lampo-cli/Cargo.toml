@@ -7,6 +7,6 @@ edition = "2021"
 lampo-common = { path = "../lampo-common" }
 log = { version = "0.4", features = ["std"] }
 lexopt = { version = "0.3" }
-radicle-term = "0.13.0"
+radicle-term = "0.14.0"
 elite-rpc =  { version = "0.0.4", features = ["curl"] }
 serde = "*"
