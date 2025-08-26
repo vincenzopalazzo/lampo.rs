@@ -14,5 +14,5 @@ clightning-testing = { git = "https://github.com/laanwj/cln4rust.git"}
 log = "0.4.18"
 tempfile = "3.19.1"
 port-selector = "0.1.6"
-anyhow = "1.0.98"
+anyhow = "1.0.99"
 tokio = { version = "1.47.1", features = ["process", "time", "fs", "rt-multi-thread"] }
