@@ -31,8 +31,8 @@ have rust installed, and then run the following command:
 make install
 ```
 
-After you have `lampod-cli` and `lampo-cli` available, you can
-run the following command to launch Lampo in signet mode:
+After you have `lampod-cli` and `lampo-cli` available, the first time you run
+`lampod-cli` with signet network, it will create a new wallet:
 
 ```
 ➜  ~ lampod-cli --network signet
@@ -41,8 +41,16 @@ run the following command to launch Lampo in signet mode:
 ```
 
 >[!NOTE]
-Store your wallet words, and then reuse them to restore the wallet with `--restore-wallet`.
+Store your wallet words securely. You can use them later to restore the wallet with `--restore-wallet`.
 If you do not store your words anywhere, your funds will be lost the next time Lampo starts!
+
+The second time you run the same command, it will start the Lampo daemon (lampod), which will show continuous logs of the node's activity:
+
+```
+➜  ~ lampod-cli --network signet
+[2025-08-27T10:15:23Z INFO  lampod] WARN lampod_cl1 Loading from existing wallet. [lampod-cli/src/main.rs:159] 
+... (continuous log output) ...
+```
 
 Please note that you need to have a `lampo.conf` in the path `~/.lampo/signet`. Run the
 following command to use the example config file:
