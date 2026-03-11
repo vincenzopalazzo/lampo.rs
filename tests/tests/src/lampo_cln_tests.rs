@@ -83,7 +83,10 @@ pub async fn fund_a_simple_channel_from_lampo_to_cln() -> error::Result<()> {
     // mine some blocks but not enough to confirm the channel
     lampo_manager.fund_wallet(3).await?;
     async_wait!(async {
-        while let Some(event) = events.recv().await {
+        while let Some(event) = tokio::time::timeout(Duration::from_secs(10), events.recv())
+            .await
+            .map_err(|_| ())?
+        {
             log::trace!("{:?}", event);
             let Event::Lightning(LightningEvent::ChannelReady { .. }) = event else {
                 log::info!(target: "tests", "event received {:?}", event);

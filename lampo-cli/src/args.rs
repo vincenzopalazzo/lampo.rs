@@ -19,17 +19,9 @@ enum CliCommand {
     long_about = None
 )]
 struct CliParser {
-    /// Set the network for lampo (default: testnet)
-    #[arg(short = 'n', long = "network")]
-    pub network: Option<String>,
-
     /// Specify API endpoint
     #[arg(short = 'u', long = "url")]
     pub url: Option<String>,
-
-    /// Specify lampo data directory (used to get socket path)
-    #[arg(short = 'd', long = "data-dir")]
-    pub data_dir: Option<String>,
 
     #[command(subcommand)]
     command: Option<CliCommand>,
@@ -55,7 +47,7 @@ fn parse_value(val: &str) -> json::Value {
 }
 
 pub fn parse_args() -> Result<LampoCliArgs, clap::Error> {
-    let cli = CliParser::parse();
+    let cli = CliParser::try_parse()?;
 
     let url = cli
         .url
@@ -90,11 +82,20 @@ pub fn parse_args() -> Result<LampoCliArgs, clap::Error> {
         let arg = &trailing[i];
         if let Some(key) = arg.strip_prefix("--") {
             i += 1;
-            if i < trailing.len() {
-                let val = &trailing[i];
-                log::debug!("look for args {:?} = {:?}", key, val);
-                args.insert(key.to_string(), parse_value(val));
+            if i >= trailing.len() {
+                return Err(CliParser::command().error(
+                    clap::error::ErrorKind::MissingRequiredArgument,
+                    format!("missing value for argument '--{key}'"),
+                ));
             }
+            let val = &trailing[i];
+            log::debug!("look for args {:?} = {:?}", key, val);
+            args.insert(key.to_string(), parse_value(val));
+        } else {
+            return Err(CliParser::command().error(
+                clap::error::ErrorKind::InvalidValue,
+                format!("unexpected positional argument '{arg}'"),
+            ));
         }
         i += 1;
     }
