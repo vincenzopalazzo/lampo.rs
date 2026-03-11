@@ -33,7 +33,7 @@ use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, GossipSync};
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
-use lampo_common::wallet::WalletManager;
+use lampo_common::wallet::{AnchorChannelBumpHandler, WalletManager};
 use lampo_common::{error, ldk};
 
 use crate::actions::handler::LampoHandler;
@@ -103,6 +103,10 @@ impl LampoDaemon {
 
     pub fn conf(&self) -> Arc<LampoConf> {
         self.conf.clone()
+    }
+
+    pub fn logger(&self) -> Arc<LampoLogger> {
+        self.logger.clone()
     }
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
@@ -186,7 +190,7 @@ impl LampoDaemon {
     }
 
     pub fn init_event_handler(&mut self) -> error::Result<()> {
-        log::debug!(target: "lampod", "init inventory manager ...");
+        log::debug!(target: "lampod", "init event handler ...");
         let handler = LampoHandler::new(self);
         self.handler = Some(Arc::new(handler));
         Ok(())
@@ -212,6 +216,19 @@ impl LampoDaemon {
         client.set_channel_manager(self.channel_manager().manager());
         client.set_chain_monitor(self.channel_manager().chain_monitor());
         self.channel_manager().set_handler(self.handler());
+        Ok(())
+    }
+
+    /// Set the anchor channel bump transaction handler on the event handler.
+    /// This should be called after `init()` once all components are available.
+    pub async fn set_anchor_bump_handler(
+        &self,
+        handler: Arc<dyn AnchorChannelBumpHandler>,
+    ) -> error::Result<()> {
+        let Some(ref event_handler) = self.handler else {
+            error::bail!("Event handler is not initialized");
+        };
+        event_handler.set_bump_tx_handler(handler).await;
         Ok(())
     }
 
