@@ -19,6 +19,7 @@ pub mod ln;
 pub mod persistence;
 
 use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -68,6 +69,7 @@ pub struct LampoDaemon {
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
+    shutdown: Arc<AtomicBool>,
     process: Cell<Option<BackgroundProcessor>>,
 }
 
@@ -88,8 +90,17 @@ impl LampoDaemon {
             wallet_manager,
             offchain_manager: None,
             handler: None,
+            shutdown: Arc::new(AtomicBool::new(false)),
             process: Cell::new(None),
         }
+    }
+
+    /// Signal the daemon to shut down gracefully. This causes the LDK
+    /// event processor to exit after its current sleep cycle, persisting
+    /// all state (channel manager, scorer, network graph) before returning.
+    pub fn shutdown(&self) {
+        log::info!(target: "lampod", "Shutdown requested");
+        self.shutdown.store(true, Ordering::Release);
     }
 
     pub fn root_path(&self) -> String {
@@ -238,7 +249,8 @@ impl LampoDaemon {
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().listen();
         log::info!(target: "lampo", "Starting peer manager");
-        let _ = self.peer_manager().run();
+        let shutdown = self.shutdown.clone();
+        let _ = self.peer_manager().run_with_shutdown(shutdown.clone());
         log::info!(target: "lampo", "Starting channel manager");
         let _ = self.channel_manager().listen();
 
@@ -254,11 +266,26 @@ impl LampoDaemon {
                 self.logger.clone(),
                 Some(self.channel_manager().scorer()),
                 |d| {
+                    let shutdown = shutdown.clone();
                     Box::pin(async move {
-                        tokio::time::sleep(d).await;
-                        // if we return true, ldk is going to stop the processor
-                        // so we should use this when we have the stop command
-                        false
+                        // Check shutdown before sleeping so we don't wait
+                        // the full duration when shutdown was already requested
+                        if shutdown.load(Ordering::Acquire) {
+                            return true;
+                        }
+                        // Use tokio::select! to observe shutdown promptly
+                        // instead of always sleeping for the full duration
+                        tokio::select! {
+                            _ = tokio::time::sleep(d) => {},
+                            _ = async {
+                                while !shutdown.load(Ordering::Acquire) {
+                                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                                }
+                            } => {},
+                        }
+                        // returning true tells LDK to stop the processor,
+                        // which triggers final state persistence
+                        shutdown.load(Ordering::Acquire)
                     })
                 },
                 false,
@@ -271,7 +298,6 @@ impl LampoDaemon {
                 },
             )
             .await
-            // FIXME: add the stop event handler
         })
     }
 

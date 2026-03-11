@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -128,7 +129,19 @@ impl LampoPeerManager {
         Ok(())
     }
 
+    /// Run the peer manager event loop without requiring an explicit shutdown flag.
+    ///
+    /// This method is kept for backward compatibility and delegates to
+    /// [`run_with_shutdown`], creating an internal shutdown flag that is
+    /// never triggered programmatically.
     pub fn run(&self) -> error::Result<()> {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        self.run_with_shutdown(shutdown)
+    }
+
+    /// Run the peer manager event loop, allowing cooperative shutdown via the
+    /// provided `shutdown` flag.
+    pub fn run_with_shutdown(&self, shutdown: Arc<AtomicBool>) -> error::Result<()> {
         let listen_port = self.conf.port;
         let Some(ref peer_manager) = self.peer_manager else {
             error::bail!("peer manager is None, at this point this should be not None");
@@ -155,12 +168,27 @@ impl LampoPeerManager {
             };
 
             loop {
+                if shutdown.load(Ordering::Acquire) {
+                    log::info!(target: "lampo", "Peer manager shutting down");
+                    break;
+                }
                 let alias = alias.clone();
                 let peer_manager = peer_manager.clone();
                 let chan_manager = chan_manager.clone();
-                let accept = listener.accept().await;
-                let accept =
-                    accept.map_err(|err| error::anyhow!("Error accepting connection: {}", err))?;
+                let shutdown = shutdown.clone();
+                let accept = tokio::select! {
+                    result = listener.accept() => {
+                        result.map_err(|err| error::anyhow!("Error accepting connection: {}", err))?
+                    }
+                    _ = async {
+                        while !shutdown.load(Ordering::Acquire) {
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                        }
+                    } => {
+                        log::info!(target: "lampo", "Peer manager shutting down");
+                        break;
+                    }
+                };
                 match accept {
                     (tcp_stream, _) => {
                         log::info!(target: "lampo", "Got new connection {}", tcp_stream.peer_addr().unwrap());
@@ -180,6 +208,9 @@ impl LampoPeerManager {
                                 let mut interval = tokio::time::interval(Duration::from_secs(1));
                                 loop {
                                     interval.tick().await;
+                                    if shutdown.load(Ordering::Acquire) {
+                                        break;
+                                    }
                                     // Don't bother trying to announce if we don't have any public channls, though our
                                     // peers should drop such an announcement anyway. Note that announcement may not
                                     // propagate until we have a channel with 6+ confirmations.
@@ -202,6 +233,7 @@ impl LampoPeerManager {
                     }
                 }
             }
+            Ok(())
         });
         Ok(())
     }
