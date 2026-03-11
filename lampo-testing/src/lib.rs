@@ -26,6 +26,7 @@ use lampo_common::handler::Handler;
 use lampo_common::json;
 use lampo_common::model::request;
 use lampo_common::model::response;
+use lampo_common::types::NodeId;
 use lampo_httpd::handler::HttpdHandler;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
@@ -317,7 +318,10 @@ impl LampoTesting {
                     ..
                 }) = event
                 {
-                    if counterparty_node_id.to_string() != self.info.node_id.to_string() {
+                    let Ok(expected_node_id) = NodeId::from_str(&self.info.node_id) else {
+                        return Err(());
+                    };
+                    if counterparty_node_id != expected_node_id {
                         return Err(());
                     }
                     return Ok(());

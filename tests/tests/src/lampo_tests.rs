@@ -1,6 +1,7 @@
 //! Integration tests between lampo nodes.
 //!
 //! Author: Vincenzo Palazzo <vincenzopalazzo@member.fsf.org>
+use std::str::FromStr;
 use std::sync::Arc;
 
 use lampo_common::error;
@@ -9,6 +10,7 @@ use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::json;
 use lampo_common::model::{request, response};
+use lampo_common::types::NodeId;
 
 use lampo_testing::LampoTesting;
 use lampo_testing::{async_wait, prelude::*};
@@ -82,7 +84,7 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
                 ..
             }) = event
             {
-                if counterparty_node_id.to_string() != node1.info.node_id {
+                if counterparty_node_id != NodeId::from_str(&node1.info.node_id).unwrap() {
                     return Err(());
                 }
                 return Ok(());
