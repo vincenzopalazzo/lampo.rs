@@ -42,7 +42,7 @@ impl Default for LampoConf {
             inner: None,
             // default network is testnet
             network: Network::Testnet,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: Self::default_ldk_conf(),
             // default port is 19735 for testnet
             port: 19735,
             root_path: lampo_home,
@@ -65,6 +65,23 @@ impl Default for LampoConf {
 }
 
 impl LampoConf {
+    /// Returns the default LDK UserConfig with anchor outputs enabled.
+    ///
+    /// Anchor outputs allow fee bumping commitment transactions via CPFP,
+    /// which is essential for safe channel operation during fee spikes.
+    /// This requires the node to maintain on-chain UTXOs for fee bumping.
+    pub fn default_ldk_conf() -> UserConfig {
+        let mut conf = UserConfig::default();
+        // Enable anchor channels: commitment transactions use near-zero fees
+        // and rely on CPFP fee bumping via anchor outputs
+        conf.channel_handshake_config
+            .negotiate_anchors_zero_fee_htlc_tx = true;
+        // Required for anchor channels: we need to manually accept inbound
+        // channels to verify we have sufficient on-chain reserves for fee bumping
+        conf.manually_accept_inbound_channels = true;
+        conf
+    }
+
     pub fn prepare_dirs(&self) -> Result<(), anyhow::Error> {
         Self::prepare_directories(&self.root_path, Some(self.network))
     }
@@ -253,7 +270,7 @@ impl TryFrom<String> for LampoConf {
             inner: Some(conf),
             root_path,
             network,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: Self::default_ldk_conf(),
             port: u64::from_str(&port)?,
             node,
             core_url,

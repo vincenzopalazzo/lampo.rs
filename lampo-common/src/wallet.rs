@@ -8,7 +8,15 @@ use crate::bitcoin::{ScriptBuf, Transaction};
 use crate::conf::LampoConf;
 use crate::error;
 use crate::keys::LampoKeys;
+use crate::ldk::events::bump_transaction::BumpTransactionEvent;
 use crate::model::response::{NewAddress, Utxo};
+
+/// Trait for handling anchor output fee bumping events.
+/// Implementations should use LDK's BumpTransactionEventHandler
+/// to construct and broadcast CPFP transactions.
+pub trait AnchorChannelBumpHandler: Send + Sync {
+    fn handle_bump_event(&self, event: &BumpTransactionEvent);
+}
 
 /// Wallet manager trait that define a generic interface
 /// over Wallet implementation!

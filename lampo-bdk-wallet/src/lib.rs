@@ -20,14 +20,20 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::bip32::Xpriv;
 use lampo_common::bitcoin::blockdata::locktime::absolute::LockTime;
+use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::bitcoin::PrivateKey;
-use lampo_common::bitcoin::{Amount, Block, FeeRate, ScriptBuf, Transaction};
+use lampo_common::bitcoin::{Amount, Block, FeeRate, OutPoint, Psbt, ScriptBuf, Transaction, TxOut};
 use lampo_common::conf::{LampoConf, Network};
-use lampo_common::keys::LampoKeys;
+use lampo_common::keys::{LampoKeys, LampoKeysManager};
+use lampo_common::ldk::chain::chaininterface::BroadcasterInterface;
+use lampo_common::ldk::events::bump_transaction;
+use lampo_common::ldk::events::bump_transaction::{BumpTransactionEventHandler, Wallet as LdkWallet};
+use lampo_common::ldk::sign::SignerProvider;
+use lampo_common::ldk::util::logger::Logger;
 use lampo_common::model::response::NewAddress;
 use lampo_common::model::response::Utxo;
 use lampo_common::secp256k1::SecretKey;
-use lampo_common::wallet::WalletManager;
+use lampo_common::wallet::{AnchorChannelBumpHandler, WalletManager};
 use lampo_common::{async_trait, error};
 
 pub struct BDKWalletManager {
@@ -441,5 +447,125 @@ impl WalletManager for BDKWalletManager {
 
         sched.start().await?;
         Ok(())
+    }
+}
+
+/// Implementation of LDK's WalletSource trait for BDKWalletManager.
+/// This enables anchor output fee bumping by providing UTXO selection,
+/// change script generation, and PSBT signing capabilities to LDK's
+/// BumpTransactionEventHandler.
+impl bump_transaction::WalletSource for BDKWalletManager {
+    fn list_confirmed_utxos(&self) -> Result<Vec<bump_transaction::Utxo>, ()> {
+        let wallet = self.wallet.blocking_lock();
+        let utxos = wallet
+            .list_unspent()
+            .filter_map(|utxo| {
+                // Only include confirmed, unspent UTXOs
+                if utxo.is_spent {
+                    return None;
+                }
+                let outpoint = OutPoint {
+                    txid: utxo.outpoint.txid,
+                    vout: utxo.outpoint.vout,
+                };
+                // BDK uses BIP84 (native segwit P2WPKH), so use the appropriate
+                // satisfaction weight estimate
+                let script = &utxo.txout.script_pubkey;
+                if script.is_p2wpkh() {
+                    let bytes = script.as_bytes();
+                    // P2WPKH script: OP_0 <20-byte-hash>
+                    if bytes.len() == 22 {
+                        let hash: [u8; 20] = bytes[2..22].try_into().ok()?;
+                        let wpkh = lampo_common::bitcoin::WPubkeyHash::from_byte_array(hash);
+                        return Some(bump_transaction::Utxo::new_v0_p2wpkh(
+                            outpoint,
+                            utxo.txout.value,
+                            &wpkh,
+                        ));
+                    }
+                }
+                None
+            })
+            .collect();
+        Ok(utxos)
+    }
+
+    fn get_change_script(&self) -> Result<ScriptBuf, ()> {
+        let mut wallet = self.wallet.blocking_lock();
+        let address = wallet.reveal_next_address(KeychainKind::Internal);
+        // We intentionally skip persisting here since it's a change address
+        // used for fee bumping; the wallet will catch up on next sync.
+        Ok(address.address.script_pubkey())
+    }
+
+    fn sign_psbt(&self, mut psbt: Psbt) -> Result<Transaction, ()> {
+        let mut wallet = self.wallet.blocking_lock();
+        let sign_options = SignOptions {
+            trust_witness_utxo: true,
+            ..Default::default()
+        };
+        wallet.sign(&mut psbt, sign_options).map_err(|e| {
+            log::error!(target: "lampo-wallet", "Failed to sign PSBT for anchor fee bump: {e}");
+        })?;
+        psbt.extract_tx().map_err(|e| {
+            log::error!(target: "lampo-wallet", "Failed to extract tx from signed PSBT: {e}");
+        })
+    }
+}
+
+/// Anchor channel bump transaction handler that wraps LDK's
+/// BumpTransactionEventHandler with the BDK wallet as the coin
+/// selection source.
+///
+/// This handler is responsible for constructing and broadcasting
+/// CPFP (Child-Pays-For-Parent) transactions to fee bump anchor
+/// channel commitment transactions and HTLC transactions during
+/// force close scenarios.
+pub struct LampoAnchorBumpHandler<B: std::ops::Deref, L: std::ops::Deref>
+where
+    B::Target: BroadcasterInterface,
+    L::Target: Logger,
+{
+    inner: BumpTransactionEventHandler<
+        B,
+        Arc<LdkWallet<Arc<BDKWalletManager>, L>>,
+        Arc<LampoKeysManager>,
+        L,
+    >,
+}
+
+impl<B: std::ops::Deref, L: std::ops::Deref> LampoAnchorBumpHandler<B, L>
+where
+    B::Target: BroadcasterInterface,
+    L::Target: Logger,
+{
+    pub fn new(
+        broadcaster: B,
+        wallet_manager: Arc<BDKWalletManager>,
+        signer_provider: Arc<LampoKeysManager>,
+        logger: L,
+    ) -> Self
+    where
+        L: Clone,
+    {
+        let ldk_wallet = Arc::new(LdkWallet::new(wallet_manager, logger.clone()));
+        let inner = BumpTransactionEventHandler::new(
+            broadcaster,
+            ldk_wallet,
+            signer_provider,
+            logger,
+        );
+        Self { inner }
+    }
+}
+
+impl<B: std::ops::Deref + Send + Sync, L: std::ops::Deref + Send + Sync> AnchorChannelBumpHandler
+    for LampoAnchorBumpHandler<B, L>
+where
+    B::Target: BroadcasterInterface,
+    L::Target: Logger,
+{
+    fn handle_bump_event(&self, event: &bump_transaction::BumpTransactionEvent) {
+        self.inner.handle_event(event);
     }
 }

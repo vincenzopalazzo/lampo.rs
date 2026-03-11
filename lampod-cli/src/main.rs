@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use radicle_term as term;
 
-use lampo_bdk_wallet::BDKWalletManager;
+use lampo_bdk_wallet::{BDKWalletManager, LampoAnchorBumpHandler};
 use lampo_chain::LampoChainSync;
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
@@ -177,10 +177,22 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
 
     // Do wallet syncing in the background!
-    wallet.listen().await?;
+    wallet.clone().listen().await?;
 
     // Init the lampod
     lampod.init(client).await?;
+
+    // Set up anchor channel bump transaction handler for fee bumping
+    // during force-close scenarios. This requires the onchain manager
+    // (broadcaster) to be initialized first.
+    let bump_handler = Arc::new(LampoAnchorBumpHandler::new(
+        lampod.onchain_manager(),
+        wallet.clone(),
+        wallet.ldk_keys().keys_manager.clone(),
+        lampod.logger(),
+    ));
+    lampod.set_anchor_bump_handler(bump_handler).await?;
+    log::info!(target: "lampod-cli", "Anchor channel bump handler initialized");
 
     log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
     let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
