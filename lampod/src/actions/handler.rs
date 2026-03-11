@@ -39,9 +39,6 @@ pub struct LampoHandler {
     subscriber: Subscriber<Event>,
 }
 
-unsafe impl Send for LampoHandler {}
-unsafe impl Sync for LampoHandler {}
-
 impl LampoHandler {
     pub(crate) fn new(lampod: &LampoDaemon) -> Self {
         let emitter = Emitter::default();
