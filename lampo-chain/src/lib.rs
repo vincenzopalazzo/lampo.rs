@@ -16,6 +16,7 @@ use lampo_common::bitcoin::BlockHash;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
+use lampo_common::ldk::chain;
 use lampo_common::serde::Deserialize;
 use lampo_common::types::{LampoChainMonitor, LampoChannel};
 
@@ -207,15 +208,56 @@ impl Backend for LampoChainSync {
 
     async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
         let mut cache = UnboundedCache::new();
+        let channel_manager = self.channel_manager();
+        let chain_monitor = self.chain_monitor();
+
+        // Synchronize the channel manager and chain monitor from their
+        // persisted best block up to the current chain tip. This is critical
+        // on restart: the ChannelManager may have been persisted at block N,
+        // but the chain may now be at block N+M. Without this sync, the
+        // SpvClient would start at the current tip and try to connect block
+        // N+M+1 to the ChannelManager which still thinks it's at block N,
+        // causing a "Blocks must be connected in chain-order" assertion.
+        let manager_best = channel_manager.current_best_block();
+        let chain_listeners: Vec<(BlockHash, &(dyn chain::Listen + Send + Sync))> = vec![
+            (
+                manager_best.block_hash,
+                &*channel_manager as &(dyn chain::Listen + Send + Sync),
+            ),
+            (
+                manager_best.block_hash,
+                &*chain_monitor as &(dyn chain::Listen + Send + Sync),
+            ),
+        ];
+
+        log::info!(
+            target: "lampo-chain",
+            "Syncing chain listeners from block {} (height {}) to current tip",
+            manager_best.block_hash,
+            manager_best.height
+        );
+
+        let synced_chain_tip = init::synchronize_listeners(
+            self.as_ref(),
+            self.config.network,
+            &mut cache,
+            chain_listeners,
+        )
+        .await
+        .map_err(|e| error::anyhow!("Failed to synchronize chain listeners: {:?}", e))?;
+
+        let synced_best = synced_chain_tip.to_best_block();
+        log::info!(
+            target: "lampo-chain",
+            "Chain listeners synced to block {} (height {})",
+            synced_best.block_hash,
+            synced_best.height
+        );
+
+        let chain_listener = (chain_monitor, channel_manager);
         let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
-        let chain_listener = (self.chain_monitor(), self.channel_manager());
-
-        let polled_chain_tip = init::validate_best_block_header(self.as_ref())
-            .await
-            .unwrap();
-
         let mut spv_client =
-            SpvClient::new(polled_chain_tip, chain_poller, &mut cache, &chain_listener);
+            SpvClient::new(synced_chain_tip, chain_poller, &mut cache, &chain_listener);
         log::info!(target: "lampo-chain", "Start Backend ...");
         loop {
             if let Err(err) = spv_client.poll_best_tip().await {
