@@ -637,6 +637,38 @@ impl WalletManager for BDKWalletManager {
                         coordinator.set_wallet_scan_height(height);
                     }
                     log::info!(target: "lampo-wallet", "Fast-forwarded empty wallet checkpoint to height {height}");
+                } else if height < wallet_tip.height() {
+                    // Rescan from an earlier height: find the nearest wallet
+                    // checkpoint at or below the requested height and roll
+                    // back so the Emitter re-processes blocks from that
+                    // point. Previously this case was a silent no-op
+                    // (issue #444).
+                    log::info!(
+                        target: "lampo-wallet",
+                        "Reindexing from earlier height {height}, current tip is {}",
+                        wallet_tip.height()
+                    );
+                    let Some(rollback_cp) = checkpoint_at_or_below(&wallet_tip, height) else {
+                        error::bail!(
+                            "reindex_from={height} is below every wallet checkpoint (tip {})",
+                            wallet_tip.height()
+                        );
+                    };
+                    let rollback_height = rollback_cp.height();
+                    let update = bdk_wallet::Update {
+                        chain: Some(rollback_cp),
+                        ..Default::default()
+                    };
+                    wallet.apply_update(update)?;
+                    let mut wallet_db = self.wallet_db.lock().unwrap();
+                    wallet.persist(&mut wallet_db)?;
+                    if let Some(coordinator) = self.coordinator.get() {
+                        coordinator.set_wallet_scan_height(rollback_height);
+                    }
+                    log::info!(
+                        target: "lampo-wallet",
+                        "Rolled wallet checkpoint back to height {rollback_height}"
+                    );
                 }
             }
         }
@@ -700,6 +732,15 @@ fn is_recovering_history(database_exists: bool, recovery_marker_exists: bool) ->
 /// must scan history even when its local database also starts at genesis.
 fn jump_empty_wallet_to_tip(start_height: u32, fast_sync: bool, recovering_history: bool) -> bool {
     start_height == 0 && fast_sync && !recovering_history
+}
+
+/// Nearest persisted checkpoint at or below `height`, walking from the tip.
+/// `None` if the wallet has no checkpoint that far back (sparse chain).
+fn checkpoint_at_or_below(
+    tip: &bdk_wallet::chain::CheckPoint,
+    height: u32,
+) -> Option<bdk_wallet::chain::CheckPoint> {
+    tip.iter().find(|cp| cp.height() <= height)
 }
 
 #[cfg(test)]
