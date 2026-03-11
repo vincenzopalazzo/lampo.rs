@@ -1,4 +1,4 @@
-FROM ubuntu:24.10
+FROM ubuntu:24.04
 LABEL mantainer="Vincenzo Palazzo vincenzopalazzodev@gmail.com"
 
 ENV BITCOIN_VERSION=25.1
@@ -61,9 +61,10 @@ RUN cd /tmp/ && \
     rm -rf bitcoin.tar.gz /tmp/bitcoin-$BITCOIN_VERSION
 
 RUN pipx ensurepath
+ENV PATH="/root/.local/bin:${PATH}"
 RUN pipx completions
 RUN echo "eval \"\$(register-python-argcomplete pipx)\"" >> ~/.bashrc
-RUN pipx install poetry --global
+RUN pipx install poetry
 
 RUN git config --global user.name "John Doe" && \
 	git config --global user.email johndoe@example.com && \
