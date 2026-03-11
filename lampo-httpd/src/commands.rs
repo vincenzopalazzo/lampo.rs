@@ -1,3 +1,4 @@
+pub mod daemon;
 pub mod inventory;
 pub mod offchain;
 pub mod onchain;
