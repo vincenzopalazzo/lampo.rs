@@ -249,19 +249,22 @@ impl LampoChannelManager {
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
 
-        // Wait for SendRawTransaction to be received so to get the funding transaction
-        // FIXME: we can loop forever here
+        // Wait for SendRawTransaction or FundingChannelFailed to be received
+        let mut events = self.handler().events();
         let tx: Option<Transaction> = loop {
-            let mut events = self.handler().events();
-            // FIXME: put the receive code inside a macro, in this way we do not need
-            // to repeat the same code
             let event = events
                 .recv()
                 .await
-                .ok_or(error::anyhow!("Channel close no event received"))?;
+                .ok_or(error::anyhow!("Channel funding: no event received"))?;
 
-            if let Event::OnChain(OnChainEvent::SendRawTransaction(tx)) = event {
-                break Some(tx);
+            match event {
+                Event::OnChain(OnChainEvent::SendRawTransaction(tx)) => {
+                    break Some(tx);
+                }
+                Event::OnChain(OnChainEvent::FundingChannelFailed(reason)) => {
+                    return Err(error::anyhow!("{}", reason));
+                }
+                _ => {}
             }
         };
 
