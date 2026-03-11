@@ -7,6 +7,7 @@ use lampo_common::bitcoin;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::Transaction;
 use lampo_common::error;
+use lampo_common::json;
 use lampo_common::ldk;
 use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{
@@ -16,6 +17,11 @@ use lampo_common::ldk::routing::utxo::UtxoLookup;
 use lampo_common::wallet::WalletManager;
 
 use crate::sync;
+
+/// Minimum fee rate floor in sat/kw. This matches LDK's
+/// FEERATE_FLOOR_SATS_PER_KW and prevents returning zero
+/// fee rates which would cause channel operations to fail.
+const FEERATE_FLOOR_SATS_PER_KW: u32 = 253;
 
 #[derive(Clone)]
 pub struct LampoChainManager {
@@ -51,7 +57,7 @@ impl LampoChainManager {
         }
     }
 
-    pub fn estimated_fees(&self) -> HashMap<String, Option<u32>> {
+    pub fn estimated_fees(&self) -> HashMap<String, json::Value> {
         let fees_targets = vec![
             ConfirmationTarget::UrgentOnChainSweep,
             ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
@@ -61,11 +67,27 @@ impl LampoChainManager {
             ConfirmationTarget::ChannelCloseMinimum,
             ConfirmationTarget::OutputSpendingFee,
         ];
-        let mut map: HashMap<String, Option<u32>> = HashMap::new();
+        let mut map: HashMap<String, json::Value> = HashMap::new();
+        let mut has_fallback = false;
         for target in fees_targets {
             let fee = self.get_est_sat_per_1000_weight(target);
-            let value = if fee == 0 { None } else { Some(fee) };
+            if fee == FEERATE_FLOOR_SATS_PER_KW {
+                has_fallback = true;
+            }
+            let value = if fee == 0 {
+                json::Value::Null
+            } else {
+                json::Value::Number(fee.into())
+            };
             map.insert(self.print_ldk_target_to_string(target), value);
+        }
+        if has_fallback {
+            map.insert(
+                "warning".to_string(),
+                json::Value::String(
+                    "Some fee estimates are using fallback values. The backend node may be syncing or have insufficient fee data.".to_string(),
+                ),
+            );
         }
         map
     }
@@ -80,9 +102,30 @@ impl LampoChainManager {
 #[async_trait]
 impl FeeEstimator for LampoChainManager {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        // FIXME: have the result in the cache to make easy the query of it.
-        // TODO: fix this
-        256
+        let blocks = match confirmation_target {
+            ConfirmationTarget::MaximumFeeEstimate | ConfirmationTarget::UrgentOnChainSweep => 1,
+            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee
+            | ConfirmationTarget::AnchorChannelFee
+            | ConfirmationTarget::NonAnchorChannelFee => 6,
+            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee => {
+                // For this target, use the minimum mempool fee
+                let backend = self.backend.clone();
+                let fee = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(async { backend.minimum_mempool_fee().await })
+                });
+                return fee.unwrap_or(FEERATE_FLOOR_SATS_PER_KW);
+            }
+            ConfirmationTarget::ChannelCloseMinimum => 100,
+            ConfirmationTarget::OutputSpendingFee => 12,
+        };
+
+        let backend = self.backend.clone();
+        let fee = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { backend.fee_rate_estimation(blocks).await })
+        });
+        fee.unwrap_or(FEERATE_FLOOR_SATS_PER_KW)
     }
 }
 
