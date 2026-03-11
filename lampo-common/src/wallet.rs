@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -23,6 +24,42 @@ pub trait WalletManager: Send + Sync {
     async fn restore(network: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self>
     where
         Self: Sized;
+
+    /// Create or restore a wallet from persisted state.
+    ///
+    /// If a `wallet.dat` file exists in the config directory, the wallet
+    /// is restored from the mnemonic stored there. Otherwise, a new wallet
+    /// is created and the mnemonic is persisted to `wallet.dat`.
+    ///
+    /// Returns `(wallet, is_new)` where `is_new` indicates whether a
+    /// fresh wallet was created.
+    async fn make_or_restore(conf: Arc<LampoConf>) -> error::Result<(Self, bool)>
+    where
+        Self: Sized,
+    {
+        let words_path = format!("{}/wallet.dat", conf.path());
+        if Path::new(&words_path).exists() {
+            let mnemonic = std::fs::read_to_string(&words_path)
+                .map_err(|e| error::anyhow!("Failed to read wallet.dat: {e}"))?;
+            let mnemonic = mnemonic.trim().to_string();
+            if mnemonic.is_empty() {
+                return Err(error::anyhow!(
+                    "wallet.dat exists but is empty at `{words_path}`. \
+                     Please restore the mnemonic or remove the file to create a new wallet."
+                ));
+            }
+            let wallet = Self::restore(conf, &mnemonic).await?;
+            Ok((wallet, false))
+        } else {
+            std::fs::create_dir_all(conf.path())
+                .map_err(|e| error::anyhow!("Failed to create wallet directory: {e}"))?;
+            let (wallet, mnemonic) = Self::new(conf).await?;
+            // FIXME: we should give the possibility to encrypt this file.
+            std::fs::write(&words_path, &mnemonic)
+                .map_err(|e| error::anyhow!("Failed to write wallet.dat: {e}"))?;
+            Ok((wallet, true))
+        }
+    }
 
     /// Return the keys for ldk.
     fn ldk_keys(&self) -> Arc<LampoKeys>;
