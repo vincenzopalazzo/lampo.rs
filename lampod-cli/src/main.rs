@@ -199,16 +199,18 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     ))?);
     lampod.add_external_handler(handler).await?;
 
-    // Handle the shutdown signal and pass down to the lampod.listen()
+    // Signal the daemon to shut down gracefully on Ctrl+C.
+    // This causes the LDK event processor to persist all state
+    // (channel manager, scorer, network graph) before exiting.
+    let shutdown_lampod = lampod.clone();
     ctrlc::set_handler(move || {
-        use std::time::Duration;
-        log::info!("Shutdown...");
-        std::thread::sleep(Duration::from_secs(5));
-        std::process::exit(0);
+        log::info!("Shutdown signal received, shutting down gracefully...");
+        shutdown_lampod.shutdown();
     })?;
 
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     lampod.listen().await??;
+    log::info!(target: "lampod-cli", "Shutdown complete.");
     Ok(())
 }
 
