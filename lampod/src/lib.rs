@@ -18,7 +18,6 @@ pub mod jsonrpc;
 pub mod ln;
 pub mod persistence;
 
-use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -31,7 +30,7 @@ use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
-use lampo_common::ldk::processor::{process_events_async, BackgroundProcessor, GossipSync};
+use lampo_common::ldk::processor::{process_events_async, GossipSync};
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
@@ -70,11 +69,7 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
-    process: Cell<Option<BackgroundProcessor>>,
 }
-
-unsafe impl Send for LampoDaemon {}
-unsafe impl Sync for LampoDaemon {}
 
 impl LampoDaemon {
     pub fn new(config: Arc<LampoConf>, wallet_manager: Arc<dyn WalletManager>) -> Self {
@@ -91,7 +86,6 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
-            process: Cell::new(None),
         }
     }
 

@@ -1,9 +1,8 @@
 //! Channel Manager Implementation
-use std::cell::RefCell;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 use lampo_common::bitcoin::{BlockHash, Transaction};
@@ -44,27 +43,19 @@ use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
 pub struct LampoChannelManager {
-    monitor: RefCell<Option<Arc<LampoChainMonitor>>>,
+    monitor: OnceLock<Arc<LampoChainMonitor>>,
     wallet_manager: Arc<dyn WalletManager>,
     persister: Arc<LampoPersistence>,
-    graph: RefCell<Option<Arc<LampoGraph>>>,
-    score: RefCell<Option<Arc<Mutex<LampoScorer>>>>,
-    handler: RefCell<Option<Arc<LampoHandler>>>,
-    router: RefCell<Option<Arc<LampoRouter>>>,
+    graph: OnceLock<Arc<LampoGraph>>,
+    score: OnceLock<Arc<Mutex<LampoScorer>>>,
+    handler: OnceLock<Arc<LampoHandler>>,
+    router: OnceLock<Arc<LampoRouter>>,
 
     pub(crate) onchain: Arc<LampoChainManager>,
     pub(crate) conf: LampoConf,
-    pub(crate) channeld: RefCell<Option<Arc<LampoChannel>>>,
+    channeld: OnceLock<Arc<LampoChannel>>,
     pub(crate) logger: Arc<LampoLogger>,
 }
-
-// SAFETY: due the init workflow of the lampod, we should
-// store the handler later and not use the new contructor.
-//
-// Due the constructor is called only one time as the sethandler
-// it is safe use the ref cell across thread.
-unsafe impl Send for LampoChannelManager {}
-unsafe impl Sync for LampoChannelManager {}
 
 impl LampoChannelManager {
     pub fn new(
@@ -76,25 +67,27 @@ impl LampoChannelManager {
     ) -> Self {
         LampoChannelManager {
             conf: conf.to_owned(),
-            monitor: RefCell::new(None),
+            monitor: OnceLock::new(),
             onchain,
-            channeld: RefCell::new(None),
+            channeld: OnceLock::new(),
             wallet_manager,
             logger,
             persister,
-            handler: RefCell::new(None),
-            graph: RefCell::new(None),
-            score: RefCell::new(None),
-            router: RefCell::new(None),
+            handler: OnceLock::new(),
+            graph: OnceLock::new(),
+            score: OnceLock::new(),
+            router: OnceLock::new(),
         }
     }
 
     pub fn set_handler(&self, handler: Arc<LampoHandler>) {
-        self.handler.replace(Some(handler));
+        self.handler
+            .set(handler)
+            .unwrap_or_else(|_| panic!("handler already initialized"));
     }
 
     pub fn handler(&self) -> Arc<LampoHandler> {
-        self.handler.borrow().clone().unwrap()
+        self.handler.get().expect("handler not initialized").clone()
     }
 
     pub async fn listen(self: Arc<Self>) -> error::Result<()> {
@@ -118,7 +111,10 @@ impl LampoChannelManager {
     }
 
     pub fn chain_monitor(&self) -> Arc<LampoChainMonitor> {
-        self.monitor.borrow().clone().unwrap()
+        self.monitor
+            .get()
+            .expect("chain monitor not initialized")
+            .clone()
     }
 
     pub fn wallet_manager(&self) -> Arc<dyn WalletManager> {
@@ -126,7 +122,10 @@ impl LampoChannelManager {
     }
 
     pub fn manager(&self) -> Arc<LampoChannel> {
-        self.channeld.borrow().clone().unwrap()
+        self.channeld
+            .get()
+            .expect("channel manager not initialized")
+            .clone()
     }
 
     pub fn list_channels(&self) -> Channels {
@@ -161,11 +160,14 @@ impl LampoChannelManager {
     }
 
     pub fn graph(&self) -> Arc<LampoGraph> {
-        self.graph.borrow().clone().unwrap()
+        self.graph
+            .get()
+            .expect("network graph not initialized")
+            .clone()
     }
 
     pub fn scorer(&self) -> Arc<Mutex<LampoScorer>> {
-        self.score.borrow().clone().unwrap()
+        self.score.get().expect("scorer not initialized").clone()
     }
 
     // FIXME: Step 11: Optional: Initialize the NetGraphMsgHandler
@@ -181,29 +183,31 @@ impl LampoChannelManager {
             LampoScorer,
         >,
     > {
-        let router = self.router.borrow().clone();
-        if router.is_none() {
-            // Step 9: Initialize routing ProbabilisticScorer
-            let network_graph_path = format!("{}/network_graph", self.conf.path());
-            let network_graph = self.read_network(Path::new(&network_graph_path));
+        self.router
+            .get_or_init(|| {
+                let network_graph_path = format!("{}/network_graph", self.conf.path());
+                let network_graph = self.read_network(Path::new(&network_graph_path));
 
-            let scorer_path = format!("{}/scorer", self.conf.path());
-            let scorer = Arc::new(Mutex::new(
-                self.read_scorer(Path::new(&scorer_path), &network_graph),
-            ));
+                let scorer_path = format!("{}/scorer", self.conf.path());
+                let scorer = Arc::new(Mutex::new(
+                    self.read_scorer(Path::new(&scorer_path), &network_graph),
+                ));
 
-            self.graph.replace(Some(network_graph.clone()));
-            self.score.replace(Some(scorer.clone()));
-            let router = Some(Arc::new(DefaultRouter::new(
-                network_graph,
-                self.logger.clone(),
-                self.wallet_manager.ldk_keys().keys_manager.clone(),
-                scorer,
-                ProbabilisticScoringFeeParameters::default(),
-            )));
-            self.router.replace(router);
-        }
-        self.router.borrow().clone().unwrap()
+                self.graph
+                    .set(network_graph.clone())
+                    .unwrap_or_else(|_| panic!("graph OnceLock already initialized"));
+                self.score
+                    .set(scorer.clone())
+                    .unwrap_or_else(|_| panic!("score OnceLock already initialized"));
+                Arc::new(DefaultRouter::new(
+                    network_graph,
+                    self.logger.clone(),
+                    self.wallet_manager.ldk_keys().keys_manager.clone(),
+                    scorer,
+                    ProbabilisticScoringFeeParameters::default(),
+                ))
+            })
+            .clone()
     }
 
     pub(crate) fn read_scorer(
@@ -293,7 +297,9 @@ impl LampoChannelManager {
 
     pub fn restart(&self) -> error::Result<()> {
         let monitor = self.build_channel_monitor();
-        self.monitor.replace(Some(Arc::new(monitor)));
+        self.monitor
+            .set(Arc::new(monitor))
+            .unwrap_or_else(|_| panic!("chain monitor already initialized"));
 
         let _ = self.network_graph();
         let monitors = self.get_channel_monitors()?;
@@ -311,7 +317,7 @@ impl LampoChannelManager {
             self.onchain.clone() as Arc<dyn FeeEstimator + Send + Sync>,
             self.chain_monitor(),
             self.onchain.clone() as Arc<dyn BroadcasterInterface + Send + Sync>,
-            self.router.borrow().clone().unwrap(),
+            self.router.get().expect("router not initialized").clone(),
             default_message_router,
             self.logger.clone(),
             self.conf.ldk_conf,
@@ -321,7 +327,9 @@ impl LampoChannelManager {
         let (_, channel_manager) =
             <(BlockHash, LampoChannel)>::read(&mut channel_manager_file, read_args)
                 .map_err(|err| error::anyhow!("{err}"))?;
-        self.channeld.borrow_mut().replace(channel_manager.into());
+        self.channeld
+            .set(Arc::new(channel_manager))
+            .unwrap_or_else(|_| panic!("channel manager already initialized"));
         Ok(())
     }
 
@@ -339,10 +347,11 @@ impl LampoChannelManager {
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
         let monitor = self.build_channel_monitor();
-        self.monitor.replace(Some(Arc::new(monitor)));
+        self.monitor
+            .set(Arc::new(monitor))
+            .unwrap_or_else(|_| panic!("chain monitor already initialized"));
 
-        // FIXME: some hidden logic hidden inside the `network_graph()` so we need to call it there
-        // because calling `graph()`. However this is confusing as fuck!
+        // network_graph() lazily initializes the graph, scorer, and router
         let network_graph = self.network_graph();
         let default_message_router = DefaultMessageRouter::new(
             self.graph(),
@@ -365,7 +374,9 @@ impl LampoChannelManager {
             chain_params,
             now.as_secs() as u32,
         ));
-        self.channeld.borrow_mut().replace(channeld);
+        self.channeld
+            .set(channeld)
+            .unwrap_or_else(|_| panic!("channel manager already initialized"));
         Ok(())
     }
 }

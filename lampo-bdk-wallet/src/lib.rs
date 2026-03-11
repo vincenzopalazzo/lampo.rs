@@ -42,12 +42,6 @@ pub struct BDKWalletManager {
     guard: Mutex<bool>,
 }
 
-// SAFETY: It is safe to do because the `LampoWalletManager`
-// is not send and sync due the RefCell, but we use the Mutex
-// inside, so we are safe to share across threads.
-unsafe impl Send for BDKWalletManager {}
-unsafe impl Sync for BDKWalletManager {}
-
 impl BDKWalletManager {
     /// from mnemonic_words build or bkd::Wallet or return an bdk::Error
     async fn build_wallet(

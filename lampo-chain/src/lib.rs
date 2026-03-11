@@ -1,5 +1,4 @@
-use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
@@ -24,13 +23,10 @@ use lampo_common::types::{LampoChainMonitor, LampoChannel};
 pub struct LampoChainSync {
     config: Arc<LampoConf>,
     rpc_client: Arc<RpcClient>,
-    channel_manager: RefCell<Option<Arc<LampoChannel>>>,
-    chain_monitor: RefCell<Option<Arc<LampoChainMonitor>>>,
-    handler: RefCell<Option<Arc<dyn lampo_common::handler::Handler>>>,
+    channel_manager: OnceLock<Arc<LampoChannel>>,
+    chain_monitor: OnceLock<Arc<LampoChainMonitor>>,
+    handler: OnceLock<Arc<dyn lampo_common::handler::Handler>>,
 }
-
-unsafe impl Send for LampoChainSync {}
-unsafe impl Sync for LampoChainSync {}
 
 impl LampoChainSync {
     pub fn new(conf: Arc<LampoConf>) -> error::Result<Self> {
@@ -61,26 +57,36 @@ impl LampoChainSync {
         Ok(Self {
             config: conf,
             rpc_client: Arc::new(rpc),
-            channel_manager: RefCell::new(None),
-            chain_monitor: RefCell::new(None),
-            handler: RefCell::new(None),
+            channel_manager: OnceLock::new(),
+            chain_monitor: OnceLock::new(),
+            handler: OnceLock::new(),
         })
     }
 
     pub fn set_channel_manager(&self, channel_manager: Arc<LampoChannel>) {
-        self.channel_manager.borrow_mut().replace(channel_manager);
+        self.channel_manager
+            .set(channel_manager)
+            .unwrap_or_else(|_| panic!("channel manager already set"));
     }
 
     pub fn set_chain_monitor(&self, chain_monitor: Arc<LampoChainMonitor>) {
-        self.chain_monitor.borrow_mut().replace(chain_monitor);
+        self.chain_monitor
+            .set(chain_monitor)
+            .unwrap_or_else(|_| panic!("chain monitor already set"));
     }
 
     fn channel_manager(&self) -> Arc<LampoChannel> {
-        self.channel_manager.borrow().as_ref().unwrap().clone()
+        self.channel_manager
+            .get()
+            .expect("channel manager not set")
+            .clone()
     }
 
     fn chain_monitor(&self) -> Arc<LampoChainMonitor> {
-        self.chain_monitor.borrow().as_ref().unwrap().clone()
+        self.chain_monitor
+            .get()
+            .expect("chain monitor not set")
+            .clone()
     }
 }
 
@@ -118,8 +124,7 @@ impl Backend for LampoChainSync {
             .await;
         log::info!("Broadcasting tx result: {:?}", resp);
         if resp.is_ok() {
-            let handler = self.handler.borrow();
-            let Some(handler) = handler.as_ref() else {
+            let Some(handler) = self.handler.get() else {
                 return;
             };
             handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
@@ -195,7 +200,9 @@ impl Backend for LampoChainSync {
     }
 
     fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {
-        self.handler.borrow_mut().replace(handler);
+        self.handler
+            .set(handler)
+            .unwrap_or_else(|_| panic!("backend handler already set"));
     }
 
     fn set_channel_manager(&self, channel_manager: Arc<LampoChannel>) {

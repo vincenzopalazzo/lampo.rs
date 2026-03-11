@@ -132,10 +132,6 @@ impl UtxoLookup for LampoChainManager {
     }
 }
 
-// SAFETY: there is no reason why this should not be send and sync
-unsafe impl Send for LampoChainManager {}
-unsafe impl Sync for LampoChainManager {}
-
 #[async_trait]
 impl Backend for LampoChainManager {
     async fn brodcast_tx(&self, tx: &Transaction) {
