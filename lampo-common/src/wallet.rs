@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -34,6 +35,45 @@ pub trait WalletManager: Send + Sync {
     async fn restore(network: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self>
     where
         Self: Sized;
+
+    /// Create or restore a wallet from persisted state.
+    ///
+    /// If a `wallet.dat` file exists in the config directory, the wallet
+    /// is restored from the mnemonic stored there. Otherwise, a new wallet
+    /// is created and the mnemonic is persisted to `wallet.dat`.
+    ///
+    /// Returns `(wallet, is_new, mnemonic)`. `mnemonic` is `Some` only when
+    /// a fresh wallet was created, so callers that must show the seed (the
+    /// `new-wallet` command) do not re-read the persistence file and stay
+    /// correct if an implementation overrides this method.
+    async fn make_or_restore(conf: Arc<LampoConf>) -> error::Result<(Self, bool, Option<String>)>
+    where
+        Self: Sized,
+    {
+        let words_path = format!("{}/wallet.dat", conf.path());
+        if Path::new(&words_path).exists() {
+            let mnemonic = std::fs::read_to_string(&words_path)
+                .map_err(|e| error::anyhow!("Failed to read wallet.dat: {e}"))?;
+            let mnemonic = mnemonic.trim().to_string();
+            if mnemonic.is_empty() {
+                return Err(error::anyhow!(
+                    "wallet.dat exists but is empty at `{words_path}`. \
+                     Please restore the mnemonic or remove the file to create a new wallet."
+                ));
+            }
+            let wallet = Self::restore(conf, &mnemonic).await?;
+            Ok((wallet, false, None))
+        } else {
+            std::fs::create_dir_all(conf.path())
+                .map_err(|e| error::anyhow!("Failed to create wallet directory: {e}"))?;
+            let (wallet, mnemonic) = Self::new(conf).await?;
+            // SECURITY: owner-only, atomic write. A crash mid-write must not
+            // leave a truncated seed, and the default umask must not leave
+            // the mnemonic world-readable.
+            write_mnemonic_file(&words_path, &mnemonic)?;
+            Ok((wallet, true, Some(mnemonic)))
+        }
+    }
 
     /// Return the keys for ldk.
     fn ldk_keys(&self) -> Arc<LampoKeys>;
@@ -115,5 +155,103 @@ pub trait WalletManager: Send + Sync {
     /// Sign every input in `psbt` that this wallet controls.
     fn sign_psbt(&self, _psbt: Psbt) -> error::Result<Transaction> {
         error::bail!("wallet does not sign PSBTs")
+    }
+}
+
+/// Persist a BIP39 mnemonic so a crash cannot truncate it and other local
+/// users cannot read it.
+///
+/// The write goes to a sibling temp file created mode `0600`, then
+/// `rename`d into place. `OpenOptions::mode` is masked by umask and only
+/// applies on create, so permissions are tightened again after the write.
+pub fn write_mnemonic_file(path: &str, mnemonic: &str) -> error::Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let tmp_path = format!("{path}.tmp");
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&tmp_path)
+        .map_err(|e| error::anyhow!("Failed to create {tmp_path}: {e}"))?;
+    // FIXME: we should give the possibility to encrypt this file.
+    file.write_all(mnemonic.as_bytes())
+        .map_err(|e| error::anyhow!("Failed to write {tmp_path}: {e}"))?;
+    file.sync_all()
+        .map_err(|e| error::anyhow!("Failed to sync {tmp_path}: {e}"))?;
+    drop(file);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| error::anyhow!("Failed to set permissions on {tmp_path}: {e}"))?;
+    }
+
+    std::fs::rename(&tmp_path, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_path);
+        error::anyhow!("Failed to persist wallet.dat at `{path}`: {e}")
+    })?;
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::write_mnemonic_file;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn mnemonic_file_is_owner_only_and_atomic() {
+        let dir =
+            std::env::temp_dir().join(format!("lampo-wallet-mnemonic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wallet.dat");
+        let path_str = path.to_string_lossy().to_string();
+
+        write_mnemonic_file(&path_str, "abandon abandon abandon").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        let body = std::fs::read_to_string(&path).unwrap();
+        let tmp_left = dir.join("wallet.dat.tmp").exists();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(body, "abandon abandon abandon");
+        assert!(!tmp_left, "temp file must be renamed into place");
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "wallet.dat contains the mnemonic and must be 0600, got {:o}",
+            mode & 0o777
+        );
+    }
+
+    #[test]
+    fn mnemonic_file_tightens_a_preexisting_loose_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "lampo-wallet-mnemonic-loose-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wallet.dat");
+        std::fs::write(&path, "old words").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        // Rewrite goes through a temp file, so a loose preexisting target
+        // must not survive the rename.
+        write_mnemonic_file(&path.to_string_lossy(), "abandon abandon abandon").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "rewritten wallet.dat must be 0600, got {:o}",
+            mode & 0o777
+        );
     }
 }
