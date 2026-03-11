@@ -11,6 +11,10 @@ pub enum OnChainEvent {
     NewBestBlock((Header, Height)),
     FeeEstimation(u32),
     SendRawTransaction(Transaction),
+    /// Emitted when funding a channel fails (e.g. insufficient funds),
+    /// so that the `open_channel` wait loop can return an error
+    /// instead of blocking forever.
+    FundingChannelFailed(String),
     ConfirmedTransaction((Transaction, u32, Header, Height)),
     DiscardedTransaction(Txid),
     UnconfirmedTransaction(Txid),
@@ -31,6 +35,9 @@ impl Debug for OnChainEvent {
             Self::NewBlock(block) => write!(f, "NewBlock({})", block.block_hash()),
             Self::SendRawTransaction(tx) => write!(f, "SendRawTransaction({})", tx.txid()),
             Self::UnconfirmedTransaction(tx) => write!(f, "UnconfirmedTransaction({})", tx),
+            Self::FundingChannelFailed(reason) => {
+                write!(f, "FundingChannelFailed({})", reason)
+            }
             _ => write!(f, "Debug fmt not unsupported"),
         }
     }

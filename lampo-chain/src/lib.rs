@@ -123,13 +123,19 @@ impl Backend for LampoChainSync {
             .call_method::<json::Value>("sendrawtransaction", &[serialize_hex(tx).into()])
             .await;
         log::info!("Broadcasting tx result: {:?}", resp);
-        if resp.is_ok() {
-            let Some(handler) = self.handler.get() else {
-                return;
-            };
-            handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
+        let Some(handler) = self.handler.get() else {
+            return;
+        };
+        match resp {
+            Ok(_) => {
+                handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
+            }
+            Err(err) => {
+                let msg = format!("Failed to broadcast transaction: {err}");
+                log::error!(target: "lampo-chain", "{}", msg);
+                handler.emit(Event::OnChain(OnChainEvent::FundingChannelFailed(msg)));
+            }
         }
-        // FIXME: emit the brodcast event for lampo in case of errors, just to unlock the client
     }
 
     async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
