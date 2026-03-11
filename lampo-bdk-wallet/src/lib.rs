@@ -403,6 +403,24 @@ impl WalletManager for BDKWalletManager {
                     ..Default::default()
                 };
                 wallet.apply_update(update)?;
+            } else if height < wallet_tip.height() {
+                // Rescan from an earlier height: find the nearest wallet checkpoint
+                // at or below the requested height and roll back to it so the Emitter
+                // re-processes blocks from that point.
+                log::info!(
+                    target: "lampo-wallet",
+                    "Reindexing from earlier height {height}, current tip is {}",
+                    wallet_tip.height()
+                );
+                let rollback_cp = wallet_tip
+                    .iter()
+                    .find(|cp| cp.height() <= height)
+                    .unwrap_or(wallet_tip);
+                let update = bdk_wallet::Update {
+                    chain: Some(rollback_cp),
+                    ..Default::default()
+                };
+                wallet.apply_update(update)?;
             }
         }
 
