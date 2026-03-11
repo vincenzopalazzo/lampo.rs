@@ -5,11 +5,11 @@ use std::sync::Arc;
 use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client, RpcApi};
 use bdk_bitcoind_rpc::Emitter;
 use bdk_wallet::chain::BlockId;
+use bdk_wallet::descriptor::template::Bip84;
 use bdk_wallet::keys::bip39::Mnemonic;
 use bdk_wallet::keys::bip39::{Language, WordCount};
 use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
 use bdk_wallet::rusqlite::Connection;
-use bdk_wallet::template::Bip84;
 use bdk_wallet::{KeychainKind, PersistedWallet, SignOptions, Wallet};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::Mutex;
@@ -276,7 +276,7 @@ impl WalletManager for BDKWalletManager {
         enum Emission {
             SigTerm,
             Block(bdk_bitcoind_rpc::BlockEvent<Block>),
-            Mempool(Vec<(Transaction, u64)>),
+            Mempool(Vec<(Arc<Transaction>, u64)>),
         }
 
         log::info!(target: "lampo-wallet", "Checking the wallet status...");
@@ -295,8 +295,13 @@ impl WalletManager for BDKWalletManager {
         let start_height = wallet_tip.height();
         drop(wallet);
 
-        tokio::spawn(async move {
-            let mut emitter = Emitter::new(rpc_client.as_ref(), wallet_tip, start_height);
+        let emitter_handle = tokio::spawn(async move {
+            let mut emitter = Emitter::new(
+                rpc_client.as_ref(),
+                wallet_tip,
+                start_height,
+                bdk_bitcoind_rpc::NO_EXPECTED_MEMPOOL_TXIDS,
+            );
 
             while let Some(emission) = emitter.next_block()? {
                 sender.send(Emission::Block(emission))?;
@@ -340,7 +345,19 @@ impl WalletManager for BDKWalletManager {
                 }
             }
         }
-        // FIXME: update the wallet status!
+        // Surface any error from the emitter task so failures
+        // are not silently swallowed.
+        match emitter_handle.await {
+            Ok(Err(err)) => {
+                log::error!(target: "lampo-wallet", "Emitter task failed: {err}");
+                return Err(err);
+            }
+            Err(err) => {
+                log::error!(target: "lampo-wallet", "Emitter task panicked: {err}");
+                error::bail!("emitter task panicked: {err}");
+            }
+            Ok(Ok(())) => {}
+        }
         Ok(())
     }
 
