@@ -1,9 +1,39 @@
 use std::collections::HashMap;
+use std::ffi::OsString;
 
-use radicle_term as term;
+use clap::{CommandFactory, Parser, Subcommand};
 
-use lampo_common::error;
 use lampo_common::json;
+
+#[derive(Subcommand, Debug)]
+enum CliCommand {
+    #[command(external_subcommand)]
+    Method(Vec<OsString>),
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "lampo-cli",
+    about = "Lampo Daemon command line",
+    version = env!("CARGO_PKG_VERSION"),
+    long_about = None
+)]
+struct CliParser {
+    /// Set the network for lampo (default: testnet)
+    #[arg(short = 'n', long = "network")]
+    pub network: Option<String>,
+
+    /// Specify API endpoint
+    #[arg(short = 'u', long = "url")]
+    pub url: Option<String>,
+
+    /// Specify lampo data directory (used to get socket path)
+    #[arg(short = 'd', long = "data-dir")]
+    pub data_dir: Option<String>,
+
+    #[command(subcommand)]
+    command: Option<CliCommand>,
+}
 
 #[derive(Debug)]
 pub struct LampoCliArgs {
@@ -12,127 +42,63 @@ pub struct LampoCliArgs {
     pub url: String,
 }
 
-struct Help {
-    name: &'static str,
-    description: &'static str,
-    version: &'static str,
-    usage: &'static str,
+/// Parse a value string into the appropriate JSON type.
+/// Tries u64 first, then bool, then falls back to string.
+fn parse_value(val: &str) -> json::Value {
+    if let Ok(n) = val.parse::<u64>() {
+        json::json!(n)
+    } else if let Ok(b) = val.parse::<bool>() {
+        json::json!(b)
+    } else {
+        json::json!(val)
+    }
 }
 
-const HELP: Help = Help {
-    name: "lampod-cli",
-    description: "Lampo Daemon command line",
-    version: env!("CARGO_PKG_VERSION"),
-    usage: r#"
-Usage
+pub fn parse_args() -> Result<LampoCliArgs, clap::Error> {
+    let cli = CliParser::parse();
 
-    lampod-cli [<option> ...] <method> [arg=value]
+    let url = cli
+        .url
+        .unwrap_or_else(|| "http://127.0.0.1:7979".to_string());
 
-Options
-
-    -d | --data-dir     Specify lampo data directory (used to get socket path)
-    -n | --network      Set the network for lampo (default: testnet)
-    -u | --url        Specify API endipoint
-    -h | --help         Print help
-"#,
-};
-
-pub fn parse_args() -> Result<LampoCliArgs, lexopt::Error> {
-    use lexopt::prelude::*;
-
-    let mut _network: Option<String> = None;
-    let mut method: Option<String> = None;
-    let mut url: Option<String> = None;
-    let mut args = HashMap::<String, json::Value>::new();
-
-    let mut parser = lexopt::Parser::from_env();
-    while let Some(arg) = parser.next()? {
-        match arg {
-            Short('n') | Long("network") => {
-                let val: String = parser.value()?.parse()?;
-                _network = Some(val);
-            }
-            Short('u') | Long("url") => {
-                let var: String = parser.value()?.parse()?;
-                url = Some(var);
-            }
-            Long("help") => {
-                let _ = print_help();
-                std::process::exit(0);
-            }
-            Long(val) => {
-                if method.is_none() {
-                    return Err(lexopt::Error::MissingValue {
-                        option: Some("method is not specified".to_owned()),
-                    });
-                }
-                log::debug!("look for args {:?}", val);
-                match arg {
-                    Long(val) => {
-                        let key = val.to_string();
-                        let val: String = parser.value()?.parse()?;
-                        if let Ok(val) = val.parse::<u64>() {
-                            let val = json::json!(val);
-                            args.insert(key.clone(), val);
-                        } else if let Ok(val) = val.parse::<bool>() {
-                            let val = json::json!(val);
-                            args.insert(key.clone(), val);
-                        } else {
-                            let val = json::json!(val);
-                            args.insert(key, val);
-                        }
-                    }
-                    _ => return Err(arg.unexpected()),
-                }
-            }
-            Value(ref val) => {
-                if args.is_empty() && method.is_none() {
-                    method = Some(val.clone().string()?);
-                    log::debug!("find a method {:?}", method);
-                    continue;
-                }
-                return Err(arg.unexpected());
-            }
-            _ => return Err(arg.unexpected()),
+    let ext_args = match cli.command {
+        Some(CliCommand::Method(args)) => args,
+        None => {
+            return Err(CliParser::command().error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "A method must be specified. Try `lampo-cli --help`",
+            ));
         }
+    };
+
+    // First element is the method name
+    let method = ext_args
+        .first()
+        .expect("external subcommand always has at least one element")
+        .to_string_lossy()
+        .to_string();
+
+    // Parse remaining --key value pairs into a HashMap
+    let trailing: Vec<String> = ext_args[1..]
+        .iter()
+        .map(|s| s.to_string_lossy().to_string())
+        .collect();
+
+    let mut args = HashMap::<String, json::Value>::new();
+    let mut i = 0;
+    while i < trailing.len() {
+        let arg = &trailing[i];
+        if let Some(key) = arg.strip_prefix("--") {
+            i += 1;
+            if i < trailing.len() {
+                let val = &trailing[i];
+                log::debug!("look for args {:?} = {:?}", key, val);
+                args.insert(key.to_string(), parse_value(val));
+            }
+        }
+        i += 1;
     }
 
     log::debug!("args parser are {:?} {:?}", method, args);
-    Ok(LampoCliArgs {
-        url: url.unwrap_or("http://127.0.0.1:7979".to_string()),
-        method: method.ok_or_else(|| lexopt::Error::MissingValue {
-            option: Some(
-                "Too few params, a method need to be specified. Try run `lampo-cli --help`"
-                    .to_owned(),
-            ),
-        })?,
-        args,
-    })
-}
-
-// Print helps
-pub fn print_help() -> error::Result<()> {
-    println!(
-        "{}",
-        term::format::secondary("Common `lampod-cli` commands used to init the lampo daemon")
-    );
-    println!(
-        "\n{} {}",
-        term::format::bold("Usage:"),
-        term::format::dim("lampod-cli [<option> ...] <method> [arg=value]")
-    );
-    println!();
-
-    println!(
-        "\t{} version {}",
-        term::format::bold("lampo-cli"),
-        term::format::dim(HELP.version)
-    );
-    println!(
-        "\t{} {}",
-        term::format::bold(format!("{:-12}", HELP.name)),
-        term::format::dim(HELP.description)
-    );
-    println!("{}", term::format::bold(HELP.usage));
-    Ok(())
+    Ok(LampoCliArgs { url, method, args })
 }
