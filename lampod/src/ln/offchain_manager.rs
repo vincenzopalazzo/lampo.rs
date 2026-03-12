@@ -75,7 +75,7 @@ impl OffchainManager {
             amount_msats: amount_msat,
             description: ldk::invoice::Bolt11InvoiceDescription::Direct(
                 ldk::invoice::Description::new(description.to_string())
-                    .map_err(|err| error::anyhow!("{err}"))?,
+                    .map_err(|err| error::anyhow!(err))?,
             ),
             invoice_expiry_delta_secs: Some(expiring_in),
             ..Default::default()
