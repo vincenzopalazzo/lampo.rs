@@ -12,7 +12,6 @@ use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
-use lampo_common::json::de;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
@@ -38,7 +37,6 @@ use lampo_common::types::LampoScorer;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
 
 use crate::actions::handler::LampoHandler;
-use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
@@ -261,7 +259,7 @@ impl LampoChannelManager {
             }
         };
 
-        let txid = tx.as_ref().map(|tx| tx.txid());
+        let txid = tx.as_ref().map(|tx| tx.compute_txid());
 
         Ok(response::OpenChannel {
             node_id: open_channel.node_id,

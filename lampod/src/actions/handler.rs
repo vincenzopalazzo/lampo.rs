@@ -29,7 +29,9 @@ use super::Handler;
 
 pub struct LampoHandler {
     channel_manager: Arc<LampoChannelManager>,
+    #[allow(dead_code)]
     peer_manager: Arc<LampoPeerManager>,
+    #[allow(dead_code)]
     inventory_manager: Arc<LampoInventoryManager>,
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
@@ -120,10 +122,10 @@ impl Handler for LampoHandler {
         self.emit(Event::RawLDK(event.clone()));
         match event {
             ldk::events::Event::OpenChannelRequest {
-                temporary_channel_id,
-                counterparty_node_id,
-                funding_satoshis,
-                channel_type,
+                temporary_channel_id: _,
+                counterparty_node_id: _,
+                funding_satoshis: _,
+                channel_type: _,
                 channel_negotiation_type: _,
                 is_announced: _,
                 params: _
@@ -132,7 +134,7 @@ impl Handler for LampoHandler {
             }
             ldk::events::Event::ChannelReady {
                 channel_id,
-                user_channel_id,
+                user_channel_id: _,
                 counterparty_node_id,
                 channel_type,
             } => {
@@ -282,22 +284,22 @@ impl Handler for LampoHandler {
                 self.emit(Event::Lightning(LightningEvent::ChannelPending { counterparty_node_id, funding_transaction: funding_txo }));
                 Ok(())
             }
-            ldk::events::Event::PendingHTLCsForwardable { time_forwardable } => {
+            ldk::events::Event::PendingHTLCsForwardable { time_forwardable: _ } => {
                 self.channel_manager
                     .manager()
                     .process_pending_htlc_forwards();
                 Ok(())
             }
             ldk::events::Event::PaymentClaimable {
-                receiver_node_id,
-                payment_hash,
-                onion_fields,
-                amount_msat,
-                counterparty_skimmed_fee_msat,
+                receiver_node_id: _,
+                payment_hash: _,
+                onion_fields: _,
+                amount_msat: _,
+                counterparty_skimmed_fee_msat: _,
                 purpose,
-                via_channel_id,
-                via_user_channel_id,
-                claim_deadline,
+                via_channel_id: _,
+                via_user_channel_id: _,
+                claim_deadline: _,
                 payment_id: _,
             } => {
                 let preimage = match purpose {
@@ -314,13 +316,13 @@ impl Handler for LampoHandler {
                 Ok(())
             }
             ldk::events::Event::PaymentClaimed {
-                receiver_node_id,
-                payment_hash,
-                amount_msat,
+                receiver_node_id: _,
+                payment_hash: _,
+                amount_msat: _,
                 purpose,
                 ..
             } => {
-                let (payment_preimage, payment_secret) = match purpose {
+                let (_payment_preimage, _payment_secret) = match purpose {
                     ldk::events::PaymentPurpose::Bolt11InvoicePayment {
                         payment_preimage,
                         payment_secret,
