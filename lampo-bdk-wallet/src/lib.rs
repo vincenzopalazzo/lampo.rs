@@ -251,7 +251,7 @@ impl WalletManager for BDKWalletManager {
         #[allow(deprecated)]
         let opts = SignOptions::default();
         if !wallet.sign(&mut psbt, opts.clone())? {
-            error::bail!("wallet not able to sing the psbt {psbt}");
+            error::bail!("wallet not able to sign the psbt {psbt}");
         }
         Ok(psbt.extract_tx()?)
     }
