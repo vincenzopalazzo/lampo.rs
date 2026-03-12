@@ -17,7 +17,6 @@ pub mod request {
     pub use crate::model::getinfo::*;
     pub use crate::model::invoice::request::*;
     pub use crate::model::keysend::request::*;
-    pub use crate::model::network::request::*;
     pub use crate::model::new_addr::request::*;
     #[allow(unused_imports)]
     pub use crate::model::on_chain::request::*;

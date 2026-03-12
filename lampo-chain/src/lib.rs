@@ -1,5 +1,6 @@
 use std::sync::{Arc, OnceLock};
 
+use base64::Engine;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lightning_block_sync::http::HttpEndpoint;
@@ -50,7 +51,8 @@ impl LampoChainSync {
         log::debug!("Connecting to core at: {:?} - {host}", url_parts);
 
         let http_endpoint = HttpEndpoint::for_host(host.to_owned()).with_port(port);
-        let rpc_credentials = base64::encode(format!("{}:{}", core_user, core_pass));
+        let rpc_credentials = base64::engine::general_purpose::STANDARD
+            .encode(format!("{}:{}", core_user, core_pass));
 
         let rpc = RpcClient::new(&rpc_credentials, http_endpoint);
 
@@ -106,7 +108,7 @@ impl BlockSource for LampoChainSync {
         Box::pin(async move { self.rpc_client.get_block(header_hash).await })
     }
 
-    fn get_best_block<'a>(&'a self) -> AsyncBlockSourceResult<(BlockHash, Option<u32>)> {
+    fn get_best_block<'a>(&'a self) -> AsyncBlockSourceResult<'a, (BlockHash, Option<u32>)> {
         Box::pin(async move { self.rpc_client.get_best_block().await })
     }
 }
@@ -160,23 +162,23 @@ impl Backend for LampoChainSync {
 
     async fn get_transaction(
         &self,
-        txid: &lampo_common::bitcoin::Txid,
+        _txid: &lampo_common::bitcoin::Txid,
     ) -> lampo_common::error::Result<lampo_common::backend::TxResult> {
         unimplemented!()
     }
 
     async fn get_utxo(
         &self,
-        block: &lampo_common::bitcoin::BlockHash,
-        idx: u64,
+        _block: &lampo_common::bitcoin::BlockHash,
+        _idx: u64,
     ) -> lampo_common::backend::UtxoResult {
         unimplemented!()
     }
 
     async fn get_utxo_by_txid(
         &self,
-        txid: &lampo_common::bitcoin::Txid,
-        script: &lampo_common::bitcoin::Script,
+        _txid: &lampo_common::bitcoin::Txid,
+        _script: &lampo_common::bitcoin::Script,
     ) -> lampo_common::error::Result<lampo_common::backend::TxResult> {
         unimplemented!()
     }
@@ -187,7 +189,7 @@ impl Backend for LampoChainSync {
         struct MempoolInfo {
             loaded: bool,
             mempoolminfee: f64,
-        };
+        }
         let mempool_info = self
             .rpc_client
             .call_method::<json::Value>("getmempoolinfo", &[])

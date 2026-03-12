@@ -21,9 +21,9 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
+use lampo_common::ldk::ln::channelmanager::Bolt11InvoiceParameters;
 use lampo_common::ldk::ln::channelmanager::Retry;
 use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
-use lampo_common::ldk::ln::invoice_utils::create_invoice_from_channelmanager;
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
@@ -36,8 +36,11 @@ use crate::utils::logger::LampoLogger;
 
 pub struct OffchainManager {
     channel_manager: Arc<LampoChannelManager>,
+    #[allow(dead_code)]
     keys_manager: Arc<LampoKeysManager>,
+    #[allow(dead_code)]
     logger: Arc<LampoLogger>,
+    #[allow(dead_code)]
     lampo_conf: Arc<LampoConf>,
     chain_manager: Arc<LampoChainManager>,
 }
@@ -68,14 +71,20 @@ impl OffchainManager {
         description: &str,
         expiring_in: u32,
     ) -> error::Result<ldk::invoice::Bolt11Invoice> {
-        let invoice = ldk::ln::invoice_utils::create_invoice_from_channelmanager(
-            &self.channel_manager.manager(),
-            amount_msat,
-            description.to_string(),
-            expiring_in,
-            None,
-        )
-        .map_err(|err| error::anyhow!(err))?;
+        let params = Bolt11InvoiceParameters {
+            amount_msats: amount_msat,
+            description: ldk::invoice::Bolt11InvoiceDescription::Direct(
+                ldk::invoice::Description::new(description.to_string())
+                    .map_err(|err| error::anyhow!(err))?,
+            ),
+            invoice_expiry_delta_secs: Some(expiring_in),
+            ..Default::default()
+        };
+        let invoice = self
+            .channel_manager
+            .manager()
+            .create_bolt11_invoice(params)
+            .map_err(|err| error::anyhow!(err))?;
         Ok(invoice)
     }
 

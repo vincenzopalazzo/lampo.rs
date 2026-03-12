@@ -79,7 +79,7 @@ impl LampoChainManager {
 /// Rust lightning FeeEstimator implementation
 #[async_trait]
 impl FeeEstimator for LampoChainManager {
-    fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
+    fn get_est_sat_per_1000_weight(&self, _confirmation_target: ConfirmationTarget) -> u32 {
         // FIXME: have the result in the cache to make easy the query of it.
         // TODO: fix this
         256
@@ -106,7 +106,7 @@ impl BroadcasterInterface for LampoChainManager {
 impl BlockSource for LampoChainManager {
     fn get_best_block<'a>(
         &'a self,
-    ) -> ldk::block_sync::AsyncBlockSourceResult<(bitcoin::BlockHash, Option<u32>)> {
+    ) -> ldk::block_sync::AsyncBlockSourceResult<'a, (bitcoin::BlockHash, Option<u32>)> {
         sync!(self.backend.get_best_block().await)
     }
 
