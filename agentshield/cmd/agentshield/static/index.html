@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentShield — Control Tower</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: #2a2d3a;
+            --text: #e1e4ed;
+            --muted: #8b8fa3;
+            --accent: #6366f1;
+            --green: #22c55e;
+            --red: #ef4444;
+            --yellow: #eab308;
+            --blue: #3b82f6;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+        header h1 { font-size: 24px; font-weight: 700; }
+        header h1 span { color: var(--accent); }
+        .tabs { display: flex; gap: 4px; background: var(--surface); padding: 4px; border-radius: 8px; }
+        .tab { padding: 8px 16px; border-radius: 6px; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; }
+        .tab.active { background: var(--accent); color: white; }
+        .panel { display: none; }
+        .panel.active { display: block; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .badge { padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+        .badge-pending { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .badge-executed, .badge-approved { background: rgba(34,197,94,0.15); color: var(--green); }
+        .badge-denied { background: rgba(239,68,68,0.15); color: var(--red); }
+        .badge-failed { background: rgba(239,68,68,0.15); color: var(--red); }
+        .badge-allow { background: rgba(34,197,94,0.15); color: var(--green); }
+        .badge-deny { background: rgba(239,68,68,0.15); color: var(--red); }
+        .meta { color: var(--muted); font-size: 13px; }
+        .meta span { margin-right: 16px; }
+        .actions { display: flex; gap: 8px; margin-top: 12px; }
+        .btn { padding: 6px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; }
+        .btn-approve { background: var(--green); color: white; }
+        .btn-reject { background: var(--red); color: white; }
+        .btn-reset { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+        .btn:hover { opacity: 0.9; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
+        th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; }
+        .policy-form { display: grid; gap: 16px; max-width: 500px; }
+        .form-group label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+        .form-group input { width: 100%; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 14px; }
+        .btn-save { background: var(--accent); color: white; padding: 8px 24px; }
+        .empty { text-align: center; padding: 40px; color: var(--muted); }
+        .detail-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        .detail-label { color: var(--muted); min-width: 120px; font-size: 13px; }
+        .detail-value { font-size: 13px; }
+        pre { background: var(--bg); padding: 12px; border-radius: 6px; font-size: 13px; overflow-x: auto; }
+        .refresh-info { color: var(--muted); font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1><span>Agent</span>Shield</h1>
+        <div style="display:flex;gap:12px;align-items:center">
+            <span class="refresh-info">Auto-refresh: 3s</span>
+            <button class="btn btn-reset" onclick="resetDemo()">Reset Demo</button>
+        </div>
+    </header>
+
+    <div class="tabs">
+        <button class="tab active" onclick="showTab('pending')">Pending</button>
+        <button class="tab" onclick="showTab('history')">History</button>
+        <button class="tab" onclick="showTab('policy')">Policy</button>
+    </div>
+
+    <div id="pending" class="panel active">
+        <div id="pending-list"></div>
+    </div>
+
+    <div id="history" class="panel">
+        <div id="history-list"></div>
+    </div>
+
+    <div id="policy" class="panel">
+        <div class="card">
+            <h3 style="margin-bottom:16px">Live Policy Configuration</h3>
+            <div class="policy-form">
+                <div class="form-group">
+                    <label>Auto-approve payment limit ($)</label>
+                    <input type="number" id="policy-limit" step="1" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Denied actions (comma-separated)</label>
+                    <input type="text" id="policy-denied" placeholder="delete_database, drop_table">
+                </div>
+                <div class="form-group">
+                    <label>Approval-required actions (comma-separated)</label>
+                    <input type="text" id="policy-approval" placeholder="export_data">
+                </div>
+                <button class="btn btn-save" onclick="savePolicy()">Save Policy</button>
+            </div>
+            <p id="policy-status" style="margin-top:12px;font-size:13px;color:var(--green);display:none"></p>
+        </div>
+    </div>
+</div>
+
+<script>
+const API = window.location.origin + '/api/v1';
+
+function showTab(name) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(name).classList.add('active');
+    event.target.classList.add('active');
+    refresh();
+}
+
+function badgeClass(status) {
+    return 'badge badge-' + status;
+}
+
+function timeAgo(ts) {
+    const diff = Date.now() - new Date(ts).getTime();
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    return Math.floor(s/3600) + 'h ago';
+}
+
+function renderPending(actions) {
+    const el = document.getElementById('pending-list');
+    const pending = actions.filter(a => a.status === 'pending');
+    if (!pending.length) {
+        el.innerHTML = '<div class="empty">No pending actions</div>';
+        return;
+    }
+    el.innerHTML = pending.map(a => `
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <strong>${a.action_type}</strong>
+                    <span class="${badgeClass(a.decision)}" style="margin-left:8px">${a.decision}</span>
+                </div>
+                <span class="meta">${timeAgo(a.created_at)}</span>
+            </div>
+            <div class="meta">
+                <span>Agent: ${a.agent_id}</span>
+                <span>ID: ${a.id.slice(0,8)}...</span>
+            </div>
+            <div class="meta" style="margin-top:4px">Reason: ${a.reason}</div>
+            <pre>${JSON.stringify(a.parameters, null, 2)}</pre>
+            <div class="actions">
+                <button class="btn btn-approve" onclick="approve('${a.id}')">Approve</button>
+                <button class="btn btn-reject" onclick="reject('${a.id}')">Reject</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderHistory(actions) {
+    const el = document.getElementById('history-list');
+    const hist = actions.filter(a => a.status !== 'pending');
+    if (!hist.length) {
+        el.innerHTML = '<div class="empty">No action history</div>';
+        return;
+    }
+    el.innerHTML = '<table><thead><tr><th>Action</th><th>Agent</th><th>Decision</th><th>Status</th><th>Time</th></tr></thead><tbody>' +
+        hist.map(a => `
+            <tr>
+                <td>${a.action_type}</td>
+                <td>${a.agent_id}</td>
+                <td><span class="${badgeClass(a.decision)}">${a.decision}</span></td>
+                <td><span class="${badgeClass(a.status)}">${a.status}</span></td>
+                <td class="meta">${timeAgo(a.created_at)}</td>
+            </tr>
+        `).join('') + '</tbody></table>';
+}
+
+async function refresh() {
+    try {
+        const [actionsRes, policyRes] = await Promise.all([
+            fetch(API + '/actions'),
+            fetch(API + '/policy')
+        ]);
+        const actions = await actionsRes.json();
+        const policy = await policyRes.json();
+
+        renderPending(actions);
+        renderHistory(actions);
+
+        document.getElementById('policy-limit').value = policy.auto_approve_payment_limit;
+        document.getElementById('policy-denied').value = (policy.denied_actions || []).join(', ');
+        document.getElementById('policy-approval').value = (policy.approval_required_actions || []).join(', ');
+    } catch(e) {
+        console.error('refresh error:', e);
+    }
+}
+
+async function approve(id) {
+    await fetch(API + '/actions/' + id + '/approve', { method: 'POST' });
+    refresh();
+}
+
+async function reject(id) {
+    await fetch(API + '/actions/' + id + '/reject', { method: 'POST' });
+    refresh();
+}
+
+async function savePolicy() {
+    const limit = parseFloat(document.getElementById('policy-limit').value);
+    const denied = document.getElementById('policy-denied').value
+        .split(',').map(s => s.trim()).filter(Boolean);
+    const approval = document.getElementById('policy-approval').value
+        .split(',').map(s => s.trim()).filter(Boolean);
+
+    await fetch(API + '/policy', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            auto_approve_payment_limit: limit,
+            denied_actions: denied,
+            approval_required_actions: approval
+        })
+    });
+
+    const st = document.getElementById('policy-status');
+    st.textContent = 'Policy updated! New actions will use updated rules.';
+    st.style.display = 'block';
+    setTimeout(() => st.style.display = 'none', 3000);
+    refresh();
+}
+
+async function resetDemo() {
+    if (!confirm('Reset all actions and restore default policy?')) return;
+    await fetch(API + '/reset', { method: 'POST' });
+    refresh();
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
