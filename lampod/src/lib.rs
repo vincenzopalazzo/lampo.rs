@@ -29,6 +29,7 @@ use lampo_common::conf::LampoConf;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::events::{Event, ReplayEvent};
+use lampo_plugin::PluginManager;
 use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, BackgroundProcessor, GossipSync};
 use lampo_common::types::LampoGraph;
@@ -224,6 +225,18 @@ impl LampoDaemon {
             error::bail!("Initial handler is None");
         };
         handler.add_external_handler(ext_handler).await?;
+        Ok(())
+    }
+
+    /// Set the plugin manager on the handler for hook invocation and notifications.
+    pub async fn set_plugin_manager(
+        &self,
+        manager: Arc<PluginManager>,
+    ) -> error::Result<()> {
+        let Some(ref handler) = self.handler else {
+            error::bail!("Initial handler is None");
+        };
+        handler.set_plugin_manager(manager).await;
         Ok(())
     }
 

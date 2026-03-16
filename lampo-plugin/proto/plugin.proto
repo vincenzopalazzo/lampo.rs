@@ -1,0 +1,95 @@
+syntax = "proto3";
+package lampo.plugin.v1;
+
+/// LampoPlugin is the service that a remote plugin implements.
+/// The daemon connects to the plugin as a gRPC client and drives
+/// the full lifecycle: manifest → init → rpc/hook/notify → shutdown.
+service LampoPlugin {
+    /// Request the plugin's manifest (capabilities declaration).
+    rpc GetManifest(ManifestRequest) returns (ManifestResponse);
+
+    /// Initialize the plugin with node configuration.
+    rpc Init(InitRequest) returns (InitResponse);
+
+    /// Forward an RPC call to the plugin.
+    rpc HandleRpc(RpcRequest) returns (RpcResponse);
+
+    /// Invoke a synchronous hook on the plugin.
+    rpc HandleHook(HookRequest) returns (HookResponse);
+
+    /// Send a fire-and-forget notification to the plugin.
+    rpc Notify(NotifyRequest) returns (NotifyResponse);
+
+    /// Request graceful shutdown.
+    rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+// --- Manifest ---
+
+message ManifestRequest {}
+
+message ManifestResponse {
+    /// JSON-encoded PluginManifest (same schema as stdio protocol).
+    string manifest_json = 1;
+}
+
+// --- Init ---
+
+message InitRequest {
+    /// JSON-encoded InitConfig.
+    string config_json = 1;
+}
+
+message InitResponse {
+    /// Empty if OK. Set disable_message to opt out.
+    string disable_message = 1;
+}
+
+// --- RPC ---
+
+message RpcRequest {
+    /// The RPC method name.
+    string method = 1;
+    /// JSON-encoded parameters.
+    string params_json = 2;
+}
+
+message RpcResponse {
+    /// JSON-encoded result on success.
+    string result_json = 1;
+    /// If non-empty, the call failed with this error message.
+    string error_message = 2;
+    /// JSON-RPC error code (e.g. -32000 for application errors).
+    int32 error_code = 3;
+}
+
+// --- Hook ---
+
+message HookRequest {
+    /// The hook name (e.g. "hook/openchannel").
+    string hook_name = 1;
+    /// JSON-encoded hook payload.
+    string payload_json = 2;
+}
+
+message HookResponse {
+    /// JSON-encoded HookResponse (continue/complete/reject).
+    string response_json = 1;
+}
+
+// --- Notify ---
+
+message NotifyRequest {
+    /// The notification topic (e.g. "channel_ready").
+    string topic = 1;
+    /// JSON-encoded payload.
+    string payload_json = 2;
+}
+
+message NotifyResponse {}
+
+// --- Shutdown ---
+
+message ShutdownRequest {}
+
+message ShutdownResponse {}
