@@ -19,6 +19,10 @@ use lampo_common::jsonrpc::Request;
 use lampo_common::ldk;
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
+use lampo_plugin::PluginManager;
+use lampo_plugin_common::hooks::HookPoint;
+use lampo_plugin_common::messages::HookResponse;
+use lampo_plugin_common::topics;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
@@ -37,6 +41,8 @@ pub struct LampoHandler {
     #[allow(dead_code)]
     emitter: Emitter<Event>,
     subscriber: Subscriber<Event>,
+    /// Plugin manager for hook invocation and notifications.
+    plugin_manager: RwLock<Option<Arc<PluginManager>>>,
 }
 
 impl LampoHandler {
@@ -52,6 +58,7 @@ impl LampoHandler {
             external_handlers: RwLock::new(Vec::new()),
             emitter,
             subscriber,
+            plugin_manager: RwLock::new(None),
         }
     }
 
@@ -62,6 +69,34 @@ impl LampoHandler {
         let mut external_handlers = self.external_handlers.write().await;
         external_handlers.push(handler);
         Ok(())
+    }
+
+    /// Set the plugin manager for hook invocation and notifications.
+    pub async fn set_plugin_manager(&self, manager: Arc<PluginManager>) {
+        let mut pm = self.plugin_manager.write().await;
+        *pm = Some(manager);
+    }
+
+    /// Send a notification to subscribed plugins (fire-and-forget).
+    async fn notify_plugins(&self, topic: &str, payload: json::Value) {
+        let pm = self.plugin_manager.read().await;
+        if let Some(ref manager) = *pm {
+            manager.notify(topic, payload).await;
+        }
+    }
+
+    /// Run a hook chain and return the response.
+    async fn run_hook(
+        &self,
+        hook: &HookPoint,
+        payload: json::Value,
+    ) -> error::Result<HookResponse> {
+        let pm = self.plugin_manager.read().await;
+        if let Some(ref manager) = *pm {
+            manager.run_hook(hook, payload).await
+        } else {
+            Ok(HookResponse::Continue { payload: None })
+        }
     }
 
     /// Call any method supported by the lampod configuration. This includes
@@ -125,7 +160,23 @@ impl Handler for LampoHandler {
                 is_announced: _,
                 params: _
             } => {
-                Err(error::anyhow!("Request for open a channel received, unfortunatly we do not support this feature yet."))
+                // Run the openchannel hook — plugins can accept/reject
+                let hook_payload = json::json!({
+                    "temporary_channel_id": temporary_channel_id.to_string(),
+                    "counterparty_node_id": counterparty_node_id.to_string(),
+                    "funding_satoshis": funding_satoshis,
+                    "channel_type": format!("{:?}", channel_type),
+                });
+                let hook_result = self.run_hook(&HookPoint::OpenChannel, hook_payload).await?;
+                match hook_result {
+                    HookResponse::Reject { message } => {
+                        log::info!(target: "plugin", "openchannel rejected by plugin: {}", message);
+                        Err(error::anyhow!("Channel open rejected by plugin: {}", message))
+                    }
+                    _ => {
+                        Err(error::anyhow!("Request for open a channel received, unfortunately we do not support this feature yet."))
+                    }
+                }
             }
             ldk::events::Event::ChannelReady {
                 channel_id,
@@ -134,6 +185,11 @@ impl Handler for LampoHandler {
                 channel_type,
             } => {
                 log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
+                self.notify_plugins(topics::CHANNEL_READY, json::json!({
+                    "counterparty_node_id": counterparty_node_id.to_string(),
+                    "channel_id": channel_id.to_string(),
+                    "channel_type": format!("{:?}", channel_type),
+                })).await;
                 self.emit(Event::Lightning(LightningEvent::ChannelReady {
                     counterparty_node_id,
                     channel_id,
@@ -207,6 +263,12 @@ impl Handler for LampoHandler {
 
                 let node_id = counterparty_node_id.map(|id| id.to_string());
                 let txo = channel_funding_txo.map(|txo| txo.to_string());
+                self.notify_plugins(topics::CHANNEL_CLOSED, json::json!({
+                    "channel_id": channel_id.to_string(),
+                    "reason": detailed_reason.clone(),
+                    "counterparty_node_id": node_id,
+                    "funding_utxo": txo,
+                })).await;
                 self.emit(Event::Lightning(LightningEvent::CloseChannelEvent {
                     channel_id: channel_id.to_string(),
                     message: detailed_reason.clone(),
@@ -276,6 +338,10 @@ impl Handler for LampoHandler {
                     "channel pending with node `{}` with funding `{funding_txo}`",
                     counterparty_node_id.to_string()
                 );
+                self.notify_plugins(topics::CHANNEL_PENDING, json::json!({
+                    "counterparty_node_id": counterparty_node_id.to_string(),
+                    "funding_txo": funding_txo.to_string(),
+                })).await;
                 self.emit(Event::Lightning(LightningEvent::ChannelPending { counterparty_node_id, funding_transaction: funding_txo }));
                 Ok(())
             }
@@ -337,6 +403,10 @@ impl Handler for LampoHandler {
             },
             ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
                 let path = path.hops.iter().map(|hop| PaymentHop::from(hop.clone())).collect::<Vec<PaymentHop>>();
+                self.notify_plugins(topics::PAYMENT, json::json!({
+                    "state": "success",
+                    "payment_hash": payment_hash.map(|h| h.to_string()),
+                })).await;
                 let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path, reason: None };
                 self.emit(Event::Lightning(hop));
                 Ok(())
@@ -383,6 +453,11 @@ impl Handler for LampoHandler {
                     },
                 };
 
+                self.notify_plugins(topics::PAYMENT, json::json!({
+                    "state": "failure",
+                    "payment_hash": payment_hash.map(|h| h.to_string()),
+                    "reason": &detailed_reason,
+                })).await;
                 let hop = LightningEvent::PaymentEvent {
                     state: PaymentState::Failure,
                     payment_hash: payment_hash.map(|hash| hash.to_string()),

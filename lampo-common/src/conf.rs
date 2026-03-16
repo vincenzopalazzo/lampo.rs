@@ -28,6 +28,12 @@ pub struct LampoConf {
     pub api_port: u64,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
+    /// Plugin binary paths to load at startup.
+    pub plugins: Vec<String>,
+    /// Directory to scan for plugin binaries.
+    pub plugin_dir: Option<String>,
+    /// Remote plugin endpoints (e.g. "https://host:port").
+    pub remote_plugins: Vec<String>,
 }
 
 impl Default for LampoConf {
@@ -60,6 +66,9 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             dev_sync: None,
+            plugins: Vec::new(),
+            plugin_dir: None,
+            remote_plugins: Vec::new(),
         }
     }
 }
@@ -249,6 +258,12 @@ impl TryFrom<String> for LampoConf {
             .get_conf("dev-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+
+        // Parse plugin paths from config
+        let plugins = conf.get_confs("plugin");
+        let plugin_dir = conf.get_conf("plugin-dir").unwrap_or(None);
+        let remote_plugins = conf.get_confs("remote-plugin");
+
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -269,6 +284,9 @@ impl TryFrom<String> for LampoConf {
             api_port,
             reindex,
             dev_sync,
+            plugins,
+            plugin_dir,
+            remote_plugins,
         })
     }
 }

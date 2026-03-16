@@ -66,6 +66,18 @@ pub struct LampoCliArgs {
     #[arg(long = "api-port")]
     pub api_port: Option<u64>,
 
+    /// Load a plugin from the given path (can be repeated)
+    #[arg(long = "plugin")]
+    pub plugins: Vec<String>,
+
+    /// Load all plugins from this directory
+    #[arg(long = "plugin-dir")]
+    pub plugin_dir: Option<String>,
+
+    /// Connect to a remote plugin via gRPC (e.g. https://host:port, can be repeated)
+    #[arg(long = "remote-plugin")]
+    pub remote_plugins: Vec<String>,
+
     /// Subcommand to run
     #[command(subcommand)]
     pub subcommand: Option<LampoCliSubcommand>,
@@ -118,6 +130,16 @@ impl TryInto<LampoConf> for LampoCliArgs {
         }
         if let Some(api_port) = self.api_port {
             conf.api_port = api_port;
+        }
+        // Merge plugin paths from CLI args with those from config file
+        if !self.plugins.is_empty() {
+            conf.plugins.extend(self.plugins);
+        }
+        if self.plugin_dir.is_some() {
+            conf.plugin_dir = self.plugin_dir;
+        }
+        if !self.remote_plugins.is_empty() {
+            conf.remote_plugins.extend(self.remote_plugins);
         }
         Ok(conf)
     }

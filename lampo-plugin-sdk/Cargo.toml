@@ -1,0 +1,17 @@
+[package]
+name = "lampo-plugin-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "SDK for writing lampo plugins in Rust"
+
+[dependencies]
+lampo-plugin-common = { path = "../lampo-plugin-common" }
+tokio = { version = "1", features = ["io-util", "io-std", "sync", "rt", "macros"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = { version = "0.4", features = ["std"] }
+env_logger = "0.11"
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

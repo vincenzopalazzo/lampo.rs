@@ -1,6 +1,9 @@
 [workspace]
 members = [
         "lampo-common",
+        "lampo-plugin-common",
+        "lampo-plugin",
+        "lampo-plugin-sdk",
         "lampod",
         "lampod-cli",
         "lampo-cli",
@@ -13,6 +16,9 @@ members = [
 
 default-members = [
         "lampo-common",
+        "lampo-plugin-common",
+        "lampo-plugin",
+        "lampo-plugin-sdk",
         "lampod",
         "lampod-cli",
         "lampo-cli",
