@@ -4,8 +4,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use async_trait::async_trait;
-
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::keys::LampoKeysManager;
@@ -20,7 +18,6 @@ use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::types::NodeId;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph};
 
-use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
@@ -45,6 +42,7 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<L>,
     IgnoringMessageHandler,
     Arc<LampoKeysManager>,
+    IgnoringMessageHandler,
 >;
 
 type InnerLampoPeerManager =
@@ -114,6 +112,7 @@ impl LampoPeerManager {
             onion_message_handler: onion_messenger.clone(),
             route_handler: gossip_sync,
             custom_message_handler: IgnoringMessageHandler {},
+            send_only_message_handler: IgnoringMessageHandler {},
         };
 
         let peer_manager = InnerLampoPeerManager::new(

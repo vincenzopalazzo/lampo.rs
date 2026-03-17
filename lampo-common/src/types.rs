@@ -27,6 +27,7 @@ pub type LampoChainMonitor = ChainMonitor<
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoLogger>,
     Arc<FilesystemStore>,
+    Arc<LampoKeysManager>,
 >;
 
 pub type LampoArcChannelManager<M, L> = ChannelManager<
@@ -37,7 +38,7 @@ pub type LampoArcChannelManager<M, L> = ChannelManager<
     Arc<LampoKeysManager>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoRouter>,
-    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<LampoKeysManager>>>,
+    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<LampoKeysManager>>>,
     Arc<L>,
 >;
 
