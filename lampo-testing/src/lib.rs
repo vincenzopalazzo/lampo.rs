@@ -16,7 +16,7 @@ use clightning_testing::prelude::btc::Node as BtcNode;
 use clightning_testing::prelude::*;
 use tempfile::TempDir;
 
-use lampo_bdk_wallet::BDKWalletManager;
+use lampo_bdk_wallet::{BDKWalletManager, LampoAnchorBumpHandler};
 use lampo_chain::LampoChainSync;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
@@ -172,6 +172,15 @@ impl LampoTesting {
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
         lampo.init(node.clone()).await?;
         log::info!("bitcoin core added inside lampo");
+
+        // Set up anchor channel bump transaction handler
+        let bump_handler = Arc::new(LampoAnchorBumpHandler::new(
+            lampo.onchain_manager(),
+            wallet.clone(),
+            wallet.ldk_keys().keys_manager.clone(),
+            lampo.logger(),
+        ));
+        lampo.set_anchor_bump_handler(bump_handler).await?;
 
         // run httpd and create the handler that will connect to it
         let handler = Arc::new(HttpdHandler::new(format!(
