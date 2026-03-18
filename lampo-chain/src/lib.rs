@@ -148,14 +148,20 @@ impl Backend for LampoChainSync {
             .call_method::<json::Value>("estimatesmartfee", &[blocks.into()])
             .await?;
         let resp: FeeRate = json::from_value(resp)?;
-        if let Some(errs) = resp.errors {
-            return Err(error::anyhow!("Error in fee rate estimation: {:?}", errs).into());
+        if resp.errors.is_some() || resp.feerate.is_none() {
+            // When estimatesmartfee fails (e.g. during Initial Block Download
+            // or when the node has insufficient data), fall back to the
+            // minimum mempool fee. This prevents returning null fee estimates
+            // to the caller. See: https://github.com/vincenzopalazzo/lampo.rs/issues/244
+            log::warn!(
+                "estimatesmartfee failed for {} blocks (errors: {:?}), falling back to minimum mempool fee",
+                blocks,
+                resp.errors
+            );
+            return self.minimum_mempool_fee().await;
         }
-        let Some(feerate) = resp.feerate else {
-            return Err(error::anyhow!("No fee rate estimation available").into());
-        };
         // estimate fee rate in BTC/kvB
-        Ok((feerate * (100_000_000 as f64)) as u32)
+        Ok((resp.feerate.unwrap() * (100_000_000 as f64)) as u32)
     }
 
     async fn get_transaction(
