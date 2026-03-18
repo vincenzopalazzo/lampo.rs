@@ -5,8 +5,6 @@ use lampo_common::error;
 use lampo_common::model::response::NetworkInfo;
 use lampo_common::model::GetInfo;
 
-use crate::async_run;
-
 use super::{LampoChannelManager, LampoPeerManager};
 
 pub struct LampoInventoryManager {
