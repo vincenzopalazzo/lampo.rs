@@ -267,6 +267,7 @@ impl Backend for LampoChainSync {
             SpvClient::new(synced_chain_tip, chain_poller, &mut cache, &chain_listener);
         log::info!(target: "lampo-chain", "Start Backend ...");
         loop {
+            log::debug!(target: "lampo-chain", "Polling for new blocks...");
             if let Err(err) = spv_client.poll_best_tip().await {
                 log::error!(target: "lampo-chain", "Error while polling best tip: {:?}", err);
             }
