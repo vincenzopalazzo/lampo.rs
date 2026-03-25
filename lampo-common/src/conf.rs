@@ -28,6 +28,7 @@ pub struct LampoConf {
     pub api_port: u64,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
+    pub metrics: bool,
 }
 
 impl Default for LampoConf {
@@ -60,6 +61,7 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             dev_sync: None,
+            metrics: true,
         }
     }
 }
@@ -249,6 +251,12 @@ impl TryFrom<String> for LampoConf {
             .get_conf("dev-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+
+        let metrics = conf
+            .get_conf("metrics")
+            .unwrap_or(None)
+            .map(|s| s.to_lowercase() != "false" && s != "0")
+            .unwrap_or(true);
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -269,6 +277,7 @@ impl TryFrom<String> for LampoConf {
             api_port,
             reindex,
             dev_sync,
+            metrics,
         })
     }
 }

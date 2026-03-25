@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use lampo_common::bitcoin::absolute::Height;
+use metrics::{counter, gauge};
 use tokio::sync::RwLock;
 
 use lampo_common::async_trait;
@@ -53,6 +54,31 @@ impl LampoHandler {
             emitter,
             subscriber,
         }
+    }
+
+    fn update_channel_gauges(&self) {
+        let channels = self.channel_manager.list_channels();
+        let total = channels.channels.len() as f64;
+        let active = channels.channels.iter().filter(|c| c.ready).count() as f64;
+        let public = channels.channels.iter().filter(|c| c.public).count() as f64;
+        let private = channels.channels.iter().filter(|c| !c.public).count() as f64;
+        let inbound_capacity_msat: u64 = channels
+            .channels
+            .iter()
+            .map(|c| c.available_balance_for_recv_msat)
+            .sum();
+        let outbound_capacity_msat: u64 = channels
+            .channels
+            .iter()
+            .map(|c| c.available_balance_for_send_msat)
+            .sum();
+
+        gauge!("lampo_channels_total").set(total);
+        gauge!("lampo_channels_active").set(active);
+        gauge!("lampo_channels_public").set(public);
+        gauge!("lampo_channels_private").set(private);
+        gauge!("lampo_inbound_capacity_msat").set(inbound_capacity_msat as f64);
+        gauge!("lampo_outbound_capacity_msat").set(outbound_capacity_msat as f64);
     }
 
     pub async fn add_external_handler(
@@ -134,11 +160,13 @@ impl Handler for LampoHandler {
                 channel_type,
             } => {
                 log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
+                counter!("lampo_channels_opened_total").increment(1);
                 self.emit(Event::Lightning(LightningEvent::ChannelReady {
                     counterparty_node_id,
                     channel_id,
                     channel_type,
                 }));
+                self.update_channel_gauges();
                 Ok(())
             },
             ldk::events::Event::ChannelClosed {
@@ -205,6 +233,7 @@ impl Handler for LampoHandler {
                     },
                 };
 
+                counter!("lampo_channels_closed_total").increment(1);
                 let node_id = counterparty_node_id.map(|id| id.to_string());
                 let txo = channel_funding_txo.map(|txo| txo.to_string());
                 self.emit(Event::Lightning(LightningEvent::CloseChannelEvent {
@@ -214,6 +243,7 @@ impl Handler for LampoHandler {
                     funding_utxo: txo
                 }));
                 log::info!("channel `{user_channel_id}` closed: {}", detailed_reason);
+                self.update_channel_gauges();
                 Ok(())
             }
             ldk::events::Event::FundingGenerationReady {
@@ -327,21 +357,25 @@ impl Handler for LampoHandler {
                     ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
                 };
+                counter!("lampo_payments_received_total").increment(1);
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristent these information
                 Ok(())
             }
             ldk::events::Event::PaymentSent { .. } => {
+                counter!("lampo_payments_sent_total").increment(1);
                 log::info!("payment sent: `{:?}`", event);
                 Ok(())
             },
             ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
+                counter!("lampo_payments_forwarded_total").increment(1);
                 let path = path.hops.iter().map(|hop| PaymentHop::from(hop.clone())).collect::<Vec<PaymentHop>>();
                 let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path, reason: None };
                 self.emit(Event::Lightning(hop));
                 Ok(())
             },
             ldk::events::Event::PaymentFailed { payment_id, payment_hash, reason } => {
+                counter!("lampo_payments_failed_total").increment(1);
                 log::error!("payment failed: {:?} with reason: {:?}", payment_id, reason);
 
                 // Provide detailed failure reason based on PaymentFailureReason enum

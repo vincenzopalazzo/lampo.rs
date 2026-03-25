@@ -189,9 +189,25 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?")
         })?;
 
+    let metrics_handle = if lampo_conf.metrics {
+        match lampo_httpd::init_metrics() {
+            Ok(handle) => {
+                log::info!("Prometheus metrics enabled");
+                Some(handle)
+            }
+            Err(err) => {
+                log::warn!("Failed to initialize metrics: {err}");
+                None
+            }
+        }
+    } else {
+        log::info!("Prometheus metrics disabled");
+        None
+    };
+
     let lampod = Arc::new(lampod);
 
-    run_httpd(lampod.clone()).await?;
+    run_httpd(lampod.clone(), metrics_handle).await?;
 
     let handler = Arc::new(HttpdHandler::new(format!(
         "{}:{}",
@@ -214,7 +230,10 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     Ok(())
 }
 
-pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+pub async fn run_httpd(
+    lampod: Arc<LampoDaemon>,
+    metrics_handle: Option<metrics_exporter_prometheus::PrometheusHandle>,
+) -> error::Result<()> {
     let url = format!("{}:{}", lampod.conf().api_host, lampod.conf().api_port);
     let mut http_hosting = url.clone();
     if let Some(clean_url) = url.strip_prefix("http://") {
@@ -223,6 +242,6 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
         http_hosting = clean_url.to_string();
     }
     log::info!("preparing httpd api on addr `{url}`");
-    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
+    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url, metrics_handle));
     Ok(())
 }

@@ -14,5 +14,8 @@ tokio = { version = "1", features = ["rt"] }
 lampo-common = { path = "../lampo-common" }
 lampod = { path = "../lampod" }
 
+metrics = "0.24"
+metrics-exporter-prometheus = "0.18"
+
 # FIXME: this should be optional
 elite-rpc =  { version = "0.0.4", features = ["curl"] }

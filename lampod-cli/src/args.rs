@@ -66,6 +66,10 @@ pub struct LampoCliArgs {
     #[arg(long = "api-port")]
     pub api_port: Option<u64>,
 
+    /// Disable Prometheus metrics endpoint
+    #[arg(long = "no-metrics")]
+    pub no_metrics: bool,
+
     /// Subcommand to run
     #[command(subcommand)]
     pub subcommand: Option<LampoCliSubcommand>,
@@ -118,6 +122,9 @@ impl TryInto<LampoConf> for LampoCliArgs {
         }
         if let Some(api_port) = self.api_port {
             conf.api_port = api_port;
+        }
+        if self.no_metrics {
+            conf.metrics = false;
         }
         Ok(conf)
     }

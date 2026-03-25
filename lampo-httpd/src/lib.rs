@@ -7,6 +7,7 @@ use std::{fmt::Display, sync::Arc};
 
 use actix::{web, HttpResponseWrapper, OpenApiExt};
 use actix_web::{App, HttpResponse, HttpServer, ResponseError};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use paperclip::actix::{self, CreatedJson};
 
 use lampo_common::error;
@@ -77,11 +78,22 @@ impl From<lampo_common::jsonrpc::Error> for JsonRPCError {
     }
 }
 
+/// Install the global metrics recorder and return a handle
+/// for rendering Prometheus output.
+pub fn init_metrics() -> error::Result<PrometheusHandle> {
+    let builder = PrometheusBuilder::new();
+    let handle = builder
+        .install_recorder()
+        .map_err(|err| error::anyhow!("failed to install metrics recorder: {err}"))?;
+    Ok(handle)
+}
+
 /// This struct represents app state and it is pass on every
 /// endpoint.
 pub(crate) struct AppState {
     host: String,
     open_api_url: String,
+    metrics_handle: Option<PrometheusHandle>,
 
     lampod: Arc<LampoDaemon>,
 }
@@ -91,10 +103,12 @@ impl AppState {
         lampod: Arc<LampoDaemon>,
         host: String,
         open_api_url: String,
+        metrics_handle: Option<PrometheusHandle>,
     ) -> error::Result<Self> {
         Ok(Self {
             host,
             open_api_url,
+            metrics_handle,
             lampod,
         })
     }
@@ -104,12 +118,19 @@ pub async fn run<T: ToSocketAddrs + Display>(
     lampod: Arc<LampoDaemon>,
     host: T,
     open_api_url: String,
+    metrics_handle: Option<PrometheusHandle>,
 ) -> error::Result<()> {
     let host_str = format!("{host}");
     log::info!("httpd api running on `{host_str}`");
 
     let server = HttpServer::new(move || {
-        let state = AppState::new(lampod.clone(), host_str.clone(), open_api_url.clone()).unwrap();
+        let state = AppState::new(
+            lampod.clone(),
+            host_str.clone(),
+            open_api_url.clone(),
+            metrics_handle.clone(),
+        )
+        .unwrap();
         // FIXME: It is possible to avoid mapping the service in here?
         // it ispossible to init the app outside the callback and
         // use the macros to do add services?
@@ -130,11 +151,23 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_funds)
             .service(rest_new_addr)
             .service(rest_stop)
+            .service(rest_metrics)
             .build()
     })
     .bind(host)?;
     server.run().await?;
     Ok(())
+}
+
+#[actix::get("/metrics")]
+async fn rest_metrics(data: web::Data<AppState>) -> HttpResponseWrapper {
+    let resp = match &data.metrics_handle {
+        Some(handle) => HttpResponse::Ok()
+            .content_type("text/plain; version=0.0.4; charset=utf-8")
+            .body(handle.render()),
+        None => HttpResponse::NotFound().body("metrics not enabled"),
+    };
+    HttpResponseWrapper(resp)
 }
 
 // this is just a hack to support swagger UI with https://paperclip-rs.github.io/paperclip/
