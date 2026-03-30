@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 lightning = { version = "0.1.5", features = [] }
 lightning-block-sync = { version = "0.1.0" }
-lightning-persister = { version = "0.1.0" }
+lightning-persister = { version = "0.2.0" }
 lightning-background-processor = { version = "0.1", features = ["futures"] }
 lightning-net-tokio = { version = "0.1.0" }
 lightning-rapid-gossip-sync = { version = "0.1.0" }
