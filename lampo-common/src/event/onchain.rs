@@ -22,14 +22,14 @@ impl Debug for OnChainEvent {
             Self::ConfirmedTransaction((tx, idx, header, height)) => write!(
                 f,
                 "ConfirmedTransaction(txid: {}, idx {idx}, block: {:?}, height: {height})",
-                tx.txid(),
+                tx.compute_txid(),
                 header
             ),
             Self::NewBestBlock((header, height)) => {
                 write!(f, "NewBestBlock({}, {height})", header.block_hash())
             }
             Self::NewBlock(block) => write!(f, "NewBlock({})", block.block_hash()),
-            Self::SendRawTransaction(tx) => write!(f, "SendRawTransaction({})", tx.txid()),
+            Self::SendRawTransaction(tx) => write!(f, "SendRawTransaction({})", tx.compute_txid()),
             Self::UnconfirmedTransaction(tx) => write!(f, "UnconfirmedTransaction({})", tx),
             _ => write!(f, "Debug fmt not unsupported"),
         }

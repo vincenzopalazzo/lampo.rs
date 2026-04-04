@@ -21,12 +21,12 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
-use lampo_common::ldk::ln::channelmanager::Retry;
-use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
-use lampo_common::ldk::ln::invoice_utils::create_invoice_from_channelmanager;
+use lampo_common::ldk::ln::channelmanager::{
+    Bolt11InvoiceParameters, PaymentId, RecipientOnionFields, Retry,
+};
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
-use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
+use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters, RouteParametersConfig};
 use lampo_common::ldk::sign::EntropySource;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
 
@@ -68,14 +68,17 @@ impl OffchainManager {
         description: &str,
         expiring_in: u32,
     ) -> error::Result<ldk::invoice::Bolt11Invoice> {
-        let invoice = ldk::ln::invoice_utils::create_invoice_from_channelmanager(
-            &self.channel_manager.manager(),
-            amount_msat,
-            description.to_string(),
-            expiring_in,
-            None,
-        )
-        .map_err(|err| error::anyhow!(err))?;
+        let desc = ldk::invoice::Description::new(description.to_string())
+            .map_err(|err| error::anyhow!("{:?}", err))?;
+        let params = Bolt11InvoiceParameters {
+            amount_msats: amount_msat,
+            description: ldk::invoice::Bolt11InvoiceDescription::Direct(desc),
+            invoice_expiry_delta_secs: Some(expiring_in),
+            ..Default::default()
+        };
+        let invoice = self.channel_manager.manager()
+            .create_bolt11_invoice(params)
+            .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(invoice)
     }
 
@@ -106,49 +109,46 @@ impl OffchainManager {
         let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
 
         let amount = match offer.amount() {
-            Some(Amount::Bitcoin { amount_msats }) => amount_msats.clone(),
+            Some(Amount::Bitcoin { amount_msats }) => {
+                // Offer already specifies amount; pass None to let LDK use it,
+                // but allow the caller to override with a different amount.
+                amount_msat.or(Some(amount_msats.clone()))
+            },
             Some(_) => error::bail!(
                 "Cannot process non-Bitcoin-denominated offer value {:?}",
                 offer.amount()
             ),
-            None => amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?,
+            None => Some(amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?),
         };
 
-        log::debug!(target: "lampo::offchain", "paying offer with amount `{}msat` & payer_note: `{}`", amount, payer_note.as_ref().unwrap_or(&"".to_string()));
+        log::debug!(target: "lampo::offchain", "paying offer with amount `{:?}msat` & payer_note: `{}`", amount, payer_note.as_ref().unwrap_or(&"".to_string()));
         self.channel_manager
             .manager()
             .pay_for_offer(
                 &offer,
-                None,
-                Some(amount),
-                payer_note,
+                amount,
                 payment_id,
-                Retry::Timeout(std::time::Duration::from_secs(1)),
-                None,
+                ldk::ln::channelmanager::OptionalOfferPaymentParams {
+                    payer_note,
+                    ..Default::default()
+                },
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(())
     }
 
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
-        // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
         let payment_id = PaymentId((*invoice.payment_hash()).to_byte_array());
-        let (payment_hash, onion, route) = if invoice.amount_milli_satoshis().is_none() {
-            ldk::ln::bolt11_payment::payment_parameters_from_variable_amount_invoice(
-                &invoice,
-                amount_msat.ok_or(error::anyhow!(
-                    "invoice with no amount, and amount must be specified"
-                ))?,
-            )
-            .map_err(|err| error::anyhow!("{:?}", err))?
-        } else {
-            ldk::ln::bolt11_payment::payment_parameters_from_invoice(&invoice)
-                .map_err(|err| error::anyhow!("{:?}", err))?
-        };
         self.channel_manager
             .manager()
-            .send_payment(payment_hash, onion, payment_id, route, Retry::Attempts(10))
+            .pay_for_bolt11_invoice(
+                &invoice,
+                payment_id,
+                amount_msat,
+                RouteParametersConfig::default(),
+                Retry::Attempts(10),
+            )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(())
     }

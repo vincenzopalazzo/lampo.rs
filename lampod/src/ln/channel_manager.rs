@@ -11,7 +11,6 @@ use lampo_common::error;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
-use lampo_common::json::de;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
@@ -25,7 +24,7 @@ use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
-use lampo_common::ldk::sign::InMemorySigner;
+use lampo_common::ldk::sign::{InMemorySigner, NodeSigner};
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
@@ -37,7 +36,6 @@ use lampo_common::types::LampoScorer;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
 
 use crate::actions::handler::LampoHandler;
-use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
@@ -100,6 +98,8 @@ impl LampoChannelManager {
     }
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {
+        let keys = self.wallet_manager.ldk_keys().keys_manager.clone();
+        let peer_storage_key = keys.inner.get_peer_storage_key();
         ChainMonitor::new(
             // FIXME: this is needed when use esplora or electrum
             None,
@@ -107,6 +107,8 @@ impl LampoChannelManager {
             self.logger.clone(),
             self.onchain.clone(),
             self.persister.clone(),
+            keys,
+            peer_storage_key,
         )
     }
 
@@ -245,7 +247,7 @@ impl LampoChannelManager {
                 0,
                 0,
                 None,
-                Some(self.conf.ldk_conf),
+                Some(self.conf.ldk_conf.clone()),
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
 
@@ -265,7 +267,7 @@ impl LampoChannelManager {
             }
         };
 
-        let txid = tx.as_ref().map(|tx| tx.txid());
+        let txid = tx.as_ref().map(|tx| tx.compute_txid());
 
         Ok(response::OpenChannel {
             node_id: open_channel.node_id,
@@ -320,7 +322,7 @@ impl LampoChannelManager {
             self.router.get().expect("router not initialized").clone(),
             default_message_router,
             self.logger.clone(),
-            self.conf.ldk_conf,
+            self.conf.ldk_conf.clone(),
             monitors,
         );
         let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
@@ -339,7 +341,7 @@ impl LampoChannelManager {
         let chain_params = ChainParameters {
             network: self.conf.network,
             best_block: BestBlock {
-                block_hash: block_hash,
+                block_hash,
                 // FIXME: the default could be dangerus here
                 height: block_height.unwrap_or_default(),
             },
@@ -370,7 +372,7 @@ impl LampoChannelManager {
             keymanagers.clone(),
             keymanagers.clone(),
             keymanagers,
-            self.conf.ldk_conf,
+            self.conf.ldk_conf.clone(),
             chain_params,
             now.as_secs() as u32,
         ));

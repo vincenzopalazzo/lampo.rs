@@ -1,5 +1,4 @@
 //! All the Lampo Node Events that the node is able to react to
-use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::jsonrpc::Request;

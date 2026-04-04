@@ -6,7 +6,7 @@ use lampo_common::model::request::NetworkInfo;
 use lampo_common::model::response::{NetworkChannel, NetworkChannels};
 use lampo_common::model::GetInfo;
 
-use crate::{async_run, LampoDaemon};
+use crate::LampoDaemon;
 
 // FIXME: change the name to `json_get_info`
 pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {

@@ -30,7 +30,9 @@ use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
-use lampo_common::ldk::processor::{process_events_async, GossipSync};
+use lampo_common::ldk::processor::{
+    process_events_async_with_kv_store_sync, BackgroundProcessor, GossipSync, NO_LIQUIDITY_MANAGER,
+};
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
@@ -249,7 +251,7 @@ impl LampoDaemon {
         let _ = self.channel_manager().listen();
 
         tokio::spawn(async move {
-            process_events_async(
+            process_events_async_with_kv_store_sync(
                 self.persister.clone(),
                 |env| self.handler_ldk_events(env),
                 self.channel_manager().chain_monitor(),
@@ -257,6 +259,18 @@ impl LampoDaemon {
                 Some(self.peer_manager().onion_messager()),
                 GossipSync::p2p(gossip_sync),
                 self.peer_manager().manager(),
+                NO_LIQUIDITY_MANAGER,
+                // FIXME: implement output sweeper to automatically claim spendable outputs
+                // from force-closed channels
+                None::<Arc<ldk::util::sweep::OutputSweeperSync<
+                    Arc<dyn ldk::chain::chaininterface::BroadcasterInterface + Send + Sync>,
+                    Arc<dyn ldk::sign::ChangeDestinationSourceSync + Send + Sync>,
+                    Arc<dyn ldk::chain::chaininterface::FeeEstimator + Send + Sync>,
+                    Arc<dyn ldk::chain::Filter + Send + Sync>,
+                    Arc<LampoPersistence>,
+                    Arc<LampoLogger>,
+                    Arc<dyn ldk::sign::OutputSpender + Send + Sync>,
+                >>>,
                 self.logger.clone(),
                 Some(self.channel_manager().scorer()),
                 |d| {
