@@ -97,7 +97,7 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
         http_hosting = clean_url.to_string();
     }
     log::info!("preparing httpd api on addr `{url}`");
-    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
+    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url, None));
     Ok(())
 }
 
