@@ -4,7 +4,7 @@ use paperclip::actix::{self, CreatedJson};
 use paste::paste;
 
 use lampo_common::json;
-use lampo_common::model::{request, response};
+use lampo_common::model::response;
 use lampod::jsonrpc::inventory::*;
 use lampod::jsonrpc::onchain::*;
 

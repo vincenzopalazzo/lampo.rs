@@ -10,9 +10,11 @@ use lampo_common::json;
 use lampo_common::json::{Deserialize, Serialize};
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct RestProtocol;
 
 #[derive(Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct JsonResult {
     result: json::Value,
 }

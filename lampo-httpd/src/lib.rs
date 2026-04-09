@@ -80,6 +80,7 @@ impl From<lampo_common::jsonrpc::Error> for JsonRPCError {
 /// This struct represents app state and it is pass on every
 /// endpoint.
 pub(crate) struct AppState {
+    #[allow(dead_code)]
     host: String,
     open_api_url: String,
 

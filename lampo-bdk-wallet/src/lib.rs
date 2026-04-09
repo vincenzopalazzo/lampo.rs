@@ -10,6 +10,7 @@ use bdk_wallet::keys::bip39::Mnemonic;
 use bdk_wallet::keys::bip39::{Language, WordCount};
 use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
 use bdk_wallet::rusqlite::Connection;
+#[allow(deprecated)]
 use bdk_wallet::{KeychainKind, PersistedWallet, SignOptions, Wallet};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::Mutex;
@@ -241,9 +242,10 @@ impl WalletManager for BDKWalletManager {
             .fee_rate(fee_rate)
             .nlocktime(locktime);
         let mut psbt = tx.finish()?;
+        #[allow(deprecated)]
         let opts = SignOptions::default();
         if !wallet.sign(&mut psbt, opts.clone())? {
-            error::bail!("wallet not able to sing the psbt {psbt}");
+            error::bail!("wallet not able to sign the psbt {psbt}");
         }
         Ok(psbt.extract_tx()?)
     }
@@ -267,6 +269,7 @@ impl WalletManager for BDKWalletManager {
 
     async fn sync(&self) -> error::Result<()> {
         #[derive(Debug)]
+        #[allow(dead_code)]
         enum Emission {
             SigTerm,
             Block(bdk_bitcoind_rpc::BlockEvent<Block>),

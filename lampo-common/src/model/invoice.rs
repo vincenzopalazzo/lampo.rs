@@ -38,7 +38,7 @@ pub mod request {
 pub mod response {
     use std::vec::Vec;
 
-    use bitcoin::{secp256k1::PublicKey, Network};
+    use bitcoin::Network;
     use lightning::offers::offer::Offer as LDKOffer;
     use lightning::routing::router::RouteHop;
     use paperclip::actix::Apiv2Schema;
