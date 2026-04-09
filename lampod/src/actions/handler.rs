@@ -19,6 +19,7 @@ use lampo_common::jsonrpc::Request;
 use lampo_common::ldk;
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
+use lampo_common::wallet::AnchorChannelBumpHandler;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
@@ -33,6 +34,7 @@ pub struct LampoHandler {
     inventory_manager: Arc<LampoInventoryManager>,
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
+    bump_tx_handler: RwLock<Option<Arc<dyn AnchorChannelBumpHandler>>>,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
@@ -49,10 +51,18 @@ impl LampoHandler {
             inventory_manager: lampod.inventory_manager(),
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
+            bump_tx_handler: RwLock::new(None),
             external_handlers: RwLock::new(Vec::new()),
             emitter,
             subscriber,
         }
+    }
+
+    /// Set the anchor channel bump transaction handler for fee bumping
+    /// anchor output commitment transactions during force close.
+    pub async fn set_bump_tx_handler(&self, handler: Arc<dyn AnchorChannelBumpHandler>) {
+        let mut bump_handler = self.bump_tx_handler.write().await;
+        *bump_handler = Some(handler);
     }
 
     pub async fn add_external_handler(
@@ -125,7 +135,26 @@ impl Handler for LampoHandler {
                 is_announced: _,
                 params: _
             } => {
-                Err(error::anyhow!("Request for open a channel received, unfortunatly we do not support this feature yet."))
+                log::info!(
+                    "Received open channel request from `{counterparty_node_id}` \
+                     for {funding_satoshis} sats, channel type: {channel_type}"
+                );
+                // Accept inbound channels (required for anchor channels since
+                // manually_accept_inbound_channels is enabled)
+                self.channel_manager
+                    .manager()
+                    .accept_inbound_channel(
+                        &temporary_channel_id,
+                        &counterparty_node_id,
+                        0, // user_channel_id
+                    )
+                    .map_err(|err| error::anyhow!(
+                        "Failed to accept inbound channel from `{counterparty_node_id}`: {:?}", err
+                    ))?;
+                log::info!(
+                    "Accepted inbound channel from `{counterparty_node_id}`"
+                );
+                Ok(())
             }
             ldk::events::Event::ChannelReady {
                 channel_id,
@@ -390,6 +419,21 @@ impl Handler for LampoHandler {
                     reason: Some(detailed_reason)
                 };
                 self.emit(Event::Lightning(hop));
+                Ok(())
+            },
+            ldk::events::Event::BumpTransaction(bump_event) => {
+                log::info!(target: "lampo::handler", "Handling anchor channel bump transaction event");
+                let handler = self.bump_tx_handler.read().await;
+                if let Some(ref handler) = *handler {
+                    handler.handle_bump_event(&bump_event);
+                    log::info!(target: "lampo::handler", "Bump transaction event handled successfully");
+                } else {
+                    log::error!(
+                        target: "lampo::handler",
+                        "Received BumpTransaction event but no anchor bump handler is configured! \
+                         This may result in loss of funds if HTLCs expire."
+                    );
+                }
                 Ok(())
             },
             _ => {
