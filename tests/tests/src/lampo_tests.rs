@@ -3,6 +3,7 @@
 //! Author: Vincenzo Palazzo <vincenzopalazzo@member.fsf.org>
 use std::sync::Arc;
 
+use lampo_common::bitcoin::hashes::{sha256, Hash};
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
@@ -99,6 +100,87 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
             }
 
             if channels.channels.first().unwrap().ready {
+                return Ok(());
+            }
+        }
+        Err(())
+    });
+    Ok(())
+}
+
+/// BLIP-0056: a merchant sends a `payment_notification` onion message to a PoS
+/// node; the PoS verifies the preimage, emits `PosPaymentNotified`, and replies
+/// with `notification_ack`, which the merchant surfaces as `PosNotificationAck`.
+#[tokio_test_shutdown_timeout::test(60)]
+pub async fn pos_payment_notification_roundtrip() -> error::Result<()> {
+    init();
+    let merchant = LampoTesting::tmp().await?;
+    let pos = LampoTesting::new(merchant.btc.clone()).await?;
+
+    // The PoS connects to the merchant so they become onion-message peers; the
+    // merchant uses that connection as the introduction node for routing.
+    let _: response::Connect = pos
+        .lampod()
+        .call(
+            "connect",
+            request::Connect {
+                node_id: merchant.info.node_id.clone(),
+                addr: "127.0.0.1".to_owned(),
+                port: merchant.port,
+            },
+        )
+        .await
+        .unwrap();
+
+    // Derive a preimage/hash pair. A sha256::Hash prints as hex via Display, so
+    // we avoid pulling in a hex dependency just for the test vectors.
+    let preimage_hash = sha256::Hash::hash(b"blip-0056 pos preimage");
+    let preimage = preimage_hash.to_byte_array();
+    let preimage_hex = preimage_hash.to_string();
+    let payment_hash_hex = sha256::Hash::hash(&preimage).to_string();
+    let amount_msat = 50_000u64;
+
+    let mut pos_events = pos.lampod().events();
+    let mut merchant_events = merchant.lampod().events();
+
+    let _: json::Value = merchant
+        .lampod()
+        .call(
+            "sendpaymentnotification",
+            json::json!({
+                "node_id": pos.info.node_id,
+                "payment_hash": payment_hash_hex,
+                "preimage": preimage_hex,
+                "amount_msat": amount_msat,
+            }),
+        )
+        .await
+        .unwrap();
+
+    // The PoS receives and verifies the notification.
+    async_wait!(async {
+        while let Some(event) = pos_events.recv().await {
+            log::info!(target: "tests", "pos event {:?}", event);
+            if let Event::Lightning(LightningEvent::PosPaymentNotified {
+                amount_msat: amt,
+                verified,
+                ..
+            }) = event
+            {
+                assert!(verified, "preimage must verify against the payment hash");
+                assert_eq!(amt, amount_msat);
+                return Ok(());
+            }
+        }
+        Err(())
+    });
+
+    // The merchant receives the PoS acknowledgement.
+    async_wait!(async {
+        while let Some(event) = merchant_events.recv().await {
+            log::info!(target: "tests", "merchant event {:?}", event);
+            if let Event::Lightning(LightningEvent::PosNotificationAck { acked, .. }) = event {
+                assert!(acked, "the PoS must ack a valid notification");
                 return Ok(());
             }
         }

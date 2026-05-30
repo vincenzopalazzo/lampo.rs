@@ -41,7 +41,7 @@ pub struct LampoHandler {
 
 impl LampoHandler {
     pub(crate) fn new(lampod: &LampoDaemon) -> Self {
-        let emitter = Emitter::default();
+        let emitter = lampod.emitter();
         let subscriber = emitter.subscriber();
         Self {
             channel_manager: lampod.channel_manager(),

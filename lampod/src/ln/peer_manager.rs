@@ -8,6 +8,7 @@ use async_trait::async_trait;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::event::{Emitter, Event};
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::blinded_path::EmptyNodeIdLookUp;
@@ -22,6 +23,7 @@ use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph}
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
+use crate::ln::pos::PosOnionHandler;
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
@@ -34,7 +36,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
-    IgnoringMessageHandler,
+    Arc<PosOnionHandler>,
 >;
 
 pub type SimpleArcPeerManager<M, T, L> = PeerManager<
@@ -56,6 +58,7 @@ pub struct LampoPeerManager {
     conf: LampoConf,
     logger: Arc<LampoLogger>,
     onion_messenger: Option<Arc<LampoArcOnionMessenger<LampoLogger>>>,
+    pos_handler: Option<Arc<PosOnionHandler>>,
 }
 
 impl LampoPeerManager {
@@ -66,6 +69,7 @@ impl LampoPeerManager {
             logger,
             channel_manager: None,
             onion_messenger: None,
+            pos_handler: None,
         }
     }
 
@@ -77,11 +81,17 @@ impl LampoPeerManager {
         self.onion_messenger.clone().unwrap()
     }
 
+    /// The BLIP-0056 PoS custom onion message handler.
+    pub fn pos_handler(&self) -> Arc<PosOnionHandler> {
+        self.pos_handler.clone().unwrap()
+    }
+
     pub fn init(
         &mut self,
         _onchain_manager: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
         channel_manager: Arc<LampoChannelManager>,
+        emitter: Emitter<Event>,
     ) -> error::Result<()> {
         let ephemeral_bytes = [0; 32];
         let current_time = SystemTime::now()
@@ -91,6 +101,9 @@ impl LampoPeerManager {
 
         let keys = wallet_manager.ldk_keys().keys_manager.clone();
         let graph = channel_manager.graph();
+        // BLIP-0056: plug the PoS custom onion message handler into the
+        // messenger so `payment_notification`/`ack`/`nack` are processed.
+        let pos_handler = Arc::new(PosOnionHandler::new(emitter, self.logger.clone()));
         let onion_messenger = Arc::new(OnionMessenger::new(
             keys.clone(),
             keys.clone(),
@@ -99,8 +112,8 @@ impl LampoPeerManager {
             Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone())),
             channel_manager.manager(), // Use channel manager for offers message handler
             IgnoringMessageHandler {}, // async_payments_message_handler
-            IgnoringMessageHandler {}, // custom_onion_message_handler
-            IgnoringMessageHandler {}, // custom_onion_message_contents
+            IgnoringMessageHandler {}, // dns_resolver_message_handler
+            pos_handler.clone(),       // custom_onion_message_handler (BLIP-0056)
         ));
 
         let gossip_sync = Arc::new(P2PGossipSync::new(
@@ -126,6 +139,7 @@ impl LampoPeerManager {
         self.peer_manager = Some(Arc::new(peer_manager));
         self.channel_manager = Some(channel_manager.clone());
         self.onion_messenger = Some(onion_messenger);
+        self.pos_handler = Some(pos_handler);
         Ok(())
     }
 

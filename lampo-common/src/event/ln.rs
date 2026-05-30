@@ -48,4 +48,17 @@ pub enum LightningEvent {
         counterparty_node_id: Option<String>,
         funding_utxo: Option<String>,
     },
+    /// BLIP-0056: a PoS node received and verified a `payment_notification`.
+    PosPaymentNotified {
+        payment_hash: String,
+        amount_msat: u64,
+        /// `true` if `sha256(preimage) == payment_hash`.
+        verified: bool,
+    },
+    /// BLIP-0056: a merchant received a `notification_ack`/`notification_nack`.
+    PosNotificationAck {
+        payment_hash: String,
+        /// `true` for an ack, `false` for a nack.
+        acked: bool,
+    },
 }
