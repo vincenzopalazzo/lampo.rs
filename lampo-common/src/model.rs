@@ -7,6 +7,7 @@ mod network;
 mod new_addr;
 mod on_chain;
 mod open_channel;
+mod pos;
 
 pub use connect::Connect;
 pub use getinfo::GetInfo;
@@ -22,6 +23,7 @@ pub mod request {
     #[allow(unused_imports)]
     pub use crate::model::on_chain::request::*;
     pub use crate::model::open_channel::request::*;
+    pub use crate::model::pos::request::*;
 }
 
 pub mod response {
@@ -34,4 +36,5 @@ pub mod response {
     pub use crate::model::new_addr::response::*;
     pub use crate::model::on_chain::response::*;
     pub use crate::model::open_channel::response::*;
+    pub use crate::model::pos::response::*;
 }

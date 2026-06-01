@@ -6,16 +6,20 @@ use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::ldk;
+use lampo_common::ldk::blinded_path::message::MessageContext;
 use lampo_common::ldk::offers::offer;
+use lampo_common::ldk::onion_message::messenger::{Destination, MessageSendInstructions};
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
 use lampo_common::model::request::Pay;
+use lampo_common::model::request::SendPaymentNotification;
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
 use lampo_common::{json, model::request::DecodeInvoice};
 
+use crate::ln::PosMessage;
 use crate::LampoDaemon;
 
 pub async fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
@@ -143,4 +147,48 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         .keysend(request.destination, request.amount_msat)?;
     // FIXME: return a better response
     Ok(json::json!({}))
+}
+
+/// BLIP-0056: merchant-side primitive that sends a `payment_notification`
+/// onion message to a PoS node and asks the messenger to build a reply path so
+/// the PoS can respond with `notification_ack`/`notification_nack`.
+pub async fn json_sendpaymentnotification(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!(
+        "call for `sendpaymentnotification` with request `{:?}`",
+        request
+    );
+    let request: SendPaymentNotification = json::from_value(request.clone())?;
+    let payment_hash = decode_hash32(&request.payment_hash)?;
+    let preimage = decode_hash32(&request.preimage)?;
+    let message = PosMessage::PaymentNotification {
+        payment_hash,
+        preimage,
+        amount_msat: request.amount_msat,
+    };
+    // The empty MessageContext is replaced by the encrypted order context once
+    // the PoS-built notification path is wired (see `TODO.md`, TODO-2).
+    let instructions = MessageSendInstructions::WithReplyPath {
+        destination: Destination::Node(request.node_id),
+        context: MessageContext::Custom(Vec::new()),
+    };
+    ctx.peer_manager()
+        .pos_handler()
+        .enqueue(message, instructions);
+    // Nudge the peer manager so the queued message is flushed promptly rather
+    // than waiting for the next background processor tick.
+    ctx.peer_manager().manager().process_events();
+    Ok(json::to_value(response::SendPaymentNotification {
+        status: "queued".to_string(),
+    })?)
+}
+
+fn decode_hash32(value: &str) -> Result<[u8; 32], Error> {
+    let bytes =
+        hex::decode(value).map_err(|err| crate::rpc_error!("invalid hex `{value}`: {err}"))?;
+    bytes
+        .try_into()
+        .map_err(|_| crate::rpc_error!("expected 32 bytes for `{value}`"))
 }

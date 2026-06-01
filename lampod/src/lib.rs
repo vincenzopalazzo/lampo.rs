@@ -26,6 +26,7 @@ use tokio::task::JoinHandle;
 
 use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
+use lampo_common::event::Emitter;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::events::{Event, ReplayEvent};
@@ -69,6 +70,9 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
+    /// Shared event emitter, cloned into the handler and the PoS onion handler
+    /// so every component publishes to the same set of subscribers.
+    emitter: Emitter<lampo_common::event::Event>,
 }
 
 impl LampoDaemon {
@@ -86,6 +90,7 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
+            emitter: Emitter::default(),
         }
     }
 
@@ -158,6 +163,7 @@ impl LampoDaemon {
             self.onchain_manager(),
             self.wallet_manager.clone(),
             self.channel_manager(),
+            self.emitter.clone(),
         )?;
         self.peer_manager = Some(Arc::new(peer_manager));
         Ok(())
@@ -194,6 +200,11 @@ impl LampoDaemon {
 
     pub fn handler(&self) -> Arc<LampoHandler> {
         self.handler.clone().unwrap()
+    }
+
+    /// The shared event emitter used by all node components.
+    pub(crate) fn emitter(&self) -> Emitter<lampo_common::event::Event> {
+        self.emitter.clone()
     }
 
     pub fn init_reactor(&mut self) -> error::Result<()> {
