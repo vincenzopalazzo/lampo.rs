@@ -21,9 +21,10 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
-use lampo_common::ldk::ln::channelmanager::Retry;
-use lampo_common::ldk::ln::channelmanager::{PaymentId, RecipientOnionFields};
-use lampo_common::ldk::ln::invoice_utils::create_invoice_from_channelmanager;
+use lampo_common::ldk::ln::channelmanager::{
+    Bolt11InvoiceParameters, OptionalBolt11PaymentParams, OptionalOfferPaymentParams, PaymentId,
+};
+use lampo_common::ldk::ln::outbound_payment::{RecipientOnionFields, Retry};
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
@@ -68,14 +69,20 @@ impl OffchainManager {
         description: &str,
         expiring_in: u32,
     ) -> error::Result<ldk::invoice::Bolt11Invoice> {
-        let invoice = ldk::ln::invoice_utils::create_invoice_from_channelmanager(
-            &self.channel_manager.manager(),
-            amount_msat,
-            description.to_string(),
-            expiring_in,
-            None,
-        )
-        .map_err(|err| error::anyhow!(err))?;
+        let description = ldk::invoice::Bolt11InvoiceDescription::Direct(
+            ldk::invoice::Description::new(description.to_string())
+                .map_err(|err| error::anyhow!("{:?}", err))?,
+        );
+        let invoice = self
+            .channel_manager
+            .manager()
+            .create_bolt11_invoice(Bolt11InvoiceParameters {
+                amount_msats: amount_msat,
+                description,
+                invoice_expiry_delta_secs: Some(expiring_in),
+                ..Default::default()
+            })
+            .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(invoice)
     }
 
@@ -119,12 +126,13 @@ impl OffchainManager {
             .manager()
             .pay_for_offer(
                 &offer,
-                None,
                 Some(amount),
-                payer_note,
                 payment_id,
-                Retry::Timeout(std::time::Duration::from_secs(1)),
-                None,
+                OptionalOfferPaymentParams {
+                    payer_note,
+                    retry_strategy: Retry::Timeout(std::time::Duration::from_secs(1)),
+                    ..Default::default()
+                },
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(())
@@ -133,22 +141,26 @@ impl OffchainManager {
     pub fn pay_invoice(&self, invoice_str: &str, amount_msat: Option<u64>) -> error::Result<()> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
-        let payment_id = PaymentId((*invoice.payment_hash()).to_byte_array());
-        let (payment_hash, onion, route) = if invoice.amount_milli_satoshis().is_none() {
-            ldk::ln::bolt11_payment::payment_parameters_from_variable_amount_invoice(
-                &invoice,
-                amount_msat.ok_or(error::anyhow!(
-                    "invoice with no amount, and amount must be specified"
-                ))?,
-            )
-            .map_err(|err| error::anyhow!("{:?}", err))?
+        let payment_id = PaymentId(invoice.payment_hash().0);
+        // Only forward a caller-supplied amount for zero-amount invoices. For a
+        // fixed-amount invoice LDK treats `amount_msat` as an overpayment, so
+        // drop it (matching the pre-0.3 `payment_parameters_from_invoice`).
+        let amount_msat = if invoice.amount_milli_satoshis().is_some() {
+            None
         } else {
-            ldk::ln::bolt11_payment::payment_parameters_from_invoice(&invoice)
-                .map_err(|err| error::anyhow!("{:?}", err))?
+            amount_msat
         };
         self.channel_manager
             .manager()
-            .send_payment(payment_hash, onion, payment_id, route, Retry::Attempts(10))
+            .pay_for_bolt11_invoice(
+                &invoice,
+                payment_id,
+                amount_msat,
+                OptionalBolt11PaymentParams {
+                    retry_strategy: Retry::Attempts(10),
+                    ..Default::default()
+                },
+            )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(())
     }
@@ -177,7 +189,7 @@ impl OffchainManager {
             .manager()
             .send_spontaneous_payment(
                 Some(payment_preimage),
-                RecipientOnionFields::spontaneous_empty(),
+                RecipientOnionFields::spontaneous_empty(amount_msat),
                 PaymentId(payment_hash.0),
                 route_params,
                 Retry::Timeout(Duration::from_secs(10)),

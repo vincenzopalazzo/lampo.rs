@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
+use lampo_common::backend::Backend;
 use lampo_common::bitcoin::{BlockHash, Transaction};
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
@@ -17,7 +18,7 @@ use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
-use lampo_common::ldk::chain::BestBlock;
+use lampo_common::ldk::chain::BlockLocator;
 use lampo_common::ldk::ln::channelmanager::{ChainParameters, ChannelManagerReadArgs};
 use lampo_common::ldk::onion_message::messenger::DefaultMessageRouter;
 use lampo_common::ldk::routing::gossip::NetworkGraph;
@@ -25,7 +26,7 @@ use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
-use lampo_common::ldk::sign::InMemorySigner;
+use lampo_common::ldk::sign::{InMemorySigner, NodeSigner};
 use lampo_common::ldk::util::persist::read_channel_monitors;
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::model::request;
@@ -100,6 +101,7 @@ impl LampoChannelManager {
     }
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {
+        let keys = self.wallet_manager.ldk_keys().keys_manager.clone();
         ChainMonitor::new(
             // FIXME: this is needed when use esplora or electrum
             None,
@@ -107,6 +109,10 @@ impl LampoChannelManager {
             self.logger.clone(),
             self.onchain.clone(),
             self.persister.clone(),
+            keys.clone(),
+            keys.get_peer_storage_key(),
+            // `deferred`: lampo uses synchronous filesystem persistence.
+            false,
         )
     }
 
@@ -245,7 +251,7 @@ impl LampoChannelManager {
                 0,
                 0,
                 None,
-                Some(self.conf.ldk_conf),
+                Some(self.conf.ldk_conf.clone()),
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
 
@@ -320,12 +326,12 @@ impl LampoChannelManager {
             self.router.get().expect("router not initialized").clone(),
             default_message_router,
             self.logger.clone(),
-            self.conf.ldk_conf,
+            self.conf.ldk_conf.clone(),
             monitors,
         );
         let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
         let (_, channel_manager) =
-            <(BlockHash, LampoChannel)>::read(&mut channel_manager_file, read_args)
+            <(BlockLocator, LampoChannel)>::read(&mut channel_manager_file, read_args)
                 .map_err(|err| error::anyhow!("{err}"))?;
         self.channeld
             .set(Arc::new(channel_manager))
@@ -338,11 +344,8 @@ impl LampoChannelManager {
         .map_err(|err| error::anyhow!("Failed to connect to bitcoind: {:?}. Please ensure bitcoind is running and accessible.", err))?;
         let chain_params = ChainParameters {
             network: self.conf.network,
-            best_block: BestBlock {
-                block_hash: block_hash,
-                // FIXME: the default could be dangerus here
-                height: block_height.unwrap_or_default(),
-            },
+            // FIXME: the default height could be dangerous here
+            best_block: BlockLocator::new(block_hash, block_height.unwrap_or_default()),
         };
 
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
@@ -370,7 +373,7 @@ impl LampoChannelManager {
             keymanagers.clone(),
             keymanagers.clone(),
             keymanagers,
-            self.conf.ldk_conf,
+            self.conf.ldk_conf.clone(),
             chain_params,
             now.as_secs() as u32,
         ));

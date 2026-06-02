@@ -107,10 +107,17 @@ impl BDKWalletManager {
         xprv: PrivateKey,
         channel_keys: Option<String>,
     ) -> error::Result<(PersistedWallet<Connection>, Connection, LampoKeys)> {
-        let ldk_keys = if channel_keys.is_some() {
-            LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), channel_keys.unwrap())
-        } else {
-            LampoKeys::new(xprv.inner.secret_bytes())
+        let ldk_keys = match channel_keys {
+            #[cfg(feature = "unsafe_channel_keys")]
+            Some(keys) => LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), keys),
+            #[cfg(not(feature = "unsafe_channel_keys"))]
+            Some(_) => {
+                log::warn!(
+                    "`channel_keys` is set but this build lacks the `unsafe_channel_keys` feature; using random keys"
+                );
+                LampoKeys::new(xprv.inner.secret_bytes())
+            }
+            None => LampoKeys::new(xprv.inner.secret_bytes()),
         };
 
         let mut db = Connection::open_in_memory()?;

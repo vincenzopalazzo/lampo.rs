@@ -119,19 +119,27 @@ impl Handler for LampoHandler {
             ldk::events::Event::OpenChannelRequest {
                 temporary_channel_id,
                 counterparty_node_id,
-                funding_satoshis,
-                channel_type,
-                channel_negotiation_type: _,
-                is_announced: _,
-                params: _
+                ..
             } => {
-                Err(error::anyhow!("Request for open a channel received, unfortunatly we do not support this feature yet."))
+                // LDK 0.3 removed `manually_accept_inbound_channels`; inbound
+                // channels are now always surfaced here and must be accepted
+                // explicitly. Auto-accept to preserve the previous behaviour.
+                log::info!(
+                    target: "lampod",
+                    "accepting inbound channel request from `{counterparty_node_id}`"
+                );
+                self.channel_manager
+                    .manager()
+                    .accept_inbound_channel(&temporary_channel_id, &counterparty_node_id, 0, None)
+                    .map_err(|err| error::anyhow!("{:?}", err))?;
+                Ok(())
             }
             ldk::events::Event::ChannelReady {
                 channel_id,
                 user_channel_id,
                 counterparty_node_id,
                 channel_type,
+                ..
             } => {
                 log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
                 self.emit(Event::Lightning(LightningEvent::ChannelReady {
@@ -140,7 +148,7 @@ impl Handler for LampoHandler {
                     channel_type,
                 }));
                 Ok(())
-            },
+            }
             ldk::events::Event::ChannelClosed {
                 channel_id,
                 user_channel_id,
@@ -156,53 +164,68 @@ impl Handler for LampoHandler {
                 // Provide detailed closure reason based on the ClosureReason enum
                 let detailed_reason = match reason {
                     ldk::events::ClosureReason::CounterpartyForceClosed { peer_msg } => {
-                        format!("Counterparty force-closed the channel. Peer message: {}", peer_msg)
-                    },
-                    ldk::events::ClosureReason::HolderForceClosed { broadcasted_latest_txn } => {
+                        format!(
+                            "Counterparty force-closed the channel. Peer message: {}",
+                            peer_msg
+                        )
+                    }
+                    ldk::events::ClosureReason::HolderForceClosed {
+                        broadcasted_latest_txn,
+                        ..
+                    } => {
                         let broadcast_status = match broadcasted_latest_txn {
                             Some(true) => "with broadcasting latest transaction",
                             Some(false) => "without broadcasting latest transaction",
-                            None => "broadcast status unknown"
+                            None => "broadcast status unknown",
                         };
                         format!("We force-closed the channel {}", broadcast_status)
-                    },
+                    }
                     ldk::events::ClosureReason::LegacyCooperativeClosure => {
                         "Channel closed cooperatively (legacy closure)".to_string()
-                    },
+                    }
                     ldk::events::ClosureReason::CounterpartyInitiatedCooperativeClosure => {
                         "Counterparty initiated cooperative channel closure".to_string()
-                    },
+                    }
                     ldk::events::ClosureReason::LocallyInitiatedCooperativeClosure => {
                         "We initiated cooperative channel closure".to_string()
-                    },
+                    }
                     ldk::events::ClosureReason::CommitmentTxConfirmed => {
-                        "Channel closed due to commitment transaction confirmation on-chain".to_string()
-                    },
+                        "Channel closed due to commitment transaction confirmation on-chain"
+                            .to_string()
+                    }
                     ldk::events::ClosureReason::FundingTimedOut => {
                         "Channel funding transaction failed to confirm in time".to_string()
-                    },
+                    }
                     ldk::events::ClosureReason::ProcessingError { err } => {
                         format!("Channel closed due to processing error: {}", err)
-                    },
+                    }
                     ldk::events::ClosureReason::DisconnectedPeer => {
                         "Peer disconnected before funding completed, channel forgotten".to_string()
-                    },
+                    }
                     ldk::events::ClosureReason::OutdatedChannelManager => {
-                        "Channel closed due to outdated ChannelManager (ChannelMonitor is newer)".to_string()
-                    },
+                        "Channel closed due to outdated ChannelManager (ChannelMonitor is newer)"
+                            .to_string()
+                    }
                     ldk::events::ClosureReason::CounterpartyCoopClosedUnfundedChannel => {
                         "Counterparty requested cooperative close of unfunded channel".to_string()
-                    },
+                    }
+                    ldk::events::ClosureReason::LocallyCoopClosedUnfundedChannel => {
+                        "We requested cooperative close of an unfunded channel".to_string()
+                    }
                     ldk::events::ClosureReason::FundingBatchClosure => {
-                        "Channel closed because another channel in the same funding batch closed".to_string()
-                    },
-                    ldk::events::ClosureReason::HTLCsTimedOut => {
+                        "Channel closed because another channel in the same funding batch closed"
+                            .to_string()
+                    }
+                    ldk::events::ClosureReason::HTLCsTimedOut { .. } => {
                         "Channel closed due to HTLC timeout".to_string()
-                    },
-                    ldk::events::ClosureReason::PeerFeerateTooLow { peer_feerate_sat_per_kw, required_feerate_sat_per_kw } => {
+                    }
+                    ldk::events::ClosureReason::PeerFeerateTooLow {
+                        peer_feerate_sat_per_kw,
+                        required_feerate_sat_per_kw,
+                    } => {
                         format!("Channel closed due to peer's feerate too low. Peer feerate: {} sat/kw, Required: {} sat/kw",
                                peer_feerate_sat_per_kw, required_feerate_sat_per_kw)
-                    },
+                    }
                 };
 
                 let node_id = counterparty_node_id.map(|id| id.to_string());
@@ -211,7 +234,7 @@ impl Handler for LampoHandler {
                     channel_id: channel_id.to_string(),
                     message: detailed_reason.clone(),
                     counterparty_node_id: node_id,
-                    funding_utxo: txo
+                    funding_utxo: txo,
                 }));
                 log::info!("channel `{user_channel_id}` closed: {}", detailed_reason);
                 Ok(())
@@ -231,22 +254,36 @@ impl Handler for LampoHandler {
 
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
                 // FIXME: estimate the fee rate with a callback
-                let fee = self.chain_manager.backend.fee_rate_estimation(6).await.map_err(|err| {
-                    let msg = format!("Channel Opening Error: {err}");
-                    self.emit(Event::Lightning(LightningEvent::ChannelEvent { state: "error".to_owned(), message : msg}));
-                    err
-                })?;
+                let fee = self
+                    .chain_manager
+                    .backend
+                    .fee_rate_estimation(6)
+                    .await
+                    .map_err(|err| {
+                        let msg = format!("Channel Opening Error: {err}");
+                        self.emit(Event::Lightning(LightningEvent::ChannelEvent {
+                            state: "error".to_owned(),
+                            message: msg,
+                        }));
+                        err
+                    })?;
                 log::info!("fee estimated {:?} sats", fee);
 
                 let best_block = self.channel_manager.manager().current_best_block().height;
-                let transaction = self.wallet_manager.create_transaction(
-                    output_script,
-                    Amount::from_sat(channel_value_satoshis),
-                    FeeRate::from_sat_per_vb_unchecked(fee as u64),
-                    // FIXME: remove unwrap
-                    Height::from_consensus(best_block).unwrap(),
-                ).await?;
-                log::info!("funding transaction created `{}`", transaction.compute_txid());
+                let transaction = self
+                    .wallet_manager
+                    .create_transaction(
+                        output_script,
+                        Amount::from_sat(channel_value_satoshis),
+                        FeeRate::from_sat_per_vb_unchecked(fee as u64),
+                        // FIXME: remove unwrap
+                        Height::from_consensus(best_block).unwrap(),
+                    )
+                    .await?;
+                log::info!(
+                    "funding transaction created `{}`",
+                    transaction.compute_txid()
+                );
                 log::info!(
                     "transaction hex `{}`",
                     lampo_common::bitcoin::consensus::encode::serialize_hex(&transaction)
@@ -276,13 +313,10 @@ impl Handler for LampoHandler {
                     "channel pending with node `{}` with funding `{funding_txo}`",
                     counterparty_node_id.to_string()
                 );
-                self.emit(Event::Lightning(LightningEvent::ChannelPending { counterparty_node_id, funding_transaction: funding_txo }));
-                Ok(())
-            }
-            ldk::events::Event::PendingHTLCsForwardable { time_forwardable } => {
-                self.channel_manager
-                    .manager()
-                    .process_pending_htlc_forwards();
+                self.emit(Event::Lightning(LightningEvent::ChannelPending {
+                    counterparty_node_id,
+                    funding_transaction: funding_txo,
+                }));
                 Ok(())
             }
             ldk::events::Event::PaymentClaimable {
@@ -292,17 +326,20 @@ impl Handler for LampoHandler {
                 amount_msat,
                 counterparty_skimmed_fee_msat,
                 purpose,
-                via_channel_id,
-                via_user_channel_id,
                 claim_deadline,
                 payment_id: _,
+                ..
             } => {
                 let preimage = match purpose {
-                    ldk::events::PaymentPurpose::Bolt11InvoicePayment  {
+                    ldk::events::PaymentPurpose::Bolt11InvoicePayment {
                         payment_preimage, ..
                     } => payment_preimage,
-                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, .. } => payment_preimage,
-                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => payment_preimage,
+                    ldk::events::PaymentPurpose::Bolt12OfferPayment {
+                        payment_preimage, ..
+                    } => payment_preimage,
+                    ldk::events::PaymentPurpose::Bolt12RefundPayment {
+                        payment_preimage, ..
+                    } => payment_preimage,
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
                 };
                 self.channel_manager
@@ -323,9 +360,19 @@ impl Handler for LampoHandler {
                         payment_secret,
                         ..
                     } => (payment_preimage, Some(payment_secret)),
-                    ldk::events::PaymentPurpose::Bolt12OfferPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
-                    ldk::events::PaymentPurpose::Bolt12RefundPayment { payment_preimage, payment_secret, .. } => (payment_preimage, Some(payment_secret)),
-                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
+                    ldk::events::PaymentPurpose::Bolt12OfferPayment {
+                        payment_preimage,
+                        payment_secret,
+                        ..
+                    } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::Bolt12RefundPayment {
+                        payment_preimage,
+                        payment_secret,
+                        ..
+                    } => (payment_preimage, Some(payment_secret)),
+                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => {
+                        (Some(preimage), None)
+                    }
                 };
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristent these information
@@ -334,14 +381,29 @@ impl Handler for LampoHandler {
             ldk::events::Event::PaymentSent { .. } => {
                 log::info!("payment sent: `{:?}`", event);
                 Ok(())
-            },
-            ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
-                let path = path.hops.iter().map(|hop| PaymentHop::from(hop.clone())).collect::<Vec<PaymentHop>>();
-                let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path, reason: None };
+            }
+            ldk::events::Event::PaymentPathSuccessful {
+                payment_hash, path, ..
+            } => {
+                let path = path
+                    .hops
+                    .iter()
+                    .map(|hop| PaymentHop::from(hop.clone()))
+                    .collect::<Vec<PaymentHop>>();
+                let hop = LightningEvent::PaymentEvent {
+                    state: PaymentState::Success,
+                    payment_hash: payment_hash.map(|hash| hash.to_string()),
+                    path,
+                    reason: None,
+                };
                 self.emit(Event::Lightning(hop));
                 Ok(())
-            },
-            ldk::events::Event::PaymentFailed { payment_id, payment_hash, reason } => {
+            }
+            ldk::events::Event::PaymentFailed {
+                payment_id,
+                payment_hash,
+                reason,
+            } => {
                 log::error!("payment failed: {:?} with reason: {:?}", payment_id, reason);
 
                 // Provide detailed failure reason based on PaymentFailureReason enum
@@ -387,15 +449,15 @@ impl Handler for LampoHandler {
                     state: PaymentState::Failure,
                     payment_hash: payment_hash.map(|hash| hash.to_string()),
                     path: vec![],
-                    reason: Some(detailed_reason)
+                    reason: Some(detailed_reason),
                 };
                 self.emit(Event::Lightning(hop));
                 Ok(())
-            },
+            }
             _ => {
                 log::warn!(target: "lampo::handler", "unhandled ldk event: {:?}", event);
                 Ok(())
-            },
+            }
         }
     }
 }

@@ -3,6 +3,10 @@ name = "lampo-bdk-wallet"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Forward LDK's deterministic test-only channel keys (testing only).
+unsafe_channel_keys = ["lampo-common/unsafe_channel_keys"]
+
 [dependencies]
 lampo-common = { path = "../lampo-common" }
 bdk_wallet = { version = "2.3", features = ["rusqlite", "keys-bip39"] }

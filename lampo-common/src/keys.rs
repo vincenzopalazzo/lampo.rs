@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::SystemTime};
 
-use bitcoin::secp256k1::{Secp256k1, SecretKey};
+#[cfg(feature = "unsafe_channel_keys")]
+use bitcoin::secp256k1::SecretKey;
 use lightning::bolt11_invoice;
 use lightning::sign::{InMemorySigner, NodeSigner, OutputSpender, SignerProvider};
 
@@ -27,7 +28,7 @@ impl LampoKeys {
         }
     }
 
-    // FIXME: add this under a feature flag
+    #[cfg(feature = "unsafe_channel_keys")]
     pub fn with_channel_keys(seed: [u8; 32], channels_keys: String) -> Self {
         // Fill in random_32_bytes with secure random data, or, on restart, reload the seed from disk.
         let start_time = SystemTime::now()
@@ -59,29 +60,43 @@ impl LampoKeys {
 pub struct LampoKeysManager {
     pub(crate) inner: KeysManager,
 
+    #[cfg(feature = "unsafe_channel_keys")]
     funding_key: Option<SecretKey>,
+    #[cfg(feature = "unsafe_channel_keys")]
     revocation_base_secret: Option<SecretKey>,
+    #[cfg(feature = "unsafe_channel_keys")]
     payment_base_secret: Option<SecretKey>,
+    #[cfg(feature = "unsafe_channel_keys")]
     delayed_payment_base_secret: Option<SecretKey>,
+    #[cfg(feature = "unsafe_channel_keys")]
     htlc_base_secret: Option<SecretKey>,
+    #[cfg(feature = "unsafe_channel_keys")]
     shachain_seed: Option<[u8; 32]>,
 }
 
 impl LampoKeysManager {
     pub fn new(seed: &[u8; 32], starting_time_secs: u64, starting_time_nanos: u32) -> Self {
-        let inner = KeysManager::new(seed, starting_time_secs, starting_time_nanos);
+        // `false` keeps the pre-0.3 (v1) channel key derivation so existing
+        // channels keep deriving the same keys after the LDK upgrade.
+        let inner = KeysManager::new(seed, starting_time_secs, starting_time_nanos, false);
         Self {
             inner,
+            #[cfg(feature = "unsafe_channel_keys")]
             funding_key: None,
+            #[cfg(feature = "unsafe_channel_keys")]
             revocation_base_secret: None,
+            #[cfg(feature = "unsafe_channel_keys")]
             payment_base_secret: None,
+            #[cfg(feature = "unsafe_channel_keys")]
             delayed_payment_base_secret: None,
+            #[cfg(feature = "unsafe_channel_keys")]
             htlc_base_secret: None,
+            #[cfg(feature = "unsafe_channel_keys")]
             shachain_seed: None,
         }
     }
 
-    // FIXME: put this under a debug a feature flag like `unsafe_channel_keys`
+    #[cfg(feature = "unsafe_channel_keys")]
     pub fn set_channels_keys(
         &mut self,
         funding_key: String,
@@ -110,6 +125,18 @@ impl EntropySource for LampoKeysManager {
 }
 
 impl NodeSigner for LampoKeysManager {
+    fn get_expanded_key(&self) -> lightning::ln::inbound_payment::ExpandedKey {
+        self.inner.get_expanded_key()
+    }
+
+    fn get_peer_storage_key(&self) -> lightning::sign::PeerStorageKey {
+        self.inner.get_peer_storage_key()
+    }
+
+    fn get_receive_auth_key(&self) -> lightning::sign::ReceiveAuthKey {
+        self.inner.get_receive_auth_key()
+    }
+
     fn ecdh(
         &self,
         recipient: lightning::sign::Recipient,
@@ -117,10 +144,6 @@ impl NodeSigner for LampoKeysManager {
         tweak: Option<&bitcoin::secp256k1::Scalar>,
     ) -> Result<bitcoin::secp256k1::ecdh::SharedSecret, ()> {
         self.inner.ecdh(recipient, other_key, tweak)
-    }
-
-    fn get_inbound_payment_key(&self) -> lightning::ln::inbound_payment::ExpandedKey {
-        self.inner.get_inbound_payment_key()
     }
 
     fn get_node_id(
@@ -151,17 +174,21 @@ impl NodeSigner for LampoKeysManager {
     ) -> Result<bitcoin::secp256k1::ecdsa::RecoverableSignature, ()> {
         self.inner.sign_invoice(invoice, recipient)
     }
+
+    fn sign_message(&self, msg: &[u8]) -> Result<String, ()> {
+        self.inner.sign_message(msg)
+    }
 }
 
 impl OutputSpender for LampoKeysManager {
-    fn spend_spendable_outputs<C: bitcoin::secp256k1::Signing>(
+    fn spend_spendable_outputs(
         &self,
         descriptors: &[&lightning::sign::SpendableOutputDescriptor],
         outputs: Vec<bitcoin::TxOut>,
         change_destination_script: bitcoin::ScriptBuf,
         feerate_sat_per_1000_weight: u32,
         locktime: Option<bitcoin::absolute::LockTime>,
-        secp_ctx: &bitcoin::secp256k1::Secp256k1<C>,
+        secp_ctx: &bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>,
     ) -> Result<bitcoin::Transaction, ()> {
         self.inner.spend_spendable_outputs(
             descriptors,
@@ -178,42 +205,35 @@ impl SignerProvider for LampoKeysManager {
     // FIXME: this should be the same of the inner
     type EcdsaSigner = InMemorySigner;
 
-    fn derive_channel_signer(
-        &self,
-        channel_value_satoshis: u64,
-        channel_keys_id: [u8; 32],
-    ) -> Self::EcdsaSigner {
+    fn derive_channel_signer(&self, channel_keys_id: [u8; 32]) -> Self::EcdsaSigner {
+        #[cfg(feature = "unsafe_channel_keys")]
         if self.funding_key.is_some() {
             // FIXME(vincenzopalazzo): make this a general
             let commitment_seed = [
                 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
                 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
             ];
+            // LDK 0.3 split the payment key into v1/v2; with v2 derivation
+            // disabled the v1 key is the one in use, so reuse it for both.
             return InMemorySigner::new(
-                &Secp256k1::new(),
                 self.funding_key.unwrap(),
                 self.revocation_base_secret.unwrap(),
                 self.payment_base_secret.unwrap(),
+                self.payment_base_secret.unwrap(),
+                false,
                 self.delayed_payment_base_secret.unwrap(),
                 self.htlc_base_secret.unwrap(),
                 commitment_seed,
-                channel_value_satoshis,
                 channel_keys_id,
                 self.shachain_seed.unwrap(),
             );
         }
-        self.inner
-            .derive_channel_signer(channel_value_satoshis, channel_keys_id)
+        self.inner.derive_channel_signer(channel_keys_id)
     }
 
-    fn generate_channel_keys_id(
-        &self,
-        inbound: bool,
-        channel_value_satoshis: u64,
-        user_channel_id: u128,
-    ) -> [u8; 32] {
+    fn generate_channel_keys_id(&self, inbound: bool, user_channel_id: u128) -> [u8; 32] {
         self.inner
-            .generate_channel_keys_id(inbound, channel_value_satoshis, user_channel_id)
+            .generate_channel_keys_id(inbound, user_channel_id)
     }
 
     fn get_destination_script(&self, channel_keys_id: [u8; 32]) -> Result<bitcoin::ScriptBuf, ()> {
@@ -222,12 +242,5 @@ impl SignerProvider for LampoKeysManager {
 
     fn get_shutdown_scriptpubkey(&self) -> Result<lightning::ln::script::ShutdownScript, ()> {
         self.inner.get_shutdown_scriptpubkey()
-    }
-
-    fn read_chan_signer(
-        &self,
-        reader: &[u8],
-    ) -> Result<Self::EcdsaSigner, lightning::ln::msgs::DecodeError> {
-        self.inner.read_chan_signer(reader)
     }
 }

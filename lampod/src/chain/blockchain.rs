@@ -7,15 +7,12 @@ use lampo_common::bitcoin;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::Transaction;
 use lampo_common::error;
-use lampo_common::ldk;
-use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{
-    BroadcasterInterface, ConfirmationTarget, FeeEstimator,
+    BroadcasterInterface, ConfirmationTarget, FeeEstimator, TransactionType,
 };
 use lampo_common::ldk::routing::utxo::UtxoLookup;
+use lampo_common::ldk::util::wakers::Notifier;
 use lampo_common::wallet::WalletManager;
-
-use crate::sync;
 
 #[derive(Clone)]
 pub struct LampoChainManager {
@@ -88,11 +85,11 @@ impl FeeEstimator for LampoChainManager {
 
 /// Brodcaster Interface implementation for Lampo.
 impl BroadcasterInterface for LampoChainManager {
-    fn broadcast_transactions(&self, txs: &[&Transaction]) {
+    fn broadcast_transactions(&self, txs: &[(&Transaction, TransactionType)]) {
         // FIXME: support brodcast_txs for multiple tx
         // FIXME: we are missing any error in the brodcast_tx, we should
         // fix that
-        for tx in txs.to_vec() {
+        for (tx, _) in txs.to_vec() {
             let tx = tx.clone();
             let backend = self.backend.clone();
             tokio::spawn(async move {
@@ -103,31 +100,13 @@ impl BroadcasterInterface for LampoChainManager {
     }
 }
 
-impl BlockSource for LampoChainManager {
-    fn get_best_block<'a>(
-        &'a self,
-    ) -> ldk::block_sync::AsyncBlockSourceResult<(bitcoin::BlockHash, Option<u32>)> {
-        sync!(self.backend.get_best_block().await)
-    }
-
-    fn get_block<'a>(
-        &'a self,
-        header_hash: &'a bitcoin::BlockHash,
-    ) -> ldk::block_sync::AsyncBlockSourceResult<'a, ldk::block_sync::BlockData> {
-        sync!(self.backend.get_block(header_hash).await)
-    }
-
-    fn get_header<'a>(
-        &'a self,
-        header_hash: &'a bitcoin::BlockHash,
-        height_hint: Option<u32>,
-    ) -> ldk::block_sync::AsyncBlockSourceResult<'a, ldk::block_sync::BlockHeaderData> {
-        sync!(self.backend.get_header(header_hash, height_hint).await)
-    }
-}
-
 impl UtxoLookup for LampoChainManager {
-    fn get_utxo(&self, _: &ChainHash, _: u64) -> lampo_common::backend::UtxoResult {
+    fn get_utxo(
+        &self,
+        _: &ChainHash,
+        _: u64,
+        _: Arc<Notifier>,
+    ) -> lampo_common::backend::UtxoResult {
         unimplemented!()
     }
 }
@@ -167,6 +146,12 @@ impl Backend for LampoChainManager {
 
     fn kind(&self) -> lampo_common::backend::BackendKind {
         self.backend.kind()
+    }
+
+    async fn get_best_block(
+        &self,
+    ) -> lampo_common::backend::BlockSourceResult<(bitcoin::BlockHash, Option<u32>)> {
+        self.backend.get_best_block().await
     }
 
     async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {

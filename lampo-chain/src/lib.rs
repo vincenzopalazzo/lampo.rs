@@ -2,10 +2,9 @@ use std::sync::{Arc, OnceLock};
 
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
-use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::init;
 use lightning_block_sync::rpc::RpcClient;
-use lightning_block_sync::{poll, AsyncBlockSourceResult, BlockHeaderData, UnboundedCache};
+use lightning_block_sync::{poll, BlockHeaderData, BlockSourceResult};
 use lightning_block_sync::{BlockSource, SpvClient};
 
 use lampo_common::async_trait;
@@ -49,10 +48,10 @@ impl LampoChainSync {
 
         log::debug!("Connecting to core at: {:?} - {host}", url_parts);
 
-        let http_endpoint = HttpEndpoint::for_host(host.to_owned()).with_port(port);
+        let base_url = format!("http://{host}:{port}");
         let rpc_credentials = base64::encode(format!("{}:{}", core_user, core_pass));
 
-        let rpc = RpcClient::new(&rpc_credentials, http_endpoint);
+        let rpc = RpcClient::new(&rpc_credentials, base_url);
 
         Ok(Self {
             config: conf,
@@ -95,19 +94,22 @@ impl BlockSource for LampoChainSync {
         &'a self,
         header_hash: &'a BlockHash,
         height_hint: Option<u32>,
-    ) -> AsyncBlockSourceResult<'a, BlockHeaderData> {
-        Box::pin(async move { self.rpc_client.get_header(header_hash, height_hint).await })
+    ) -> impl std::future::Future<Output = BlockSourceResult<BlockHeaderData>> + Send + 'a {
+        async move { self.rpc_client.get_header(header_hash, height_hint).await }
     }
 
     fn get_block<'a>(
         &'a self,
         header_hash: &'a BlockHash,
-    ) -> AsyncBlockSourceResult<'a, BlockData> {
-        Box::pin(async move { self.rpc_client.get_block(header_hash).await })
+    ) -> impl std::future::Future<Output = BlockSourceResult<BlockData>> + Send + 'a {
+        async move { self.rpc_client.get_block(header_hash).await }
     }
 
-    fn get_best_block<'a>(&'a self) -> AsyncBlockSourceResult<(BlockHash, Option<u32>)> {
-        Box::pin(async move { self.rpc_client.get_best_block().await })
+    fn get_best_block<'a>(
+        &'a self,
+    ) -> impl std::future::Future<Output = BlockSourceResult<(BlockHash, Option<u32>)>> + Send + 'a
+    {
+        async move { self.rpc_client.get_best_block().await }
     }
 }
 
@@ -115,6 +117,10 @@ impl BlockSource for LampoChainSync {
 impl Backend for LampoChainSync {
     fn kind(&self) -> lampo_common::backend::BackendKind {
         lampo_common::backend::BackendKind::Core
+    }
+
+    async fn get_best_block(&self) -> BlockSourceResult<(BlockHash, Option<u32>)> {
+        self.rpc_client.get_best_block().await
     }
 
     async fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
@@ -214,7 +220,6 @@ impl Backend for LampoChainSync {
     }
 
     async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
-        let mut cache = UnboundedCache::new();
         let channel_manager = self.channel_manager();
         let chain_monitor = self.chain_monitor();
 
@@ -226,13 +231,13 @@ impl Backend for LampoChainSync {
         // N+M+1 to the ChannelManager which still thinks it's at block N,
         // causing a "Blocks must be connected in chain-order" assertion.
         let manager_best = channel_manager.current_best_block();
-        let chain_listeners: Vec<(BlockHash, &(dyn chain::Listen + Send + Sync))> = vec![
+        let chain_listeners: Vec<(chain::BlockLocator, &(dyn chain::Listen + Send + Sync))> = vec![
             (
-                manager_best.block_hash,
+                manager_best.clone(),
                 &*channel_manager as &(dyn chain::Listen + Send + Sync),
             ),
             (
-                manager_best.block_hash,
+                manager_best.clone(),
                 &*chain_monitor as &(dyn chain::Listen + Send + Sync),
             ),
         ];
@@ -244,27 +249,16 @@ impl Backend for LampoChainSync {
             manager_best.height
         );
 
-        let synced_chain_tip = init::synchronize_listeners(
-            self.as_ref(),
-            self.config.network,
-            &mut cache,
-            chain_listeners,
-        )
-        .await
-        .map_err(|e| error::anyhow!("Failed to synchronize chain listeners: {:?}", e))?;
+        let (cache, synced_chain_tip) =
+            init::synchronize_listeners(self.as_ref(), self.config.network, chain_listeners)
+                .await
+                .map_err(|e| error::anyhow!("Failed to synchronize chain listeners: {:?}", e))?;
 
-        let synced_best = synced_chain_tip.to_best_block();
-        log::info!(
-            target: "lampo-chain",
-            "Chain listeners synced to block {} (height {})",
-            synced_best.block_hash,
-            synced_best.height
-        );
+        log::info!(target: "lampo-chain", "Chain listeners synced to current tip");
 
         let chain_listener = (chain_monitor, channel_manager);
         let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
-        let mut spv_client =
-            SpvClient::new(synced_chain_tip, chain_poller, &mut cache, &chain_listener);
+        let mut spv_client = SpvClient::new(synced_chain_tip, chain_poller, cache, &chain_listener);
         log::info!(target: "lampo-chain", "Start Backend ...");
         loop {
             if let Err(err) = spv_client.poll_best_tip().await {

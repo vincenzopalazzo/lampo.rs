@@ -8,7 +8,7 @@ use crate::bitcoin::secp256k1::PublicKey;
 use crate::ldk::chain::chainmonitor::ChainMonitor;
 use crate::ldk::chain::Filter;
 use crate::ldk::ln::channelmanager::ChannelManager;
-use crate::ldk::persister::fs_store::FilesystemStore;
+use crate::ldk::persister::fs_store::v1::FilesystemStore;
 use crate::ldk::routing::gossip::NetworkGraph;
 use crate::ldk::routing::router::DefaultRouter;
 use crate::ldk::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
@@ -27,6 +27,7 @@ pub type LampoChainMonitor = ChainMonitor<
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoLogger>,
     Arc<FilesystemStore>,
+    Arc<LampoKeysManager>,
 >;
 
 pub type LampoArcChannelManager<M, L> = ChannelManager<

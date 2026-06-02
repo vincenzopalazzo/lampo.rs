@@ -10,7 +10,6 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
-use lampo_common::ldk::blinded_path::EmptyNodeIdLookUp;
 use lampo_common::ldk::ln::peer_handler::MessageHandler;
 use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
 use lampo_common::ldk::net;
@@ -29,7 +28,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<LampoKeysManager>,
     Arc<LampoKeysManager>,
     Arc<L>,
-    Arc<EmptyNodeIdLookUp>,
+    Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<LampoKeysManager>>>,
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     IgnoringMessageHandler,
@@ -45,6 +44,7 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<L>,
     IgnoringMessageHandler,
     Arc<LampoKeysManager>,
+    IgnoringMessageHandler,
 >;
 
 type InnerLampoPeerManager =
@@ -95,7 +95,9 @@ impl LampoPeerManager {
             keys.clone(),
             keys.clone(),
             self.logger.clone(),
-            Arc::new(EmptyNodeIdLookUp {}),
+            // ChannelManager implements NodeIdLookUp; use it (not EmptyNodeIdLookUp)
+            // so the messenger can resolve hops when advancing offer blinded paths.
+            channel_manager.manager(),
             Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone())),
             channel_manager.manager(), // Use channel manager for offers message handler
             IgnoringMessageHandler {}, // async_payments_message_handler
@@ -114,6 +116,7 @@ impl LampoPeerManager {
             onion_message_handler: onion_messenger.clone(),
             route_handler: gossip_sync,
             custom_message_handler: IgnoringMessageHandler {},
+            send_only_message_handler: IgnoringMessageHandler {},
         };
 
         let peer_manager = InnerLampoPeerManager::new(
