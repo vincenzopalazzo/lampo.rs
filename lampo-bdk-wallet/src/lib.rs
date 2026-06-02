@@ -330,6 +330,8 @@ impl WalletManager for BDKWalletManager {
             Ok::<_, error::Error>(())
         });
 
+        // Count of blocks applied this round, used to rate-limit progress logs.
+        let mut applied_blocks: u64 = 0;
         while let Some(emission) = receiver.recv().await {
             let mut wallet = self.wallet.lock().await;
             let mut wallet_db = self.wallet_db.lock().await;
@@ -347,11 +349,20 @@ impl WalletManager for BDKWalletManager {
                     wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
                     wallet.persist(&mut wallet_db)?;
                     let elapsed = start_apply_block.elapsed().as_secs_f32();
+                    // Record live progress for `getinfo`, and keep the log quiet
+                    // during a long rescan: one trace line per block, one info
+                    // line per ~difficulty period (2016 blocks).
                     self.scan_height.store(height, Ordering::SeqCst);
-                    log::info!(target: "lampo-wallet",
+                    applied_blocks += 1;
+                    log::trace!(target: "lampo-wallet",
                         "Applied block {} at height {} in {}s",
                         hash, height, elapsed
                     );
+                    if applied_blocks % 2016 == 0 {
+                        log::info!(target: "lampo-wallet",
+                            "Wallet sync in progress: applied {applied_blocks} blocks, at height {height}"
+                        );
+                    }
                 }
                 Emission::Mempool(mempool_emission) => {
                     log::warn!(target: "lampo-wallet", "Mempool emission: {mempool_emission:?}");
