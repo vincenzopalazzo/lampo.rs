@@ -379,8 +379,18 @@ impl WalletManager for BDKWalletManager {
         let wallet_tip = wallet.latest_checkpoint();
         let start_height = wallet_tip.height();
 
+        // Resolve the height to fast-forward the wallet checkpoint to so we can
+        // skip a full historical block scan:
+        //   * `reindex=<height>` jumps to that explicit height (see #444);
+        //   * a brand-new wallet (genesis checkpoint) jumps to the chain tip;
+        //   * `fast_sync=true` jumps a restored wallet to the chain tip as well.
+        //     This is opt-in only because it skips any on-chain history below
+        //     the tip, so a wallet that still holds funds there would not see
+        //     them. The default (`None`) keeps the safe full scan on every
+        //     network.
+        let jump_to_tip = start_height == 0 || self.conf.fast_sync.unwrap_or(false);
         let reindex_from = self.reindex_from.or_else(|| {
-            if start_height == 0 {
+            if jump_to_tip {
                 rpc_client.get_blockchain_info().ok().map(|info| {
                     Height::from_consensus(info.blocks as u32)
                         .expect("Failed to convert blockchain height to consensus height")
@@ -403,6 +413,11 @@ impl WalletManager for BDKWalletManager {
                     ..Default::default()
                 };
                 wallet.apply_update(update)?;
+                // Persist the jump straight away so it survives a restart even
+                // before the first tail block is applied.
+                let mut wallet_db = self.wallet_db.lock().await;
+                wallet.persist(&mut wallet_db)?;
+                log::info!(target: "lampo-wallet", "Fast-forwarded wallet checkpoint to height {height}");
             }
         }
 

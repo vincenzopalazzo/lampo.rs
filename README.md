@@ -59,6 +59,26 @@ following command to use the example config file:
 cp lampo.example.conf ~/.lampo/signet/lampo.conf
 ```
 
+### Fast wallet sync
+
+By default a restored wallet rescans every block from its persisted checkpoint
+to the chain tip. On long-running networks (e.g. Signet) this can take days. To
+skip the historical scan and jump the wallet checkpoint to the current tip,
+start the daemon with `--fast-sync` (or set `fast-sync=true` in `lampo.conf`):
+
+```
+lampod-cli --network signet --restore-wallet --fast-sync
+```
+
+For a fixed birthday height instead of the tip, set `reindex=<height>` in the
+config file.
+
+>[!WARNING]
+`--fast-sync` and `reindex` skip any on-chain history below the jump height: the
+wallet will not discover funds received before it. Use them only for a fresh
+wallet or a restored wallet with no on-chain history to recover. On mainnet,
+prefer the default full scan unless you are sure the wallet is empty.
+
 Then you can query the node with the following command:
 
 ``` 

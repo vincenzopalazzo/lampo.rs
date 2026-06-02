@@ -34,6 +34,11 @@ pub struct LampoCliArgs {
     #[arg(long = "restore-wallet")]
     pub restore_wallet: bool,
 
+    /// Skip the full historical block scan by jumping the wallet checkpoint to
+    /// the chain tip. Only safe for a wallet with no on-chain funds to recover.
+    #[arg(long = "fast-sync")]
+    pub fast_sync: bool,
+
     /// Set the log level, by default is `info`
     #[arg(long = "log-level")]
     pub log_level: Option<String>,
@@ -118,6 +123,11 @@ impl TryInto<LampoConf> for LampoCliArgs {
         }
         if let Some(api_port) = self.api_port {
             conf.api_port = api_port;
+        }
+        // The CLI flag can only force fast-sync on; the config file value is
+        // honoured otherwise.
+        if self.fast_sync {
+            conf.fast_sync = Some(true);
         }
         Ok(conf)
     }
