@@ -1,5 +1,6 @@
 //! Wallet Manager implementation with BDK
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client, RpcApi};
@@ -27,7 +28,7 @@ use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::NewAddress;
 use lampo_common::model::response::Utxo;
 use lampo_common::secp256k1::SecretKey;
-use lampo_common::wallet::WalletManager;
+use lampo_common::wallet::{WalletManager, WalletSyncStatus};
 use lampo_common::{async_trait, error};
 
 pub struct BDKWalletManager {
@@ -40,6 +41,20 @@ pub struct BDKWalletManager {
     pub conf: Arc<LampoConf>,
 
     guard: Mutex<bool>,
+    /// Height of the most recently applied block, updated live during a sync so
+    /// `getinfo` can report scan progress instead of the stale checkpoint.
+    scan_height: AtomicU32,
+    /// Whether a chain sync is currently running.
+    syncing: AtomicBool,
+}
+
+/// Resets the `syncing` flag when a sync returns, on any path.
+struct SyncGuard<'a>(&'a AtomicBool);
+
+impl Drop for SyncGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 impl BDKWalletManager {
@@ -171,6 +186,7 @@ impl WalletManager for BDKWalletManager {
         let mnemonic_words = mnemonic.to_string();
         let (wallet, db, keymanager) = Self::build_wallet(conf.clone(), &mnemonic_words).await?;
         let client = Self::build_client(conf.clone())?;
+        let scan_height = wallet.latest_checkpoint().height();
         Ok((
             Self {
                 wallet: Mutex::new(wallet),
@@ -181,6 +197,8 @@ impl WalletManager for BDKWalletManager {
                 guard: Mutex::new(false),
                 reindex_from: conf.reindex,
                 conf: conf.clone(),
+                scan_height: AtomicU32::new(scan_height),
+                syncing: AtomicBool::new(false),
             },
             mnemonic_words,
         ))
@@ -190,6 +208,7 @@ impl WalletManager for BDKWalletManager {
         let (wallet, db, keymanager) =
             BDKWalletManager::build_wallet(conf.clone(), mnemonic_words).await?;
         let client = BDKWalletManager::build_client(conf.clone())?;
+        let scan_height = wallet.latest_checkpoint().height();
         Ok(Self {
             wallet: Mutex::new(wallet),
             wallet_db: Mutex::new(db),
@@ -199,6 +218,8 @@ impl WalletManager for BDKWalletManager {
             guard: Mutex::new(false),
             reindex_from: conf.reindex,
             conf: conf.clone(),
+            scan_height: AtomicU32::new(scan_height),
+            syncing: AtomicBool::new(false),
         })
     }
 
@@ -274,6 +295,10 @@ impl WalletManager for BDKWalletManager {
         }
 
         log::info!(target: "lampo-wallet", "Checking the wallet status...");
+        // Mark the sync as running so `getinfo` can report it; the guard clears
+        // the flag again whatever path this function returns through.
+        self.syncing.store(true, Ordering::SeqCst);
+        let _sync_guard = SyncGuard(&self.syncing);
         let (sender, mut receiver) = unbounded_channel::<Emission>();
 
         /*let signal_sender = sender.clone();
@@ -287,6 +312,7 @@ impl WalletManager for BDKWalletManager {
         let wallet = self.wallet.lock().await;
         let wallet_tip = wallet.latest_checkpoint();
         let start_height = wallet_tip.height();
+        self.scan_height.store(start_height, Ordering::SeqCst);
         drop(wallet);
 
         let emitter_handle = tokio::spawn(async move {
@@ -321,6 +347,7 @@ impl WalletManager for BDKWalletManager {
                     wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
                     wallet.persist(&mut wallet_db)?;
                     let elapsed = start_apply_block.elapsed().as_secs_f32();
+                    self.scan_height.store(height, Ordering::SeqCst);
                     log::info!(target: "lampo-wallet",
                         "Applied block {} at height {} in {}s",
                         hash, height, elapsed
@@ -360,6 +387,13 @@ impl WalletManager for BDKWalletManager {
         let tip = wallet.latest_checkpoint().height();
         let tip = Height::from_consensus(tip)?;
         Ok(tip)
+    }
+
+    async fn sync_status(&self) -> error::Result<WalletSyncStatus> {
+        Ok(WalletSyncStatus {
+            scan_height: self.scan_height.load(Ordering::SeqCst),
+            in_progress: self.syncing.load(Ordering::SeqCst),
+        })
     }
 
     async fn listen(self: Arc<Self>) -> error::Result<()> {
@@ -417,6 +451,7 @@ impl WalletManager for BDKWalletManager {
                 // before the first tail block is applied.
                 let mut wallet_db = self.wallet_db.lock().await;
                 wallet.persist(&mut wallet_db)?;
+                self.scan_height.store(height, Ordering::SeqCst);
                 log::info!(target: "lampo-wallet", "Fast-forwarded wallet checkpoint to height {height}");
             }
         }

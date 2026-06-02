@@ -54,6 +54,7 @@ impl LampoInventoryManager {
         }
 
         let wallet_tips = self.channel_manager.wallet_manager().wallet_tips().await?;
+        let sync_status = self.channel_manager.wallet_manager().sync_status().await?;
         let getinfo = GetInfo {
             node_id: self.channel_manager.manager().get_our_node_id().to_string(),
             peers: self.peer_manager.manager().list_peers().len(),
@@ -65,6 +66,9 @@ impl LampoInventoryManager {
             address: address_vec,
             block_hash: block_hash.to_string(),
             wallet_height: wallet_tips.to_consensus_u32() as u64,
+            wallet_scan_height: sync_status.scan_height as u64,
+            sync_in_progress: sync_status.in_progress,
+            sync_progress_percent: sync_status.progress_percent(blockheight),
         };
         Ok(getinfo)
     }
