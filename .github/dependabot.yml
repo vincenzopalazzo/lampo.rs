@@ -8,3 +8,11 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly" # See documentation for possible values
+    # Keep the LDK crate family on a single version: bump every lightning*
+    # crate together in one PR so an isolated bump can't split `lightning`
+    # across versions and break the build (see #537).
+    groups:
+      ldk:
+        patterns:
+          - "lightning"
+          - "lightning-*"
