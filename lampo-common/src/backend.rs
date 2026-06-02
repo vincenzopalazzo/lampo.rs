@@ -10,10 +10,7 @@ pub use bitcoin::consensus::{deserialize, serialize};
 pub use bitcoin::{Block, BlockHash, Script, Transaction, Txid};
 pub use lightning::chain::WatchedOutput;
 pub use lightning::routing::utxo::UtxoResult;
-use lightning_block_sync::BlockSource;
-pub use lightning_block_sync::{
-    AsyncBlockSourceResult, BlockData, BlockHeaderData, BlockSourceResult,
-};
+pub use lightning_block_sync::{BlockData, BlockHeaderData, BlockSourceResult};
 use serde::{Deserialize, Serialize};
 
 use crate::error;
@@ -35,9 +32,16 @@ pub enum BackendKind {
 // FIXME: add the BlockSource trait for this
 /// Bakend Trait specification
 #[async_trait]
-pub trait Backend: BlockSource + Send + Sync {
+pub trait Backend: Send + Sync {
     /// Return the kind of backend
     fn kind(&self) -> BackendKind;
+
+    /// Return the hash of the best block and, optionally, its height.
+    ///
+    /// LDK 0.3's `BlockSource` is no longer object-safe (it returns `impl
+    /// Future`), so `Backend` exposes this as an object-safe async method and
+    /// concrete backends implement `BlockSource` separately for chain sync.
+    async fn get_best_block(&self) -> BlockSourceResult<(BlockHash, Option<u32>)>;
 
     /// Fetch feerate give a number of blocks
     ///

@@ -5,13 +5,18 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+# Deterministic channel keys for testing only. Enables LDK's test-only
+# InMemorySigner constructor; never enable in production builds.
+unsafe_channel_keys = ["lightning/_test_utils"]
+
 [dependencies]
-lightning = { version = "0.1.5", features = [] }
-lightning-block-sync = { version = "0.1.0" }
-lightning-persister = { version = "0.2.0" }
-lightning-background-processor = { version = "0.1", features = ["futures"] }
-lightning-net-tokio = { version = "0.1.0" }
-lightning-rapid-gossip-sync = { version = "0.1.0" }
+lightning = { workspace = true, features = [] }
+lightning-block-sync = { workspace = true }
+lightning-persister = { workspace = true }
+lightning-background-processor = { workspace = true }
+lightning-net-tokio = { workspace = true }
+lightning-rapid-gossip-sync = { workspace = true }
 
 async-trait = "0.1"
 bitcoin = { version = "0.32", features = ["serde"] }

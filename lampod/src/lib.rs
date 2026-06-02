@@ -28,9 +28,10 @@ use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
+use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
-use lampo_common::ldk::processor::{process_events_async, GossipSync};
+use lampo_common::ldk::processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
@@ -46,6 +47,34 @@ use crate::utils::logger::LampoLogger;
 
 pub(crate) type P2PGossipSync =
     ldk::routing::gossip::P2PGossipSync<Arc<LampoGraph>, Arc<LampoChainManager>, Arc<LampoLogger>>;
+
+/// No-op [`ChangeDestinationSource`] used only to *name* the `OutputSweeper`
+/// type when passing `sweeper: None` to the background processor. Lampo does
+/// not run an output sweeper, so this is never constructed or called.
+///
+/// [`ChangeDestinationSource`]: lampo_common::ldk::sign::ChangeDestinationSource
+struct NoChangeDestinationSource;
+
+impl ldk::sign::ChangeDestinationSource for NoChangeDestinationSource {
+    fn get_change_destination_script<'a>(
+        &'a self,
+    ) -> impl std::future::Future<Output = Result<lampo_common::bitcoin::ScriptBuf, ()>> + Send + 'a
+    {
+        std::future::ready(Err(()))
+    }
+}
+
+/// Concrete `OutputSweeper` type matching lampo's chain-monitor wiring, used
+/// solely to type the `None` sweeper argument to [`process_events_async`].
+type LampoSweeper = ldk::util::sweep::OutputSweeper<
+    Arc<dyn ldk::chain::chaininterface::BroadcasterInterface + Send + Sync>,
+    Arc<NoChangeDestinationSource>,
+    Arc<dyn ldk::chain::chaininterface::FeeEstimator + Send + Sync>,
+    Arc<dyn ldk::chain::Filter + Send + Sync>,
+    Arc<LampoPersistence>,
+    Arc<LampoLogger>,
+    LampoKeysManager,
+>;
 
 /// LampoDaemon is the main data structure that uses the facade
 /// pattern to hide the complexity of the LDK library. You can interact
@@ -257,6 +286,8 @@ impl LampoDaemon {
                 Some(self.peer_manager().onion_messager()),
                 GossipSync::p2p(gossip_sync),
                 self.peer_manager().manager(),
+                NO_LIQUIDITY_MANAGER,
+                None::<Arc<LampoSweeper>>,
                 self.logger.clone(),
                 Some(self.channel_manager().scorer()),
                 |d| {

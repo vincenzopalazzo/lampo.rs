@@ -21,3 +21,14 @@ default-members = [
         "lampo-bdk-wallet"
 ]
 resolver = "2"
+
+# LDK 0.3 is not yet published to crates.io; track the upstream `0.3` branch,
+# pinned to a commit for reproducible builds. Bump every lightning* crate
+# together so the stack stays on one version (see issue #537).
+[workspace.dependencies]
+lightning = { git = "https://github.com/lightningdevkit/rust-lightning", rev = "84605cf08d34b8db731ee4a4356a95125a8b02af" }
+lightning-block-sync = { git = "https://github.com/lightningdevkit/rust-lightning", rev = "84605cf08d34b8db731ee4a4356a95125a8b02af" }
+lightning-persister = { git = "https://github.com/lightningdevkit/rust-lightning", rev = "84605cf08d34b8db731ee4a4356a95125a8b02af", features = ["tokio"] }
+lightning-background-processor = { git = "https://github.com/lightningdevkit/rust-lightning", rev = "84605cf08d34b8db731ee4a4356a95125a8b02af" }
+lightning-net-tokio = { git = "https://github.com/lightningdevkit/rust-lightning", rev = "84605cf08d34b8db731ee4a4356a95125a8b02af" }
+lightning-rapid-gossip-sync = { git = "https://github.com/lightningdevkit/rust-lightning", rev = "84605cf08d34b8db731ee4a4356a95125a8b02af" }
