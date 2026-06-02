@@ -57,3 +57,34 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
+
+  deps:
+    name: Dependency hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      # Guards against the failure mode in #537: a bump of a single LDK crate
+      # pulling in a second, incompatible `lightning` version. Every `lightning*`
+      # crate must resolve to one version across the workspace.
+      - name: Ensure a single LDK (lightning*) version
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree --workspace --duplicates --edges normal)
+          dupes=$(printf '%s\n' "$tree" | grep -E '^lightning[a-z-]* v' | sort -u || true)
+          if [ -n "$dupes" ]; then
+            echo "::error::Multiple versions of LDK (lightning*) crates detected:"
+            echo "$dupes"
+            echo "Bump every lightning* crate together so the stack stays on one version."
+            exit 1
+          fi
+          echo "OK: each lightning* crate resolves to a single version."
