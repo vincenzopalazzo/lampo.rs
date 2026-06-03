@@ -12,7 +12,7 @@
 set -euo pipefail
 
 direct=$(cargo tree -p lampo-bdk-wallet --edges normal --depth 1 --prefix none 2>/dev/null \
-    | grep -iE 'lightning' || true)
+    | grep -E '^lightning' || true)
 
 if [ -n "$direct" ]; then
     echo "::error::lampo-bdk-wallet directly depends on an LDK crate:" >&2

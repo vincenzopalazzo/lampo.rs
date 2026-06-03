@@ -33,7 +33,8 @@ const NO_HEIGHT: u64 = u64::MAX;
 /// Cheap to clone behind an `Arc`; all methods take `&self`.
 pub struct ChainSyncCoordinator {
     /// Current lifecycle state. A `watch` channel so callers can `await`
-    /// transitions (`wait_listeners_synced`) as well as read the latest value.
+    /// transitions (`wait_initial_sync_complete`) as well as read the latest
+    /// value.
     state: watch::Sender<SyncState>,
     /// Latest wallet scan height, or `NO_HEIGHT` when none has been reported.
     wallet_scan_height: AtomicU64,
@@ -69,8 +70,19 @@ impl ChainSyncCoordinator {
     }
 
     /// Advance to `Running`: the initial sync is fully complete.
+    ///
+    /// Only advances from `ListenersSynced` (a no-op from `Running`, and
+    /// defensively a no-op from `PendingInitialSync` so the state machine is
+    /// self-consistent regardless of caller).
     pub fn mark_running(&self) {
-        self.state.send_replace(SyncState::Running);
+        self.state.send_if_modified(|state| {
+            if matches!(state, SyncState::ListenersSynced) {
+                *state = SyncState::Running;
+                true
+            } else {
+                false
+            }
+        });
     }
 
     /// Latest reported wallet scan height, if any.
@@ -87,23 +99,6 @@ impl ChainSyncCoordinator {
             .store(u64::from(height), Ordering::Relaxed);
     }
 
-    /// Resolve once the chain listeners have synced (state is `ListenersSynced`
-    /// or `Running`). Returns immediately if already past `PendingInitialSync`.
-    pub async fn wait_listeners_synced(&self) {
-        let mut rx = self.state.subscribe();
-        loop {
-            if !matches!(*rx.borrow_and_update(), SyncState::PendingInitialSync) {
-                return;
-            }
-            // The coordinator owns `self.state`, so the sender never drops while
-            // we hold `&self`; `changed()` therefore cannot error here, but if it
-            // ever did we simply stop waiting rather than spin.
-            if rx.changed().await.is_err() {
-                return;
-            }
-        }
-    }
-
     /// Resolve once the full initial sync has completed (state is `Running`).
     /// Used by the `sync_wallets` RPC to block until the node is caught up.
     pub async fn wait_initial_sync_complete(&self) {
@@ -112,6 +107,9 @@ impl ChainSyncCoordinator {
             if matches!(*rx.borrow_and_update(), SyncState::Running) {
                 return;
             }
+            // The coordinator owns `self.state`, so the sender never drops while
+            // we hold `&self`; `changed()` therefore cannot error here, but if it
+            // ever did we simply stop waiting rather than spin.
             if rx.changed().await.is_err() {
                 return;
             }
@@ -167,12 +165,24 @@ mod tests {
     #[test]
     fn mark_listeners_synced_does_not_regress_running() {
         let coord = ChainSyncCoordinator::new();
+        coord.mark_listeners_synced();
         coord.mark_running();
         // A late listener-sync signal must not pull a Running node backwards.
         coord.mark_listeners_synced();
         assert_eq!(coord.state(), SyncState::Running);
         assert!(coord.initial_sync_complete());
         assert!(!coord.sync_in_progress());
+    }
+
+    #[test]
+    fn mark_running_requires_listeners_synced_first() {
+        let coord = ChainSyncCoordinator::new();
+        // Defensive: never jump straight from Pending to Running.
+        coord.mark_running();
+        assert_eq!(coord.state(), SyncState::PendingInitialSync);
+        coord.mark_listeners_synced();
+        coord.mark_running();
+        assert_eq!(coord.state(), SyncState::Running);
     }
 
     #[test]

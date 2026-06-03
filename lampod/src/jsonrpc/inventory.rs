@@ -72,7 +72,18 @@ pub async fn json_sync_wallets(
 ) -> Result<json::Value, Error> {
     log::info!("calling `sync_wallets` with request `{:?}`", request);
     let chain_sync = ctx.chain_sync();
-    chain_sync.wait_initial_sync_complete().await;
+    // Bound the wait so a stuck node can't pin the HTTP worker indefinitely.
+    // On timeout we return the current (incomplete) status; the caller re-polls.
+    const SYNC_WALLETS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+    if tokio::time::timeout(
+        SYNC_WALLETS_TIMEOUT,
+        chain_sync.wait_initial_sync_complete(),
+    )
+    .await
+    .is_err()
+    {
+        log::warn!("`sync_wallets` timed out waiting for initial sync; returning current status");
+    }
     let status = SyncStatus {
         chain_listeners_synced: chain_sync.chain_listeners_synced(),
         initial_sync_complete: chain_sync.initial_sync_complete(),

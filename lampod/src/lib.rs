@@ -105,6 +105,11 @@ pub struct LampoDaemon {
 impl LampoDaemon {
     pub fn new(config: Arc<LampoConf>, wallet_manager: Arc<dyn WalletManager>) -> Self {
         let root_path = config.path();
+        let chain_sync = Arc::new(ChainSyncCoordinator::new());
+        // Wire the wallet to the coordinator here so every daemon (CLI, tests,
+        // embedders) gets consistent sync-progress reporting with no per-caller
+        // setup. The backend is wired separately in `init`.
+        wallet_manager.set_coordinator(chain_sync.clone());
         LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
@@ -117,7 +122,7 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
-            chain_sync: Arc::new(ChainSyncCoordinator::new()),
+            chain_sync,
         }
     }
 
