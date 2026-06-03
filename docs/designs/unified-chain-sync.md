@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|--------|
-| Status | Draft (rev. 2 — decoupled) |
+| Status | In progress (rev. 3 — Phases A–C implemented) |
 | Author | Vincenzo Palazzo (with Grok-assisted analysis; rev. 2 decoupling pass) |
 | Date | 2026-06-03 |
 | Related issues | [#545](https://github.com/vincenzopalazzo/lampo.rs/issues/545), [#540](https://github.com/vincenzopalazzo/lampo.rs/issues/540) (fast sync), [#444](https://github.com/vincenzopalazzo/lampo.rs/issues/444) (`reindex` semantics) |
@@ -410,24 +410,51 @@ If Phase D requires *zero* edits to `lampo-bdk-wallet`, the design met its goal.
 
 ## PR Plan
 
-| PR | Title | Scope | Depends on |
-|----|-------|-------|------------|
-| 1 | `feat(sync): add backend-agnostic ChainSyncCoordinator + getinfo progress` | `lampo-common`, `lampod` inventory JSON | — |
-| 2 | `fix(wallet): gate BDK Emitter until listeners synced; startup reorder` | `lampo-bdk-wallet`, `lampod-cli` | PR 1 |
-| 3 | `feat(wallet): add lampo-native apply_block/current_best_block to WalletManager` | `lampo-common`, `lampo-bdk-wallet` (no LDK) | PR 1 |
-| 4 | `feat(chain): wallet Listen adapter + include wallet in synchronize_listeners` | `lampo-chain` only (adapter lives here) | PR 3 |
-| 5 | `feat(chain): retire parallel Emitter in unified mode` | `lampo-bdk-wallet`, `lampo-chain` | PR 4 |
-| 6 | `feat(config): fast_sync + sync_mode + document reindex` | `lampo.example.conf`, CLI, README | PR 4 |
-| 7 | `feat(jsonrpc): add sync_wallets endpoint` | `lampod`, `lampo-httpd` | PR 4 |
-| 8 | `test: decoupling guard + signet unified-sync integration` | `lampo-testing`, CI | PR 4 |
+Implemented as a single branch of self-contained commits (commit subjects use
+the repo's `crate:` prefix convention rather than `feat()`):
 
-## Open questions
+| # | Commit | Scope | Status |
+|---|--------|-------|--------|
+| 1 | `sync: add ChainSyncCoordinator and getinfo fields` | `lampo-common`, `lampod` | Done |
+| 2 | `wallet: gate BDK Emitter on listener sync` | `lampo-bdk-wallet`, `lampo-chain`, `lampod`, `lampod-cli` | Done |
+| 3a | `wallet: add apply_block/current_best_block` | `lampo-common`, `lampo-bdk-wallet` (no LDK) | Done |
+| 3b | `wallet: synchronous chain-state locking` | `lampo-bdk-wallet` (std mutex; fixes guard-shadow bug) | Done |
+| 4 | `chain: drive wallet through synchronize_listeners` | `lampo-chain` adapter + `Backend::set_wallet_manager` | Done |
+| 6 | `config: add sync_mode and fast_sync` | `lampo-common`, `lampo-chain`, `lampo-bdk-wallet`, example conf | Done |
+| 7 | `jsonrpc: add sync_wallets endpoint` | `lampo-common`, `lampod`, `lampo-httpd` | Done |
+| 8 | `ci: guard wallet stays free of LDK` | `tools/`, `build.yml` | Done (decoupling guard) |
+| 5 | retire the Emitter for ongoing updates | `lampo-chain`, `lampo-bdk-wallet` | **Deferred** |
+| 8b | signet unified-sync integration test | `lampo-testing` / docker CI | **Deferred** |
 
-1. Should the HTTP/API bind be delayed until `initial_sync_complete` (ldk-node-style), or only report status via `getinfo`?
-2. Investigate missing `Applied block` logs in release builds — logging level vs apply-path bug?
-3. Should signet deployments default `fast_sync = true` in the example config?
-4. Adapter bridging: is `block_on` inside `Listen::block_connected` acceptable, or should `WalletManager::apply_block` have a sync sibling to avoid the runtime bridge?
-5. When Phase D lands, does `WalletManager` grow `apply_confirmed_txs`, or do we introduce a separate `TxWalletSync` sub-trait to keep block-based wallets minimal?
+**Why PR 5 is deferred:** the production bug (parallel dual full-scan) is already
+fixed — PR 2 gates the Emitter and PR 4 folds the wallet's *initial* catch-up
+into `synchronize_listeners`, so the overlapping range is fetched once. The
+Emitter now only serves cheap *incremental* ongoing polling (gated). Fully
+retiring it requires driving the wallet from the `SpvClient` poll loop, but LDK
+only implements `Listen` for `(T, U)` where both are `Deref` (so a 3-listener
+tuple needs a custom `Listen` impl). That change has real reorg/ongoing-update
+risk and is best landed with the signet integration test (8b) to validate it.
+
+## Open questions — resolved
+
+1. **HTTP bind vs sync:** *report-only* (do not block the bind). `getinfo` exposes
+   the progress fields; the `sync_wallets` RPC (PR 7) is the opt-in blocking wait.
+   Per-command readiness guards for fund-requiring commands are a follow-up.
+2. **Missing `Applied block` logs / frozen db:** root cause was a latent lock bug —
+   `listen()` shadowed the wallet `MutexGuard` and held it across the scheduler
+   `.await`s. Fixed in PR 3b (sync locks + scoped guards). The blocking
+   `Emitter::next_block()` under `tokio::spawn` should move to `spawn_blocking` in
+   the legacy path (follow-up); the unified path (PR 4) avoids the issue.
+3. **signet `fast_sync` default:** code default stays `true` but only ever applies
+   to a *fresh* wallet (height 0, no UTXOs to miss); documented in the example
+   conf. No unsafe history-skipping for funded wallets.
+4. **Adapter bridge:** resolved to a *synchronous wallet core* (PR 3b) — no
+   `block_in_place`/`block_on`, so the adapter drives the wallet from
+   `Listen::block_connected` on any runtime flavor, keeping `LampoDaemon`
+   embeddable. The LDK coupling is confined to `lampo-chain`.
+5. **Phase D tx-based wallet:** introduce a separate `TxWalletSync` sub-trait when
+   Esplora/Electrum lands; keep `apply_block` on `WalletManager` for now (one
+   mode, one impl) per "write for today."
 
 ## References
 
