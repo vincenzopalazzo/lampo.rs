@@ -13,6 +13,7 @@ pub use lightning::routing::utxo::UtxoResult;
 pub use lightning_block_sync::{BlockData, BlockHeaderData, BlockSourceResult};
 use serde::{Deserialize, Serialize};
 
+use crate::chainsync::ChainSyncCoordinator;
 use crate::error;
 use crate::handler::Handler;
 use crate::types::{LampoChainMonitor, LampoChannel};
@@ -61,6 +62,10 @@ pub trait Backend: Send + Sync {
     fn set_channel_manager(&self, _: Arc<LampoChannel>) {}
 
     fn set_chain_monitor(&self, _: Arc<LampoChainMonitor>) {}
+
+    /// Inject the backend-agnostic chain-sync coordinator so the backend can
+    /// publish listener-sync progress. Default no-op.
+    fn set_coordinator(&self, _: Arc<ChainSyncCoordinator>) {}
 
     /// Get the information of a transaction inside the blockchain.
     async fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;

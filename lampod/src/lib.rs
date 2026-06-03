@@ -249,6 +249,7 @@ impl LampoDaemon {
         client.set_handler(self.handler());
         client.set_channel_manager(self.channel_manager().manager());
         client.set_chain_monitor(self.channel_manager().chain_monitor());
+        client.set_coordinator(self.chain_sync());
         self.channel_manager().set_handler(self.handler());
         Ok(())
     }

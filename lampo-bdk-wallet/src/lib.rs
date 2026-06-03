@@ -1,6 +1,6 @@
 //! Wallet Manager implementation with BDK
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client, RpcApi};
 use bdk_bitcoind_rpc::Emitter;
@@ -22,6 +22,7 @@ use lampo_common::bitcoin::bip32::Xpriv;
 use lampo_common::bitcoin::blockdata::locktime::absolute::LockTime;
 use lampo_common::bitcoin::PrivateKey;
 use lampo_common::bitcoin::{Amount, Block, FeeRate, ScriptBuf, Transaction};
+use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::NewAddress;
@@ -40,6 +41,10 @@ pub struct BDKWalletManager {
     pub conf: Arc<LampoConf>,
 
     guard: Mutex<bool>,
+    /// Chain-sync coordinator, when wired in. Gates the Emitter scan on LDK
+    /// listener sync and carries scan progress. `None` (e.g. in tests) leaves
+    /// the wallet syncing immediately, exactly as before.
+    coordinator: OnceLock<Arc<ChainSyncCoordinator>>,
 }
 
 impl BDKWalletManager {
@@ -188,6 +193,7 @@ impl WalletManager for BDKWalletManager {
                 guard: Mutex::new(false),
                 reindex_from: conf.reindex,
                 conf: conf.clone(),
+                coordinator: OnceLock::new(),
             },
             mnemonic_words,
         ))
@@ -206,6 +212,7 @@ impl WalletManager for BDKWalletManager {
             guard: Mutex::new(false),
             reindex_from: conf.reindex,
             conf: conf.clone(),
+            coordinator: OnceLock::new(),
         })
     }
 
@@ -272,6 +279,12 @@ impl WalletManager for BDKWalletManager {
         Ok(txs)
     }
 
+    fn set_coordinator(&self, coordinator: Arc<ChainSyncCoordinator>) {
+        self.coordinator
+            .set(coordinator)
+            .unwrap_or_else(|_| panic!("chain sync coordinator already set"));
+    }
+
     async fn sync(&self) -> error::Result<()> {
         #[derive(Debug)]
         enum Emission {
@@ -327,6 +340,9 @@ impl WalletManager for BDKWalletManager {
                     let start_apply_block = Instant::now();
                     wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
                     wallet.persist(&mut wallet_db)?;
+                    if let Some(coordinator) = self.coordinator.get() {
+                        coordinator.set_wallet_scan_height(height);
+                    }
                     let elapsed = start_apply_block.elapsed().as_secs_f32();
                     log::info!(target: "lampo-wallet",
                         "Applied block {} at height {} in {}s",
@@ -359,6 +375,14 @@ impl WalletManager for BDKWalletManager {
             }
             Ok(Ok(())) => {}
         }
+
+        // The wallet has caught up to the chain tip. If the LDK listeners are
+        // also synced, the node's initial sync is complete.
+        if let Some(coordinator) = self.coordinator.get() {
+            if coordinator.chain_listeners_synced() {
+                coordinator.mark_running();
+            }
+        }
         Ok(())
     }
 
@@ -374,6 +398,19 @@ impl WalletManager for BDKWalletManager {
         sched.shutdown_on_ctrl_c();
 
         async fn innet_sync(wallet: Arc<BDKWalletManager>) -> error::Result<()> {
+            // Gate: hold the Emitter scan until the LDK chain listeners have
+            // synced, so the two pipelines don't compete for the same RPC.
+            // Active only when a coordinator is wired in and
+            // `wallet_sync_parallel` is unset; otherwise sync runs as before.
+            let parallel = wallet.conf.wallet_sync_parallel.unwrap_or(false);
+            if !parallel {
+                if let Some(coordinator) = wallet.coordinator.get() {
+                    if !coordinator.chain_listeners_synced() {
+                        log::info!(target: "lampo-wallet", "Waiting for chain listeners to sync before scanning the wallet");
+                        return Ok(());
+                    }
+                }
+            }
             let _is_sync = wallet.guard.lock().await;
             log::debug!(target: "lampo-wallet", "Tick tock, time to check if we need to sync the wallet");
             wallet.sync().await?;
