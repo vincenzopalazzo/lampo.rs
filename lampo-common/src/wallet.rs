@@ -4,12 +4,21 @@ use async_trait::async_trait;
 
 use crate::bitcoin::absolute::Height;
 use crate::bitcoin::{Amount, FeeRate};
-use crate::bitcoin::{ScriptBuf, Transaction};
+use crate::bitcoin::{Block, BlockHash, ScriptBuf, Transaction};
 use crate::chainsync::ChainSyncCoordinator;
 use crate::conf::LampoConf;
 use crate::error;
 use crate::keys::LampoKeys;
 use crate::model::response::{NewAddress, Utxo};
+
+/// A lightweight reference to a block (height + hash). Pure `bitcoin` types,
+/// so a chain backend and the wallet can exchange chain positions without the
+/// wallet depending on LDK or the backend depending on BDK.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlockRef {
+    pub height: u32,
+    pub hash: BlockHash,
+}
 
 /// Wallet manager trait that define a generic interface
 /// over Wallet implementation!
@@ -50,6 +59,16 @@ pub trait WalletManager: Send + Sync {
     /// Return the last block height of the wallet, but we can abstract
     /// in the future the wallet tips info that we will need.
     async fn wallet_tips(&self) -> error::Result<Height>;
+
+    /// The wallet's current best (checkpoint) block: height + hash. Lets a
+    /// chain backend compute where to start syncing the wallet from in a
+    /// unified sync pass.
+    async fn current_best_block(&self) -> error::Result<BlockRef>;
+
+    /// Apply a connected block, advancing the wallet's view of the chain.
+    /// Takes pure `bitcoin` types so the wallet never depends on LDK
+    /// chain-sync; a backend drives this during unified sync.
+    async fn apply_block(&self, block: &Block, height: u32) -> error::Result<()>;
 
     /// Inject the chain-sync coordinator so the wallet can gate its scan on
     /// the LDK listener sync and report scan progress. Default no-op; the
