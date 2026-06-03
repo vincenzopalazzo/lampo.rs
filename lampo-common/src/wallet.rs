@@ -63,12 +63,19 @@ pub trait WalletManager: Send + Sync {
     /// The wallet's current best (checkpoint) block: height + hash. Lets a
     /// chain backend compute where to start syncing the wallet from in a
     /// unified sync pass.
-    async fn current_best_block(&self) -> error::Result<BlockRef>;
+    ///
+    /// Synchronous so an LDK `Listen` adapter can call it without an async
+    /// runtime; the underlying access is a short, non-blocking lookup.
+    fn current_best_block(&self) -> error::Result<BlockRef>;
 
     /// Apply a connected block, advancing the wallet's view of the chain.
     /// Takes pure `bitcoin` types so the wallet never depends on LDK
     /// chain-sync; a backend drives this during unified sync.
-    async fn apply_block(&self, block: &Block, height: u32) -> error::Result<()>;
+    ///
+    /// Synchronous so it can be driven directly from `Listen::block_connected`
+    /// (which is itself sync) on any runtime flavor, keeping `LampoDaemon`
+    /// embeddable. The critical section is a short BDK apply + persist.
+    fn apply_block(&self, block: &Block, height: u32) -> error::Result<()>;
 
     /// Inject the chain-sync coordinator so the wallet can gate its scan on
     /// the LDK listener sync and report scan progress. Default no-op; the
