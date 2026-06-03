@@ -104,6 +104,20 @@ impl ChainSyncCoordinator {
         }
     }
 
+    /// Resolve once the full initial sync has completed (state is `Running`).
+    /// Used by the `sync_wallets` RPC to block until the node is caught up.
+    pub async fn wait_initial_sync_complete(&self) {
+        let mut rx = self.state.subscribe();
+        loop {
+            if matches!(*rx.borrow_and_update(), SyncState::Running) {
+                return;
+            }
+            if rx.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
     /// Whether the LDK chain listeners have completed their initial sync.
     pub fn chain_listeners_synced(&self) -> bool {
         !matches!(self.state(), SyncState::PendingInitialSync)
