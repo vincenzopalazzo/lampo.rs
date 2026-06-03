@@ -13,6 +13,18 @@ pub struct GetInfo {
     pub address: Vec<NetworkInfo>,
     pub block_hash: String,
     pub wallet_height: u64,
+    /// Live wallet scan height during initial catch-up, if known.
+    #[serde(default)]
+    pub wallet_scan_height: Option<u32>,
+    /// Whether the LDK chain listeners have completed their initial sync.
+    #[serde(default)]
+    pub chain_listeners_synced: bool,
+    /// Whether the full initial sync (listeners + wallet) has completed.
+    #[serde(default)]
+    pub initial_sync_complete: bool,
+    /// Whether an initial sync is still in progress.
+    #[serde(default)]
+    pub sync_in_progress: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Apiv2Schema)]

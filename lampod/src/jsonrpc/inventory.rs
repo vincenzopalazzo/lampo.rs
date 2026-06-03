@@ -3,7 +3,7 @@ use lampo_common::error;
 use lampo_common::json;
 use lampo_common::jsonrpc::Error;
 use lampo_common::model::request::NetworkInfo;
-use lampo_common::model::response::{NetworkChannel, NetworkChannels};
+use lampo_common::model::response::{NetworkChannel, NetworkChannels, SyncStatus};
 use lampo_common::model::GetInfo;
 
 use crate::{async_run, LampoDaemon};
@@ -38,6 +38,7 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     }
 
     let wallet_tips = ctx.wallet_manager().wallet_tips().await?;
+    let chain_sync = ctx.chain_sync();
 
     let getinfo = GetInfo {
         node_id: ctx
@@ -54,9 +55,42 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         lampo_dir,
         address: address_vec,
         wallet_height: wallet_tips.to_consensus_u32() as u64,
+        wallet_scan_height: chain_sync.wallet_scan_height(),
+        chain_listeners_synced: chain_sync.chain_listeners_synced(),
+        initial_sync_complete: chain_sync.initial_sync_complete(),
+        sync_in_progress: chain_sync.sync_in_progress(),
     };
 
     Ok(json::to_value(getinfo)?)
+}
+
+/// Block until the node's initial chain sync (LDK listeners + on-chain wallet)
+/// completes, then return the final sync status. Useful for scripts and CI.
+pub async fn json_sync_wallets(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("calling `sync_wallets` with request `{:?}`", request);
+    let chain_sync = ctx.chain_sync();
+    // Bound the wait so a stuck node can't pin the HTTP worker indefinitely.
+    // On timeout we return the current (incomplete) status; the caller re-polls.
+    const SYNC_WALLETS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+    if tokio::time::timeout(
+        SYNC_WALLETS_TIMEOUT,
+        chain_sync.wait_initial_sync_complete(),
+    )
+    .await
+    .is_err()
+    {
+        log::warn!("`sync_wallets` timed out waiting for initial sync; returning current status");
+    }
+    let status = SyncStatus {
+        chain_listeners_synced: chain_sync.chain_listeners_synced(),
+        initial_sync_complete: chain_sync.initial_sync_complete(),
+        sync_in_progress: chain_sync.sync_in_progress(),
+        wallet_scan_height: chain_sync.wallet_scan_height(),
+    };
+    Ok(json::to_value(status)?)
 }
 
 // FIXME: check the request

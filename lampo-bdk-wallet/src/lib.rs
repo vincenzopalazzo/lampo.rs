@@ -1,6 +1,11 @@
 //! Wallet Manager implementation with BDK
 use std::str::FromStr;
-use std::sync::Arc;
+// The on-chain wallet + its sqlite handle are guarded by a std (blocking)
+// mutex, not a tokio one: their critical sections are short and fully
+// synchronous (BDK apply + rusqlite persist), and a sync lock lets the LDK
+// `Listen` adapter drive `apply_block` without an async runtime. `guard`
+// stays a tokio mutex because it is held across `.await`.
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
 use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client, RpcApi};
 use bdk_bitcoind_rpc::Emitter;
@@ -22,17 +27,18 @@ use lampo_common::bitcoin::bip32::Xpriv;
 use lampo_common::bitcoin::blockdata::locktime::absolute::LockTime;
 use lampo_common::bitcoin::PrivateKey;
 use lampo_common::bitcoin::{Amount, Block, FeeRate, ScriptBuf, Transaction};
+use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::NewAddress;
 use lampo_common::model::response::Utxo;
 use lampo_common::secp256k1::SecretKey;
-use lampo_common::wallet::WalletManager;
+use lampo_common::wallet::{BlockRef, WalletManager};
 use lampo_common::{async_trait, error};
 
 pub struct BDKWalletManager {
-    pub wallet: Mutex<PersistedWallet<Connection>>,
-    pub wallet_db: Mutex<Connection>,
+    pub wallet: StdMutex<PersistedWallet<Connection>>,
+    pub wallet_db: StdMutex<Connection>,
     pub rpc: Arc<Client>,
     pub keymanager: Arc<LampoKeys>,
     pub network: Network,
@@ -40,6 +46,10 @@ pub struct BDKWalletManager {
     pub conf: Arc<LampoConf>,
 
     guard: Mutex<bool>,
+    /// Chain-sync coordinator, when wired in. Gates the Emitter scan on LDK
+    /// listener sync and carries scan progress. `None` (e.g. in tests) leaves
+    /// the wallet syncing immediately, exactly as before.
+    coordinator: OnceLock<Arc<ChainSyncCoordinator>>,
 }
 
 impl BDKWalletManager {
@@ -166,6 +176,36 @@ impl BDKWalletManager {
         let client = Client::new(url, Auth::UserPass(user.clone(), pass.clone()))?;
         Ok(client)
     }
+
+    /// Apply a connected block to the wallet, given the BDK `connected_to`
+    /// point. Synchronous: holds the wallet/db locks only for the short BDK
+    /// apply + persist, so callers (including the async `sync` loop and the
+    /// LDK `Listen` adapter) never hold a `MutexGuard` across an `.await`.
+    fn apply_block_inner(
+        &self,
+        block: &Block,
+        height: u32,
+        connected_to: BlockId,
+    ) -> error::Result<()> {
+        let mut wallet = self.wallet.lock().unwrap();
+        let mut wallet_db = self.wallet_db.lock().unwrap();
+        wallet.apply_block_connected_to(block, height, connected_to)?;
+        wallet.persist(&mut wallet_db)?;
+        if let Some(coordinator) = self.coordinator.get() {
+            coordinator.set_wallet_scan_height(height);
+        }
+        Ok(())
+    }
+
+    /// Apply unconfirmed (mempool) transactions to the wallet. Synchronous for
+    /// the same reason as [`Self::apply_block_inner`].
+    fn apply_mempool(&self, txs: Vec<(Arc<Transaction>, u64)>) -> error::Result<()> {
+        let mut wallet = self.wallet.lock().unwrap();
+        let mut wallet_db = self.wallet_db.lock().unwrap();
+        wallet.apply_unconfirmed_txs(txs);
+        wallet.persist(&mut wallet_db)?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -180,14 +220,15 @@ impl WalletManager for BDKWalletManager {
         let client = Self::build_client(conf.clone())?;
         Ok((
             Self {
-                wallet: Mutex::new(wallet),
-                wallet_db: Mutex::new(db),
+                wallet: StdMutex::new(wallet),
+                wallet_db: StdMutex::new(db),
                 keymanager: Arc::new(keymanager),
                 network: conf.network,
                 rpc: Arc::new(client),
                 guard: Mutex::new(false),
                 reindex_from: conf.reindex,
                 conf: conf.clone(),
+                coordinator: OnceLock::new(),
             },
             mnemonic_words,
         ))
@@ -198,14 +239,15 @@ impl WalletManager for BDKWalletManager {
             BDKWalletManager::build_wallet(conf.clone(), mnemonic_words).await?;
         let client = BDKWalletManager::build_client(conf.clone())?;
         Ok(Self {
-            wallet: Mutex::new(wallet),
-            wallet_db: Mutex::new(db),
+            wallet: StdMutex::new(wallet),
+            wallet_db: StdMutex::new(db),
             keymanager: Arc::new(keymanager),
             network: conf.network,
             rpc: Arc::new(client),
             guard: Mutex::new(false),
             reindex_from: conf.reindex,
             conf: conf.clone(),
+            coordinator: OnceLock::new(),
         })
     }
 
@@ -214,8 +256,8 @@ impl WalletManager for BDKWalletManager {
     }
 
     async fn get_onchain_address(&self) -> error::Result<NewAddress> {
-        let mut wallet = self.wallet.lock().await;
-        let mut wallet_db = self.wallet_db.lock().await;
+        let mut wallet = self.wallet.lock().unwrap();
+        let mut wallet_db = self.wallet_db.lock().unwrap();
         let address = wallet.reveal_next_address(KeychainKind::External);
         wallet.persist(&mut wallet_db)?;
         Ok(NewAddress {
@@ -225,7 +267,7 @@ impl WalletManager for BDKWalletManager {
 
     // Return in satoshis
     async fn get_onchain_balance(&self) -> error::Result<u64> {
-        let balance = self.wallet.lock().await.balance();
+        let balance = self.wallet.lock().unwrap().balance();
         log::warn!(target: "lampo-wallet", "balance: {balance:?}");
         Ok(balance.confirmed.to_sat())
     }
@@ -237,7 +279,7 @@ impl WalletManager for BDKWalletManager {
         fee_rate: FeeRate,
         best_block: Height,
     ) -> error::Result<Transaction> {
-        let mut wallet = self.wallet.lock().await;
+        let mut wallet = self.wallet.lock().unwrap();
 
         // We set nLockTime to the current height to discourage fee sniping.
         let locktime =
@@ -257,7 +299,7 @@ impl WalletManager for BDKWalletManager {
 
     async fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
         log::info!("lampo-wallet: list transactions");
-        let wallet = self.wallet.lock().await;
+        let wallet = self.wallet.lock().unwrap();
         log::info!("lampo-wallet: wallet lock taken");
         let txs = wallet
             .list_unspent()
@@ -270,6 +312,12 @@ impl WalletManager for BDKWalletManager {
             })
             .collect::<Vec<_>>();
         Ok(txs)
+    }
+
+    fn set_coordinator(&self, coordinator: Arc<ChainSyncCoordinator>) {
+        self.coordinator
+            .set(coordinator)
+            .unwrap_or_else(|_| panic!("chain sync coordinator already set"));
     }
 
     async fn sync(&self) -> error::Result<()> {
@@ -291,10 +339,14 @@ impl WalletManager for BDKWalletManager {
         });*/
 
         let rpc_client = self.rpc.clone();
-        let wallet = self.wallet.lock().await;
-        let wallet_tip = wallet.latest_checkpoint();
-        let start_height = wallet_tip.height();
-        drop(wallet);
+        // Scope the (std) wallet guard so it is provably released before the
+        // async work below; the checkpoint we return is owned.
+        let (wallet_tip, start_height) = {
+            let wallet = self.wallet.lock().unwrap();
+            let checkpoint = wallet.latest_checkpoint();
+            let height = checkpoint.height();
+            (checkpoint, height)
+        };
 
         let emitter_handle = tokio::spawn(async move {
             let mut emitter = Emitter::new(
@@ -312,9 +364,8 @@ impl WalletManager for BDKWalletManager {
         });
 
         while let Some(emission) = receiver.recv().await {
-            let mut wallet = self.wallet.lock().await;
-            let mut wallet_db = self.wallet_db.lock().await;
-
+            // All wallet locking happens inside the synchronous helpers so no
+            // `MutexGuard` is held across the `.await` above.
             match emission {
                 Emission::SigTerm => {
                     println!("Sigterm received, exiting...");
@@ -325,8 +376,7 @@ impl WalletManager for BDKWalletManager {
                     let hash = block_emission.block_hash();
                     let connected_to = block_emission.connected_to();
                     let start_apply_block = Instant::now();
-                    wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
-                    wallet.persist(&mut wallet_db)?;
+                    self.apply_block_inner(&block_emission.block, height, connected_to)?;
                     let elapsed = start_apply_block.elapsed().as_secs_f32();
                     log::info!(target: "lampo-wallet",
                         "Applied block {} at height {} in {}s",
@@ -336,8 +386,7 @@ impl WalletManager for BDKWalletManager {
                 Emission::Mempool(mempool_emission) => {
                     log::warn!(target: "lampo-wallet", "Mempool emission: {mempool_emission:?}");
                     let start_apply_mempool = Instant::now();
-                    wallet.apply_unconfirmed_txs(mempool_emission);
-                    wallet.persist(&mut wallet_db)?;
+                    self.apply_mempool(mempool_emission)?;
                     log::info!(target: "lampo-wallet",
                         "Applied unconfirmed transactions in {}s",
                         start_apply_mempool.elapsed().as_secs_f32()
@@ -359,14 +408,42 @@ impl WalletManager for BDKWalletManager {
             }
             Ok(Ok(())) => {}
         }
+
+        // The wallet has caught up to the chain tip. If the LDK listeners are
+        // also synced, the node's initial sync is complete.
+        if let Some(coordinator) = self.coordinator.get() {
+            if coordinator.chain_listeners_synced() {
+                coordinator.mark_running();
+            }
+        }
         Ok(())
     }
 
     async fn wallet_tips(&self) -> error::Result<Height> {
-        let wallet = self.wallet.lock().await;
+        let wallet = self.wallet.lock().unwrap();
         let tip = wallet.latest_checkpoint().height();
         let tip = Height::from_consensus(tip)?;
         Ok(tip)
+    }
+
+    fn current_best_block(&self) -> error::Result<BlockRef> {
+        let wallet = self.wallet.lock().unwrap();
+        let checkpoint = wallet.latest_checkpoint();
+        Ok(BlockRef {
+            height: checkpoint.height(),
+            hash: checkpoint.hash(),
+        })
+    }
+
+    fn apply_block(&self, block: &Block, height: u32) -> error::Result<()> {
+        // Connect to the parent block. During sequential catch-up this is the
+        // previous block, which BDK matches against its checkpoint chain; on a
+        // reorg the differing `prev_blockhash` rolls the wallet chain back.
+        let connected_to = BlockId {
+            height: height.saturating_sub(1),
+            hash: block.header.prev_blockhash,
+        };
+        self.apply_block_inner(block, height, connected_to)
     }
 
     async fn listen(self: Arc<Self>) -> error::Result<()> {
@@ -374,42 +451,64 @@ impl WalletManager for BDKWalletManager {
         sched.shutdown_on_ctrl_c();
 
         async fn innet_sync(wallet: Arc<BDKWalletManager>) -> error::Result<()> {
+            // Gate: hold the Emitter scan until the LDK chain listeners have
+            // synced, so the two pipelines don't compete for the same RPC.
+            // Active only when a coordinator is wired in and
+            // `wallet_sync_parallel` is unset; otherwise sync runs as before.
+            let parallel = wallet.conf.wallet_sync_parallel.unwrap_or(false);
+            if !parallel {
+                if let Some(coordinator) = wallet.coordinator.get() {
+                    if !coordinator.chain_listeners_synced() {
+                        log::info!(target: "lampo-wallet", "Waiting for chain listeners to sync before scanning the wallet");
+                        return Ok(());
+                    }
+                }
+            }
             let _is_sync = wallet.guard.lock().await;
             log::debug!(target: "lampo-wallet", "Tick tock, time to check if we need to sync the wallet");
             wallet.sync().await?;
             Ok(())
         }
 
-        // we need to modify the bdk wallet state in this position.
-        let rpc_client = self.rpc.clone();
-        let mut wallet = self.wallet.lock().await;
-        let wallet_tip = wallet.latest_checkpoint();
-        let start_height = wallet_tip.height();
+        // Set up the initial wallet checkpoint (reindex / fast-forward). Scoped
+        // so the synchronous wallet guard is released before the async
+        // scheduler work below. Previously this guard was shadowed by
+        // `let wallet = self.clone()` and held across the scheduler `.await`s.
+        {
+            let rpc_client = self.rpc.clone();
+            let mut wallet = self.wallet.lock().unwrap();
+            let wallet_tip = wallet.latest_checkpoint();
+            let start_height = wallet_tip.height();
 
-        let reindex_from = self.reindex_from.or_else(|| {
-            if start_height == 0 {
-                rpc_client.get_blockchain_info().ok().map(|info| {
-                    Height::from_consensus(info.blocks as u32)
-                        .expect("Failed to convert blockchain height to consensus height")
-                })
-            } else {
-                None
-            }
-        });
+            // Fast-sync (default on) jumps an empty wallet's checkpoint to the
+            // chain tip rather than scanning from genesis. Only ever applies to
+            // a fresh wallet (height 0), which has no UTXOs to miss.
+            let fast_sync = self.conf.fast_sync.unwrap_or(true);
+            let reindex_from = self.reindex_from.or_else(|| {
+                if start_height == 0 && fast_sync {
+                    rpc_client.get_blockchain_info().ok().map(|info| {
+                        Height::from_consensus(info.blocks as u32)
+                            .expect("Failed to convert blockchain height to consensus height")
+                    })
+                } else {
+                    None
+                }
+            });
 
-        // Instruct the wallet to reindex from the specified height, ensuring it starts scanning the blockchain from this point onward.
-        if let Some(height) = reindex_from {
-            let height = height.to_consensus_u32();
-            if height > wallet_tip.height() {
-                // Insert a checkpoint into the wallet to avoid scanning the entire chain.
-                let hash = rpc_client.get_block_hash(height as u64)?;
-                let block = BlockId { height, hash };
-                let new_tip = wallet_tip.insert(block);
-                let update = bdk_wallet::Update {
-                    chain: Some(new_tip),
-                    ..Default::default()
-                };
-                wallet.apply_update(update)?;
+            // Instruct the wallet to reindex from the specified height, ensuring it starts scanning the blockchain from this point onward.
+            if let Some(height) = reindex_from {
+                let height = height.to_consensus_u32();
+                if height > wallet_tip.height() {
+                    // Insert a checkpoint into the wallet to avoid scanning the entire chain.
+                    let hash = rpc_client.get_block_hash(height as u64)?;
+                    let block = BlockId { height, hash };
+                    let new_tip = wallet_tip.insert(block);
+                    let update = bdk_wallet::Update {
+                        chain: Some(new_tip),
+                        ..Default::default()
+                    };
+                    wallet.apply_update(update)?;
+                }
             }
         }
 

@@ -25,6 +25,7 @@ use std::time::SystemTime;
 use tokio::task::JoinHandle;
 
 use lampo_common::backend::Backend;
+use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::LampoConf;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
@@ -98,11 +99,17 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
+    chain_sync: Arc<ChainSyncCoordinator>,
 }
 
 impl LampoDaemon {
     pub fn new(config: Arc<LampoConf>, wallet_manager: Arc<dyn WalletManager>) -> Self {
         let root_path = config.path();
+        let chain_sync = Arc::new(ChainSyncCoordinator::new());
+        // Wire the wallet to the coordinator here so every daemon (CLI, tests,
+        // embedders) gets consistent sync-progress reporting with no per-caller
+        // setup. The backend is wired separately in `init`.
+        wallet_manager.set_coordinator(chain_sync.clone());
         LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
@@ -115,7 +122,14 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
+            chain_sync,
         }
+    }
+
+    /// Backend-agnostic chain-sync coordinator shared across the daemon's
+    /// components. Drives the sync-progress fields exposed by `getinfo`.
+    pub fn chain_sync(&self) -> Arc<ChainSyncCoordinator> {
+        self.chain_sync.clone()
     }
 
     /// Signal the daemon to shut down gracefully. This causes the LDK
@@ -240,6 +254,8 @@ impl LampoDaemon {
         client.set_handler(self.handler());
         client.set_channel_manager(self.channel_manager().manager());
         client.set_chain_monitor(self.channel_manager().chain_monitor());
+        client.set_coordinator(self.chain_sync());
+        client.set_wallet_manager(self.wallet_manager());
         self.channel_manager().set_handler(self.handler());
         Ok(())
     }
