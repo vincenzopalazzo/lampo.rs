@@ -32,6 +32,14 @@ pub struct LampoConf {
     /// listener sync. Defaults to `false`: the wallet waits for listeners to
     /// catch up first, so the two pipelines don't compete for the same RPC.
     pub wallet_sync_parallel: Option<bool>,
+    /// Chain sync strategy: `"unified"` (default) drives the on-chain wallet
+    /// through the same `synchronize_listeners` pass as the LDK listeners;
+    /// `"legacy"` keeps the wallet on its standalone BDK Emitter scan.
+    pub sync_mode: Option<String>,
+    /// Fast-sync an empty wallet by jumping its checkpoint to the chain tip
+    /// instead of scanning from genesis. Defaults to `true` and only applies
+    /// to a fresh wallet (no UTXOs to miss); set `false` to force a full scan.
+    pub fast_sync: Option<bool>,
 }
 
 impl Default for LampoConf {
@@ -65,6 +73,8 @@ impl Default for LampoConf {
             reindex: None,
             dev_sync: None,
             wallet_sync_parallel: None,
+            sync_mode: None,
+            fast_sync: None,
         }
     }
 }
@@ -259,6 +269,13 @@ impl TryFrom<String> for LampoConf {
             .get_conf("wallet-sync-parallel")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+        // Parse sync_mode field - defaults to None ("unified")
+        let sync_mode = conf.get_conf("sync-mode").unwrap_or(None);
+        // Parse fast_sync field - defaults to None (true)
+        let fast_sync = conf
+            .get_conf("fast-sync")
+            .unwrap_or(None)
+            .map(|s| s.to_lowercase() == "true" || s == "1");
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -280,6 +297,8 @@ impl TryFrom<String> for LampoConf {
             reindex,
             dev_sync,
             wallet_sync_parallel,
+            sync_mode,
+            fast_sync,
         })
     }
 }
