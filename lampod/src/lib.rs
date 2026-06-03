@@ -25,6 +25,7 @@ use std::time::SystemTime;
 use tokio::task::JoinHandle;
 
 use lampo_common::backend::Backend;
+use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::LampoConf;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
@@ -98,6 +99,7 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
+    chain_sync: Arc<ChainSyncCoordinator>,
 }
 
 impl LampoDaemon {
@@ -115,7 +117,14 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
+            chain_sync: Arc::new(ChainSyncCoordinator::new()),
         }
+    }
+
+    /// Backend-agnostic chain-sync coordinator shared across the daemon's
+    /// components. Drives the sync-progress fields exposed by `getinfo`.
+    pub fn chain_sync(&self) -> Arc<ChainSyncCoordinator> {
+        self.chain_sync.clone()
     }
 
     /// Signal the daemon to shut down gracefully. This causes the LDK
