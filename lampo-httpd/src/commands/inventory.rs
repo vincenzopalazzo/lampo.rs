@@ -11,5 +11,6 @@ use lampod::jsonrpc::onchain::*;
 use crate::{post, AppState, ResultJson};
 
 post!(getinfo, response: response::GetInfo);
+post!(sync_wallets, response: response::SyncStatus);
 post!(networkchannels, request: json::Value, response: response::NetworkChannels);
 post!(funds, request: json::Value, response: response::Utxos);

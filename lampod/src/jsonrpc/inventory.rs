@@ -3,7 +3,7 @@ use lampo_common::error;
 use lampo_common::json;
 use lampo_common::jsonrpc::Error;
 use lampo_common::model::request::NetworkInfo;
-use lampo_common::model::response::{NetworkChannel, NetworkChannels};
+use lampo_common::model::response::{NetworkChannel, NetworkChannels, SyncStatus};
 use lampo_common::model::GetInfo;
 
 use crate::{async_run, LampoDaemon};
@@ -62,6 +62,24 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     };
 
     Ok(json::to_value(getinfo)?)
+}
+
+/// Block until the node's initial chain sync (LDK listeners + on-chain wallet)
+/// completes, then return the final sync status. Useful for scripts and CI.
+pub async fn json_sync_wallets(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("calling `sync_wallets` with request `{:?}`", request);
+    let chain_sync = ctx.chain_sync();
+    chain_sync.wait_initial_sync_complete().await;
+    let status = SyncStatus {
+        chain_listeners_synced: chain_sync.chain_listeners_synced(),
+        initial_sync_complete: chain_sync.initial_sync_complete(),
+        sync_in_progress: chain_sync.sync_in_progress(),
+        wallet_scan_height: chain_sync.wallet_scan_height(),
+    };
+    Ok(json::to_value(status)?)
 }
 
 // FIXME: check the request

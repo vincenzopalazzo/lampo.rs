@@ -7,6 +7,7 @@ mod network;
 mod new_addr;
 mod on_chain;
 mod open_channel;
+mod sync;
 
 pub use connect::Connect;
 pub use getinfo::GetInfo;
@@ -34,4 +35,5 @@ pub mod response {
     pub use crate::model::new_addr::response::*;
     pub use crate::model::on_chain::response::*;
     pub use crate::model::open_channel::response::*;
+    pub use crate::model::sync::response::*;
 }

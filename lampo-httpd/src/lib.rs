@@ -14,7 +14,7 @@ use lampo_common::json;
 use lampod::LampoDaemon;
 
 use commands::daemon::rest_stop;
-use commands::inventory::{rest_funds, rest_getinfo, rest_networkchannels};
+use commands::inventory::{rest_funds, rest_getinfo, rest_networkchannels, rest_sync_wallets};
 use commands::offchain::{rest_decode, rest_invoice, rest_pay};
 use commands::onchain::rest_new_addr;
 use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel};
@@ -118,6 +118,7 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .wrap_api()
             .service(swagger_api)
             .service(rest_getinfo)
+            .service(rest_sync_wallets)
             .service(rest_channels)
             .service(rest_connect)
             .service(rest_fundchannel)
