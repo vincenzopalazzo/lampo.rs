@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use crate::bitcoin::absolute::Height;
 use crate::bitcoin::{Amount, FeeRate};
 use crate::bitcoin::{ScriptBuf, Transaction};
+use crate::chainsync::ChainSyncCoordinator;
 use crate::conf::LampoConf;
 use crate::error;
 use crate::keys::LampoKeys;
@@ -49,6 +50,12 @@ pub trait WalletManager: Send + Sync {
     /// Return the last block height of the wallet, but we can abstract
     /// in the future the wallet tips info that we will need.
     async fn wallet_tips(&self) -> error::Result<Height>;
+
+    /// Inject the chain-sync coordinator so the wallet can gate its scan on
+    /// the LDK listener sync and report scan progress. Default no-op; the
+    /// gate stays inactive until a coordinator is set. Pure lampo-common type
+    /// (no LDK), keeping the wallet replaceable.
+    fn set_coordinator(&self, _: Arc<ChainSyncCoordinator>) {}
 
     /// Sync the wallet.
     async fn sync(&self) -> error::Result<()>;

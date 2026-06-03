@@ -11,6 +11,7 @@ use lampo_common::async_trait;
 use lampo_common::backend::{Backend, BlockData};
 use lampo_common::bitcoin::consensus::encode::serialize_hex;
 use lampo_common::bitcoin::BlockHash;
+use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
@@ -25,6 +26,7 @@ pub struct LampoChainSync {
     channel_manager: OnceLock<Arc<LampoChannel>>,
     chain_monitor: OnceLock<Arc<LampoChainMonitor>>,
     handler: OnceLock<Arc<dyn lampo_common::handler::Handler>>,
+    coordinator: OnceLock<Arc<ChainSyncCoordinator>>,
 }
 
 impl LampoChainSync {
@@ -59,6 +61,7 @@ impl LampoChainSync {
             channel_manager: OnceLock::new(),
             chain_monitor: OnceLock::new(),
             handler: OnceLock::new(),
+            coordinator: OnceLock::new(),
         })
     }
 
@@ -219,6 +222,12 @@ impl Backend for LampoChainSync {
         self.set_chain_monitor(chain_monitor);
     }
 
+    fn set_coordinator(&self, coordinator: Arc<ChainSyncCoordinator>) {
+        self.coordinator
+            .set(coordinator)
+            .unwrap_or_else(|_| panic!("chain sync coordinator already set"));
+    }
+
     async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
         let channel_manager = self.channel_manager();
         let chain_monitor = self.chain_monitor();
@@ -255,6 +264,13 @@ impl Backend for LampoChainSync {
                 .map_err(|e| error::anyhow!("Failed to synchronize chain listeners: {:?}", e))?;
 
         log::info!(target: "lampo-chain", "Chain listeners synced to current tip");
+
+        // Publish listener-sync completion so gated components (e.g. the
+        // on-chain wallet) can proceed over the now-free RPC. No-op when no
+        // coordinator was injected.
+        if let Some(coordinator) = self.coordinator.get() {
+            coordinator.mark_listeners_synced();
+        }
 
         let chain_listener = (chain_monitor, channel_manager);
         let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
