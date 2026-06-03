@@ -65,6 +65,12 @@ impl LampoInventoryManager {
             address: address_vec,
             block_hash: block_hash.to_string(),
             wallet_height: wallet_tips.to_consensus_u32() as u64,
+            // Sync-progress fields are not tracked on this deprecated path;
+            // report the same defaults as a freshly created coordinator.
+            wallet_scan_height: None,
+            chain_listeners_synced: false,
+            initial_sync_complete: false,
+            sync_in_progress: true,
         };
         Ok(getinfo)
     }
