@@ -480,8 +480,12 @@ impl WalletManager for BDKWalletManager {
             let wallet_tip = wallet.latest_checkpoint();
             let start_height = wallet_tip.height();
 
+            // Fast-sync (default on) jumps an empty wallet's checkpoint to the
+            // chain tip rather than scanning from genesis. Only ever applies to
+            // a fresh wallet (height 0), which has no UTXOs to miss.
+            let fast_sync = self.conf.fast_sync.unwrap_or(true);
             let reindex_from = self.reindex_from.or_else(|| {
-                if start_height == 0 {
+                if start_height == 0 && fast_sync {
                     rpc_client.get_blockchain_info().ok().map(|info| {
                         Height::from_consensus(info.blocks as u32)
                             .expect("Failed to convert blockchain height to consensus height")

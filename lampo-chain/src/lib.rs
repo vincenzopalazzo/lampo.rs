@@ -298,12 +298,19 @@ impl Backend for LampoChainSync {
         // causing a "Blocks must be connected in chain-order" assertion.
         let manager_best = channel_manager.current_best_block();
 
-        // When an on-chain wallet is wired in, include it in the same sync pass
-        // so one RPC stream catches up the channel manager, chain monitor, and
-        // wallet together -- deduplicating the overlapping block range instead
-        // of running a second `getblock` scan. Kept in locals so the listener
-        // outlives the `chain_listeners` vec consumed by `synchronize_listeners`.
-        let wallet = self.wallet();
+        // When an on-chain wallet is wired in (and not in `legacy` sync mode),
+        // include it in the same sync pass so one RPC stream catches up the
+        // channel manager, chain monitor, and wallet together -- deduplicating
+        // the overlapping block range instead of running a second `getblock`
+        // scan. Kept in locals so the listener outlives the `chain_listeners`
+        // vec consumed by `synchronize_listeners`.
+        let unified = self
+            .config
+            .sync_mode
+            .as_deref()
+            .map(|mode| !mode.eq_ignore_ascii_case("legacy"))
+            .unwrap_or(true);
+        let wallet = if unified { self.wallet() } else { None };
         let wallet_listener = wallet.as_ref().map(|wallet| WalletChainListener {
             wallet: wallet.clone(),
         });
