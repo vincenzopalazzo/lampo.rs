@@ -28,7 +28,7 @@ use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::NewAddress;
 use lampo_common::model::response::Utxo;
 use lampo_common::secp256k1::SecretKey;
-use lampo_common::wallet::WalletManager;
+use lampo_common::wallet::{BlockRef, WalletManager};
 use lampo_common::{async_trait, error};
 
 pub struct BDKWalletManager {
@@ -391,6 +391,33 @@ impl WalletManager for BDKWalletManager {
         let tip = wallet.latest_checkpoint().height();
         let tip = Height::from_consensus(tip)?;
         Ok(tip)
+    }
+
+    async fn current_best_block(&self) -> error::Result<BlockRef> {
+        let wallet = self.wallet.lock().await;
+        let checkpoint = wallet.latest_checkpoint();
+        Ok(BlockRef {
+            height: checkpoint.height(),
+            hash: checkpoint.hash(),
+        })
+    }
+
+    async fn apply_block(&self, block: &Block, height: u32) -> error::Result<()> {
+        let mut wallet = self.wallet.lock().await;
+        let mut wallet_db = self.wallet_db.lock().await;
+        // Connect to the parent block. During sequential catch-up this is the
+        // previous block, which BDK matches against its checkpoint chain; on a
+        // reorg the differing `prev_blockhash` rolls the wallet chain back.
+        let connected_to = BlockId {
+            height: height.saturating_sub(1),
+            hash: block.header.prev_blockhash,
+        };
+        wallet.apply_block_connected_to(block, height, connected_to)?;
+        wallet.persist(&mut wallet_db)?;
+        if let Some(coordinator) = self.coordinator.get() {
+            coordinator.set_wallet_scan_height(height);
+        }
+        Ok(())
     }
 
     async fn listen(self: Arc<Self>) -> error::Result<()> {
