@@ -17,6 +17,7 @@ use crate::chainsync::ChainSyncCoordinator;
 use crate::error;
 use crate::handler::Handler;
 use crate::types::{LampoChainMonitor, LampoChannel};
+use crate::wallet::WalletManager;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TxResult {
@@ -66,6 +67,11 @@ pub trait Backend: Send + Sync {
     /// Inject the backend-agnostic chain-sync coordinator so the backend can
     /// publish listener-sync progress. Default no-op.
     fn set_coordinator(&self, _: Arc<ChainSyncCoordinator>) {}
+
+    /// Inject the on-chain wallet so the backend can drive it through the same
+    /// chain sync as the LDK listeners (one RPC stream). Default no-op. Passed
+    /// as the lampo-native `WalletManager`; the backend never sees BDK types.
+    fn set_wallet_manager(&self, _: Arc<dyn WalletManager>) {}
 
     /// Get the information of a transaction inside the blockchain.
     async fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;

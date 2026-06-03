@@ -166,9 +166,13 @@ impl LampoTesting {
         let lampo_conf = Arc::new(lampo_conf);
         let (wallet, mnemonic) = BDKWalletManager::new(lampo_conf.clone()).await?;
         let wallet = Arc::new(wallet);
-        wallet.clone().listen().await?;
 
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+        // Share the coordinator before starting wallet sync so the wallet gates
+        // its Emitter on listener sync, matching the production startup flow.
+        wallet.set_coordinator(lampo.chain_sync());
+        wallet.clone().listen().await?;
+
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
         lampo.init(node.clone()).await?;
         log::info!("bitcoin core added inside lampo");
