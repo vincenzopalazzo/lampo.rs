@@ -38,6 +38,8 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     }
 
     let wallet_tips = ctx.wallet_manager().wallet_tips().await?;
+    let sync_status = ctx.wallet_manager().sync_status().await?;
+    let sync_progress_percent = sync_status.progress_percent(blockheight);
 
     let getinfo = GetInfo {
         node_id: ctx
@@ -54,6 +56,9 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         lampo_dir,
         address: address_vec,
         wallet_height: wallet_tips.to_consensus_u32() as u64,
+        wallet_scan_height: sync_status.scan_height as u64,
+        sync_in_progress: sync_status.in_progress,
+        sync_progress_percent,
     };
 
     Ok(json::to_value(getinfo)?)

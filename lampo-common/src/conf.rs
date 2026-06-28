@@ -28,6 +28,11 @@ pub struct LampoConf {
     pub api_port: u64,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
+    /// Skip the full historical block scan on startup by jumping the wallet
+    /// checkpoint to the current chain tip. Unsafe for a wallet that holds
+    /// on-chain funds below the tip (those UTXOs are not discovered), so it
+    /// defaults to `None` (full scan) on every network and must be opted into.
+    pub fast_sync: Option<bool>,
 }
 
 impl Default for LampoConf {
@@ -60,6 +65,7 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             dev_sync: None,
+            fast_sync: None,
         }
     }
 }
@@ -249,6 +255,11 @@ impl TryFrom<String> for LampoConf {
             .get_conf("dev-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+        // Parse fast_sync field - defaults to None (full historical scan)
+        let fast_sync = conf
+            .get_conf("fast-sync")
+            .unwrap_or(None)
+            .map(|s| s.to_lowercase() == "true" || s == "1");
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -269,6 +280,7 @@ impl TryFrom<String> for LampoConf {
             api_port,
             reindex,
             dev_sync,
+            fast_sync,
         })
     }
 }
