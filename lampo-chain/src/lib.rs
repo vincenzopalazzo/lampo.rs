@@ -389,14 +389,29 @@ impl Backend for LampoChainSync {
                 }
             }
 
-            match init::synchronize_listeners(self.as_ref(), self.config.network, chain_listeners)
-                .await
+            // Bound each pass: a hung/unresponsive backend must not stall the
+            // listener sync (and thus the gated wallet) forever. On timeout we
+            // retry; each attempt resumes from the listeners' current best block.
+            const SYNC_PASS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+            match tokio::time::timeout(
+                SYNC_PASS_TIMEOUT,
+                init::synchronize_listeners(self.as_ref(), self.config.network, chain_listeners),
+            )
+            .await
             {
-                Ok(result) => break result,
-                Err(e) => {
+                Ok(Ok(result)) => break result,
+                Ok(Err(e)) => {
                     log::error!(
                         target: "lampo-chain",
                         "Failed to synchronize chain listeners, retrying in 5s: {:?}", e
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+                Err(_) => {
+                    log::error!(
+                        target: "lampo-chain",
+                        "Timed out synchronizing chain listeners after {:?}, retrying in 5s",
+                        SYNC_PASS_TIMEOUT
                     );
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }

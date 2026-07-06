@@ -458,7 +458,7 @@ impl WalletManager for BDKWalletManager {
             let parallel = wallet.conf.wallet_sync_parallel.unwrap_or(false);
             if !parallel {
                 if let Some(coordinator) = wallet.coordinator.get() {
-                    if !coordinator.chain_listeners_synced() {
+                    if !coordinator.wallet_scan_allowed() {
                         log::info!(target: "lampo-wallet", "Waiting for chain listeners to sync before scanning the wallet");
                         return Ok(());
                     }
