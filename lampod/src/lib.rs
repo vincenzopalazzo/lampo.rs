@@ -255,6 +255,11 @@ impl LampoDaemon {
         client.set_channel_manager(self.channel_manager().manager());
         client.set_chain_monitor(self.channel_manager().chain_monitor());
         client.set_coordinator(self.chain_sync());
+        // The on-chain manager is the only component that calls
+        // `mark_listeners_synced` once the unified listener sync completes;
+        // without this the coordinator stays `PendingInitialSync` and the
+        // gated wallet cron waits forever for `chain_listeners_synced`.
+        self.onchain_manager().set_coordinator(self.chain_sync());
         client.set_wallet_manager(self.wallet_manager());
         self.channel_manager().set_handler(self.handler());
         Ok(())
