@@ -16,7 +16,6 @@ use bdk_wallet::keys::bip39::{Language, WordCount};
 use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
 use bdk_wallet::rusqlite::Connection;
 use bdk_wallet::{KeychainKind, PersistedWallet, SignOptions, Wallet};
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 use tokio::time::Instant;
@@ -187,28 +186,13 @@ impl BDKWalletManager {
         height: u32,
         connected_to: BlockId,
     ) -> error::Result<()> {
-        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} acquiring wallet lock", height);
         let mut wallet = self.wallet.lock().unwrap();
-        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} acquired wallet lock, acquiring db lock", height);
         let mut wallet_db = self.wallet_db.lock().unwrap();
-        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} calling apply_block_connected_to", height);
         wallet.apply_block_connected_to(block, height, connected_to)?;
-        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} calling persist", height);
         wallet.persist(&mut wallet_db)?;
-        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} persisted ok", height);
         if let Some(coordinator) = self.coordinator.get() {
             coordinator.set_wallet_scan_height(height);
         }
-        Ok(())
-    }
-
-    /// Apply unconfirmed (mempool) transactions to the wallet. Synchronous for
-    /// the same reason as [`Self::apply_block_inner`].
-    fn apply_mempool(&self, txs: Vec<(Arc<Transaction>, u64)>) -> error::Result<()> {
-        let mut wallet = self.wallet.lock().unwrap();
-        let mut wallet_db = self.wallet_db.lock().unwrap();
-        wallet.apply_unconfirmed_txs(txs);
-        wallet.persist(&mut wallet_db)?;
         Ok(())
     }
 }
@@ -326,22 +310,7 @@ impl WalletManager for BDKWalletManager {
     }
 
     async fn sync(&self) -> error::Result<()> {
-        #[derive(Debug)]
-        enum Emission {
-            SigTerm,
-            Block(bdk_bitcoind_rpc::BlockEvent<Block>),
-            Mempool(Vec<(Arc<Transaction>, u64)>),
-        }
-
         log::info!(target: "lampo-wallet", "Checking the wallet status...");
-        let (sender, mut receiver) = unbounded_channel::<Emission>();
-
-        /*let signal_sender = sender.clone();
-        ctrl_c::set_handler(move || {
-            signal_sender
-                .send(Emissine::SigTerm)
-                .expect("failed to send sigterm")
-        });*/
 
         let rpc_client = self.rpc.clone();
         // Scope the (std) wallet guard so it is provably released before the
@@ -370,7 +339,6 @@ impl WalletManager for BDKWalletManager {
             let height = emission.block_height();
             let hash = emission.block_hash();
             let connected_to = emission.connected_to();
-            log::debug!(target: "lampo-wallet", "DBG received block emission height={} hash={}", height, hash);
             let start_apply_block = Instant::now();
             self.apply_block_inner(&emission.block, height, connected_to)?;
             let elapsed = start_apply_block.elapsed().as_secs_f32();
@@ -379,7 +347,6 @@ impl WalletManager for BDKWalletManager {
                 hash, height, elapsed
             );
         }
-        log::info!(target: "lampo-wallet", "DBG emitter finished yielding blocks");
 
         // The wallet has caught up to the chain tip. If the LDK listeners are
         // also synced, the node's initial sync is complete.
