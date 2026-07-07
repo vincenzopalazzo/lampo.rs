@@ -353,69 +353,33 @@ impl WalletManager for BDKWalletManager {
             (checkpoint, height)
         };
 
-        let emitter_handle = tokio::spawn(async move {
-            let mut emitter = Emitter::new(
-                rpc_client.as_ref(),
-                wallet_tip,
-                start_height,
-                bdk_bitcoind_rpc::NO_EXPECTED_MEMPOOL_TXIDS,
+        // Emit-and-apply in a single loop, in this task. Previously the Emitter
+        // ran on a spawned task and forwarded blocks over a channel to a
+        // receiver loop that was never polled, so blocks were fetched but never
+        // applied and the wallet never advanced. Applying inline removes the
+        // channel entirely: `next_block().await` yields back to the runtime,
+        // then the block is applied synchronously (no wallet/db guard is held
+        // across the await).
+        let mut emitter = Emitter::new(
+            rpc_client.as_ref(),
+            wallet_tip,
+            start_height,
+            bdk_bitcoind_rpc::NO_EXPECTED_MEMPOOL_TXIDS,
+        );
+        while let Some(emission) = emitter.next_block()? {
+            let height = emission.block_height();
+            let hash = emission.block_hash();
+            let connected_to = emission.connected_to();
+            log::debug!(target: "lampo-wallet", "DBG received block emission height={} hash={}", height, hash);
+            let start_apply_block = Instant::now();
+            self.apply_block_inner(&emission.block, height, connected_to)?;
+            let elapsed = start_apply_block.elapsed().as_secs_f32();
+            log::info!(target: "lampo-wallet",
+                "Applied block {} at height {} in {}s",
+                hash, height, elapsed
             );
-
-            while let Some(emission) = emitter.next_block()? {
-                log::debug!(target: "lampo-wallet", "DBG emitter yielded block height={}", emission.block_height());
-                sender.send(Emission::Block(emission))?;
-            }
-            log::info!(target: "lampo-wallet", "DBG emitter finished yielding blocks");
-            //sender.send(Emission::Mempool(emitter.mempool()?))?;
-            Ok::<_, error::Error>(())
-        });
-
-        while let Some(emission) = receiver.recv().await {
-            // All wallet locking happens inside the synchronous helpers so no
-            // `MutexGuard` is held across the `.await` above.
-            match emission {
-                Emission::SigTerm => {
-                    println!("Sigterm received, exiting...");
-                    break;
-                }
-                Emission::Block(block_emission) => {
-                    let height = block_emission.block_height();
-                    let hash = block_emission.block_hash();
-                    let connected_to = block_emission.connected_to();
-                    log::debug!(target: "lampo-wallet", "DBG received block emission height={} hash={}", height, hash);
-                    let start_apply_block = Instant::now();
-                    self.apply_block_inner(&block_emission.block, height, connected_to)?;
-                    let elapsed = start_apply_block.elapsed().as_secs_f32();
-                    log::info!(target: "lampo-wallet",
-                        "Applied block {} at height {} in {}s",
-                        hash, height, elapsed
-                    );
-                }
-                Emission::Mempool(mempool_emission) => {
-                    log::warn!(target: "lampo-wallet", "Mempool emission: {mempool_emission:?}");
-                    let start_apply_mempool = Instant::now();
-                    self.apply_mempool(mempool_emission)?;
-                    log::info!(target: "lampo-wallet",
-                        "Applied unconfirmed transactions in {}s",
-                        start_apply_mempool.elapsed().as_secs_f32()
-                    );
-                    break;
-                }
-            }
         }
-        // Surface any error from the emitter task so failures
-        // are not silently swallowed.
-        match emitter_handle.await {
-            Ok(Err(err)) => {
-                log::error!(target: "lampo-wallet", "Emitter task failed: {err}");
-                return Err(err);
-            }
-            Err(err) => {
-                log::error!(target: "lampo-wallet", "Emitter task panicked: {err}");
-                error::bail!("emitter task panicked: {err}");
-            }
-            Ok(Ok(())) => {}
-        }
+        log::info!(target: "lampo-wallet", "DBG emitter finished yielding blocks");
 
         // The wallet has caught up to the chain tip. If the LDK listeners are
         // also synced, the node's initial sync is complete.
