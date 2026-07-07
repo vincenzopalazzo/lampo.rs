@@ -539,10 +539,17 @@ impl WalletManager for BDKWalletManager {
                     log::debug!(target: "lampo-wallet", "Unable to take the log: {err}");
                     return;
                 }
-                let Err(err) = innet_sync(wallet).await else {
-                    return;
-                };
-                log::error!("Error during the sync: {err}");
+                // Run the (potentially long) wallet sync on the runtime.
+                // tokio-cron-scheduler does not drive a job's future to
+                // completion, so awaiting `sync()` inline left the wallet's
+                // apply loop unpolled: blocks were fetched but never applied
+                // and the wallet never advanced. Spawning lets the runtime
+                // poll the scan to completion; the `guard` prevents overlaps.
+                tokio::spawn(async move {
+                    if let Err(err) = innet_sync(wallet).await {
+                        log::error!(target: "lampo-wallet", "Error during the sync: {err}");
+                    }
+                });
             })
         })?;
         sched.add(job).await?;
