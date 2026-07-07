@@ -187,10 +187,15 @@ impl BDKWalletManager {
         height: u32,
         connected_to: BlockId,
     ) -> error::Result<()> {
+        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} acquiring wallet lock", height);
         let mut wallet = self.wallet.lock().unwrap();
+        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} acquired wallet lock, acquiring db lock", height);
         let mut wallet_db = self.wallet_db.lock().unwrap();
+        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} calling apply_block_connected_to", height);
         wallet.apply_block_connected_to(block, height, connected_to)?;
+        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} calling persist", height);
         wallet.persist(&mut wallet_db)?;
+        log::debug!(target: "lampo-wallet", "DBG apply_block_inner height={} persisted ok", height);
         if let Some(coordinator) = self.coordinator.get() {
             coordinator.set_wallet_scan_height(height);
         }
@@ -357,8 +362,10 @@ impl WalletManager for BDKWalletManager {
             );
 
             while let Some(emission) = emitter.next_block()? {
+                log::debug!(target: "lampo-wallet", "DBG emitter yielded block height={}", emission.block_height());
                 sender.send(Emission::Block(emission))?;
             }
+            log::info!(target: "lampo-wallet", "DBG emitter finished yielding blocks");
             //sender.send(Emission::Mempool(emitter.mempool()?))?;
             Ok::<_, error::Error>(())
         });
@@ -375,6 +382,7 @@ impl WalletManager for BDKWalletManager {
                     let height = block_emission.block_height();
                     let hash = block_emission.block_hash();
                     let connected_to = block_emission.connected_to();
+                    log::debug!(target: "lampo-wallet", "DBG received block emission height={} hash={}", height, hash);
                     let start_apply_block = Instant::now();
                     self.apply_block_inner(&block_emission.block, height, connected_to)?;
                     let elapsed = start_apply_block.elapsed().as_secs_f32();
