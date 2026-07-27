@@ -152,7 +152,7 @@ ldk-node puts `Listen` **on the wallet**. Lampo will instead put the `Listen` ad
 | Aspect | Lampo (today) | ldk-node (bitcoind) | Lampo (this design) |
 |--------|---------------|---------------------|---------------------|
 | Listener set | CM + ChainMonitor | Wallet + CM + Sweeper + ChainMonitor | CM + ChainMonitor + **wallet adapter** (bitcoind backend only) |
-| RPC clients | 2 (separate) | 1 | 1 |
+| RPC clients | 2 (separate) | 1 | 1 during initial sync; 2 until PR 5 |
 | Block delivery to wallet | BDK `Emitter` | LDK `Listen` on wallet | lampo-native `WalletManager::apply_block`, driven by backend |
 | Wallet ↔ LDK coupling | none | wallet depends on LDK | **none** (adapter lives in `lampo-chain`) |
 | Backend swap (Esplora) | independent but duplicative | separate tx-path | same `Backend`/coordinator contract, wallet unchanged |
@@ -434,6 +434,8 @@ retiring it requires driving the wallet from the `SpvClient` poll loop, but LDK
 only implements `Listen` for `(T, U)` where both are `Deref` (so a 3-listener
 tuple needs a custom `Listen` impl). That change has real reorg/ongoing-update
 risk and is best landed with the signet integration test (8b) to validate it.
+**Ordering:** the regtest reorg test (8b) MUST land before PR 5 retires the
+Emitter, because the Emitter is currently the wallet's reorg recovery path.
 
 ## Open questions — resolved
 

@@ -64,8 +64,9 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     Ok(json::to_value(getinfo)?)
 }
 
-/// Block until the node's initial chain sync (LDK listeners + on-chain wallet)
-/// completes, then return the final sync status. Useful for scripts and CI.
+/// Wait (up to 600s) for the node's initial chain sync (LDK listeners + on-chain
+/// wallet) to complete. On timeout returns the current, possibly incomplete,
+/// status; callers should re-poll.
 pub async fn json_sync_wallets(
     ctx: &LampoDaemon,
     request: &json::Value,

@@ -11,6 +11,9 @@
 # only forbid a *direct* dependency, hence `--depth 1`.
 set -euo pipefail
 
+# We only check --edges normal because dev-dependencies on lightning would be
+# weird but still slip through; the real API-coupling surface is the normal
+# dependency graph, which is what this guard protects.
 direct=$(cargo tree -p lampo-bdk-wallet --edges normal --depth 1 --prefix none 2>/dev/null \
     | grep -E '^lightning' || true)
 

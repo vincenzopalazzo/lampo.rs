@@ -315,9 +315,12 @@ impl WalletManager for BDKWalletManager {
     }
 
     fn set_coordinator(&self, coordinator: Arc<ChainSyncCoordinator>) {
-        self.coordinator
-            .set(coordinator)
-            .unwrap_or_else(|_| panic!("chain sync coordinator already set"));
+        if self.coordinator.set(coordinator).is_err() {
+            log::debug!(
+                target: "lampo-wallet",
+                "chain sync coordinator already set; keeping existing"
+            );
+        }
     }
 
     async fn sync(&self) -> error::Result<()> {

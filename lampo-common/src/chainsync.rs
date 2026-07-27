@@ -7,8 +7,9 @@
 //! `Backend` drives the transitions, the wallet reports progress, and
 //! `getinfo` reads the state. See `docs/designs/unified-chain-sync.md`.
 //!
-//! In this first PR the coordinator is wired in but not yet driven; later PRs
-//! call `mark_listeners_synced` / `mark_running` from the sync path.
+//! The coordinator is driven now: `mark_listeners_synced` is called from
+//! `lampo-chain` after `synchronize_listeners`, and `mark_running` is called
+//! from the wallet `sync()` once the on-chain scan is up to tip.
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::watch;
