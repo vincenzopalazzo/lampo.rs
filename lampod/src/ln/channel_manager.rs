@@ -27,15 +27,21 @@ use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
 use lampo_common::ldk::sign::{InMemorySigner, NodeSigner};
-use lampo_common::ldk::util::persist::read_channel_monitors;
+use lampo_common::ldk::util::persist::{
+    read_channel_monitors, KVStoreSync, OUTPUT_SWEEPER_PERSISTENCE_KEY,
+    OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE, OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
+};
 use lampo_common::ldk::util::ser::ReadableArgs;
+use lampo_common::ldk::util::sweep::OutputSweeper;
 use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel, Channels};
 use lampo_common::types::LampoChannel;
 use lampo_common::types::LampoGraph;
 use lampo_common::types::LampoRouter;
 use lampo_common::types::LampoScorer;
+use lampo_common::types::LampoSweeper;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
+use lampo_common::wallet::LampoChangeDestination;
 
 use crate::actions::handler::LampoHandler;
 use crate::async_run;
@@ -52,6 +58,7 @@ pub struct LampoChannelManager {
     handler: OnceLock<Arc<LampoHandler>>,
     router: OnceLock<Arc<LampoRouter>>,
     stale_monitors: Mutex<Vec<(BlockLocator, ChannelMonitor<InMemorySigner>)>>,
+    sweeper: OnceLock<(BlockLocator, Arc<LampoSweeper>)>,
 
     pub(crate) onchain: Arc<LampoChainManager>,
     pub(crate) conf: LampoConf,
@@ -80,6 +87,7 @@ impl LampoChannelManager {
             score: OnceLock::new(),
             router: OnceLock::new(),
             stale_monitors: Mutex::new(Vec::new()),
+            sweeper: OnceLock::new(),
         }
     }
 
@@ -99,7 +107,79 @@ impl LampoChannelManager {
         } else {
             self.start().await?;
         }
+        self.init_sweeper()?;
         Ok(())
+    }
+
+    /// Build the [`LampoSweeper`], restoring its persisted state (tracked
+    /// spendable outputs and best block) when present.
+    fn init_sweeper(&self) -> error::Result<()> {
+        let broadcaster = self.onchain.clone() as Arc<dyn BroadcasterInterface + Send + Sync>;
+        let fee_estimator = self.onchain.clone() as Arc<dyn FeeEstimator + Send + Sync>;
+        let change_destination = Arc::new(LampoChangeDestination::new(
+            self.wallet_manager.clone(),
+            self.conf.network,
+        ));
+        let spender = self.wallet_manager.ldk_keys().keys_manager.clone();
+
+        let state = KVStoreSync::read(
+            &*self.persister,
+            OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE,
+            OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
+            OUTPUT_SWEEPER_PERSISTENCE_KEY,
+        );
+        let (best_block, sweeper) = match state {
+            Ok(bytes) => <(BlockLocator, LampoSweeper)>::read(
+                &mut std::io::Cursor::new(bytes),
+                (
+                    broadcaster,
+                    fee_estimator,
+                    None,
+                    spender,
+                    change_destination,
+                    self.persister.clone(),
+                    self.logger.clone(),
+                ),
+            )
+            .map_err(|err| error::anyhow!("failed to read the sweeper state: {err}"))?,
+            Err(err) if err.kind() == lampo_common::ldk::io::ErrorKind::NotFound => {
+                let best_block = self.manager().current_best_block();
+                let sweeper = OutputSweeper::new(
+                    best_block.clone(),
+                    broadcaster,
+                    fee_estimator,
+                    None,
+                    spender,
+                    change_destination,
+                    self.persister.clone(),
+                    self.logger.clone(),
+                );
+                (best_block, sweeper)
+            }
+            Err(err) => error::bail!("failed to read the sweeper state: {err}"),
+        };
+        self.sweeper
+            .set((best_block, Arc::new(sweeper)))
+            .unwrap_or_else(|_| panic!("sweeper already initialized"));
+        Ok(())
+    }
+
+    pub fn sweeper(&self) -> Arc<LampoSweeper> {
+        self.sweeper
+            .get()
+            .expect("sweeper not initialized")
+            .1
+            .clone()
+    }
+
+    /// The best block the sweeper state was persisted at: the chain backend
+    /// must replay blocks from here before going live.
+    pub fn sweeper_best_block(&self) -> BlockLocator {
+        self.sweeper
+            .get()
+            .expect("sweeper not initialized")
+            .0
+            .clone()
     }
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {

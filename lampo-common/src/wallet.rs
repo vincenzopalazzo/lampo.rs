@@ -1,13 +1,15 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::bitcoin::absolute::Height;
+use crate::bitcoin::{Address, Network, ScriptBuf, Transaction};
 use crate::bitcoin::{Amount, FeeRate};
-use crate::bitcoin::{ScriptBuf, Transaction};
 use crate::conf::LampoConf;
 use crate::error;
 use crate::keys::LampoKeys;
+use crate::ldk::sign::ChangeDestinationSource;
 use crate::model::response::{NewAddress, Utxo};
 
 /// Wallet manager trait that define a generic interface
@@ -56,4 +58,36 @@ pub trait WalletManager: Send + Sync {
     /// Run a task for wallet sync operation, this usually need to
     /// be run in a `tokio::spawn(wallet.listen())`.
     async fn listen(self: Arc<Self>) -> error::Result<()>;
+}
+
+/// [`ChangeDestinationSource`] backed by the node's on-chain wallet: swept
+/// channel outputs land on a fresh wallet address.
+pub struct LampoChangeDestination {
+    wallet: Arc<dyn WalletManager>,
+    network: Network,
+}
+
+impl LampoChangeDestination {
+    pub fn new(wallet: Arc<dyn WalletManager>, network: Network) -> Self {
+        Self { wallet, network }
+    }
+}
+
+impl ChangeDestinationSource for LampoChangeDestination {
+    fn get_change_destination_script<'a>(
+        &'a self,
+    ) -> impl std::future::Future<Output = Result<ScriptBuf, ()>> + Send + 'a {
+        async move {
+            let address = self.wallet.get_onchain_address().await.map_err(|err| {
+                log::error!(target: "lampo-wallet", "failed to derive a sweep destination address: {err}");
+            })?;
+            let address = Address::from_str(&address.address).map_err(|err| {
+                log::error!(target: "lampo-wallet", "invalid sweep destination address: {err}");
+            })?;
+            let address = address.require_network(self.network).map_err(|err| {
+                log::error!(target: "lampo-wallet", "sweep destination address on wrong network: {err}");
+            })?;
+            Ok(address.script_pubkey())
+        }
+    }
 }

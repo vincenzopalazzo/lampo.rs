@@ -292,6 +292,14 @@ impl Backend for LampoChainManager {
         self.backend.set_handler(arc);
     }
 
+    fn set_sweeper(
+        &self,
+        best_block: lampo_common::backend::BlockLocator,
+        sweeper: Arc<lampo_common::types::LampoSweeper>,
+    ) {
+        self.backend.set_sweeper(best_block, sweeper);
+    }
+
     fn set_stale_monitors(
         &self,
         monitors: Vec<(

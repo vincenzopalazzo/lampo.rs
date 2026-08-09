@@ -14,9 +14,11 @@ use crate::ldk::routing::gossip::NetworkGraph;
 use crate::ldk::routing::router::DefaultRouter;
 use crate::ldk::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
 use crate::ldk::sign::InMemorySigner;
+use crate::ldk::util::sweep::OutputSweeper;
 
 use crate::keys::LampoKeysManager;
 use crate::utils::logger::LampoLogger;
+use crate::wallet::LampoChangeDestination;
 
 pub type NodeId = PublicKey;
 pub type ChannelId = crate::ldk::ln::types::ChannelId;
@@ -44,6 +46,19 @@ pub type LampoArcChannelManager<M, L> = ChannelManager<
 >;
 
 pub type LampoChannel = LampoArcChannelManager<LampoChainMonitor, LampoLogger>;
+
+/// Tracks and sweeps spendable outputs of closed channels back into the
+/// on-chain wallet. Fed by `Event::SpendableOutputs`, driven by the
+/// background processor, and notified of blocks by the chain backend.
+pub type LampoSweeper = OutputSweeper<
+    Arc<dyn BroadcasterInterface + Send + Sync>,
+    Arc<LampoChangeDestination>,
+    Arc<dyn FeeEstimator + Send + Sync>,
+    Arc<dyn Filter + Send + Sync>,
+    Arc<FilesystemStore>,
+    Arc<LampoLogger>,
+    Arc<LampoKeysManager>,
+>;
 
 /// A [`ChannelMonitor`] read from disk on restart, paired with the chain
 /// context it needs to replay blocks on its own (LDK implements

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::handler::Handler;
-use crate::types::{LampoChainMonitor, LampoChannel, LampoMonitorListener};
+use crate::types::{LampoChainMonitor, LampoChannel, LampoMonitorListener, LampoSweeper};
 
 pub use lightning::chain::BlockLocator;
 
@@ -94,6 +94,10 @@ pub trait Backend: Send + Sync {
     /// sync every monitor up to the chain tip individually and register
     /// it with the chain monitor before connecting new blocks.
     fn set_stale_monitors(&self, _: Vec<(BlockLocator, LampoMonitorListener)>) {}
+
+    /// Register the output sweeper as a chain listener, together with the
+    /// best block its persisted state was last synced to.
+    fn set_sweeper(&self, _: BlockLocator, _: Arc<LampoSweeper>) {}
 
     /// Perform the initial chain synchronization: bring the channel
     /// manager, the chain monitor, and any stale channel monitors up to

@@ -18,9 +18,9 @@ use lampo_common::error;
 use lampo_common::json;
 use lampo_common::ldk::chain;
 use lampo_common::ldk::chain::chaininterface::FEERATE_FLOOR_SATS_PER_KW;
-use lampo_common::ldk::chain::{BlockLocator, ChannelMonitorUpdateStatus, Watch};
+use lampo_common::ldk::chain::{BlockLocator, ChannelMonitorUpdateStatus, Listen, Watch};
 use lampo_common::serde::Deserialize;
-use lampo_common::types::{LampoChainMonitor, LampoChannel, LampoMonitorListener};
+use lampo_common::types::{LampoChainMonitor, LampoChannel, LampoMonitorListener, LampoSweeper};
 
 /// Welcome in another Facede pattern implementation
 pub struct LampoChainSync {
@@ -36,6 +36,42 @@ pub struct LampoChainSync {
     /// Header cache and validated chain tip produced by the initial sync,
     /// consumed by [`Backend::listen`] to seed the SPV client.
     sync_state: Mutex<Option<(HeaderCache, ValidatedBlockHeader)>>,
+    /// The output sweeper, registered as an ongoing chain listener with the
+    /// best block its persisted state was last synced to.
+    sweeper: OnceLock<(BlockLocator, Arc<LampoSweeper>)>,
+}
+
+/// The set of ongoing chain listeners fed by the SPV client after the
+/// initial synchronization.
+struct ChainListeners {
+    chain_monitor: Arc<LampoChainMonitor>,
+    channel_manager: Arc<LampoChannel>,
+    sweeper: Option<Arc<LampoSweeper>>,
+}
+
+impl chain::Listen for ChainListeners {
+    fn filtered_block_connected(
+        &self,
+        header: &lampo_common::bitcoin::block::Header,
+        txdata: &chain::transaction::TransactionData,
+        height: u32,
+    ) {
+        self.chain_monitor
+            .filtered_block_connected(header, txdata, height);
+        self.channel_manager
+            .filtered_block_connected(header, txdata, height);
+        if let Some(ref sweeper) = self.sweeper {
+            sweeper.filtered_block_connected(header, txdata, height);
+        }
+    }
+
+    fn blocks_disconnected(&self, fork_point: BlockLocator) {
+        self.chain_monitor.blocks_disconnected(fork_point.clone());
+        self.channel_manager.blocks_disconnected(fork_point.clone());
+        if let Some(ref sweeper) = self.sweeper {
+            sweeper.blocks_disconnected(fork_point);
+        }
+    }
 }
 
 impl LampoChainSync {
@@ -72,6 +108,7 @@ impl LampoChainSync {
             handler: OnceLock::new(),
             stale_monitors: Mutex::new(Vec::new()),
             sync_state: Mutex::new(None),
+            sweeper: OnceLock::new(),
         })
     }
 
@@ -328,6 +365,12 @@ impl Backend for LampoChainSync {
         *self.stale_monitors.lock().unwrap() = monitors;
     }
 
+    fn set_sweeper(&self, best_block: BlockLocator, sweeper: Arc<LampoSweeper>) {
+        self.sweeper
+            .set((best_block, sweeper))
+            .unwrap_or_else(|_| panic!("sweeper already set"));
+    }
+
     async fn sync_chain(&self) -> lampo_common::error::Result<()> {
         let channel_manager = self.channel_manager();
         let chain_monitor = self.chain_monitor();
@@ -364,6 +407,12 @@ impl Backend for LampoChainSync {
             chain_listeners.push((
                 locator.clone(),
                 listener as &(dyn chain::Listen + Send + Sync),
+            ));
+        }
+        if let Some((sweeper_best, sweeper)) = self.sweeper.get() {
+            chain_listeners.push((
+                sweeper_best.clone(),
+                &**sweeper as &(dyn chain::Listen + Send + Sync),
             ));
         }
 
@@ -417,7 +466,11 @@ impl Backend for LampoChainSync {
             .take()
             .expect("sync_chain populated the state above");
 
-        let chain_listener = (self.chain_monitor(), self.channel_manager());
+        let chain_listener = ChainListeners {
+            chain_monitor: self.chain_monitor(),
+            channel_manager: self.channel_manager(),
+            sweeper: self.sweeper.get().map(|(_, sweeper)| sweeper.clone()),
+        };
         let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
         let mut spv_client = SpvClient::new(synced_chain_tip, chain_poller, cache, &chain_listener);
         log::info!(target: "lampo-chain", "Start Backend ...");
