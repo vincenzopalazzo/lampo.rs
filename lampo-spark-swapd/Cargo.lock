@@ -868,6 +868,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "clightning-testing"
+version = "0.1.0"
+source = "git+https://github.com/laanwj/cln4rust.git#586f4f454ddc196bb09b7b4a6f56a618a73f6a87"
+dependencies = [
+ "anyhow",
+ "clightningrpc",
+ "corepc-node",
+ "log",
+ "port-selector",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "clightningrpc"
+version = "0.3.0-beta.8"
+source = "git+https://github.com/laanwj/cln4rust.git#586f4f454ddc196bb09b7b4a6f56a618a73f6a87"
+dependencies = [
+ "clightningrpc-common",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "clightningrpc-common"
+version = "0.3.0-beta.4"
+source = "git+https://github.com/laanwj/cln4rust.git#586f4f454ddc196bb09b7b4a6f56a618a73f6a87"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "clightningrpc-conf"
 version = "0.0.3"
 source = "git+https://github.com/laanwj/cln4rust.git?branch=master#586f4f454ddc196bb09b7b4a6f56a618a73f6a87"
@@ -973,6 +1006,45 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "corepc-client"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c6b8eaeccd3df6c1f264cd6ff8cf5df7d056029473ce9551b2a6257832d38e0"
+dependencies = [
+ "bitcoin",
+ "corepc-types",
+ "jsonrpc",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "corepc-node"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2bcc6e09458f052024ec36e4728bd5619e248643da6175876eb3b10ca6d4d86"
+dependencies = [
+ "anyhow",
+ "corepc-client",
+ "log",
+ "serde_json",
+ "tempfile",
+ "which",
+]
+
+[[package]]
+name = "corepc-types"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4bc664fdaeeae1eaf459edb88650af3009b758010fc69b423c5b38142446cfb"
+dependencies = [
+ "bitcoin",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -2473,12 +2545,30 @@ dependencies = [
  "lampo-chain",
  "lampo-common",
  "lampo-httpd",
+ "lampo-testing",
  "lampod",
  "log",
  "serde",
  "serde_json",
  "spark",
  "spark-wallet",
+ "tokio",
+]
+
+[[package]]
+name = "lampo-testing"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clightning-testing",
+ "lampo-bdk-wallet",
+ "lampo-chain",
+ "lampo-common",
+ "lampo-httpd",
+ "lampod",
+ "log",
+ "port-selector",
+ "tempfile",
  "tokio",
 ]
 
@@ -3147,6 +3237,15 @@ dependencies = [
  "cpufeatures 0.2.17",
  "opaque-debug",
  "universal-hash",
+]
+
+[[package]]
+name = "port-selector"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0f0d4202cea786c2aa44e20692eb5dfac74f0d3804d2ce68fdbd40bedcbef05"
+dependencies = [
+ "rand 0.10.2",
 ]
 
 [[package]]
@@ -4882,6 +4981,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "which"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d011071ae14a2f6671d0b74080ae0cd8ebf3a6f8c9589a2cd45f23126fe29724"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

@@ -5,13 +5,6 @@
 //! Spark wallet and the swap engine wired to the node's in-process
 //! event stream. Run this **instead of** `lampod-cli`, never both:
 //! they share the `lampod.pid` lock for exactly that reason.
-mod api;
-mod engine;
-mod lampo_leg;
-mod settings;
-mod spark_leg;
-mod store;
-mod swap;
 
 use std::io::Read;
 use std::path::Path;
@@ -31,11 +24,12 @@ use lampod::LampoDaemon;
 use spark::signer::{DefaultSigner, SparkSignerAdapter};
 use spark_wallet::{OperatorPoolConfig, SparkWalletConfig, WalletBuilder};
 
-use crate::engine::Engine;
-use crate::lampo_leg::LampoLeg;
-use crate::settings::Settings;
-use crate::spark_leg::SparkLeg;
-use crate::store::SwapStore;
+use lampo_spark_swapd::api;
+use lampo_spark_swapd::engine::Engine;
+use lampo_spark_swapd::lampo_leg::LampoLeg;
+use lampo_spark_swapd::settings::Settings;
+use lampo_spark_swapd::spark_leg::SparkLeg;
+use lampo_spark_swapd::store::SwapStore;
 
 #[derive(Parser)]
 #[command(name = "lampo-spark-swapd", about = "lampo <-> spark swap daemon")]
