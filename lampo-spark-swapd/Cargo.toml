@@ -1,0 +1,43 @@
+# Its own workspace root: this crate must never be pulled into the
+# lampo workspace build, whatever the parent manifest says.
+[workspace]
+
+[package]
+name = "lampo-spark-swapd"
+version = "0.1.0"
+edition = "2021"
+description = "Swap daemon between a lampo lightning node (BOLT12 offers) and Spark"
+license = "MIT"
+
+# This crate is deliberately EXCLUDED from the lampo workspace (see the
+# root Cargo.toml). It pulls the Spark stack, ~160 crates lampo itself
+# does not need, so it keeps its own lock file and is never built by
+# lampo's CI. Build it explicitly:
+#
+#   cargo build --manifest-path lampo-spark-swapd/Cargo.toml
+
+[dependencies]
+# --- lampo leg: the daemon owns the node, in process ---
+lampod = { path = "../lampod" }
+lampo-common = { path = "../lampo-common" }
+lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
+lampo-chain = { path = "../lampo-chain" }
+lampo-httpd = { path = "../lampo-httpd" }
+
+# --- spark leg: the only dependencies lampo does not already have ---
+spark-wallet = { git = "https://github.com/breez/spark-sdk", rev = "8c6abb1f04369c0540995b207aee3c6407d4aded" }
+spark = { git = "https://github.com/breez/spark-sdk", rev = "8c6abb1f04369c0540995b207aee3c6407d4aded" }
+
+# --- daemon: every one of these is already in lampo's dependency tree ---
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+log = "0.4"
+ctrlc = "3"
+filelock-rs = "0.1.0-beta.2"
+actix-web = "4"
+bitcoin = "0.32"
+
+[profile.release]
+panic = "abort"
