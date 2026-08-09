@@ -4,6 +4,7 @@ use std::str::FromStr;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
+use lampo_common::hex;
 use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::ldk;
 use lampo_common::ldk::offers::offer;
@@ -98,19 +99,28 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     let request: Pay = json::from_value(request.clone())?;
     let mut events = ctx.handler().events();
 
-    if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
+    let payment_id = if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
         log::debug!("Paying offer with bolt12 invoice: {}", request.invoice_str);
         let payer_note = request.bolt12.and_then(|x| x.payer_note);
         ctx.offchain_manager()
-            .pay_offer(&request.invoice_str, request.amount, payer_note)?;
+            .pay_offer(&request.invoice_str, request.amount, payer_note)?
     } else {
         log::debug!(
             "Paying invoice with bolt11 invoice: {}",
             request.invoice_str
         );
         ctx.offchain_manager()
-            .pay_invoice(&request.invoice_str, request.amount)?;
-    }
+            .pay_invoice(&request.invoice_str, request.amount)?
+    };
+    // The event bus broadcasts to every subscriber, so a concurrent `pay` would
+    // otherwise see this payment's result -- and now its preimage and payer
+    // proof too. Only accept events carrying our own payment id.
+    let payment_id = hex::encode(payment_id.0);
+
+    // The receipt lands on `PaymentReceipt` and the hop path on the terminal
+    // `PaymentEvent`, so hold the receipt until the payment finishes.
+    let mut receipt: Option<(String, Option<String>)> = None;
+
     // FIXME: this will loop when the Payment event is not generated
     loop {
         log::warn!("Waiting for payment event...");
@@ -120,18 +130,34 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
             data: None,
         }))?;
 
-        if let Event::Lightning(LightningEvent::PaymentEvent {
-            payment_hash,
-            path,
-            state,
-            reason: _,
-        }) = event
-        {
-            return Ok(json::to_value(PayResult {
-                state,
-                path,
+        match event {
+            Event::Lightning(LightningEvent::PaymentReceipt {
+                payment_id: id,
+                payment_preimage,
+                payer_proof,
+            }) if id == payment_id => {
+                receipt = Some((payment_preimage, payer_proof));
+            }
+            Event::Lightning(LightningEvent::PaymentEvent {
+                payment_id: Some(id),
                 payment_hash,
-            })?);
+                path,
+                state,
+                reason: _,
+            }) if id == payment_id => {
+                let (payment_preimage, payer_proof) = match receipt {
+                    Some((preimage, proof)) => (Some(preimage), proof),
+                    None => (None, None),
+                };
+                return Ok(json::to_value(PayResult {
+                    state,
+                    path,
+                    payment_hash,
+                    payment_preimage,
+                    payer_proof,
+                })?);
+            }
+            _ => {}
         }
     }
 }

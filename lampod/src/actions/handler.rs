@@ -17,12 +17,15 @@ use lampo_common::handler::Handler as EventHandler;
 use lampo_common::json;
 use lampo_common::jsonrpc::Request;
 use lampo_common::ldk;
+use lampo_common::ldk::sign::NodeSigner;
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
+use crate::ln::payer_proof::{self, PayerProofRecord};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
 
 use super::Handler;
@@ -33,6 +36,7 @@ pub struct LampoHandler {
     inventory_manager: Arc<LampoInventoryManager>,
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
+    persister: Arc<LampoPersistence>,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
@@ -49,6 +53,7 @@ impl LampoHandler {
             inventory_manager: lampod.inventory_manager(),
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
+            persister: lampod.persister(),
             external_handlers: RwLock::new(Vec::new()),
             emitter,
             subscriber,
@@ -378,12 +383,64 @@ impl Handler for LampoHandler {
                 // FIXME: make peristent these information
                 Ok(())
             }
-            ldk::events::Event::PaymentSent { .. } => {
-                log::info!("payment sent: `{:?}`", event);
+            ldk::events::Event::PaymentSent {
+                payment_id,
+                payment_preimage,
+                payment_hash,
+                bolt12_invoice,
+                ..
+            } => {
+                log::info!(
+                    target: "lampo::handler",
+                    "payment sent: id `{payment_id:?}`, bolt12 payer proof available: {}",
+                    bolt12_invoice.is_some()
+                );
+                let Some(payment_id) = payment_id else {
+                    // Without an id the receipt cannot be matched to the `pay`
+                    // call that is waiting for it, so there is nothing to emit.
+                    return Ok(());
+                };
+                let record = PayerProofRecord {
+                    preimage: payment_preimage,
+                    invoice: bolt12_invoice,
+                };
+
+                // Build the proof from the material in hand rather than from
+                // storage, so the receipt does not depend on the write below.
+                let expanded_key = self
+                    .wallet_manager
+                    .ldk_keys()
+                    .keys_manager
+                    .get_expanded_key();
+                let payer_proof = payer_proof::build(&record, &expanded_key, payment_id);
+
+                self.emit(Event::Lightning(LightningEvent::PaymentReceipt {
+                    payment_id: lampo_common::hex::encode(payment_id.0),
+                    payment_preimage: lampo_common::hex::encode(record.preimage.0),
+                    payer_proof,
+                }));
+
+                // This is the only event carrying the paid BOLT 12 invoice, and the
+                // proof cannot be rebuilt without it. Keep it so the proof can be
+                // re-issued later with a wider disclosure. The payment already
+                // settled and the receipt is already out, so a storage failure
+                // only costs us the ability to re-issue.
+                //
+                // Only BOLT 12 payments are worth keeping: a BOLT 11 record holds
+                // a preimage and nothing else, can never build a proof, and
+                // nothing prunes it.
+                if record.invoice.is_some() {
+                    if let Err(err) = payer_proof::store(&self.persister, &payment_hash, &record) {
+                        log::error!(target: "lampo::handler", "storing payer proof material: {err}");
+                    }
+                }
                 Ok(())
             }
             ldk::events::Event::PaymentPathSuccessful {
-                payment_hash, path, ..
+                payment_id,
+                payment_hash,
+                path,
+                ..
             } => {
                 let path = path
                     .hops
@@ -392,6 +449,7 @@ impl Handler for LampoHandler {
                     .collect::<Vec<PaymentHop>>();
                 let hop = LightningEvent::PaymentEvent {
                     state: PaymentState::Success,
+                    payment_id: Some(lampo_common::hex::encode(payment_id.0)),
                     payment_hash: payment_hash.map(|hash| hash.to_string()),
                     path,
                     reason: None,
@@ -447,6 +505,7 @@ impl Handler for LampoHandler {
 
                 let hop = LightningEvent::PaymentEvent {
                     state: PaymentState::Failure,
+                    payment_id: Some(lampo_common::hex::encode(payment_id.0)),
                     payment_hash: payment_hash.map(|hash| hash.to_string()),
                     path: vec![],
                     reason: Some(detailed_reason),

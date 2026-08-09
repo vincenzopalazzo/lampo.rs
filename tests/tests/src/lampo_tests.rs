@@ -1,7 +1,11 @@
 //! Integration tests between lampo nodes.
 //!
 //! Author: Vincenzo Palazzo <vincenzopalazzo@member.fsf.org>
+use std::str::FromStr;
 use std::sync::Arc;
+
+use lampo_common::hex;
+use lampo_common::ldk::offers::payer_proof::PayerProof;
 
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
@@ -143,6 +147,16 @@ pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
         )
         .await?;
     log::info!(target: &node2.info.node_id, "payment made `{:?}`", pay);
+
+    // BOLT 11 has no payer proof, but the preimage is still the receipt.
+    assert!(
+        pay.payment_preimage.is_some(),
+        "a settled bolt11 payment must expose its preimage"
+    );
+    assert!(
+        pay.payer_proof.is_none(),
+        "bolt11 payments cannot produce a payer proof"
+    );
     Ok(())
 }
 
@@ -181,6 +195,33 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
         )
         .await?;
     log::info!(target: &node2.info.node_id, "payment made `{:?}`", pay);
+
+    // Paying an offer must hand back a payer proof a third party can check
+    // against the payment we actually made.
+    let preimage = pay
+        .payment_preimage
+        .expect("a settled offer payment must expose its preimage");
+    // There is no separate verify entry point: LDK runs the checks while
+    // parsing, in `TryFrom<Vec<u8>> for PayerProof`. Parsing here is the
+    // verification, and it covers preimage against payment hash, the invoice
+    // signature against the issuer key, and the payer signature over the
+    // merkle root.
+    let proof = PayerProof::from_str(
+        &pay.payer_proof
+            .expect("a settled offer payment must expose a payer proof"),
+    )
+    .expect("the payer proof must verify");
+
+    assert_eq!(
+        proof.payment_hash().to_string(),
+        pay.payment_hash.unwrap(),
+        "the proof must commit to the hash of the payment we made"
+    );
+    assert_eq!(
+        hex::encode(proof.payment_preimage().0),
+        preimage,
+        "the proof must carry the same preimage the RPC returned"
+    );
     Ok(())
 }
 

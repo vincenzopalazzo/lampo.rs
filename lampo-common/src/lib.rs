@@ -43,6 +43,7 @@ pub mod chan {
 pub use async_trait::async_trait;
 pub use bitcoin;
 pub use bitcoin::secp256k1;
+pub use hex;
 
 pub mod btc_rpc {
     use serde::{Deserialize, Serialize};

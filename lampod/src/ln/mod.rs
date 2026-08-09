@@ -4,6 +4,7 @@ mod inventory_manager;
 mod offchain_manager;
 mod peer_manager;
 
+pub mod payer_proof;
 pub mod peer_event;
 
 pub use channel_manager::LampoChannelManager;
