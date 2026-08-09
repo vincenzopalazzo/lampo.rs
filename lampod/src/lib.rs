@@ -134,6 +134,10 @@ impl LampoDaemon {
         self.conf.clone()
     }
 
+    pub fn persister(&self) -> Arc<LampoPersistence> {
+        self.persister.clone()
+    }
+
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         log::debug!(target: "lampod", "init onchaind ..");
         let onchain_manager = LampoChainManager::new(client, self.wallet_manager.clone());
