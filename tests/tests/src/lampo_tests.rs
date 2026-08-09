@@ -269,6 +269,117 @@ pub async fn pay_offer_minimal_offer() -> error::Result<()> {
     Ok(())
 }
 
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn fetchinvoice_then_payfetched() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
+
+    let offer: response::Offer = node2
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: Some("fetch me".to_owned()),
+                amount_msat: Some(70_000),
+            },
+        )
+        .await?;
+
+    // fetch the invoice without paying it
+    let fetched: response::FetchInvoiceResult = node1
+        .lampod()
+        .call(
+            "fetchinvoice",
+            request::FetchInvoice {
+                offer_str: offer.bolt12,
+                amount_msat: None,
+                payer_note: None,
+            },
+        )
+        .await?;
+    assert_eq!(fetched.amount_msat, 70_000);
+    assert_eq!(fetched.payment_hash.len(), 64);
+
+    // nothing has been paid yet: this is the whole point of the fetch
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "payfetched",
+            request::PayFetched {
+                payment_id: fetched.payment_id,
+            },
+        )
+        .await?;
+    assert_eq!(pay.state, response::PaymentState::Success);
+    assert_eq!(pay.payment_hash, Some(fetched.payment_hash.clone()));
+    // the preimage must be the proof of payment for the fetched hash
+    use lampo_common::bitcoin::hashes::{sha256, Hash};
+    use lampo_common::bitcoin::hex::FromHex;
+    let preimage = pay.payment_preimage.expect("preimage on success");
+    let preimage = Vec::<u8>::from_hex(&preimage)?;
+    assert_eq!(
+        sha256::Hash::hash(&preimage).to_string(),
+        fetched.payment_hash
+    );
+    Ok(())
+}
+
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn fetchinvoice_cancel_prevents_payment() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
+
+    let offer: response::Offer = node2
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: Some("fetch and cancel".to_owned()),
+                amount_msat: Some(70_000),
+            },
+        )
+        .await?;
+
+    let fetched: response::FetchInvoiceResult = node1
+        .lampod()
+        .call(
+            "fetchinvoice",
+            request::FetchInvoice {
+                offer_str: offer.bolt12,
+                amount_msat: None,
+                payer_note: None,
+            },
+        )
+        .await?;
+
+    let _: response::CancelFetchedResult = node1
+        .lampod()
+        .call(
+            "cancelfetched",
+            request::CancelFetched {
+                payment_id: fetched.payment_id.clone(),
+            },
+        )
+        .await?;
+
+    // the invoice is gone, paying it must fail
+    let pay: error::Result<response::PayResult> = node1
+        .lampod()
+        .call(
+            "payfetched",
+            request::PayFetched {
+                payment_id: fetched.payment_id,
+            },
+        )
+        .await;
+    assert!(pay.is_err(), "paying a cancelled fetch must fail");
+    Ok(())
+}
+
 /// Build a (preimage, payment_hash) pair for the hold invoice tests.
 fn hold_preimage(seed: u8) -> (String, String) {
     use lampo_common::bitcoin::hashes::{sha256, Hash};

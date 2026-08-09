@@ -24,7 +24,7 @@ use lampo_common::model::response::PaymentState;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
-use crate::ln::{HoldDecision, HoldManager};
+use crate::ln::{HoldDecision, HoldManager, OffchainManager};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
@@ -39,6 +39,7 @@ pub struct LampoHandler {
     chain_manager: Arc<LampoChainManager>,
     persister: Arc<LampoPersistence>,
     hold_manager: Arc<HoldManager>,
+    offchain_manager: Arc<OffchainManager>,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
@@ -57,6 +58,7 @@ impl LampoHandler {
             chain_manager: lampod.onchain_manager(),
             persister: lampod.persister(),
             hold_manager: lampod.hold_manager(),
+            offchain_manager: lampod.offchain_manager(),
             external_handlers: RwLock::new(Vec::new()),
             emitter,
             subscriber,
@@ -451,6 +453,28 @@ impl Handler for LampoHandler {
                 };
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristent these information
+                Ok(())
+            }
+            ldk::events::Event::InvoiceReceived {
+                payment_id,
+                invoice,
+                context,
+                ..
+            } => {
+                // This branch must never block: the whole node event
+                // loop waits on it.
+                let outcome = self
+                    .offchain_manager
+                    .on_invoice_received(payment_id, invoice, context)?;
+                if let Some(outcome) = outcome {
+                    if outcome.fetched {
+                        self.emit(Event::Lightning(LightningEvent::Bolt12InvoiceReceived {
+                            payment_id: payment_id.to_string(),
+                            payment_hash: outcome.payment_hash.to_string(),
+                            amount_msat: outcome.amount_msat,
+                        }));
+                    }
+                }
                 Ok(())
             }
             ldk::events::Event::PaymentSent {
