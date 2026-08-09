@@ -245,7 +245,12 @@ pub async fn json_fetchinvoice(
         Ok(result) => Ok(json::to_value(&result?)?),
         Err(_) => {
             // give the pending payment back to LDK to reap
-            let _ = ctx.offchain_manager().cancel_fetched_invoice(payment_id);
+            if let Err(err) = ctx.offchain_manager().cancel_fetched_invoice(payment_id) {
+                log::warn!(
+                    target: "lampo::offchain",
+                    "could not cancel the pending fetch `{payment_id}`: {err}"
+                );
+            }
             Err(crate::rpc_error!(
                 "timeout while waiting for the invoice, the offer issuer may be offline"
             ))
@@ -316,7 +321,12 @@ pub async fn json_holdinvoice(
         Ok(invoice) => invoice,
         Err(err) => {
             // roll the registration back, there is no invoice to pay
-            let _ = ctx.hold_manager().unregister(&request.payment_hash);
+            if let Err(err) = ctx.hold_manager().unregister(&request.payment_hash) {
+                log::warn!(
+                    target: "lampo::hold",
+                    "could not roll back the hold for `{}`: {err}", request.payment_hash
+                );
+            }
             return Err(crate::rpc_error!("{err}"));
         }
     };

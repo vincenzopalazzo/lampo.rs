@@ -238,6 +238,169 @@ impl OffchainManager {
         amount_msat: Option<u64>,
         payer_note: Option<String>,
     ) -> error::Result<PaymentId> {
+        let payment_id = PaymentId(self.entropy());
+        let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
+        let amount = Self::offer_amount(&offer, amount_msat)?;
+
+        log::debug!(target: "lampo::offchain", "fetching invoice for offer with amount `{amount}msat`");
+        // SAFETY: the mutex is never poisoned, we do not panic while holding it.
+        self.bolt12_flows
+            .lock()
+            .unwrap()
+            .insert(payment_id, Bolt12Flow::Fetch { invoice: None });
+        let result = self.channel_manager.manager().pay_for_offer(
+            &offer,
+            Some(amount),
+            payment_id,
+            OptionalOfferPaymentParams {
+                payer_note,
+                retry_strategy: Retry::Timeout(std::time::Duration::from_secs(1)),
+                ..Default::default()
+            },
+        );
+        if let Err(err) = result {
+            self.bolt12_flows.lock().unwrap().remove(&payment_id);
+            error::bail!("{:?}", err);
+        }
+        Ok(payment_id)
+    }
+
+    /// Pay an invoice previously stored by `fetch_invoice_from_offer`,
+    /// returning the payment hash the caller should wait on.
+    pub fn pay_fetched_invoice(&self, payment_id: PaymentId) -> error::Result<PaymentHash> {
+        // Take the invoice only once we know there is one: removing the
+        // entry for a fetch still in flight would drop the pending
+        // request and make its invoice arrive unattributed.
+        // SAFETY: the mutex is never poisoned, we do not panic while holding it.
+        let entry = {
+            let mut flows = self.bolt12_flows.lock().unwrap();
+            match flows.get(&payment_id) {
+                Some(Bolt12Flow::Fetch {
+                    invoice: Some(_), ..
+                }) => flows.remove(&payment_id),
+                Some(Bolt12Flow::Fetch { invoice: None }) => {
+                    error::bail!("the invoice for payment id `{payment_id}` has not arrived yet")
+                }
+                _ => None,
+            }
+        };
+        let Some(Bolt12Flow::Fetch {
+            invoice: Some((invoice, context)),
+        }) = entry
+        else {
+            error::bail!("no fetched invoice found for payment id `{payment_id}`");
+        };
+        let payment_hash = invoice.payment_hash();
+        if let Err(err) = self
+            .channel_manager
+            .manager()
+            .send_payment_for_bolt12_invoice(&invoice, context.as_ref())
+        {
+            // Drop the pending payment as well, the caller has no
+            // handle to retry it with.
+            self.channel_manager.manager().abandon_payment(payment_id);
+            error::bail!(
+                "{:?} (the invoice request may have expired, fetch the invoice again)",
+                err
+            );
+        }
+        Ok(payment_hash)
+    }
+
+    /// Abandon an invoice previously fetched with `fetch_invoice_from_offer`.
+    ///
+    /// Only fetch flows are cancellable: the payment id of an in-flight
+    /// `pay` must not be abandoned through this path.
+    pub fn cancel_fetched_invoice(&self, payment_id: PaymentId) -> error::Result<()> {
+        // SAFETY: the mutex is never poisoned, we do not panic while holding it.
+        let mut flows = self.bolt12_flows.lock().unwrap();
+        match flows.get(&payment_id) {
+            Some(Bolt12Flow::Fetch { .. }) => {
+                flows.remove(&payment_id);
+            }
+            Some(Bolt12Flow::Pay) => {
+                error::bail!("payment id `{payment_id}` belongs to a pay call, not a fetch")
+            }
+            None => error::bail!("no fetched invoice found for payment id `{payment_id}`"),
+        }
+        drop(flows);
+        self.channel_manager.manager().abandon_payment(payment_id);
+        Ok(())
+    }
+
+    /// React to a manually handled BOLT12 invoice. Called from the LDK
+    /// event handler, it must never block. Invoices that cannot be
+    /// attributed to a `pay` or `fetchinvoice` call (e.g. replayed
+    /// after a restart) are abandoned: paying them without an intent
+    /// record would move funds nobody asked to move.
+    pub fn on_invoice_received(
+        &self,
+        payment_id: PaymentId,
+        invoice: Bolt12Invoice,
+        context: Option<OffersContext>,
+    ) -> error::Result<Option<InvoiceReceivedOutcome>> {
+        let payment_hash = invoice.payment_hash();
+        let amount_msat = invoice.amount_msats();
+        // SAFETY: the mutex is never poisoned, we do not panic while holding it.
+        let mut flows = self.bolt12_flows.lock().unwrap();
+        match flows.get_mut(&payment_id) {
+            Some(Bolt12Flow::Pay) => {
+                flows.remove(&payment_id);
+                drop(flows);
+                if let Err(err) = self
+                    .channel_manager
+                    .manager()
+                    .send_payment_for_bolt12_invoice(&invoice, context.as_ref())
+                {
+                    // Abandon the payment so LDK emits `PaymentFailed`:
+                    // without it the `pay` caller waits for a payment
+                    // event that would never come.
+                    self.channel_manager.manager().abandon_payment(payment_id);
+                    error::bail!("{:?}", err);
+                }
+                Ok(Some(InvoiceReceivedOutcome {
+                    fetched: false,
+                    payment_hash,
+                    amount_msat,
+                }))
+            }
+            Some(Bolt12Flow::Fetch {
+                invoice: stored @ None,
+            }) => {
+                *stored = Some((invoice, context));
+                Ok(Some(InvoiceReceivedOutcome {
+                    fetched: true,
+                    payment_hash,
+                    amount_msat,
+                }))
+            }
+            Some(Bolt12Flow::Fetch { invoice: Some(_) }) => {
+                // Keep the first invoice. The fetch already reported its
+                // payment hash to the caller, and paying a later one
+                // would move funds under a different hash.
+                log::warn!(
+                    target: "lampo::offchain",
+                    "ignoring a second bolt12 invoice for payment id `{payment_id}`"
+                );
+                Ok(None)
+            }
+            None => {
+                log::warn!(
+                    target: "lampo::offchain",
+                    "abandoning bolt12 invoice for unknown payment id `{payment_id}`"
+                );
+                drop(flows);
+                self.channel_manager.manager().abandon_payment(payment_id);
+                Ok(None)
+            }
+        }
+    }
+
+    pub fn pay_invoice(
+        &self,
+        invoice_str: &str,
+        amount_msat: Option<u64>,
+    ) -> error::Result<PaymentId> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
         let payment_id = PaymentId(invoice.payment_hash().0);

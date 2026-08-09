@@ -36,7 +36,19 @@ Decision table for an incoming claimable payment:
 | yes | — | — | claim as today |
 | no | yes | yes | hold, emit `PaymentHeld` |
 | no | yes | no (underpaid) | fail back, keep the record open |
+| no | yes, already held | — | leave pending, log |
 | no | no | — | fail back (`IncorrectOrUnknownPaymentDetails`) |
+
+A second payment arriving for a hash that is already held is *not*
+failed back. LDK keys claimable payments by hash, so failing "the
+duplicate" would fail the payment already being held along with it. It
+is left pending instead: a claim settles both, and the deadline fails
+both back.
+
+"Never block" here means never awaiting an unbounded external decision
+(an RPC call, a counterparty, a human). The one bounded local write
+described below is accepted deliberately: the alternative is losing
+held payments across a restart.
 
 ## Persistence
 
