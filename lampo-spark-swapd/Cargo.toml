@@ -39,5 +39,10 @@ filelock-rs = "0.1.0-beta.2"
 actix-web = "4"
 bitcoin = "0.32"
 
+[dev-dependencies]
+# Two real lampo nodes with a channel for the end-to-end swap test.
+# Path dep on the sibling crate; it never enters the release build.
+lampo-testing = { path = "../lampo-testing" }
+
 [profile.release]
 panic = "abort"

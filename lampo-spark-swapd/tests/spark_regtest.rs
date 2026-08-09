@@ -325,3 +325,159 @@ async fn spark_htlc_is_locked_and_claimed_with_the_preimage() {
 fn hex_of(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+// --- the full swap: lightning leg + spark leg joined by one hash ---
+
+use lampo_spark_swapd::engine::Engine;
+use lampo_spark_swapd::lampo_leg::LampoLeg;
+use lampo_spark_swapd::settings::Settings;
+use lampo_spark_swapd::spark_leg::SparkLeg;
+use lampo_spark_swapd::store::SwapStore;
+use lampo_spark_swapd::swap::State;
+
+/// Settings for an in-test engine. The spark side is unused here (the
+/// legs are constructed directly), so only the swap knobs matter.
+fn engine_settings(quote_expiry_secs: u64) -> Settings {
+    Settings {
+        spark_network: "regtest".to_owned(),
+        spark_seed_file: std::path::PathBuf::from("/dev/null"),
+        quote_expiry_secs,
+        spark_htlc_expiry_secs: 3600,
+        api_addr: "127.0.0.1:0".to_owned(),
+        spark_operators: Vec::new(),
+    }
+}
+
+/// Direction A, the whole thing: a Spark user pays a BOLT12 offer.
+///
+/// Two lampo nodes with a channel stand in for the swap node (S) and
+/// the merchant issuing the offer (M); two spark wallets stand in for
+/// the swap node and the paying user. The only value that crosses
+/// between lightning and spark is the payment hash. The engine drives
+/// it: fetch the offer, wait for the user's spark htlc on that hash,
+/// pay M over lightning, and claim the user's htlc with the preimage
+/// the payment revealed.
+#[tokio::test]
+#[ignore = "needs the spark operator stack and bitcoind, see the module docs"]
+async fn direction_a_full_swap_spark_to_lightning() {
+    use lampo_common::model::{request, response};
+    use lampo_testing::prelude::*;
+    use lampo_testing::LampoTesting;
+
+    init_logger();
+
+    // --- lightning side: swap node S with a channel to merchant M ---
+    let node_s = LampoTesting::tmp().await.expect("node S");
+    let node_m = std::sync::Arc::new(LampoTesting::new(node_s.btc.clone()).await.expect("node M"));
+    node_s
+        .fund_channel_with(node_m.clone(), 1_000_000)
+        .await
+        .expect("channel S -> M");
+
+    // --- spark side: the swap node's wallet and the user's wallet ---
+    let swapd_spark = std::sync::Arc::new(wallet(nonce()).await);
+    let user_spark = wallet(nonce()).await;
+
+    // The swap moves 50_000 sat == 50_000_000 msat across the two.
+    let amount_sat: u64 = 50_000;
+    let amount_msat = amount_sat * 1000;
+    fund(&user_spark, amount_sat).await;
+
+    // M issues the offer the user wants to pay.
+    let offer: response::Offer = node_m
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: Some("swap me".to_owned()),
+                amount_msat: Some(amount_msat),
+            },
+        )
+        .await
+        .expect("offer");
+
+    // Build the engine on the swap node's lampo handler and spark wallet.
+    let store_dir = std::env::temp_dir().join(format!("swapd-e2e-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store_dir);
+    let engine = std::sync::Arc::new(Engine::new(
+        LampoLeg::new(node_s.lampod()),
+        SparkLeg::new(swapd_spark.clone()),
+        SwapStore::new(store_dir).expect("store"),
+        engine_settings(90),
+    ));
+
+    // Quote: fetch M's invoice through S, pin the payment hash, and get
+    // the address the user must lock against.
+    let quote = engine
+        .quote_spark_to_ln(&offer.bolt12, None)
+        .await
+        .expect("quote");
+    assert_eq!(quote.amount_msat, amount_msat);
+
+    // The user locks their spark htlc on that hash, to the swap node.
+    use bitcoin::hashes::sha256;
+    use std::str::FromStr;
+    let receiver = spark::address::SparkAddress::from_str(&quote.spark_address).expect("addr");
+    let payment_hash = sha256::Hash::from_str(&quote.payment_hash).expect("hash");
+    user_spark
+        .create_htlc(
+            amount_sat,
+            &receiver,
+            &payment_hash,
+            std::time::Duration::from_secs(3600),
+            None,
+        )
+        .await
+        .expect("user locks the spark htlc");
+
+    // Drive the engine and wait for the swap to settle. run() reconciles
+    // on a tick: it sees the locked htlc, pays M, and claims the htlc.
+    tokio::spawn(engine.clone().run());
+
+    let mut final_state = None;
+    for _ in 0..30 {
+        if let Some(swap) = engine
+            .list()
+            .into_iter()
+            .find(|s| s.payment_hash.as_deref() == Some(&quote.payment_hash))
+        {
+            if swap.is_terminal() {
+                final_state = Some(swap.state);
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+
+    assert_eq!(
+        final_state,
+        Some(State::Done),
+        "the swap must complete; got {final_state:?}"
+    );
+
+    // The swap node now holds the user's spark funds...
+    let mut swapd_balance = 0;
+    for _ in 0..15 {
+        swapd_spark.sync().await.ok();
+        swapd_balance = swapd_spark.get_balance().await.unwrap_or(0);
+        if swapd_balance >= amount_sat {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    assert!(
+        swapd_balance >= amount_sat,
+        "the swap node must hold the claimed spark funds, has {swapd_balance}"
+    );
+
+    // ...and the merchant was paid over lightning.
+    println!(
+        "full swap complete: swap node holds {swapd_balance} sat on spark, M paid over lightning"
+    );
+}
+
+fn init_logger() {
+    let _ = std::env::var("TEST_LOG_LEVEL")
+        .ok()
+        .and_then(|level| lampo_common::logger::init(&level, None).ok());
+}
