@@ -117,19 +117,39 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     // otherwise see this payment's result -- and now its preimage and payer
     // proof too. Only accept events carrying our own payment id.
     let payment_id = hex::encode(payment_id.0);
+    let result = next_payment_event(ctx, &mut events, &payment_id).await?;
+    Ok(json::to_value(result)?)
+}
 
+/// Wait for the terminal payment event of `payment_id`, nudging the LDK
+/// event queue while waiting (see
+/// `LampoDaemon::process_pending_ldk_events`): a manually handled BOLT12
+/// invoice does not wake the background processor on its own.
+async fn next_payment_event(
+    ctx: &LampoDaemon,
+    events: &mut lampo_common::chan::UnboundedReceiver<Event>,
+    payment_id: &str,
+) -> Result<PayResult, Error> {
     // The receipt lands on `PaymentReceipt` and the hop path on the terminal
     // `PaymentEvent`, so hold the receipt until the payment finishes.
     let mut receipt: Option<(String, Option<String>)> = None;
 
     // FIXME: this will loop when the Payment event is not generated
     loop {
-        log::warn!("Waiting for payment event...");
-        let event = events.recv().await.ok_or(Error::Rpc(RpcError {
-            code: -1,
-            message: format!("No event received, communication channel dropped"),
-            data: None,
-        }))?;
+        ctx.process_pending_ldk_events().await;
+        let event = match tokio::time::timeout(std::time::Duration::from_millis(250), events.recv())
+            .await
+        {
+            Ok(Some(event)) => event,
+            Ok(None) => {
+                return Err(Error::Rpc(RpcError {
+                    code: -1,
+                    message: format!("No event received, communication channel dropped"),
+                    data: None,
+                }))
+            }
+            Err(_) => continue,
+        };
 
         match event {
             Event::Lightning(LightningEvent::PaymentReceipt {
@@ -150,17 +170,120 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
                     Some((preimage, proof)) => (Some(preimage), proof),
                     None => (None, None),
                 };
-                return Ok(json::to_value(PayResult {
+                return Ok(PayResult {
                     state,
                     path,
                     payment_hash,
                     payment_preimage,
                     payer_proof,
-                })?);
+                });
             }
             _ => {}
         }
     }
+}
+
+fn parse_payment_id(payment_id: &str) -> Result<ldk::ln::channelmanager::PaymentId, Error> {
+    Vec::<u8>::from_hex(payment_id)
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(ldk::ln::channelmanager::PaymentId)
+        .ok_or(crate::rpc_error!(
+            "`payment_id` must be a 32 byte hex string"
+        ))
+}
+
+pub async fn json_fetchinvoice(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `fetchinvoice` with request `{:?}`", request);
+    let request: request::FetchInvoice = json::from_value(request.clone())?;
+    // subscribe before firing the request so the event cannot be missed
+    let mut events = ctx.handler().events();
+    let payment_id = ctx
+        .offchain_manager()
+        .fetch_invoice_from_offer(&request.offer_str, request.amount_msat, request.payer_note)
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    let payment_id_str = payment_id.to_string();
+
+    let wait = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            // nudge the LDK event queue: `InvoiceReceived` does not
+            // wake the background processor on its own
+            ctx.process_pending_ldk_events().await;
+            let event =
+                match tokio::time::timeout(std::time::Duration::from_millis(250), events.recv())
+                    .await
+                {
+                    Ok(Some(event)) => event,
+                    Ok(None) => {
+                        return Err(crate::rpc_error!(
+                            "no event received, communication channel dropped"
+                        ))
+                    }
+                    Err(_) => continue,
+                };
+            if let Event::Lightning(LightningEvent::Bolt12InvoiceReceived {
+                payment_id,
+                payment_hash,
+                amount_msat,
+            }) = event
+            {
+                if payment_id == payment_id_str {
+                    return Ok(response::FetchInvoiceResult {
+                        payment_id,
+                        payment_hash,
+                        amount_msat,
+                    });
+                }
+            }
+        }
+    })
+    .await;
+    match wait {
+        Ok(result) => Ok(json::to_value(&result?)?),
+        Err(_) => {
+            // give the pending payment back to LDK to reap
+            let _ = ctx.offchain_manager().cancel_fetched_invoice(payment_id);
+            Err(crate::rpc_error!(
+                "timeout while waiting for the invoice, the offer issuer may be offline"
+            ))
+        }
+    }
+}
+
+pub async fn json_payfetched(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `payfetched` with request `{:?}`", request);
+    let request: request::PayFetched = json::from_value(request.clone())?;
+    let payment_id = parse_payment_id(&request.payment_id)?;
+    let mut events = ctx.handler().events();
+    ctx.offchain_manager()
+        .pay_fetched_invoice(payment_id)
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    // Same rule as `pay`: filter on our own payment id, the bus
+    // broadcasts every payment's result to every subscriber.
+    let payment_id = hex::encode(payment_id.0);
+    let result = next_payment_event(ctx, &mut events, &payment_id).await?;
+    Ok(json::to_value(result)?)
+}
+
+pub async fn json_cancelfetched(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `cancelfetched` with request `{:?}`", request);
+    let request: request::CancelFetched = json::from_value(request.clone())?;
+    let payment_id = parse_payment_id(&request.payment_id)?;
+    ctx.offchain_manager()
+        .cancel_fetched_invoice(payment_id)
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    Ok(json::to_value(&response::CancelFetchedResult {
+        payment_id: request.payment_id,
+    })?)
 }
 
 pub async fn json_holdinvoice(

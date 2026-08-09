@@ -45,6 +45,13 @@ pub enum LightningEvent {
         /// BOLT 11 and async (static invoice) payments cannot produce one.
         payer_proof: Option<String>,
     },
+    /// A BOLT12 invoice fetched from an offer has been received and
+    /// stored, waiting to be paid or cancelled.
+    Bolt12InvoiceReceived {
+        payment_id: String,
+        payment_hash: String,
+        amount_msat: u64,
+    },
     /// An incoming payment for a hold invoice arrived and its HTLCs
     /// are kept pending until it is claimed or failed.
     PaymentHeld {

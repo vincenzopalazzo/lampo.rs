@@ -10,8 +10,10 @@
 //! with the network graph. But this is not so clear yet.
 //!
 //! Author: Vincenzo Palazzo <vincenzopalazzo@member.fsf.org>
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
@@ -21,10 +23,12 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
+use lampo_common::ldk::blinded_path::message::OffersContext;
 use lampo_common::ldk::ln::channelmanager::{
     Bolt11InvoiceParameters, OptionalBolt11PaymentParams, OptionalOfferPaymentParams, PaymentId,
 };
 use lampo_common::ldk::ln::outbound_payment::{RecipientOnionFields, Retry};
+use lampo_common::ldk::offers::invoice::Bolt12Invoice;
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
@@ -35,12 +39,37 @@ use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
 use crate::utils::logger::LampoLogger;
 
+/// Why we asked the network for a BOLT12 invoice. Since lampo handles
+/// BOLT12 invoices manually (see `default_ldk_conf`), every
+/// `pay_for_offer` records its intent here and the `InvoiceReceived`
+/// handler acts on it: `Pay` is settled right away, `Fetch` stores the
+/// invoice for a later `payfetched`/`cancelfetched`, and an invoice
+/// with no recorded intent (e.g. replayed after a restart) is
+/// abandoned, never paid.
+enum Bolt12Flow {
+    Pay,
+    Fetch {
+        invoice: Option<(Bolt12Invoice, Option<OffersContext>)>,
+    },
+}
+
+/// The outcome of an `InvoiceReceived` event, decided by
+/// [`OffchainManager::on_invoice_received`].
+pub struct InvoiceReceivedOutcome {
+    /// Set when the invoice was stored by a `fetchinvoice` flow, so the
+    /// handler can notify the waiting RPC.
+    pub fetched: bool,
+    pub payment_hash: PaymentHash,
+    pub amount_msat: u64,
+}
+
 pub struct OffchainManager {
     channel_manager: Arc<LampoChannelManager>,
     keys_manager: Arc<LampoKeysManager>,
     logger: Arc<LampoLogger>,
     lampo_conf: Arc<LampoConf>,
     chain_manager: Arc<LampoChainManager>,
+    bolt12_flows: Mutex<HashMap<PaymentId, Bolt12Flow>>,
 }
 
 impl OffchainManager {
@@ -58,7 +87,30 @@ impl OffchainManager {
             logger,
             lampo_conf,
             chain_manager,
+            bolt12_flows: Mutex::new(HashMap::new()),
         })
+    }
+
+    fn entropy(&self) -> [u8; 32] {
+        self.chain_manager
+            .wallet_manager
+            .ldk_keys()
+            .keys_manager
+            .clone()
+            .get_secure_random_bytes()
+    }
+
+    /// Resolve the amount to pay for an offer, either from the offer
+    /// itself or from the caller.
+    fn offer_amount(offer: &Offer, amount_msat: Option<u64>) -> error::Result<u64> {
+        match offer.amount() {
+            Some(Amount::Bitcoin { amount_msats }) => Ok(amount_msats),
+            Some(_) => error::bail!(
+                "Cannot process non-Bitcoin-denominated offer value {:?}",
+                offer.amount()
+            ),
+            None => amount_msat.ok_or(error::anyhow!("An amount need to be specified")),
+        }
     }
 
     /// Generate an invoice with a specific amount and a specific
@@ -146,37 +198,45 @@ impl OffchainManager {
         let offer_hash = Sha256::hash(offer_str.as_bytes());
         let payment_id = PaymentId(*offer_hash.as_ref());
         let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
-
-        let amount = match offer.amount() {
-            Some(Amount::Bitcoin { amount_msats }) => amount_msats.clone(),
-            Some(_) => error::bail!(
-                "Cannot process non-Bitcoin-denominated offer value {:?}",
-                offer.amount()
-            ),
-            None => amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?,
-        };
+        let amount = Self::offer_amount(&offer, amount_msat)?;
 
         log::debug!(target: "lampo::offchain", "paying offer with amount `{}msat` & payer_note: `{}`", amount, payer_note.as_ref().unwrap_or(&"".to_string()));
-        self.channel_manager
-            .manager()
-            .pay_for_offer(
-                &offer,
-                Some(amount),
-                payment_id,
-                OptionalOfferPaymentParams {
-                    payer_note,
-                    retry_strategy: Retry::Timeout(std::time::Duration::from_secs(1)),
-                    ..Default::default()
-                },
-            )
-            .map_err(|err| error::anyhow!("{:?}", err))?;
+        // record the intent first: the `InvoiceReceived` handler pays
+        // only invoices it can attribute to a `pay` call.
+        // SAFETY: the mutex is never poisoned, we do not panic while holding it.
+        self.bolt12_flows
+            .lock()
+            .unwrap()
+            .insert(payment_id, Bolt12Flow::Pay);
+        let result = self.channel_manager.manager().pay_for_offer(
+            &offer,
+            Some(amount),
+            payment_id,
+            OptionalOfferPaymentParams {
+                payer_note,
+                retry_strategy: Retry::Timeout(std::time::Duration::from_secs(1)),
+                ..Default::default()
+            },
+        );
+        if let Err(err) = result {
+            self.bolt12_flows.lock().unwrap().remove(&payment_id);
+            error::bail!("{:?}", err);
+        }
         Ok(payment_id)
     }
 
-    pub fn pay_invoice(
+    /// Ask the offer issuer for a BOLT12 invoice *without* paying it.
+    /// The invoice arrives asynchronously via `InvoiceReceived` and is
+    /// stored until `pay_fetched_invoice` or `cancel_fetched_invoice`.
+    ///
+    /// N.B: LDK garbage collects the pending payment roughly one
+    /// minute after the invoice request goes out, so the fetched
+    /// invoice must be paid (or it expires) within that window.
+    pub fn fetch_invoice_from_offer(
         &self,
-        invoice_str: &str,
+        offer_str: &str,
         amount_msat: Option<u64>,
+        payer_note: Option<String>,
     ) -> error::Result<PaymentId> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;

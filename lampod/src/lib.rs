@@ -368,6 +368,22 @@ impl LampoDaemon {
         Ok(())
     }
 
+    /// Drive the LDK pending event queue right now.
+    ///
+    /// LDK queues `Event::InvoiceReceived` without waking the
+    /// background processor, so a manually handled BOLT12 invoice can
+    /// sit unprocessed until the processor's next idle wake (up to 30
+    /// seconds). RPCs waiting on a BOLT12 event call this to process
+    /// it promptly. Concurrent calls with the background processor are
+    /// safe: LDK guards event processing with an atomic flag and the
+    /// loser returns immediately.
+    pub async fn process_pending_ldk_events(&self) {
+        self.channel_manager()
+            .manager()
+            .process_pending_events_async(|env| self.handler_ldk_events(env))
+            .await;
+    }
+
     /// Call any method supported by the lampod configuration. This includes
     /// a lot of handler code. This function serves as a broker pattern in some ways,
     /// but it may also function as a chain of responsibility pattern in certain cases.
