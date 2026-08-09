@@ -29,7 +29,7 @@ use lampo_httpd::handler::HttpdHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
 use spark::signer::{DefaultSigner, SparkSignerAdapter};
-use spark_wallet::{SparkWalletConfig, WalletBuilder};
+use spark_wallet::{OperatorPoolConfig, SparkWalletConfig, WalletBuilder};
 
 use crate::engine::Engine;
 use crate::lampo_leg::LampoLeg;
@@ -123,8 +123,37 @@ async fn main() -> error::Result<()> {
         DefaultSigner::new(&seed, spark_network)
             .map_err(|err| error::anyhow!("spark signer: {err}"))?,
     )));
+    let mut spark_config = SparkWalletConfig::default_config(spark_network);
+    if !settings.spark_operators.is_empty() {
+        // A local regtest stack: the SDK defaults point at Lightspark's
+        // hosted operators, which a self hosted network must override.
+        let operators = settings
+            .spark_operators
+            .iter()
+            .map(|operator| {
+                SparkWalletConfig::create_operator_config(
+                    operator.id,
+                    &operator.identifier,
+                    &operator.address,
+                    operator.ca_cert.as_deref(),
+                    &operator.identity_public_key,
+                )
+                .map_err(|err| error::anyhow!("spark operator `{}`: {err}", operator.id))
+            })
+            .collect::<error::Result<Vec<_>>>()?;
+        let coordinator = operators
+            .first()
+            .map(|operator| operator.id)
+            .ok_or(error::anyhow!("no spark operators configured"))?;
+        log::info!(target: "swapd", "using {} local spark operators", operators.len());
+        spark_config.operator_pool = OperatorPoolConfig::new(coordinator, operators)
+            .map_err(|err| error::anyhow!("spark operator pool: {err}"))?;
+        spark_config
+            .validate()
+            .map_err(|err| error::anyhow!("spark config: {err}"))?;
+    }
     let spark_wallet = Arc::new(
-        WalletBuilder::new(SparkWalletConfig::default_config(spark_network), signer)
+        WalletBuilder::new(spark_config, signer)
             .build()
             .await
             .map_err(|err| error::anyhow!("spark wallet: {err}"))?,
