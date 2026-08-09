@@ -41,7 +41,7 @@ use lampo_common::{error, ldk};
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
-use crate::ln::OffchainManager;
+use crate::ln::{HoldManager, OffchainManager};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
@@ -95,6 +95,7 @@ pub struct LampoDaemon {
     inventory_manager: Option<Arc<LampoInventoryManager>>,
     wallet_manager: Arc<dyn WalletManager>,
     offchain_manager: Option<Arc<OffchainManager>>,
+    hold_manager: Option<Arc<HoldManager>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
@@ -120,6 +121,7 @@ impl LampoDaemon {
             inventory_manager: None,
             wallet_manager,
             offchain_manager: None,
+            hold_manager: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             chain_sync,
@@ -198,6 +200,17 @@ impl LampoDaemon {
         Ok(())
     }
 
+    pub fn hold_manager(&self) -> Arc<HoldManager> {
+        self.hold_manager.clone().unwrap()
+    }
+
+    pub fn init_hold_manager(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init hold manager ...");
+        let manager = HoldManager::new(self.channel_manager(), self.persister.clone())?;
+        self.hold_manager = Some(Arc::new(manager));
+        Ok(())
+    }
+
     pub fn init_peer_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampo", "init peer manager ...");
         let mut peer_manager = LampoPeerManager::new(&self.conf, self.logger.clone());
@@ -252,6 +265,7 @@ impl LampoDaemon {
         self.init_onchaind(client.clone())?;
         self.init_channeld().await?;
         self.init_offchain_manager()?;
+        self.init_hold_manager()?;
         self.init_peer_manager()?;
         self.init_inventory_manager()?;
         self.init_event_handler()?;

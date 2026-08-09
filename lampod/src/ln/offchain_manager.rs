@@ -86,6 +86,41 @@ impl OffchainManager {
         Ok(invoice)
     }
 
+    /// Generate an invoice for an external payment hash. The node does
+    /// not know the preimage, so the payment will be held when it
+    /// arrives (see `HoldManager`).
+    ///
+    /// The `min_final_cltv_expiry_delta` bounds how long (in blocks)
+    /// the payment can be held: LDK fails the pending HTLCs back
+    /// roughly 39 blocks before their expiry, so with the default
+    /// delta of 42 blocks the hold window is only ~3 blocks.
+    pub fn generate_invoice_for_hash(
+        &self,
+        payment_hash: PaymentHash,
+        amount_msat: Option<u64>,
+        description: &str,
+        expiring_in: u32,
+        min_final_cltv_expiry_delta: Option<u16>,
+    ) -> error::Result<ldk::invoice::Bolt11Invoice> {
+        let description = ldk::invoice::Bolt11InvoiceDescription::Direct(
+            ldk::invoice::Description::new(description.to_string())
+                .map_err(|err| error::anyhow!("{:?}", err))?,
+        );
+        let invoice = self
+            .channel_manager
+            .manager()
+            .create_bolt11_invoice(Bolt11InvoiceParameters {
+                amount_msats: amount_msat,
+                description,
+                invoice_expiry_delta_secs: Some(expiring_in),
+                min_final_cltv_expiry_delta,
+                payment_hash: Some(payment_hash),
+                ..Default::default()
+            })
+            .map_err(|err| error::anyhow!("{:?}", err))?;
+        Ok(invoice)
+    }
+
     pub fn decode_invoice(&self, invoice_str: &str) -> error::Result<ldk::invoice::Bolt11Invoice> {
         // FIXME: we should be able to `?` on the error right?
         let invoice = invoice_str
