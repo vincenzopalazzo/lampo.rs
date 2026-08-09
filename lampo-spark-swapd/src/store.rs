@@ -102,14 +102,16 @@ mod tests {
     use super::*;
     use crate::swap::{now, Direction, State};
 
+    /// A directory nobody else in this process will pick. Timestamps
+    /// are not enough: tests run in parallel and two of them can read
+    /// the same nanosecond, then share a store and wipe each other.
     fn tmp_dir() -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
             "swapd-store-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .subsec_nanos()
+            NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         let _ = std::fs::remove_dir_all(&dir);
         dir

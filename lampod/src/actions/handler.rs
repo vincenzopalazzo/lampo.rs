@@ -597,12 +597,6 @@ impl Handler for LampoHandler {
                     },
                 };
 
-                let payment_hash = payment_hash.map(|hash| hash.to_string());
-                if let Some(hash) = payment_hash.as_ref() {
-                    // SAFETY: the mutex is never poisoned, we do not panic
-                    // while holding it.
-                    self.sent_preimages.lock().unwrap().remove(hash);
-                }
                 let hop = LightningEvent::PaymentEvent {
                     state: PaymentState::Failure,
                     payment_id: Some(lampo_common::hex::encode(payment_id.0)),
