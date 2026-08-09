@@ -64,7 +64,6 @@ impl SwapStore {
         Ok(())
     }
 
-    #[cfg(test)]
     pub fn get(&self, id: &str) -> Option<Swap> {
         // SAFETY: the mutex is never poisoned, we do not panic while holding it.
         self.swaps.lock().unwrap().get(id).cloned()
@@ -125,6 +124,7 @@ mod tests {
             state: State::Quoted,
             amount_msat: 42_000,
             lampo_payment_id: Some("11".repeat(32)),
+            spark_transfer_id: None,
             counterparty_spark_address: None,
             offer: "lno1qq".to_owned(),
             created_at: now(),
@@ -156,7 +156,7 @@ mod tests {
         swap.payment_hash = None;
         swap.offer_id = Some("offer123".to_owned());
         swap.direction = Direction::LnToSpark;
-        swap.state = State::OfferPublished;
+        swap.state = State::HoldInvoiceIssued;
         store.persist(&swap).unwrap();
         assert!(store.find_by_offer_id("offer123").is_some());
 
