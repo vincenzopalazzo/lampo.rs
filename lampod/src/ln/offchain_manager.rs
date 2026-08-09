@@ -201,13 +201,22 @@ impl OffchainManager {
         let amount = Self::offer_amount(&offer, amount_msat)?;
 
         log::debug!(target: "lampo::offchain", "paying offer with amount `{}msat` & payer_note: `{}`", amount, payer_note.as_ref().unwrap_or(&"".to_string()));
-        // record the intent first: the `InvoiceReceived` handler pays
+        // Record the intent first: the `InvoiceReceived` handler pays
         // only invoices it can attribute to a `pay` call.
+        //
+        // The payment id of an offer is derived from the offer string, so
+        // two concurrent `pay` calls for the same offer collide. Refuse the
+        // second rather than overwrite the first: LDK would reject it as a
+        // duplicate anyway, and clearing the shared entry on that error
+        // would strand the first call's invoice as unattributable.
         // SAFETY: the mutex is never poisoned, we do not panic while holding it.
-        self.bolt12_flows
-            .lock()
-            .unwrap()
-            .insert(payment_id, Bolt12Flow::Pay);
+        {
+            let mut flows = self.bolt12_flows.lock().unwrap();
+            if flows.contains_key(&payment_id) {
+                error::bail!("a payment for this offer is already in flight");
+            }
+            flows.insert(payment_id, Bolt12Flow::Pay);
+        }
         let result = self.channel_manager.manager().pay_for_offer(
             &offer,
             Some(amount),
