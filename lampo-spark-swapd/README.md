@@ -147,10 +147,30 @@ Builds against lampo `feat/bolt12-swap-primitives` (PR #553) and
 breez/spark-sdk `8c6abb1`. State machines and the swap store are unit
 tested, and `tests/spark_regtest.rs` talks to real local operators.
 
-No swap has been executed end to end yet: that needs a funded spark
-wallet (deposit address, regtest coins, `claim_deposit`) and a second
-lampo node as the bolt12 counterparty. That is the next milestone, and
-until it passes nothing here should be trusted with money.
+No swap has been executed end to end, and it is currently blocked
+before the swap even starts: a spark wallet cannot be funded against
+locally built operators. `claim_deposit` fails with
+
+```text
+bitcoin error: invalid transaction: signed tx input has empty witness
+```
+
+raised by `verify_finalized_taproot_signature` in the sdk, which
+expects the operator to return the deposit tree transaction carrying a
+64 byte schnorr signature after server side FROST aggregation. The
+operator returns it without one.
+
+This is a version skew, not a bug here: the sdk is pinned at
+`8c6abb1` (2026-08-07) while the operators are built from
+buildonspark/spark `eaddc41` (2026-08-08), whose head commit changes
+that exact deposit signing handshake. Fixing it means pinning the
+operators to a build the sdk pin matches, moving the sdk pin forward
+to match the operators, or using Lightspark's hosted regtest with
+faucet credentials.
+
+`spark_htlc_is_locked_and_claimed_with_the_preimage` is kept as the
+reproduction. Until it passes, no swap has been demonstrated and
+nothing here should be trusted with money.
 
 Known limits, on purpose and documented in code:
 - Direction B trusted window (above).
