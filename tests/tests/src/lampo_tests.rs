@@ -269,6 +269,71 @@ pub async fn pay_offer_minimal_offer() -> error::Result<()> {
     Ok(())
 }
 
+/// Concurrent payments share the same event stream, so each caller
+/// must get back the result of the payment it actually asked for.
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn concurrent_payments_do_not_cross_results() -> error::Result<()> {
+    use std::str::FromStr;
+
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
+
+    let mut invoices = Vec::new();
+    for (i, amount) in [30_000u64, 70_000u64].iter().enumerate() {
+        let invoice: response::Invoice = node2
+            .lampod()
+            .call(
+                "invoice",
+                request::GenerateInvoice {
+                    description: format!("concurrent {i}"),
+                    amount_msat: Some(*amount),
+                    expiring_in: None,
+                },
+            )
+            .await?;
+        let hash = lampo_common::ldk::invoice::Bolt11Invoice::from_str(&invoice.bolt11)
+            .map_err(|err| error::anyhow!("{err:?}"))?
+            .payment_hash()
+            .to_string();
+        invoices.push((invoice.bolt11, hash));
+    }
+
+    let tasks: Vec<_> = invoices
+        .iter()
+        .map(|(bolt11, hash)| {
+            let payer = node1.lampod().clone();
+            let bolt11 = bolt11.clone();
+            let hash = hash.clone();
+            tokio::spawn(async move {
+                let pay: error::Result<response::PayResult> = payer
+                    .call(
+                        "pay",
+                        request::Pay {
+                            invoice_str: bolt11,
+                            amount: None,
+                            bolt12: None,
+                        },
+                    )
+                    .await;
+                (hash, pay)
+            })
+        })
+        .collect();
+
+    for task in tasks {
+        let (expected_hash, pay) = task.await?;
+        let pay = pay?;
+        assert_eq!(
+            pay.payment_hash,
+            Some(expected_hash),
+            "each caller must receive the result of its own payment"
+        );
+    }
+    Ok(())
+}
+
 #[tokio_test_shutdown_timeout::test(10)]
 pub async fn fetchinvoice_then_payfetched() -> error::Result<()> {
     init();
