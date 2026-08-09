@@ -143,3 +143,101 @@ fn parsed(conf: &LampoConf, key: &str) -> error::Result<Option<u64>> {
         .map_err(|err| error::anyhow!("`{key}` must be a number, found `{raw}`: {err}"))?;
     Ok(Some(parsed))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a real LampoConf from a lampo.conf on disk, the same way
+    /// the daemon does, so the parser is tested end to end.
+    fn conf_with(lines: &str) -> LampoConf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "swapd-settings-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("lampo.conf"),
+            format!("network=regtest\nport=19735\n{lines}\n"),
+        )
+        .unwrap();
+        LampoConf::try_from(dir.to_str().unwrap().to_owned()).unwrap()
+    }
+
+    #[test]
+    fn no_operator_lines_mean_sdk_defaults() {
+        let settings = Settings::from_lampo_conf(&conf_with("")).unwrap();
+        assert!(settings.spark_operators.is_empty());
+    }
+
+    #[test]
+    fn operator_lines_parse_in_order() {
+        let settings = Settings::from_lampo_conf(&conf_with(
+            "spark-operator=0|https://localhost:8535|02aa\n\
+             spark-operator=1|https://localhost:8536|02bb",
+        ))
+        .unwrap();
+        assert_eq!(settings.spark_operators.len(), 2);
+        let first = &settings.spark_operators[0];
+        assert_eq!(first.id, 0);
+        assert_eq!(first.address, "https://localhost:8535");
+        assert_eq!(first.identity_public_key, "02aa");
+        // operator n signs as FROST identifier n + 1
+        assert!(first.identifier.ends_with('1'));
+        assert_eq!(first.identifier.len(), 64);
+        assert!(first.ca_cert.is_none());
+    }
+
+    #[test]
+    fn a_cert_path_is_read_into_bytes() {
+        let cert = std::env::temp_dir().join(format!("swapd-cert-{}", std::process::id()));
+        std::fs::write(&cert, b"PEMISH").unwrap();
+        let settings = Settings::from_lampo_conf(&conf_with(&format!(
+            "spark-operator=0|https://localhost:8535|02aa|{}",
+            cert.display()
+        )))
+        .unwrap();
+        assert_eq!(
+            settings.spark_operators[0].ca_cert.as_deref(),
+            Some(b"PEMISH".as_slice())
+        );
+    }
+
+    #[test]
+    fn malformed_operator_lines_are_refused_loudly() {
+        // Too few fields must fail, not silently configure half an
+        // operator pool that then signs with the wrong quorum.
+        assert!(Settings::from_lampo_conf(&conf_with("spark-operator=0|onlyaddress")).is_err());
+        // and so must a non numeric id
+        assert!(Settings::from_lampo_conf(&conf_with(
+            "spark-operator=zero|https://localhost:8535|02aa"
+        ))
+        .is_err());
+        // and a cert path that does not exist
+        assert!(Settings::from_lampo_conf(&conf_with(
+            "spark-operator=0|https://localhost:8535|02aa|/definitely/not/here.crt"
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn swap_settings_read_from_the_same_file() {
+        let settings = Settings::from_lampo_conf(&conf_with(
+            "swap-quote-expiry-secs=30\nswap-htlc-expiry-secs=600\nswap-api-addr=0.0.0.0:9999",
+        ))
+        .unwrap();
+        assert_eq!(settings.quote_expiry_secs, 30);
+        assert_eq!(settings.spark_htlc_expiry_secs, 600);
+        assert_eq!(settings.api_addr, "0.0.0.0:9999");
+        // and the network falls back to the node's, mapped for spark
+        assert_eq!(settings.spark_network, "regtest");
+    }
+
+    #[test]
+    fn a_non_numeric_expiry_is_an_error() {
+        assert!(Settings::from_lampo_conf(&conf_with("swap-quote-expiry-secs=soon")).is_err());
+    }
+}
