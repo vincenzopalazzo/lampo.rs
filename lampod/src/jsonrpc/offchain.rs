@@ -121,6 +121,12 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     Ok(json::to_value(result)?)
 }
 
+/// How long `pay` waits for a payment to reach a terminal state before
+/// giving the caller an answer. A payment that takes longer than this
+/// is not failed, it is still in flight: the call gives up waiting, it
+/// does not give up on the payment.
+const PAYMENT_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Wait for the terminal payment event of `payment_id`, nudging the LDK
 /// event queue while waiting (see
 /// `LampoDaemon::process_pending_ldk_events`): a manually handled BOLT12
@@ -133,9 +139,16 @@ async fn next_payment_event(
     // The receipt lands on `PaymentReceipt` and the hop path on the terminal
     // `PaymentEvent`, so hold the receipt until the payment finishes.
     let mut receipt: Option<(String, Option<String>)> = None;
-
-    // FIXME: this will loop when the Payment event is not generated
+    let deadline = tokio::time::Instant::now() + PAYMENT_WAIT_TIMEOUT;
     loop {
+        if tokio::time::Instant::now() >= deadline {
+            // Never report this as a failure: the htlcs may still be
+            // in flight and the payment can still settle.
+            return Err(crate::rpc_error!(
+                "the payment did not reach a terminal state within {} seconds, it may still be in flight",
+                PAYMENT_WAIT_TIMEOUT.as_secs()
+            ));
+        }
         ctx.process_pending_ldk_events().await;
         let event = match tokio::time::timeout(std::time::Duration::from_millis(250), events.recv())
             .await
