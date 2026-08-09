@@ -174,20 +174,51 @@ impl FeeEstimator for LampoChainManager {
     }
 }
 
+/// How many times a failed broadcast is retried before giving up. LDK
+/// re-broadcasts pending claims on its own timer, so this only needs to
+/// cover transient backend failures (e.g. a bitcoind restart).
+const BROADCAST_ATTEMPTS: u32 = 3;
+const BROADCAST_RETRY_DELAY_SECS: u64 = 5;
+
 /// Brodcaster Interface implementation for Lampo.
 impl BroadcasterInterface for LampoChainManager {
     fn broadcast_transactions(&self, txs: &[(&Transaction, TransactionType)]) {
-        // FIXME: support brodcast_txs for multiple tx
-        // FIXME: we are missing any error in the brodcast_tx, we should
-        // fix that
-        for (tx, _) in txs.to_vec() {
-            let tx = tx.clone();
-            let backend = self.backend.clone();
-            tokio::spawn(async move {
-                let tx = tx.clone();
-                backend.brodcast_tx(&tx).await;
-            });
-        }
+        // When LDK hands over more than one transaction they form a
+        // package (a child paying for its parents, e.g. an anchor CPFP
+        // and its commitment) and must be relayed together, in order.
+        let txs: Vec<Transaction> = txs.iter().map(|(tx, _)| (*tx).clone()).collect();
+        let backend = self.backend.clone();
+        tokio::spawn(async move {
+            let txids = txs
+                .iter()
+                .map(|tx| tx.compute_txid().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            for attempt in 1..=BROADCAST_ATTEMPTS {
+                match backend.brodcast_txs(&txs).await {
+                    Ok(()) => return,
+                    Err(err) if attempt < BROADCAST_ATTEMPTS => {
+                        log::warn!(
+                            target: "lampo-chain",
+                            "broadcast of `{txids}` failed (attempt {attempt}/{BROADCAST_ATTEMPTS}): {err}"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(
+                            BROADCAST_RETRY_DELAY_SECS,
+                        ))
+                        .await;
+                    }
+                    Err(err) => {
+                        // This can be a commitment or HTLC transaction:
+                        // scream, do not whisper. LDK will retry pending
+                        // claims on its own rebroadcast timer.
+                        log::error!(
+                            target: "lampo-chain",
+                            "broadcast of `{txids}` failed after {BROADCAST_ATTEMPTS} attempts: {err}"
+                        );
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -204,8 +235,12 @@ impl UtxoLookup for LampoChainManager {
 
 #[async_trait]
 impl Backend for LampoChainManager {
-    async fn brodcast_tx(&self, tx: &Transaction) {
-        self.backend.brodcast_tx(tx).await;
+    async fn brodcast_tx(&self, tx: &Transaction) -> lampo_common::error::Result<()> {
+        self.backend.brodcast_tx(tx).await
+    }
+
+    async fn brodcast_txs(&self, txs: &[Transaction]) -> lampo_common::error::Result<()> {
+        self.backend.brodcast_txs(txs).await
     }
 
     async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {

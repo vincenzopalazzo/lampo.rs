@@ -11,6 +11,8 @@ pub enum OnChainEvent {
     NewBestBlock((Header, Height)),
     FeeEstimation(u32),
     SendRawTransaction(Transaction),
+    /// The backend definitively failed to broadcast the transaction.
+    BroadcastFailed(Txid),
     ConfirmedTransaction((Transaction, u32, Header, Height)),
     DiscardedTransaction(Txid),
     UnconfirmedTransaction(Txid),
@@ -30,6 +32,7 @@ impl Debug for OnChainEvent {
             }
             Self::NewBlock(block) => write!(f, "NewBlock({})", block.block_hash()),
             Self::SendRawTransaction(tx) => write!(f, "SendRawTransaction({})", tx.txid()),
+            Self::BroadcastFailed(txid) => write!(f, "BroadcastFailed({txid})"),
             Self::UnconfirmedTransaction(tx) => write!(f, "UnconfirmedTransaction({})", tx),
             _ => write!(f, "Debug fmt not unsupported"),
         }

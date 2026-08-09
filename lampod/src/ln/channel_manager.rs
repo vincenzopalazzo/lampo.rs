@@ -266,8 +266,12 @@ impl LampoChannelManager {
                 .await
                 .ok_or(error::anyhow!("Channel close no event received"))?;
 
-            if let Event::OnChain(OnChainEvent::SendRawTransaction(tx)) = event {
-                break Some(tx);
+            match event {
+                Event::OnChain(OnChainEvent::SendRawTransaction(tx)) => break Some(tx),
+                Event::OnChain(OnChainEvent::BroadcastFailed(txid)) => {
+                    error::bail!("funding transaction `{txid}` failed to broadcast");
+                }
+                _ => continue,
             }
         };
 

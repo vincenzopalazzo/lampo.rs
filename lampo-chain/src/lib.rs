@@ -88,6 +88,29 @@ impl LampoChainSync {
             .expect("chain monitor not set")
             .clone()
     }
+
+    fn emit_broadcast_success(&self, tx: &lampo_common::bitcoin::Transaction) {
+        if let Some(handler) = self.handler.get() {
+            handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
+        }
+    }
+
+    fn emit_broadcast_failure(&self, tx: &lampo_common::bitcoin::Transaction) {
+        if let Some(handler) = self.handler.get() {
+            handler.emit(Event::OnChain(OnChainEvent::BroadcastFailed(
+                tx.compute_txid(),
+            )));
+        }
+    }
+}
+
+/// Whether a bitcoind broadcast error means the transaction (or package)
+/// is already in the mempool or the chain, i.e. the broadcast goal is met.
+fn is_already_broadcast_error(err: &str) -> bool {
+    err.contains("already in block chain")
+        || err.contains("txn-already-in-mempool")
+        || err.contains("txn-already-known")
+        || err.contains("already known")
 }
 
 impl BlockSource for LampoChainSync {
@@ -124,19 +147,85 @@ impl Backend for LampoChainSync {
         self.rpc_client.get_best_block().await
     }
 
-    async fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
+    async fn brodcast_tx(
+        &self,
+        tx: &lampo_common::bitcoin::Transaction,
+    ) -> lampo_common::error::Result<()> {
         let resp = self
             .rpc_client
             .call_method::<json::Value>("sendrawtransaction", &[serialize_hex(tx).into()])
             .await;
-        log::info!("Broadcasting tx result: {:?}", resp);
-        if resp.is_ok() {
-            let Some(handler) = self.handler.get() else {
-                return;
-            };
-            handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
+        log::debug!(target: "lampo-chain", "broadcasting tx `{}` result: {:?}", tx.compute_txid(), resp);
+        match resp {
+            Ok(_) => {
+                self.emit_broadcast_success(tx);
+                Ok(())
+            }
+            // LDK's rebroadcast timer resends transactions that may already
+            // be in the mempool or confirmed; bitcoind rejects those with
+            // "already known"-style errors that mean the broadcast goal is
+            // achieved, not failed.
+            Err(err) if is_already_broadcast_error(&format!("{err:?}")) => {
+                self.emit_broadcast_success(tx);
+                Ok(())
+            }
+            Err(err) => {
+                self.emit_broadcast_failure(tx);
+                Err(error::anyhow!(
+                    "failed to broadcast tx `{}`: {:?}",
+                    tx.compute_txid(),
+                    err
+                ))
+            }
         }
-        // FIXME: emit the brodcast event for lampo in case of errors, just to unlock the client
+    }
+
+    async fn brodcast_txs(
+        &self,
+        txs: &[lampo_common::bitcoin::Transaction],
+    ) -> lampo_common::error::Result<()> {
+        let [_, _, ..] = txs else {
+            // Zero or one transaction: no package semantics needed.
+            if let Some(tx) = txs.first() {
+                return self.brodcast_tx(tx).await;
+            }
+            return Ok(());
+        };
+        // More than one transaction is a package (a child and its
+        // parents, e.g. an anchor CPFP paying for a low-feerate
+        // commitment): it must be submitted atomically or the parent can
+        // be rejected for paying below the mempool minimum feerate.
+        let hexes = txs
+            .iter()
+            .map(|tx| json::Value::from(serialize_hex(tx)))
+            .collect::<Vec<_>>();
+        let resp = self
+            .rpc_client
+            .call_method::<json::Value>("submitpackage", &[json::Value::from(hexes)])
+            .await;
+        log::debug!(target: "lampo-chain", "submitpackage result: {:?}", resp);
+        let err = match resp {
+            Ok(resp) => {
+                if resp.get("package_msg").and_then(|msg| msg.as_str()) == Some("success") {
+                    for tx in txs {
+                        self.emit_broadcast_success(tx);
+                    }
+                    return Ok(());
+                }
+                error::anyhow!("submitpackage rejected the package: {resp}")
+            }
+            Err(err) if is_already_broadcast_error(&format!("{err:?}")) => {
+                for tx in txs {
+                    self.emit_broadcast_success(tx);
+                }
+                return Ok(());
+            }
+            Err(err) => error::anyhow!("submitpackage failed: {err:?}"),
+        };
+        for tx in txs {
+            self.emit_broadcast_failure(tx);
+        }
+        Err(err)
     }
 
     async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {

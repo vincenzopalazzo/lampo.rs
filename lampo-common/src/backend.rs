@@ -53,7 +53,29 @@ pub trait Backend: Send + Sync {
     /// per 1000 weight units.
     async fn minimum_mempool_fee(&self) -> error::Result<u32>;
 
-    async fn brodcast_tx(&self, tx: &Transaction);
+    /// Broadcast the transaction to the network.
+    ///
+    /// Returns an error when the backend rejected or failed to relay the
+    /// transaction, so callers can retry or surface the failure. Silently
+    /// dropping a failed broadcast of a commitment or HTLC transaction can
+    /// cost funds.
+    async fn brodcast_tx(&self, tx: &Transaction) -> error::Result<()>;
+
+    /// Broadcast a set of transactions that form a single package (a
+    /// child paying for its parents), preserving order.
+    ///
+    /// LDK hands anchor CPFP transactions to the broadcaster together
+    /// with their low-feerate commitment parent: submitting them one by
+    /// one can leave the parent stuck below the mempool minimum feerate
+    /// and the child rejected for missing inputs. Backends should use a
+    /// package-aware RPC (`submitpackage`) when more than one transaction
+    /// is given.
+    async fn brodcast_txs(&self, txs: &[Transaction]) -> error::Result<()> {
+        for tx in txs {
+            self.brodcast_tx(tx).await?;
+        }
+        Ok(())
+    }
 
     async fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
 
