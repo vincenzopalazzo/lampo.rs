@@ -62,6 +62,15 @@ impl Engine {
         amount_msat: Option<u64>,
     ) -> error::Result<Quote> {
         let fetched = self.lampo.fetch_invoice(offer, amount_msat).await?;
+        // The spark leg settles in sats: reject the swap now rather than
+        // after the counterparty has locked funds against the quote.
+        if fetched.amount_msat % 1000 != 0 {
+            self.lampo.cancel_fetched(&fetched.payment_id).await.ok();
+            error::bail!(
+                "the invoice asks {}msat, which is not a whole number of sats",
+                fetched.amount_msat
+            );
+        }
         let swap = Swap {
             payment_hash: Some(fetched.payment_hash.clone()),
             offer_id: None,
@@ -90,6 +99,9 @@ impl Engine {
         spark_address: &str,
         amount_msat: u64,
     ) -> error::Result<String> {
+        if amount_msat % 1000 != 0 {
+            error::bail!("{amount_msat}msat is not a whole number of sats");
+        }
         let offer = self.lampo.create_offer(Some(amount_msat)).await?;
         let id = offer_id(&offer.bolt12)?;
         let swap = Swap {
@@ -179,6 +191,15 @@ impl Engine {
         ) else {
             error::bail!("direction B swap `{}` misses hash or address", swap.id());
         };
+        // Spark settles in sats. Truncating here would quietly short the
+        // counterparty by up to 999 msat per swap, so refuse instead.
+        if swap.amount_msat % 1000 != 0 {
+            error::bail!(
+                "swap `{}` is {}msat, which is not a whole number of sats",
+                swap.id(),
+                swap.amount_msat
+            );
+        }
         let amount_sat = swap.amount_msat / 1000;
         match self
             .spark
@@ -261,16 +282,35 @@ impl Engine {
         if pending.is_empty() {
             return Ok(());
         }
-        let claimable = self
-            .spark
-            .claimable_payment_hashes()
-            .await
-            .unwrap_or_default();
+        let claimable = self.spark.claimable_htlcs().await.unwrap_or_default();
         for mut swap in pending {
             match (&swap.direction, swap.state.clone()) {
                 (Direction::SparkToLn, State::Quoted) => {
                     let hash = swap.payment_hash.clone().unwrap_or_default();
-                    if claimable.contains(&hash) {
+                    // Anyone can lock an htlc against a quoted hash, so the
+                    // amount decides whether we pay: a short lock would have
+                    // us settle an expensive invoice and reveal the preimage
+                    // for less than we paid.
+                    let locked_sat = claimable
+                        .iter()
+                        .find(|(locked_hash, _)| locked_hash == &hash)
+                        .map(|(_, amount_sat)| *amount_sat);
+                    let expected_sat = swap.amount_msat / 1000;
+                    if let Some(locked_sat) = locked_sat {
+                        if locked_sat < expected_sat {
+                            log::error!(
+                                target: "swapd",
+                                "swap `{}` is locked with `{locked_sat}sat` but owes `{expected_sat}sat`, refusing to pay",
+                                swap.id()
+                            );
+                            swap.transition(State::Failed {
+                                reason: format!(
+                                    "spark htlc locks {locked_sat} sat, the swap needs {expected_sat} sat"
+                                ),
+                            })?;
+                            self.store.persist(&swap)?;
+                            continue;
+                        }
                         if let Err(err) = self.advance_spark_to_ln(&mut swap).await {
                             log::error!(target: "swapd", "swap `{}`: {err}", swap.id());
                         }
