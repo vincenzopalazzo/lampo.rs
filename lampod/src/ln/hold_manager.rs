@@ -292,13 +292,20 @@ impl HoldManager {
     pub fn fail(&self, payment_hash: &str) -> error::Result<Hold> {
         let payment_hash = Self::canonical_hash(payment_hash)?;
         let hash = Self::parse_hash(&payment_hash)?;
-        // Fail the HTLCs back before dropping the record: a crash in
-        // between would otherwise leave a held payment with nothing on
-        // disk to find it again.
+        // Take the record first, exactly like `claim` does. Removing it is
+        // what makes the two settlement paths mutually exclusive: without
+        // it a `holdfail` racing a `holdclaim` can fail the payer back
+        // while the claim proceeds and still reports success.
+        //
+        // The cost is a crash window: if the process dies between the take
+        // and the call below, the htlcs stay pending and LDK fails them
+        // back at the claim deadline. That refunds the payer, which is the
+        // safe direction to fail in.
+        let hold = self.store.take(&payment_hash)?;
         self.channel_manager
             .manager()
             .fail_htlc_backwards_with_reason(&hash, FailureCode::IncorrectOrUnknownPaymentDetails);
-        self.store.take(&payment_hash)
+        Ok(hold)
     }
 
     pub fn list(&self) -> Vec<Hold> {

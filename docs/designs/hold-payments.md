@@ -79,6 +79,23 @@ never ride a held HTLC into a force-close initiated by our own peer;
 the residual risk is a node that is down across the deadline, where
 the upstream peer force-closes.
 
+## Settling: claim and fail are mutually exclusive
+
+`holdclaim` and `holdfail` both remove the durable record *before*
+calling into LDK, and removal happens under a single lock. That is what
+makes them exclusive: whichever removes the record first owns the
+settlement, and the loser reports that no hold exists instead of
+issuing a contradictory second action. Without it a `holdfail` racing a
+`holdclaim` can fail the payer back while the claim proceeds and still
+reports success.
+
+The cost is a crash window. If the process dies after the record is
+removed and before the LDK call lands, the htlcs stay pending and LDK
+fails them back at the claim deadline. The payer is refunded, which is
+the safe direction to fail in, but it does mean a `holdclaim` that
+returned an error is not proof the payment was not claimed: reconcile
+against the payment, not against the hold record.
+
 ## Follow-ups
 
 - Configurable caps on concurrent holds / total held msat (griefing
