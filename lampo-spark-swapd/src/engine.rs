@@ -174,9 +174,32 @@ impl Engine {
             target: "swapd",
             "offer `{claimed_offer}` paid with `{amount_msat}msat`, hash `{payment_hash}`"
         );
+        // Deliver the amount the swap was agreed for, not the raw amount
+        // received: lightning can settle for slightly more than intended
+        // (an over-payment of a few msat is normal), and the spark leg
+        // owes only what was quoted. Any surplus stays with the swap
+        // node. Receiving *less* than agreed must never happen for a
+        // fixed-amount offer, but guard it rather than under-deliver.
+        if amount_msat < swap.amount_msat {
+            log::error!(
+                target: "swapd",
+                "offer `{claimed_offer}` underpaid: got `{amount_msat}msat`, owed `{}msat`",
+                swap.amount_msat
+            );
+            let old_id = swap.id();
+            swap.payment_hash = Some(payment_hash.to_string());
+            swap.transition(State::Failed {
+                reason: format!(
+                    "lightning paid {amount_msat} msat, less than the agreed {}",
+                    swap.amount_msat
+                ),
+            })?;
+            self.store.rekey(&old_id, &swap)?;
+            return Ok(());
+        }
         let old_id = swap.id();
         swap.payment_hash = Some(payment_hash.to_string());
-        swap.amount_msat = amount_msat;
+        // keep swap.amount_msat as the agreed amount for the spark leg
         swap.transition(State::LnReceived)?;
         self.store.rekey(&old_id, &swap)?;
         self.deliver_spark_htlc(&mut swap).await

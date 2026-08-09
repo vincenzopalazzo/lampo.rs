@@ -481,3 +481,131 @@ fn init_logger() {
         .ok()
         .and_then(|level| lampo_common::logger::init(&level, None).ok());
 }
+
+/// Direction B, the whole thing: a lightning payer funds a spark
+/// address. The swap node publishes an offer mapped to the user's
+/// spark address; the user pays it over lightning and learns the
+/// preimage; the engine, seeing the payment, creates a spark htlc to
+/// the user on the same hash; the user claims it with that preimage.
+///
+/// This is the trusted-window direction: the lightning leg settles
+/// before the spark htlc exists, so the swap node is briefly paid
+/// while still owing the htlc. The persisted swap record is what makes
+/// it deliver that debt across a restart. Closing the window fully
+/// needs an offer-hold primitive in lampo; this proves the happy path
+/// runs.
+#[tokio::test]
+#[ignore = "needs the spark operator stack and bitcoind, see the module docs"]
+async fn direction_b_full_swap_lightning_to_spark() {
+    use lampo_common::model::{request, response};
+    use lampo_testing::prelude::*;
+    use lampo_testing::LampoTesting;
+
+    init_logger();
+
+    // node S is the swap node's lightning node; node U is the user, who
+    // pays over lightning and receives on spark. U funds a channel to S
+    // so S has the inbound to receive the offer payment.
+    let node_s = std::sync::Arc::new(LampoTesting::tmp().await.expect("node S"));
+    let node_u = LampoTesting::new(node_s.btc.clone()).await.expect("node U");
+    node_u
+        .fund_channel_with(node_s.clone(), 1_000_000)
+        .await
+        .expect("channel U -> S");
+
+    // The swap node pays out on spark, so its wallet must be funded; the
+    // user receives on spark.
+    let amount_sat: u64 = 50_000;
+    let amount_msat = amount_sat * 1000;
+    let swapd_spark = std::sync::Arc::new(wallet(nonce()).await);
+    let user_spark = wallet(nonce()).await;
+    fund(&swapd_spark, amount_sat).await;
+    let user_address = user_spark
+        .get_spark_address()
+        .unwrap()
+        .to_address_string()
+        .unwrap();
+
+    let store_dir = std::env::temp_dir().join(format!("swapd-e2e-b-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store_dir);
+    let engine = std::sync::Arc::new(Engine::new(
+        LampoLeg::new(node_s.lampod()),
+        SparkLeg::new(swapd_spark.clone()),
+        SwapStore::new(store_dir).expect("store"),
+        engine_settings(90),
+    ));
+    tokio::spawn(engine.clone().run());
+
+    // Publish the offer for the user's spark address, then the user pays
+    // it and keeps the preimage its settlement reveals.
+    let offer = engine
+        .create_receive_offer(&user_address, amount_msat)
+        .await
+        .expect("receive offer");
+
+    let pay: response::PayResult = node_u
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer,
+                amount: None,
+                bolt12: None,
+            },
+        )
+        .await
+        .expect("user pays the offer");
+    assert_eq!(pay.state, response::PaymentState::Success);
+    let preimage = pay.payment_preimage.expect("preimage from settlement");
+
+    // The engine, seeing the payment, owes and creates the spark htlc.
+    let mut done = false;
+    for _ in 0..30 {
+        if engine.list().iter().any(|s| {
+            matches!(s.direction, lampo_spark_swapd::swap::Direction::LnToSpark)
+                && s.state == State::Done
+        }) {
+            done = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+    assert!(
+        done,
+        "the engine must deliver the spark htlc after the payment"
+    );
+
+    // The user claims the htlc with the preimage its lightning payment
+    // revealed, and the spark funds land.
+    let mut claimed = false;
+    for _ in 0..15 {
+        user_spark.sync().await.ok();
+        if user_spark
+            .claim_htlc(&spark::services::Preimage::from_hex(&preimage).expect("preimage"))
+            .await
+            .is_ok()
+        {
+            claimed = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    assert!(claimed, "the user must claim the delivered spark htlc");
+
+    let mut user_balance = 0;
+    for _ in 0..15 {
+        user_spark.sync().await.ok();
+        user_balance = user_spark.get_balance().await.unwrap_or(0);
+        if user_balance >= amount_sat {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    assert!(
+        user_balance >= amount_sat,
+        "the user must receive the spark funds, has {user_balance}"
+    );
+    println!(
+        "direction B complete: user received {user_balance} sat on spark for a lightning payment"
+    );
+}
