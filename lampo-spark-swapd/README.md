@@ -162,11 +162,32 @@ different commit and `claim_deposit` fails inside the sdk with
 handshake has moved. Check out that commit before `docker compose
 build`.
 
-Still not done: the *lightning* half. The bolt12 leg through a second
-lampo node, and the two legs joined by one payment hash in the swap
-engine, have not been exercised on regtest. Until that runs, the swap
-as a whole is not demonstrated and nothing here should be trusted with
-money.
+Both swap directions now run end to end on regtest, driven by the real
+engine `run()` loop:
+
+- `direction_a_full_swap_spark_to_lightning`: a spark user pays a
+  bolt12 offer. Two lampo nodes with a channel stand in for the swap
+  node and the merchant; the engine quotes the offer, waits for the
+  user's spark htlc on the invoice hash, pays the merchant over
+  lightning, and claims the htlc with the revealed preimage. Atomic
+  for both sides.
+- `direction_b_full_swap_lightning_to_spark`: a lightning payer funds
+  a spark address. The swap node publishes an offer, the user pays it
+  and learns the preimage, the engine delivers a spark htlc on the
+  same hash, and the user claims it. This is the trusted-window
+  direction (the lightning leg settles before the spark htlc exists);
+  the persisted swap record is what makes the debt survive a restart,
+  and closing the window fully still needs an offer-hold primitive in
+  lampo.
+
+The two lampo nodes run on their own bitcoind and the spark wallets on
+the operators' chain: nothing shares a chain, only the payment hash.
+
+Still not production ready: no fee policy, no leaf-denomination
+management (a deposit lands as one leaf, so partial-amount payouts are
+limited), the direction B trust window above, and the crash-window
+idempotency gaps noted in the code. But the swap itself is now
+demonstrated in both directions, not argued.
 
 Known limits, on purpose and documented in code:
 - Direction B trusted window (above).
