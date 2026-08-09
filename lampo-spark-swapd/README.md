@@ -147,30 +147,26 @@ Builds against lampo `feat/bolt12-swap-primitives` (PR #553) and
 breez/spark-sdk `8c6abb1`. State machines and the swap store are unit
 tested, and `tests/spark_regtest.rs` talks to real local operators.
 
-No swap has been executed end to end, and it is currently blocked
-before the swap even starts: a spark wallet cannot be funded against
-locally built operators. `claim_deposit` fails with
+The spark half of a swap now runs end to end on regtest:
+`spark_htlc_is_locked_and_claimed_with_the_preimage` funds a wallet
+from the chain, locks a hash-locked htlc, and a second wallet claims
+it with the preimage, with the balance landing on the far side. That
+is the first execution of any swap machinery against a real Spark
+network.
 
-```text
-bitcoin error: invalid transaction: signed tx input has empty witness
-```
+The operator build **must match the sdk pin**. breez/spark-sdk's own
+itest Dockerfile pins buildonspark/spark at
+`e8ceff40979d27c1c19e31899901b7b47bd591bc`; build the operators from a
+different commit and `claim_deposit` fails inside the sdk with
+"signed tx input has empty witness", because the deposit signing
+handshake has moved. Check out that commit before `docker compose
+build`.
 
-raised by `verify_finalized_taproot_signature` in the sdk, which
-expects the operator to return the deposit tree transaction carrying a
-64 byte schnorr signature after server side FROST aggregation. The
-operator returns it without one.
-
-This is a version skew, not a bug here: the sdk is pinned at
-`8c6abb1` (2026-08-07) while the operators are built from
-buildonspark/spark `eaddc41` (2026-08-08), whose head commit changes
-that exact deposit signing handshake. Fixing it means pinning the
-operators to a build the sdk pin matches, moving the sdk pin forward
-to match the operators, or using Lightspark's hosted regtest with
-faucet credentials.
-
-`spark_htlc_is_locked_and_claimed_with_the_preimage` is kept as the
-reproduction. Until it passes, no swap has been demonstrated and
-nothing here should be trusted with money.
+Still not done: the *lightning* half. The bolt12 leg through a second
+lampo node, and the two legs joined by one payment hash in the swap
+engine, have not been exercised on regtest. Until that runs, the swap
+as a whole is not demonstrated and nothing here should be trusted with
+money.
 
 Known limits, on purpose and documented in code:
 - Direction B trusted window (above).

@@ -38,6 +38,19 @@ const OPERATORS: [(usize, &str, &str); 3] = [
 /// Where the certs were copied out of the containers to.
 const TLS_DIR: &str = "/tmp/spark-tls";
 
+/// 32 fresh bytes from the OS. Operator state persists across runs in
+/// the postgres volume, so wallet seeds and preimages must be unique
+/// per run or a second run collides on an already-used payment hash.
+fn nonce() -> [u8; 32] {
+    use std::io::Read;
+    let mut bytes = [0u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .unwrap()
+        .read_exact(&mut bytes)
+        .unwrap();
+    bytes
+}
+
 fn local_config() -> SparkWalletConfig {
     let mut config = SparkWalletConfig::default_config(Network::Regtest);
     let operators = OPERATORS
@@ -165,17 +178,14 @@ async fn fund(wallet: &SparkWallet, amount_sat: u64) {
         .await
         .expect("deposit address");
     let address = deposit.address.to_string();
-    // Let the operators register and start watching the address before
-    // the funding transaction appears in a block, otherwise the
-    // chainwatcher has nothing to match it against.
-    mine(1);
-    tokio::time::sleep(std::time::Duration::from_secs(4)).await;
 
+    // Fund and claim while unconfirmed, then confirm -- the order the
+    // sdk's own itest helper uses. The operators register the address
+    // at generation time, so the deposit is claimable straight from
+    // the mempool; pre-mining it instead moves it into on-chain
+    // deposit processing and the claim path stops working.
     let btc = format!("{:.8}", amount_sat as f64 / 100_000_000.0);
     let txid = bitcoin_cli(&["sendtoaddress", &address, &btc]);
-    // The operators only credit a deposit once it is buried.
-    mine(6);
-    tokio::time::sleep(std::time::Duration::from_secs(6)).await;
 
     let raw = bitcoin_cli(&["getrawtransaction", &txid]);
     let tx: bitcoin::Transaction =
@@ -186,76 +196,73 @@ async fn fund(wallet: &SparkWallet, amount_sat: u64) {
         .position(|out| out.script_pubkey == deposit.address.script_pubkey())
         .expect("the deposit output must be in the transaction") as u32;
 
-    // The chainwatcher polls, so the deposit is not claimable instantly.
-    let mut claimed = None;
+    let leaves = wallet
+        .claim_deposit(tx, vout)
+        .await
+        .expect("the deposit must be claimable");
+    assert!(!leaves.is_empty(), "claiming yielded no leaves");
+
+    // A freshly claimed deposit leaf sits in "creating" status until the
+    // operators confirm the funding tx on chain and move it to
+    // available. Mine to confirm, then `sync` to pull the refreshed tree
+    // rather than waiting on the event stream, which is the fallback the
+    // sdk itself documents on `sync`.
     for _ in 0..30 {
-        match wallet.claim_deposit(tx.clone(), vout).await {
-            Ok(leaves) => {
-                claimed = Some(leaves);
-                break;
-            }
-            Err(err) => {
-                let err = err.to_string();
-                if err.contains("already used") {
-                    panic!("the deposit address was consumed by a failed attempt: {err}");
-                }
-                log_wait(&format!("deposit not claimable yet: {err}"));
-                mine(1);
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            }
+        mine(1);
+        wallet.sync().await.ok();
+        if wallet.get_balance().await.unwrap_or(0) >= amount_sat {
+            return;
         }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
-    assert!(claimed.is_some(), "the deposit was never claimable");
+    panic!("the claimed deposit never became spendable balance");
 }
 
 fn log_wait(message: &str) {
     println!("  ... {message}");
 }
 
-/// The spark half of a swap, end to end: one wallet locks funds behind
-/// a payment hash, the other sees the pending htlc and takes it with
-/// the preimage. This is exactly what the swap engine does once the
-/// lightning leg reveals that preimage.
+/// The spark half of a swap, end to end, against local operators: one
+/// wallet is funded from the regtest chain, locks a hash-locked htlc,
+/// and the other wallet claims it with the preimage. This is exactly
+/// what the swap engine does once the lightning leg reveals that
+/// preimage, and it is the first execution of any swap machinery
+/// against a real Spark network.
 ///
-/// KNOWN BLOCKED. It does not reach the htlc: funding fails first,
-/// with
-///
-/// ```text
-/// bitcoin error: invalid transaction: signed tx input has empty witness
-/// ```
-///
-/// which comes from `verify_finalized_taproot_signature` in the sdk,
-/// not from us and not from the operators. The sdk checks the tx the
-/// operator returns after server side FROST aggregation and wants a 64
-/// byte schnorr signature in the witness; the operator returned none.
-///
-/// That is a version skew: breez/spark-sdk is pinned at `8c6abb1`
-/// (2026-08-07) and the operators here were built from
-/// buildonspark/spark `eaddc41` (2026-08-08), whose newest commit is
-/// "bind deposit finalize decision to prepare", a change to exactly
-/// this deposit signing handshake. Resolving it means pinning the
-/// operators to a build the sdk pin was written against, or moving the
-/// sdk pin forward, and neither is guesswork worth doing blind.
-///
-/// Kept as the reproduction: it names the wall the swap is behind.
+/// Getting here required matching the operator build to the sdk pin
+/// (see the README) and learning three things about the flow: a
+/// deposit is claimed from the mempool and only becomes spendable
+/// after a confirmation plus a `sync`; a deposit lands as one leaf, so
+/// the whole balance is locked rather than a partial amount; and both
+/// the funded balance and the claimed balance settle after a `sync`,
+/// not instantly.
 #[tokio::test]
-#[ignore = "blocked on an sdk/operator version skew, see the doc comment"]
+#[ignore = "needs the spark operator stack, see the module docs"]
 async fn spark_htlc_is_locked_and_claimed_with_the_preimage() {
     use bitcoin::hashes::{sha256, Hash as _};
 
-    let sender = wallet([21u8; 32]).await;
-    let receiver = wallet([22u8; 32]).await;
+    let mut sender_seed = nonce();
+    let mut receiver_seed = nonce();
+    // keep them distinct even in the astronomically unlikely tie
+    sender_seed[0] ^= 0x01;
+    receiver_seed[0] ^= 0x02;
+    let sender = wallet(sender_seed).await;
+    let receiver = wallet(receiver_seed).await;
 
     fund(&sender, 100_000).await;
     let sender_start = sender.get_balance().await.expect("sender balance");
     assert!(sender_start > 0, "funding must land before the swap");
     let receiver_start = receiver.get_balance().await.expect("receiver balance");
 
-    let preimage = [42u8; 32];
+    let preimage = nonce();
     let payment_hash = sha256::Hash::hash(&preimage);
     let receiver_address = receiver.get_spark_address().expect("receiver address");
 
-    let amount_sat = 10_000;
+    // A deposit lands as a single leaf, and create_htlc cannot mint
+    // change from it, so lock the whole balance. Splitting into partial
+    // amounts is a leaf-optimization concern the swap does not need to
+    // prove here.
+    let amount_sat = sender_start;
     let transfer = sender
         .create_htlc(
             amount_sat,
@@ -272,6 +279,7 @@ async fn spark_htlc_is_locked_and_claimed_with_the_preimage() {
     // swap engine learns its counterparty has locked up.
     let mut seen = false;
     for _ in 0..20 {
+        receiver.sync().await.ok();
         let claimable = receiver
             .list_claimable_htlc_transfers(None)
             .await
@@ -296,12 +304,22 @@ async fn spark_htlc_is_locked_and_claimed_with_the_preimage() {
         .await
         .expect("the preimage must settle the htlc");
 
-    let receiver_end = receiver.get_balance().await.expect("receiver balance");
+    // The claimed leaf lands after a sync, same as any received transfer.
+    let mut receiver_end = receiver_start;
+    for _ in 0..15 {
+        receiver.sync().await.ok();
+        receiver_end = receiver.get_balance().await.expect("receiver balance");
+        if receiver_end >= receiver_start + amount_sat {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
     assert_eq!(
         receiver_end,
         receiver_start + amount_sat,
         "the claimed amount must land in the receiver's balance"
     );
+    println!("swap complete: receiver now holds {receiver_end} sat");
 }
 
 fn hex_of(bytes: &[u8]) -> String {
