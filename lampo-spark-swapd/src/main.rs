@@ -44,7 +44,11 @@ struct Args {
     /// `lampo.conf`. Swap settings are read from that same file.
     #[arg(long)]
     data_dir: Option<String>,
-    #[arg(long, default_value = "testnet")]
+    /// Lampo network. Spark rides on mainnet and regtest only, so the
+    /// default is regtest rather than lampo's own testnet default: a
+    /// daemon started with no flags should come up, not fail on the
+    /// spark leg.
+    #[arg(long, default_value = "regtest")]
     network: String,
 }
 

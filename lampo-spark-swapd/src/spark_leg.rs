@@ -54,10 +54,11 @@ impl SparkLeg {
         Ok(())
     }
 
-    /// Payment hashes of every incoming HTLC currently waiting on a
-    /// preimage from us. Direction A polls this to learn the
-    /// counterparty locked their leg.
-    pub async fn claimable_payment_hashes(&self) -> error::Result<Vec<String>> {
+    /// Every incoming HTLC currently waiting on a preimage from us,
+    /// as `(payment hash, amount in sats)`. The amount is not optional:
+    /// a counterparty can lock *any* amount against a quoted hash, so
+    /// the caller must check it before paying the other leg.
+    pub async fn claimable_htlcs(&self) -> error::Result<Vec<(String, u64)>> {
         let transfers = self
             .wallet
             .list_claimable_htlc_transfers(None)
@@ -66,9 +67,10 @@ impl SparkLeg {
         Ok(transfers
             .into_iter()
             .filter_map(|transfer| {
+                let amount_sat = transfer.total_value_sat;
                 transfer
                     .htlc_preimage_request
-                    .map(|request| request.payment_hash.to_string())
+                    .map(|request| (request.payment_hash.to_string(), amount_sat))
             })
             .collect())
     }
