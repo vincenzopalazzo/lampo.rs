@@ -70,6 +70,72 @@ impl LampoLeg {
         Ok(())
     }
 
+    /// Issue a hold invoice on a payment hash *the counterparty chose*.
+    /// We cannot settle it: only they know the preimage. That is the
+    /// whole point, it is what makes the receive direction atomic.
+    ///
+    /// `min_final_cltv_expiry_delta` bounds how long the payment can be
+    /// held, and must leave room for the spark leg to expire first.
+    pub async fn hold_invoice(
+        &self,
+        payment_hash: &str,
+        amount_msat: u64,
+        min_final_cltv_expiry_delta: u16,
+        expiring_in: u32,
+    ) -> error::Result<response::HoldInvoiceResult> {
+        self.handler
+            .call(
+                "holdinvoice",
+                request::HoldInvoice {
+                    payment_hash: payment_hash.to_owned(),
+                    amount_msat: Some(amount_msat),
+                    description: "lampo-spark-swapd".to_owned(),
+                    expiring_in: Some(expiring_in),
+                    min_final_cltv_expiry_delta: Some(min_final_cltv_expiry_delta),
+                },
+            )
+            .await
+    }
+
+    /// Settle a held payment with the preimage the counterparty
+    /// revealed by claiming their spark htlc.
+    pub async fn hold_claim(&self, preimage: &str) -> error::Result<()> {
+        let _: response::HoldClaimResult = self
+            .handler
+            .call(
+                "holdclaim",
+                request::HoldClaim {
+                    payment_preimage: preimage.to_owned(),
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Give a held payment back to the payer.
+    pub async fn hold_fail(&self, payment_hash: &str) -> error::Result<()> {
+        let _: response::HoldFailResult = self
+            .handler
+            .call(
+                "holdfail",
+                request::HoldFail {
+                    payment_hash: payment_hash.to_owned(),
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// The holds the node knows about, so the engine can reconcile
+    /// against the node rather than trusting its own record alone.
+    pub async fn list_holds(&self) -> error::Result<Vec<response::Hold>> {
+        let holds: response::ListHoldsResult = self
+            .handler
+            .call("listholds", request::ListHolds {})
+            .await?;
+        Ok(holds.holds)
+    }
+
     /// Publish a fresh BOLT12 offer of ours (Direction B entry point).
     pub async fn create_offer(&self, amount_msat: Option<u64>) -> error::Result<response::Offer> {
         self.handler

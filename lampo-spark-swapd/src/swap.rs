@@ -28,14 +28,16 @@ pub enum State {
     Claiming,
 
     // --- Direction B: LN -> Spark ---
-    /// The offer is published; waiting for a payer.
-    OfferPublished,
-    /// The lightning payment settled (the payer holds the preimage
-    /// now); we owe the counterparty a Spark HTLC on the same hash.
-    LnReceived,
-    /// The Spark HTLC to the counterparty exists; they claim it with
-    /// the preimage their payment revealed.
-    SparkHtlcCreated,
+    /// A hold invoice on the counterparty's payment hash has been
+    /// issued. We cannot settle it: only they know the preimage.
+    HoldInvoiceIssued,
+    /// Their payment arrived and its htlcs are held, not settled. We
+    /// owe them a Spark HTLC on the same hash before we can take it.
+    LnHeld,
+    /// The Spark HTLC is locked to them. When they claim it they
+    /// reveal the preimage, which is what lets us settle the held
+    /// lightning payment. Until then neither side has moved.
+    SparkHtlcLocked,
 
     // --- Terminal ---
     Done,
@@ -57,6 +59,10 @@ pub struct Swap {
     pub amount_msat: u64,
     /// Direction A: the payment id handle for `payfetched`.
     pub lampo_payment_id: Option<String>,
+    /// Direction B: the Spark transfer we owe, chosen *before* the
+    /// transfer is created so a retry after a crash reuses the same id
+    /// instead of paying a second time.
+    pub spark_transfer_id: Option<String>,
     /// Direction B: where the Spark HTLC goes. Direction A: unused.
     pub counterparty_spark_address: Option<String>,
     /// The BOLT12 offer string (theirs in A, ours in B).
@@ -90,12 +96,12 @@ impl Swap {
                 | (LnPaying, Failed { .. })
                 | (Claiming, Done)
                 | (Claiming, Failed { .. })
-                | (OfferPublished, LnReceived)
-                | (OfferPublished, Failed { .. })
-                | (LnReceived, SparkHtlcCreated)
-                | (LnReceived, Failed { .. })
-                | (SparkHtlcCreated, Done)
-                | (SparkHtlcCreated, Failed { .. })
+                | (HoldInvoiceIssued, LnHeld)
+                | (HoldInvoiceIssued, Failed { .. })
+                | (LnHeld, SparkHtlcLocked)
+                | (LnHeld, Failed { .. })
+                | (SparkHtlcLocked, Done)
+                | (SparkHtlcLocked, Failed { .. })
         );
         if !ok {
             error::bail!(
@@ -130,6 +136,7 @@ mod tests {
             state,
             amount_msat: 1_000,
             lampo_payment_id: None,
+            spark_transfer_id: None,
             counterparty_spark_address: None,
             offer: "lno1...".to_owned(),
             created_at: now(),
@@ -148,9 +155,9 @@ mod tests {
 
     #[test]
     fn direction_b_happy_path() {
-        let mut s = swap(Direction::LnToSpark, State::OfferPublished);
-        s.transition(State::LnReceived).unwrap();
-        s.transition(State::SparkHtlcCreated).unwrap();
+        let mut s = swap(Direction::LnToSpark, State::HoldInvoiceIssued);
+        s.transition(State::LnHeld).unwrap();
+        s.transition(State::SparkHtlcLocked).unwrap();
         s.transition(State::Done).unwrap();
     }
 
@@ -158,8 +165,8 @@ mod tests {
     fn skipping_states_is_rejected() {
         let mut s = swap(Direction::SparkToLn, State::Quoted);
         assert!(s.transition(State::Done).is_err());
-        let mut s = swap(Direction::LnToSpark, State::OfferPublished);
-        assert!(s.transition(State::SparkHtlcCreated).is_err());
+        let mut s = swap(Direction::LnToSpark, State::HoldInvoiceIssued);
+        assert!(s.transition(State::SparkHtlcLocked).is_err());
     }
 
     #[test]
@@ -181,9 +188,9 @@ mod tests {
             State::Quoted,
             State::LnPaying,
             State::Claiming,
-            State::OfferPublished,
-            State::LnReceived,
-            State::SparkHtlcCreated,
+            State::HoldInvoiceIssued,
+            State::LnHeld,
+            State::SparkHtlcLocked,
         ] {
             let direction = match state {
                 State::Quoted | State::LnPaying | State::Claiming => Direction::SparkToLn,

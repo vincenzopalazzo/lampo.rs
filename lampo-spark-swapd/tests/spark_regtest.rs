@@ -482,30 +482,28 @@ fn init_logger() {
         .and_then(|level| lampo_common::logger::init(&level, None).ok());
 }
 
-/// Direction B, the whole thing: a lightning payer funds a spark
-/// address. The swap node publishes an offer mapped to the user's
-/// spark address; the user pays it over lightning and learns the
-/// preimage; the engine, seeing the payment, creates a spark htlc to
-/// the user on the same hash; the user claims it with that preimage.
+/// Direction B, the whole thing, and now *atomic*: a lightning payer
+/// funds a spark address without ever trusting the swap node.
 ///
-/// This is the trusted-window direction: the lightning leg settles
-/// before the spark htlc exists, so the swap node is briefly paid
-/// while still owing the htlc. The persisted swap record is what makes
-/// it deliver that debt across a restart. Closing the window fully
-/// needs an offer-hold primitive in lampo; this proves the happy path
-/// runs.
+/// The user generates the preimage and hands over only its hash. The
+/// swap node issues a hold invoice on that hash, so it physically
+/// cannot settle the lightning leg on its own. The user pays; the
+/// payment is held, not settled. The swap node delivers a spark htlc on
+/// the same hash. The user claims it with their preimage, and only that
+/// reveal lets the swap node take the lightning payment.
+///
+/// Neither side can move alone: if the user never claims, the spark
+/// htlc refunds and the held payment goes back to them.
 #[tokio::test]
 #[ignore = "needs the spark operator stack and bitcoind, see the module docs"]
 async fn direction_b_full_swap_lightning_to_spark() {
+    use bitcoin::hashes::{sha256, Hash as _};
     use lampo_common::model::{request, response};
     use lampo_testing::prelude::*;
     use lampo_testing::LampoTesting;
 
     init_logger();
 
-    // node S is the swap node's lightning node; node U is the user, who
-    // pays over lightning and receives on spark. U funds a channel to S
-    // so S has the inbound to receive the offer payment.
     let node_s = std::sync::Arc::new(LampoTesting::tmp().await.expect("node S"));
     let node_u = LampoTesting::new(node_s.btc.clone()).await.expect("node U");
     node_u
@@ -513,8 +511,6 @@ async fn direction_b_full_swap_lightning_to_spark() {
         .await
         .expect("channel U -> S");
 
-    // The swap node pays out on spark, so its wallet must be funded; the
-    // user receives on spark.
     let amount_sat: u64 = 50_000;
     let amount_msat = amount_sat * 1000;
     let swapd_spark = std::sync::Arc::new(wallet(nonce()).await);
@@ -526,6 +522,11 @@ async fn direction_b_full_swap_lightning_to_spark() {
         .to_address_string()
         .unwrap();
 
+    // The user's secret. The swap node only ever sees the hash.
+    let preimage = nonce();
+    let payment_hash = sha256::Hash::hash(&preimage).to_string();
+    let preimage_hex = hex_of(&preimage);
+
     let store_dir = std::env::temp_dir().join(format!("swapd-e2e-b-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&store_dir);
     let engine = std::sync::Arc::new(Engine::new(
@@ -536,52 +537,64 @@ async fn direction_b_full_swap_lightning_to_spark() {
     ));
     tokio::spawn(engine.clone().run());
 
-    // Publish the offer for the user's spark address, then the user pays
-    // it and keeps the preimage its settlement reveals.
-    let offer = engine
-        .create_receive_offer(&user_address, amount_msat)
+    let invoice = engine
+        .create_hold_swap(&user_address, amount_msat, &payment_hash)
         .await
-        .expect("receive offer");
+        .expect("hold swap");
 
-    let pay: response::PayResult = node_u
-        .lampod()
-        .call(
-            "pay",
-            request::Pay {
-                invoice_str: offer,
-                amount: None,
-                bolt12: None,
-            },
-        )
-        .await
-        .expect("user pays the offer");
-    assert_eq!(pay.state, response::PaymentState::Success);
-    let preimage = pay.payment_preimage.expect("preimage from settlement");
+    // The same hash must never back a second swap.
+    assert!(
+        engine
+            .create_hold_swap(&user_address, amount_msat, &payment_hash)
+            .await
+            .is_err(),
+        "a reused payment hash must be refused"
+    );
 
-    // The engine, seeing the payment, owes and creates the spark htlc.
-    let mut done = false;
+    // The user pays. This call blocks until the payment resolves, and it
+    // cannot resolve until we settle, so drive it in the background.
+    let payer = node_u.lampod().clone();
+    let pay_task = tokio::spawn(async move {
+        payer
+            .call::<request::Pay, response::PayResult>(
+                "pay",
+                request::Pay {
+                    invoice_str: invoice,
+                    amount: None,
+                    bolt12: None,
+                },
+            )
+            .await
+    });
+
+    // The engine sees the held payment and delivers the spark htlc.
+    let mut delivered = false;
     for _ in 0..30 {
-        if engine.list().iter().any(|s| {
-            matches!(s.direction, lampo_spark_swapd::swap::Direction::LnToSpark)
-                && s.state == State::Done
-        }) {
-            done = true;
+        if engine
+            .list()
+            .iter()
+            .any(|s| s.state == State::SparkHtlcLocked)
+        {
+            delivered = true;
             break;
         }
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
+    assert!(delivered, "the engine must deliver the spark htlc");
+
+    // Crucially: the lightning payment is still HELD, not settled. The
+    // swap node has delivered but has not been paid.
     assert!(
-        done,
-        "the engine must deliver the spark htlc after the payment"
+        !pay_task.is_finished(),
+        "the lightning payment must still be held before the user claims"
     );
 
-    // The user claims the htlc with the preimage its lightning payment
-    // revealed, and the spark funds land.
+    // The user claims with their preimage, which reveals it.
     let mut claimed = false;
     for _ in 0..15 {
         user_spark.sync().await.ok();
         if user_spark
-            .claim_htlc(&spark::services::Preimage::from_hex(&preimage).expect("preimage"))
+            .claim_htlc(&spark::services::Preimage::from_hex(&preimage_hex).expect("preimage"))
             .await
             .is_ok()
         {
@@ -591,6 +604,14 @@ async fn direction_b_full_swap_lightning_to_spark() {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     assert!(claimed, "the user must claim the delivered spark htlc");
+
+    // Only now can the swap node settle, and the payer's call returns.
+    let pay = tokio::time::timeout(std::time::Duration::from_secs(60), pay_task)
+        .await
+        .expect("the held payment must settle once the preimage is revealed")
+        .expect("join")
+        .expect("pay");
+    assert_eq!(pay.state, response::PaymentState::Success);
 
     let mut user_balance = 0;
     for _ in 0..15 {
@@ -605,7 +626,5 @@ async fn direction_b_full_swap_lightning_to_spark() {
         user_balance >= amount_sat,
         "the user must receive the spark funds, has {user_balance}"
     );
-    println!(
-        "direction B complete: user received {user_balance} sat on spark for a lightning payment"
-    );
+    println!("direction B complete, atomically: user received {user_balance} sat on spark");
 }

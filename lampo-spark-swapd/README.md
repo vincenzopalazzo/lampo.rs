@@ -39,22 +39,26 @@ Mind the clock: LDK reaps a fetched-but-unpaid invoice after roughly a
 minute, so the Spark HTLC must be locked inside the quote window
 (default 45s). An expired quote fails cleanly and can be re-requested.
 
-### Direction B — receive on Spark through a BOLT12 offer (trusted window)
+### Direction B — receive on Spark, atomically
 
-1. `POST /v1/swap/in {spark_address, amount_msat}` — the daemon
-   publishes a fresh offer and maps it to the Spark address.
-2. A payer pays the offer. BOLT12 generates the preimage inside the
-   receiving node, so the lightning leg settles first — this is the
-   trusted window: the payer already holds the preimage (their proof
-   of payment), and the daemon now *owes* the Spark HTLC.
-3. The engine locks the Spark HTLC on the same hash; the counterparty
-   claims it with the preimage from step 2. The swap store persists the
-   debt, so a crash between 2 and 3 is repaid at restart.
+1. `POST /v1/swap/in {spark_address, amount_msat, payment_hash}` — the
+   caller generates a preimage and sends only its **hash**. The daemon
+   issues a **hold invoice** on that hash, so it cannot settle the
+   lightning leg on its own.
+2. The caller pays the invoice. The payment is *held*, not settled:
+   the daemon has delivered nothing and been paid nothing.
+3. The engine locks a Spark HTLC to them on the same hash.
+4. They claim it with their preimage. That reveal is the only thing
+   that lets the daemon settle the held payment.
 
-Closing the trusted window needs an "offer hold" primitive in lampo
-(hold the `PaymentClaimable` of an offer payment the way `holdinvoice`
-holds external-hash payments) — planned follow-up, tracked in the
-design docs.
+Neither side can move alone. If they never claim, the Spark HTLC
+refunds to the daemon and the held payment goes back to them.
+
+Because the daemon settles *last*, the lightning hold must outlive the
+Spark HTLC; the invoice's final CLTV is derived from the Spark expiry
+plus `LN_HOLD_MARGIN_SECS`. Direction A is the mirror: the daemon
+claims last there, so it refuses to pay unless the counterparty's lock
+leaves at least `CLAIM_MARGIN_SECS`.
 
 ## State machines
 
@@ -172,22 +176,27 @@ engine `run()` loop:
   lightning, and claims the htlc with the revealed preimage. Atomic
   for both sides.
 - `direction_b_full_swap_lightning_to_spark`: a lightning payer funds
-  a spark address. The swap node publishes an offer, the user pays it
-  and learns the preimage, the engine delivers a spark htlc on the
-  same hash, and the user claims it. This is the trusted-window
-  direction (the lightning leg settles before the spark htlc exists);
-  the persisted swap record is what makes the debt survive a restart,
-  and closing the window fully still needs an offer-hold primitive in
-  lampo.
+  a spark address atomically. The user keeps the preimage and sends
+  only the hash; the test asserts the lightning payment is **still
+  held** after the spark htlc is delivered, which is the property the
+  whole direction rests on, and that a reused payment hash is refused.
 
 The two lampo nodes run on their own bitcoind and the spark wallets on
 the operators' chain: nothing shares a chain, only the payment hash.
 
-Still not production ready: no fee policy, no leaf-denomination
-management (a deposit lands as one leaf, so partial-amount payouts are
-limited), the direction B trust window above, and the crash-window
-idempotency gaps noted in the code. But the swap itself is now
-demonstrated in both directions, not argued.
+Still not production ready. The protocol-level gaps are closed: both
+directions are atomic, a payment hash backs exactly one swap, the
+Spark transfer id is chosen and persisted before the transfer is sent
+so a retry cannot deliver twice, the two legs' expiries are derived
+from each other rather than set independently, and over- and
+under-payment are both refused with a hard cap.
+
+What remains is economic and operational rather than protocol: there
+is no fee policy (quotes are pass-through, so lightning routing fees
+come out of the daemon's own pocket), no leaf-denomination management
+(a deposit lands as a single leaf, which limits partial-amount
+payouts), and the Direction A recovery paths for a crash mid-payment
+still ask for manual review rather than resolving themselves.
 
 Known limits, on purpose and documented in code:
 - Direction B trusted window (above).

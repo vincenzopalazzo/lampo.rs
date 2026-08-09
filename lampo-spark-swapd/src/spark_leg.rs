@@ -1,16 +1,26 @@
 //! The Spark leg: a thin wrapper over `SparkWallet`. Only payment
-//! hashes, amounts and addresses cross this boundary — the engine
-//! never sees Spark protocol types.
+//! hashes, amounts, addresses and expiries cross this boundary — the
+//! engine never sees Spark protocol types.
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use bitcoin::hashes::sha256;
 
 use lampo_common::error;
 use spark::address::SparkAddress;
 use spark::services::Preimage;
-use spark_wallet::SparkWallet;
+use spark_wallet::{ListTransfersRequest, SparkWallet, TransferId};
+
+/// An incoming HTLC waiting on a preimage from us.
+#[derive(Debug, Clone)]
+pub struct ClaimableHtlc {
+    pub payment_hash: String,
+    pub amount_sat: u64,
+    /// When the lock releases back to the sender. The engine must not
+    /// pay the other leg unless this leaves room to claim afterwards.
+    pub expiry: SystemTime,
+}
 
 pub struct SparkLeg {
     wallet: Arc<SparkWallet>,
@@ -21,22 +31,29 @@ impl SparkLeg {
         Self { wallet }
     }
 
-    /// Lock a Spark HTLC to `receiver` on `payment_hash_hex`
-    /// (Direction B: we pay the counterparty once the LN leg settled).
+    /// Lock a Spark HTLC to `receiver` on `payment_hash_hex`.
+    ///
+    /// `transfer_id` is the idempotency key and is not optional by
+    /// accident: the caller persists it *before* calling, so a retry
+    /// after a crash reuses the same id and Spark refuses to create a
+    /// second transfer instead of paying twice.
     pub async fn create_htlc(
         &self,
         amount_sat: u64,
         receiver: &str,
         payment_hash_hex: &str,
         expiry: Duration,
+        transfer_id: &str,
     ) -> error::Result<String> {
         let receiver = SparkAddress::from_str(receiver)
             .map_err(|err| error::anyhow!("invalid spark address: {err}"))?;
         let hash = sha256::Hash::from_str(payment_hash_hex)
             .map_err(|err| error::anyhow!("invalid payment hash: {err}"))?;
+        let transfer_id = TransferId::from_str(transfer_id)
+            .map_err(|err| error::anyhow!("invalid transfer id: {err}"))?;
         let transfer = self
             .wallet
-            .create_htlc(amount_sat, &receiver, &hash, expiry, None)
+            .create_htlc(amount_sat, &receiver, &hash, expiry, Some(transfer_id))
             .await
             .map_err(|err| error::anyhow!("spark create_htlc: {err}"))?;
         Ok(transfer.id.to_string())
@@ -54,11 +71,11 @@ impl SparkLeg {
         Ok(())
     }
 
-    /// Every incoming HTLC currently waiting on a preimage from us,
-    /// as `(payment hash, amount in sats)`. The amount is not optional:
-    /// a counterparty can lock *any* amount against a quoted hash, so
-    /// the caller must check it before paying the other leg.
-    pub async fn claimable_htlcs(&self) -> error::Result<Vec<(String, u64)>> {
+    /// Every incoming HTLC currently waiting on a preimage from us.
+    /// Amount and expiry are carried because a counterparty chooses
+    /// both: they can lock any amount, for any duration, against a hash
+    /// we quoted, and the engine has to check both before it pays.
+    pub async fn claimable_htlcs(&self) -> error::Result<Vec<ClaimableHtlc>> {
         let transfers = self
             .wallet
             .list_claimable_htlc_transfers(None)
@@ -68,11 +85,35 @@ impl SparkLeg {
             .into_iter()
             .filter_map(|transfer| {
                 let amount_sat = transfer.total_value_sat;
-                transfer
-                    .htlc_preimage_request
-                    .map(|request| (request.payment_hash.to_string(), amount_sat))
+                transfer.htlc_preimage_request.map(|request| ClaimableHtlc {
+                    payment_hash: request.payment_hash.to_string(),
+                    amount_sat,
+                    expiry: request.expiry_time,
+                })
             })
             .collect())
+    }
+
+    /// The preimage of an HTLC *we* locked, once the receiver has
+    /// claimed it and revealed the secret. This is how the atomic
+    /// direction learns the value that settles its lightning leg.
+    pub async fn revealed_preimage(&self, transfer_id: &str) -> error::Result<Option<String>> {
+        let id = TransferId::from_str(transfer_id)
+            .map_err(|err| error::anyhow!("invalid transfer id: {err}"))?;
+        let transfers = self
+            .wallet
+            .list_transfers(ListTransfersRequest {
+                paging: None,
+                transfer_ids: vec![id],
+            })
+            .await
+            .map_err(|err| error::anyhow!("spark list_transfers: {err}"))?;
+        Ok(transfers.items.into_iter().find_map(|transfer| {
+            transfer
+                .htlc_preimage_request
+                .and_then(|request| request.preimage)
+                .map(|preimage| hex_of(&preimage.to_vec()))
+        }))
     }
 
     pub async fn spark_address(&self) -> error::Result<String> {
@@ -84,4 +125,8 @@ impl SparkLeg {
             .to_address_string()
             .map_err(|err| error::anyhow!("spark address encoding: {err}"))
     }
+}
+
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
