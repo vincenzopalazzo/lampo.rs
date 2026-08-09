@@ -31,6 +31,23 @@ pub struct Settings {
     pub spark_htlc_expiry_secs: u64,
     /// Address of the daemon's own swap API.
     pub api_addr: String,
+    /// Spark signing operators to talk to. Empty means the defaults
+    /// baked into the SDK, which are Lightspark's hosted ones; a local
+    /// regtest stack must be named explicitly.
+    pub spark_operators: Vec<OperatorEndpoint>,
+}
+
+/// One locally configured signing operator.
+#[derive(Debug, Clone)]
+pub struct OperatorEndpoint {
+    pub id: usize,
+    /// FROST identifier, 32 byte hex. Operator `n` uses `n + 1`.
+    pub identifier: String,
+    pub address: String,
+    pub identity_public_key: String,
+    /// PEM of the operator's self signed certificate, when it is not
+    /// signed by a CA the host already trusts.
+    pub ca_cert: Option<Vec<u8>>,
 }
 
 impl Settings {
@@ -45,6 +62,7 @@ impl Settings {
             quote_expiry_secs: parsed(conf, "swap-quote-expiry-secs")?.unwrap_or(45),
             spark_htlc_expiry_secs: parsed(conf, "swap-htlc-expiry-secs")?.unwrap_or(3600),
             api_addr: value(conf, "swap-api-addr")?.unwrap_or_else(|| "127.0.0.1:9736".to_owned()),
+            spark_operators: operators(conf)?,
         })
     }
 
@@ -60,6 +78,52 @@ fn conf_network(conf: &LampoConf) -> String {
         "bitcoin" => "mainnet".to_owned(),
         other => other.to_owned(),
     }
+}
+
+/// Read repeated `spark-operator=` lines. Each is
+/// `<id>|<address>|<identity pubkey>[|<ca cert path>]`, for example
+///
+/// ```text
+/// spark-operator=0|https://localhost:8535|0322ca...|/tmp/spark/server_0.crt
+/// ```
+///
+/// The FROST identifier is derived from the id, matching how the
+/// operators number themselves.
+fn operators(conf: &LampoConf) -> error::Result<Vec<OperatorEndpoint>> {
+    let Some(lines) = conf.get_values("spark-operator") else {
+        return Ok(Vec::new());
+    };
+    let mut operators = Vec::new();
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.split('|').map(|part| part.trim()).collect();
+        if parts.len() < 3 {
+            error::bail!(
+                "`spark-operator` must be `<id>|<address>|<identity pubkey>[|<ca cert path>]`, found `{line}`"
+            );
+        }
+        let id: usize = parts[0]
+            .parse()
+            .map_err(|err| error::anyhow!("operator id `{}` is not a number: {err}", parts[0]))?;
+        let ca_cert =
+            match parts.get(3) {
+                Some(path) if !path.is_empty() => Some(std::fs::read(path).map_err(|err| {
+                    error::anyhow!("cannot read the operator cert `{path}`: {err}")
+                })?),
+                _ => None,
+            };
+        operators.push(OperatorEndpoint {
+            id,
+            identifier: format!("{:064x}", id + 1),
+            address: parts[1].to_owned(),
+            identity_public_key: parts[2].to_owned(),
+            ca_cert,
+        });
+    }
+    Ok(operators)
 }
 
 fn value(conf: &LampoConf, key: &str) -> error::Result<Option<String>> {

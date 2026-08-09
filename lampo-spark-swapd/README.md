@@ -102,6 +102,16 @@ swap-api-addr=127.0.0.1:9736      # the swap api
 # spark-seed-file=/path/to/seed   # default: <data_dir>/<network>/swapd/spark.seed
 ```
 
+Point it at a self hosted Spark with repeated `spark-operator` lines,
+`<id>|<address>|<identity pubkey>[|<ca cert path>]`. Without them the
+SDK defaults apply, which are Lightspark's hosted operators:
+
+```text
+spark-operator=0|https://localhost:8535|0322ca18fc489ae25418a0e768273c2c61cabb823edfb14feb891e9bec62016510|/tmp/spark-tls/server_0.crt
+spark-operator=1|https://localhost:8536|0341727a6c41b168f07eb50865ab8c397a53c7eef628ac1020956b705e43b6cb27|/tmp/spark-tls/server_1.crt
+spark-operator=2|https://localhost:8537|0305ab8d485cc752394de4981f8a5ae004f2becfea6f432c9a59d5022d8764f0a6|/tmp/spark-tls/server_2.crt
+```
+
 The Spark seed is created on first start next to the swap records.
 Both it and lampo's `wallet.dat` are hot wallets — back them up.
 
