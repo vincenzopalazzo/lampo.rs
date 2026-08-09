@@ -310,20 +310,48 @@ impl LampoChannelManager {
         graph: &Arc<LampoGraph>,
     ) -> ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>> {
         let params = ProbabilisticScoringDecayParameters::default();
-        if let Ok(file) = File::open(path) {
-            let args = (params, Arc::clone(graph), self.logger.clone());
-            if let Ok(scorer) = ProbabilisticScorer::read(&mut BufReader::new(file), args) {
-                return scorer;
+        match File::open(path) {
+            Ok(file) => {
+                let args = (params, Arc::clone(graph), self.logger.clone());
+                match ProbabilisticScorer::read(&mut BufReader::new(file), args) {
+                    Ok(scorer) => return scorer,
+                    // A corrupt file on a datadir that persists channel
+                    // monitors deserves a loud warning, not a silent reset.
+                    Err(err) => log::error!(
+                        target: "lampod",
+                        "scorer at `{}` is unreadable ({err}); starting fresh. If this \
+                         was not expected, check the datadir for disk corruption",
+                        path.display()
+                    ),
+                }
             }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => log::error!(
+                target: "lampod",
+                "failed to open scorer at `{}`: {err}; starting fresh",
+                path.display()
+            ),
         }
         ProbabilisticScorer::new(params, graph.clone(), self.logger.clone())
     }
 
     pub(crate) fn read_network(&self, path: &Path) -> Arc<LampoGraph> {
-        if let Ok(file) = File::open(path) {
-            if let Ok(graph) = NetworkGraph::read(&mut BufReader::new(file), self.logger.clone()) {
-                return Arc::new(graph);
-            }
+        match File::open(path) {
+            Ok(file) => match NetworkGraph::read(&mut BufReader::new(file), self.logger.clone()) {
+                Ok(graph) => return Arc::new(graph),
+                Err(err) => log::error!(
+                    target: "lampod",
+                    "network graph at `{}` is unreadable ({err}); starting fresh. If \
+                     this was not expected, check the datadir for disk corruption",
+                    path.display()
+                ),
+            },
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => log::error!(
+                target: "lampod",
+                "failed to open network graph at `{}`: {err}; starting fresh",
+                path.display()
+            ),
         }
         Arc::new(NetworkGraph::new(self.conf.network, self.logger.clone()))
     }

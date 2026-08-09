@@ -70,6 +70,7 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
 }
 
 impl LampoDaemon {
@@ -87,6 +88,17 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
+            ready: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Wait until the initial chain sync completed and every channel
+    /// monitor is registered with the chain monitor. The RPC surface must
+    /// not accept channel-mutating commands before this point: a monitor
+    /// update issued while the chain monitor is still empty is dropped.
+    pub async fn wait_ready(&self) {
+        while !self.ready.load(Ordering::Acquire) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
@@ -286,6 +298,7 @@ impl LampoDaemon {
                 log::error!(target: "lampo", "Initial chain sync failed: {err}");
                 io::Error::new(io::ErrorKind::Other, err.to_string())
             })?;
+            self.ready.store(true, Ordering::Release);
 
             log::info!(target: "lampo", "Stating onchaind");
             let _ = self.onchain_manager().listen();

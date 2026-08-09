@@ -28,6 +28,10 @@ pub struct LampoConf {
     pub api_port: u64,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
+    /// Whether inbound channel requests are accepted (`accept-inbound-channels`,
+    /// default `true`). Operators that do not want arbitrary peers opening
+    /// channels to them can turn this off.
+    pub accept_inbound_channels: bool,
 }
 
 impl Default for LampoConf {
@@ -60,6 +64,7 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             dev_sync: None,
+            accept_inbound_channels: true,
         }
     }
 }
@@ -249,6 +254,15 @@ impl TryFrom<String> for LampoConf {
             .get_conf("dev-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+
+        let accept_inbound_channels = conf
+            .get_conf("accept-inbound-channels")
+            .unwrap_or(None)
+            .map(|s| {
+                let s = s.to_trimmed().to_lowercase();
+                s == "true" || s == "1"
+            })
+            .unwrap_or(true);
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -269,6 +283,7 @@ impl TryFrom<String> for LampoConf {
             api_port,
             reindex,
             dev_sync,
+            accept_inbound_channels,
         })
     }
 }

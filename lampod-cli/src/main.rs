@@ -116,6 +116,16 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 
     let lampo_conf = Arc::new(lampo_conf);
 
+    // Take the instance lock before touching any state on disk: two
+    // concurrent lampod instances loading the same channel monitors is a
+    // direct path to broadcasting a revoked state.
+    log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
+    let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
+        .map_err(|err| {
+            log::error!("{err}");
+            error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?")
+        })?;
+
     // Prepare the backend
     let client = lampo_conf.node.clone();
     log::debug!(target: "lampod-cli", "lampo running with `{client}` backend");
@@ -182,22 +192,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     // Init the lampod
     lampod.init(client).await?;
 
-    log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
-    let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
-        .map_err(|err| {
-            log::error!("{err}");
-            error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?")
-        })?;
-
     let lampod = Arc::new(lampod);
-
-    run_httpd(lampod.clone()).await?;
-
-    let handler = Arc::new(HttpdHandler::new(format!(
-        "{}:{}",
-        lampo_conf.api_host, lampo_conf.api_port
-    ))?);
-    lampod.add_external_handler(handler).await?;
 
     // Signal the daemon to shut down gracefully on Ctrl+C.
     // This causes the LDK event processor to persist all state
@@ -209,7 +204,30 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     })?;
 
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
-    lampod.listen().await??;
+    let mut daemon = lampod.clone().listen();
+
+    // Expose the RPC surface only once the initial chain sync completed
+    // and every channel monitor is registered: a close command issued
+    // before that point would produce monitor updates the chain monitor
+    // silently drops.
+    tokio::select! {
+        _ = lampod.wait_ready() => {}
+        result = &mut daemon => {
+            result??;
+            log::info!(target: "lampod-cli", "Shutdown complete.");
+            return Ok(());
+        }
+    }
+
+    run_httpd(lampod.clone()).await?;
+
+    let handler = Arc::new(HttpdHandler::new(format!(
+        "{}:{}",
+        lampo_conf.api_host, lampo_conf.api_port
+    ))?);
+    lampod.add_external_handler(handler).await?;
+
+    daemon.await??;
     log::info!(target: "lampod-cli", "Shutdown complete.");
     Ok(())
 }

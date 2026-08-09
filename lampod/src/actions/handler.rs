@@ -128,7 +128,26 @@ impl Handler for LampoHandler {
             } => {
                 // LDK 0.3 removed `manually_accept_inbound_channels`; inbound
                 // channels are now always surfaced here and must be accepted
-                // explicitly. Auto-accept to preserve the previous behaviour.
+                // explicitly.
+                if !self.channel_manager.conf.accept_inbound_channels {
+                    log::warn!(
+                        target: "lampod",
+                        "rejecting inbound channel request from `{counterparty_node_id}`: \
+                         `accept-inbound-channels` is disabled"
+                    );
+                    if let Err(err) = self
+                        .channel_manager
+                        .manager()
+                        .force_close_broadcasting_latest_txn(
+                            &temporary_channel_id,
+                            &counterparty_node_id,
+                            "inbound channels are disabled on this node".to_owned(),
+                        )
+                    {
+                        log::error!(target: "lampod", "failed to reject inbound channel: {err:?}");
+                    }
+                    return Ok(());
+                }
                 log::info!(
                     target: "lampod",
                     "accepting inbound channel request from `{counterparty_node_id}`"
@@ -347,9 +366,22 @@ impl Handler for LampoHandler {
                     } => payment_preimage,
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
                 };
-                self.channel_manager
-                    .manager()
-                    .claim_funds(preimage.unwrap());
+                // LDK hands out `None` when the preimage is not known to the
+                // node (e.g. externally generated invoices). Lampo cannot
+                // claim such HTLCs: fail them backwards instead of panicking
+                // the event processor and leaving the HTLC hanging until its
+                // timeout forces the channel on-chain.
+                let Some(preimage) = preimage else {
+                    log::error!(
+                        target: "lampod",
+                        "payment `{payment_hash}` claimable but no preimage is known, failing it backwards"
+                    );
+                    self.channel_manager
+                        .manager()
+                        .fail_htlc_backwards(&payment_hash);
+                    return Ok(());
+                };
+                self.channel_manager.manager().claim_funds(preimage);
                 Ok(())
             }
             ldk::events::Event::PaymentClaimed {
