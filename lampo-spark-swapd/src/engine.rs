@@ -287,41 +287,37 @@ impl Engine {
             match (&swap.direction, swap.state.clone()) {
                 (Direction::SparkToLn, State::Quoted) => {
                     let hash = swap.payment_hash.clone().unwrap_or_default();
-                    // Anyone can lock an htlc against a quoted hash, so the
-                    // amount decides whether we pay: a short lock would have
-                    // us settle an expensive invoice and reveal the preimage
-                    // for less than we paid.
                     let locked_sat = claimable
                         .iter()
                         .find(|(locked_hash, _)| locked_hash == &hash)
                         .map(|(_, amount_sat)| *amount_sat);
-                    let expected_sat = swap.amount_msat / 1000;
-                    if let Some(locked_sat) = locked_sat {
-                        if locked_sat < expected_sat {
-                            log::error!(
-                                target: "swapd",
-                                "swap `{}` is locked with `{locked_sat}sat` but owes `{expected_sat}sat`, refusing to pay",
-                                swap.id()
-                            );
+                    match quoted_action(
+                        locked_sat,
+                        swap.amount_msat,
+                        swap.created_at,
+                        now(),
+                        self.cfg.quote_expiry_secs,
+                    ) {
+                        QuotedAction::Wait => {}
+                        QuotedAction::Advance => {
+                            if let Err(err) = self.advance_spark_to_ln(&mut swap).await {
+                                log::error!(target: "swapd", "swap `{}`: {err}", swap.id());
+                            }
+                        }
+                        QuotedAction::Reject { reason } => {
+                            log::error!(target: "swapd", "swap `{}`: {reason}", swap.id());
+                            swap.transition(State::Failed { reason })?;
+                            self.store.persist(&swap)?;
+                        }
+                        QuotedAction::Expire => {
+                            if let Some(payment_id) = swap.lampo_payment_id.clone() {
+                                let _ = self.lampo.cancel_fetched(&payment_id).await;
+                            }
                             swap.transition(State::Failed {
-                                reason: format!(
-                                    "spark htlc locks {locked_sat} sat, the swap needs {expected_sat} sat"
-                                ),
+                                reason: "quote expired before the spark htlc was locked".to_owned(),
                             })?;
                             self.store.persist(&swap)?;
-                            continue;
                         }
-                        if let Err(err) = self.advance_spark_to_ln(&mut swap).await {
-                            log::error!(target: "swapd", "swap `{}`: {err}", swap.id());
-                        }
-                    } else if now() > swap.created_at + self.cfg.quote_expiry_secs {
-                        if let Some(payment_id) = swap.lampo_payment_id.clone() {
-                            let _ = self.lampo.cancel_fetched(&payment_id).await;
-                        }
-                        swap.transition(State::Failed {
-                            reason: "quote expired before the spark htlc was locked".to_owned(),
-                        })?;
-                        self.store.persist(&swap)?;
                     }
                 }
                 (Direction::SparkToLn, State::LnPaying) => {
@@ -362,5 +358,98 @@ impl Engine {
             }
         }
         Ok(())
+    }
+}
+
+/// What reconcile does with a Direction A swap still in `Quoted`.
+#[derive(Debug, PartialEq, Eq)]
+enum QuotedAction {
+    /// Nothing locked yet and the quote is still fresh.
+    Wait,
+    /// A sufficient htlc is locked: pay the lightning leg.
+    Advance,
+    /// An htlc is locked but it does not cover the swap. Anyone can
+    /// lock against a quoted hash, so paying here would settle an
+    /// expensive invoice and reveal the preimage for less than it
+    /// bought: the swap must fail instead.
+    Reject { reason: String },
+    /// Nothing was locked inside the quote window.
+    Expire,
+}
+
+fn quoted_action(
+    locked_sat: Option<u64>,
+    owed_msat: u64,
+    created_at: u64,
+    now: u64,
+    quote_expiry_secs: u64,
+) -> QuotedAction {
+    let expected_sat = owed_msat / 1000;
+    match locked_sat {
+        Some(locked_sat) if locked_sat < expected_sat => QuotedAction::Reject {
+            reason: format!("spark htlc locks {locked_sat} sat, the swap needs {expected_sat} sat"),
+        },
+        Some(_) => QuotedAction::Advance,
+        None if now > created_at + quote_expiry_secs => QuotedAction::Expire,
+        None => QuotedAction::Wait,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_sufficient_lock_advances() {
+        assert_eq!(
+            quoted_action(Some(10_000), 10_000_000, 100, 110, 45),
+            QuotedAction::Advance
+        );
+        // overpaying is the counterparty's problem, not a reason to stall
+        assert_eq!(
+            quoted_action(Some(20_000), 10_000_000, 100, 110, 45),
+            QuotedAction::Advance
+        );
+    }
+
+    #[test]
+    fn an_underpaying_lock_is_rejected_not_paid() {
+        let action = quoted_action(Some(1), 10_000_000, 100, 110, 45);
+        assert!(
+            matches!(action, QuotedAction::Reject { .. }),
+            "got {action:?}"
+        );
+    }
+
+    #[test]
+    fn an_underpaying_lock_is_rejected_even_after_expiry() {
+        // The lock exists, so this must never be treated as an expired
+        // quote: the counterparty's funds are in play.
+        let action = quoted_action(Some(1), 10_000_000, 100, 100 + 3600, 45);
+        assert!(
+            matches!(action, QuotedAction::Reject { .. }),
+            "got {action:?}"
+        );
+    }
+
+    #[test]
+    fn a_fresh_unlocked_quote_waits() {
+        assert_eq!(
+            quoted_action(None, 10_000_000, 100, 110, 45),
+            QuotedAction::Wait
+        );
+        // the boundary second still waits, expiry is strictly after
+        assert_eq!(
+            quoted_action(None, 10_000_000, 100, 145, 45),
+            QuotedAction::Wait
+        );
+    }
+
+    #[test]
+    fn an_unlocked_quote_expires_after_the_window() {
+        assert_eq!(
+            quoted_action(None, 10_000_000, 100, 146, 45),
+            QuotedAction::Expire
+        );
     }
 }
