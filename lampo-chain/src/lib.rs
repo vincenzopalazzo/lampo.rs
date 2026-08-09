@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use lampo_common::event::onchain::OnChainEvent;
@@ -10,13 +11,83 @@ use lightning_block_sync::{BlockSource, SpvClient};
 use lampo_common::async_trait;
 use lampo_common::backend::{Backend, BlockData};
 use lampo_common::bitcoin::consensus::encode::serialize_hex;
-use lampo_common::bitcoin::BlockHash;
+use lampo_common::bitcoin::{Block, BlockHash};
+use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::ldk::chain;
 use lampo_common::serde::Deserialize;
 use lampo_common::types::{LampoChainMonitor, LampoChannel};
+use lampo_common::wallet::WalletManager;
+
+/// Adapts the on-chain wallet to LDK's [`chain::Listen`] so it can ride the
+/// same `synchronize_listeners` pass as the channel manager and chain monitor
+/// -- one RPC stream for the whole node, instead of a second `getblock` scan.
+///
+/// This is the *only* place the LDK chain-sync types meet the wallet: the
+/// coupling is confined to the bitcoind backend crate. The wallet itself
+/// stays free of LDK, driven through the lampo-native `WalletManager` API.
+struct WalletChainListener {
+    wallet: Arc<dyn WalletManager>,
+    /// Set if any `apply_block` failed during a sync pass. `Listen` methods
+    /// can't return errors, so we record the failure here for the caller to
+    /// surface instead of silently advertising a successful unified sync.
+    failed: AtomicBool,
+}
+
+impl WalletChainListener {
+    fn new(wallet: Arc<dyn WalletManager>) -> Self {
+        Self {
+            wallet,
+            failed: AtomicBool::new(false),
+        }
+    }
+
+    /// Clear the failure flag before a (re)try of `synchronize_listeners`.
+    fn reset(&self) {
+        self.failed.store(false, Ordering::Relaxed);
+    }
+
+    /// Whether any block apply failed during the last sync pass.
+    fn had_failure(&self) -> bool {
+        self.failed.load(Ordering::Relaxed)
+    }
+}
+
+impl chain::Listen for WalletChainListener {
+    fn filtered_block_connected(
+        &self,
+        _header: &lampo_common::bitcoin::block::Header,
+        _txdata: &chain::transaction::TransactionData,
+        _height: u32,
+    ) {
+        // Lampo's bitcoind backend delivers full blocks, so `block_connected`
+        // below is what actually runs. Mirrors ldk-node's wallet listener.
+        debug_assert!(
+            false,
+            "filtered_block_connected is unsupported for the on-chain wallet"
+        );
+    }
+
+    fn block_connected(&self, block: &Block, height: u32) {
+        if let Err(err) = self.wallet.apply_block(block, height) {
+            log::error!(
+                target: "lampo-chain",
+                "on-chain wallet apply_block at height {height} failed: {err}"
+            );
+            self.failed.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn blocks_disconnected(&self, _fork_point_block: chain::BlockLocator) {
+        // BDK rolls the wallet chain back via the next `block_connected`'s
+        // `connected_to` (the new parent), so an explicit disconnect is a
+        // no-op. Reorgs do not occur during the initial historical catch-up;
+        // ongoing reorgs are handled by the wallet's Emitter poll.
+        log::debug!(target: "lampo-chain", "on-chain wallet listener: blocks_disconnected");
+    }
+}
 
 /// Welcome in another Facede pattern implementation
 pub struct LampoChainSync {
@@ -25,6 +96,8 @@ pub struct LampoChainSync {
     channel_manager: OnceLock<Arc<LampoChannel>>,
     chain_monitor: OnceLock<Arc<LampoChainMonitor>>,
     handler: OnceLock<Arc<dyn lampo_common::handler::Handler>>,
+    coordinator: OnceLock<Arc<ChainSyncCoordinator>>,
+    wallet: OnceLock<Arc<dyn WalletManager>>,
 }
 
 impl LampoChainSync {
@@ -59,6 +132,8 @@ impl LampoChainSync {
             channel_manager: OnceLock::new(),
             chain_monitor: OnceLock::new(),
             handler: OnceLock::new(),
+            coordinator: OnceLock::new(),
+            wallet: OnceLock::new(),
         })
     }
 
@@ -86,6 +161,10 @@ impl LampoChainSync {
             .get()
             .expect("chain monitor not set")
             .clone()
+    }
+
+    fn wallet(&self) -> Option<Arc<dyn WalletManager>> {
+        self.wallet.get().cloned()
     }
 }
 
@@ -225,6 +304,24 @@ impl Backend for LampoChainSync {
         self.set_chain_monitor(chain_monitor);
     }
 
+    fn set_coordinator(&self, coordinator: Arc<ChainSyncCoordinator>) {
+        if self.coordinator.set(coordinator).is_err() {
+            log::debug!(
+                target: "lampo-chain",
+                "chain sync coordinator already set; keeping existing"
+            );
+        }
+    }
+
+    fn set_wallet_manager(&self, wallet: Arc<dyn WalletManager>) {
+        if self.wallet.set(wallet).is_err() {
+            log::debug!(
+                target: "lampo-chain",
+                "wallet manager already set; keeping existing"
+            );
+        }
+    }
+
     async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
         let channel_manager = self.channel_manager();
         let chain_monitor = self.chain_monitor();
@@ -237,16 +334,29 @@ impl Backend for LampoChainSync {
         // N+M+1 to the ChannelManager which still thinks it's at block N,
         // causing a "Blocks must be connected in chain-order" assertion.
         let manager_best = channel_manager.current_best_block();
-        let chain_listeners: Vec<(chain::BlockLocator, &(dyn chain::Listen + Send + Sync))> = vec![
-            (
-                manager_best.clone(),
-                &*channel_manager as &(dyn chain::Listen + Send + Sync),
-            ),
-            (
-                manager_best.clone(),
-                &*chain_monitor as &(dyn chain::Listen + Send + Sync),
-            ),
-        ];
+
+        // Include the on-chain wallet in the same sync pass so one RPC stream
+        // catches up the channel manager, chain monitor, and wallet together --
+        // deduplicating the overlapping block range instead of a second
+        // `getblock` scan. Excluded in `legacy` sync mode, and when
+        // `wallet_sync_parallel` is set (the wallet then runs its own Emitter,
+        // so attaching it here too would double-apply blocks). Kept in a local
+        // so it outlives the `chain_listeners` vec consumed on each attempt.
+        let parallel = self.config.wallet_sync_parallel.unwrap_or(false);
+        let legacy = match self.config.sync_mode.as_deref() {
+            Some(mode) if mode.eq_ignore_ascii_case("legacy") => true,
+            Some("unified") | None => false,
+            Some(mode) => {
+                log::warn!(
+                    target: "lampo-chain",
+                    "unrecognized sync_mode `{mode}`; falling back to unified"
+                );
+                false
+            }
+        };
+        let unified = !legacy && !parallel;
+        let wallet = if unified { self.wallet() } else { None };
+        let wallet_listener = wallet.as_ref().map(|w| WalletChainListener::new(w.clone()));
 
         log::info!(
             target: "lampo-chain",
@@ -255,12 +365,98 @@ impl Backend for LampoChainSync {
             manager_best.height
         );
 
-        let (cache, synced_chain_tip) =
-            init::synchronize_listeners(self.as_ref(), self.config.network, chain_listeners)
-                .await
-                .map_err(|e| error::anyhow!("Failed to synchronize chain listeners: {:?}", e))?;
+        // Retry on transient RPC failures so a hiccup in `synchronize_listeners`
+        // can't leave the coordinator stuck in `PendingInitialSync` (which would
+        // permanently gate the on-chain wallet). Each attempt rebuilds the
+        // listener set from the current best blocks, resuming where it left off.
+        let mut retry_delay = std::time::Duration::from_secs(5);
+        let (cache, synced_chain_tip) = loop {
+            if let Some(listener) = wallet_listener.as_ref() {
+                listener.reset();
+            }
+            let manager_best = channel_manager.current_best_block();
+            let mut chain_listeners: Vec<(
+                chain::BlockLocator,
+                &(dyn chain::Listen + Send + Sync),
+            )> = vec![
+                (
+                    manager_best.clone(),
+                    &*channel_manager as &(dyn chain::Listen + Send + Sync),
+                ),
+                (
+                    manager_best.clone(),
+                    &*chain_monitor as &(dyn chain::Listen + Send + Sync),
+                ),
+            ];
+            if let (Some(wallet), Some(listener)) = (wallet.as_ref(), wallet_listener.as_ref()) {
+                match wallet.current_best_block() {
+                    Ok(best) => {
+                        log::info!(
+                            target: "lampo-chain",
+                            "Including on-chain wallet in chain sync from height {}",
+                            best.height
+                        );
+                        chain_listeners.push((
+                            chain::BlockLocator::new(best.hash, best.height),
+                            listener as &(dyn chain::Listen + Send + Sync),
+                        ));
+                    }
+                    Err(err) => {
+                        log::error!(target: "lampo-chain", "skipping on-chain wallet in chain sync: {err}")
+                    }
+                }
+            }
+
+            // Bound each pass: a hung backend (the lightning-block-sync
+            // `RpcClient` has no read timeout) must not stall the listener
+            // sync -- and thus the gated wallet -- forever. On timeout we
+            // retry immediately; each attempt resumes from the listeners'
+            // current best blocks, so a slow-but-progressing sync keeps its
+            // progress across passes.
+            const SYNC_PASS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+            match tokio::time::timeout(
+                SYNC_PASS_TIMEOUT,
+                init::synchronize_listeners(self.as_ref(), self.config.network, chain_listeners),
+            )
+            .await
+            {
+                Ok(Ok(result)) => break result,
+                Ok(Err(e)) => {
+                    log::error!(
+                        target: "lampo-chain",
+                        "Failed to synchronize chain listeners, retrying in {:?}: {:?}", retry_delay, e
+                    );
+                    tokio::time::sleep(retry_delay).await;
+                    retry_delay = (retry_delay * 2).min(std::time::Duration::from_secs(60));
+                }
+                Err(_) => {
+                    log::error!(
+                        target: "lampo-chain",
+                        "Timed out synchronizing chain listeners after {:?}, retrying",
+                        SYNC_PASS_TIMEOUT
+                    );
+                }
+            }
+        };
 
         log::info!(target: "lampo-chain", "Chain listeners synced to current tip");
+
+        // If the wallet failed to apply some blocks during the pass, surface it.
+        // The node still advances the LDK listeners; the gated wallet Emitter
+        // will recover the wallet from its last good checkpoint.
+        if wallet_listener.as_ref().is_some_and(|l| l.had_failure()) {
+            log::warn!(
+                target: "lampo-chain",
+                "on-chain wallet did not fully apply during unified sync; the wallet scan will recover it from its last good checkpoint"
+            );
+        }
+
+        // Publish listener-sync completion so gated components (e.g. the
+        // on-chain wallet) can proceed over the now-free RPC. No-op when no
+        // coordinator was injected.
+        if let Some(coordinator) = self.coordinator.get() {
+            coordinator.mark_listeners_synced();
+        }
 
         let chain_listener = (chain_monitor, channel_manager);
         let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
@@ -273,5 +469,146 @@ impl Backend for LampoChainSync {
             // FIXME: make this configurable
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use lampo_common::async_trait;
+    use lampo_common::bitcoin::absolute::Height;
+    use lampo_common::bitcoin::block::Header as BlockHeader;
+    use lampo_common::bitcoin::block::{TxMerkleNode, Version};
+    use lampo_common::bitcoin::hashes::Hash;
+    use lampo_common::bitcoin::pow::CompactTarget;
+    use lampo_common::bitcoin::{Amount, Block, BlockHash, FeeRate, ScriptBuf, Transaction};
+    use lampo_common::conf::LampoConf;
+    use lampo_common::error;
+    use lampo_common::keys::LampoKeys;
+    use lampo_common::ldk::chain::Listen;
+    use lampo_common::model::response::{NewAddress, Utxo};
+    use lampo_common::wallet::{BlockRef, WalletManager};
+
+    use super::WalletChainListener;
+
+    struct MockWallet {
+        heights: Mutex<Vec<u32>>,
+        fail_height: Option<u32>,
+    }
+
+    impl MockWallet {
+        fn new(fail_height: Option<u32>) -> Self {
+            Self {
+                heights: Mutex::new(Vec::new()),
+                fail_height,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl WalletManager for MockWallet {
+        async fn new(_: Arc<LampoConf>) -> error::Result<(Self, String)> {
+            unimplemented!()
+        }
+
+        async fn restore(_: Arc<LampoConf>, _: &str) -> error::Result<Self> {
+            unimplemented!()
+        }
+
+        fn ldk_keys(&self) -> Arc<LampoKeys> {
+            unimplemented!()
+        }
+
+        async fn get_onchain_address(&self) -> error::Result<NewAddress> {
+            unimplemented!()
+        }
+
+        async fn get_onchain_balance(&self) -> error::Result<u64> {
+            Ok(0)
+        }
+
+        async fn create_transaction(
+            &self,
+            _script: ScriptBuf,
+            _amount: Amount,
+            _fee_rate: FeeRate,
+            _best_block: Height,
+        ) -> error::Result<Transaction> {
+            unimplemented!()
+        }
+
+        async fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
+            Ok(Vec::new())
+        }
+
+        async fn wallet_tips(&self) -> error::Result<Height> {
+            unimplemented!()
+        }
+
+        fn current_best_block(&self) -> error::Result<BlockRef> {
+            Ok(BlockRef {
+                height: 0,
+                hash: BlockHash::all_zeros(),
+            })
+        }
+
+        fn apply_block(&self, _block: &Block, height: u32) -> error::Result<()> {
+            self.heights.lock().unwrap().push(height);
+            if self.fail_height == Some(height) {
+                Err(error::anyhow!(
+                    "mock apply_block failure at height {}",
+                    height
+                ))
+            } else {
+                Ok(())
+            }
+        }
+
+        async fn sync(&self) -> error::Result<()> {
+            Ok(())
+        }
+
+        async fn listen(self: Arc<Self>) -> error::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn dummy_block() -> Block {
+        Block {
+            header: BlockHeader {
+                version: Version::default(),
+                prev_blockhash: BlockHash::all_zeros(),
+                merkle_root: TxMerkleNode::all_zeros(),
+                time: 0,
+                bits: CompactTarget::from_consensus(0),
+                nonce: 0,
+            },
+            txdata: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn block_connected_delegates_to_apply_block_in_order() {
+        let wallet = Arc::new(MockWallet::new(None));
+        let listener = WalletChainListener::new(wallet.clone());
+
+        let block = dummy_block();
+        listener.block_connected(&block, 100);
+        listener.block_connected(&block, 101);
+
+        assert_eq!(wallet.heights.lock().unwrap().as_slice(), &[100, 101]);
+        assert!(!listener.had_failure());
+    }
+
+    #[test]
+    fn block_connected_failure_sets_failed_flag() {
+        let wallet = Arc::new(MockWallet::new(Some(42)));
+        let listener = WalletChainListener::new(wallet.clone());
+
+        let block = dummy_block();
+        listener.block_connected(&block, 42);
+
+        assert!(listener.had_failure());
+        assert_eq!(wallet.heights.lock().unwrap().as_slice(), &[42]);
     }
 }
