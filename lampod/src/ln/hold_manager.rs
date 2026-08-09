@@ -168,7 +168,33 @@ impl HoldStore {
         let Some(hold) = holds.remove(payment_hash) else {
             error::bail!("no hold found for payment hash `{payment_hash}`");
         };
-        self.forget(payment_hash)?;
+        if let Err(err) = self.forget(payment_hash) {
+            // Put the record back: the durable copy is still there and
+            // dropping the in-memory one would hide a live hold until
+            // the next restart.
+            holds.insert(payment_hash.to_owned(), hold);
+            return Err(err);
+        }
+        Ok(hold)
+    }
+
+    /// Remove a hold only if it is still waiting to be settled, under a
+    /// single lock so two concurrent claims cannot both act on it.
+    pub(crate) fn take_held(&self, payment_hash: &str) -> error::Result<Hold> {
+        // SAFETY: the mutex is never poisoned, we do not panic while holding it.
+        let mut holds = self.holds.lock().unwrap();
+        let Some(hold) = holds.get(payment_hash) else {
+            error::bail!("no hold found for payment hash `{payment_hash}`");
+        };
+        if hold.status != HoldStatus::Held {
+            error::bail!("hold `{payment_hash}` has no pending payment to claim");
+        }
+        // SAFETY: checked just above while holding the lock.
+        let hold = holds.remove(payment_hash).unwrap();
+        if let Err(err) = self.forget(payment_hash) {
+            holds.insert(payment_hash.to_owned(), hold);
+            return Err(err);
+        }
         Ok(hold)
     }
 
@@ -201,20 +227,24 @@ impl HoldManager {
     }
 
     /// Register a payment hash to be held when the payment arrives.
+    ///
+    /// The record is keyed by the canonical lowercase hash, so a hash
+    /// given in any other hex casing still matches the incoming
+    /// payment.
     pub fn register(
         &self,
         payment_hash: &str,
         expected_amount_msat: Option<u64>,
     ) -> error::Result<Hold> {
-        // sanity check that the hash is a valid 32 byte hex string
-        let _ = Self::parse_hash(payment_hash)?;
-        self.store.register(payment_hash, expected_amount_msat)
+        let payment_hash = Self::canonical_hash(payment_hash)?;
+        self.store.register(&payment_hash, expected_amount_msat)
     }
 
     /// Remove the record for a payment hash without touching any HTLC.
     /// Used to roll back a registration when the invoice creation fails.
     pub fn unregister(&self, payment_hash: &str) -> error::Result<Hold> {
-        self.store.take(payment_hash)
+        let payment_hash = Self::canonical_hash(payment_hash)?;
+        self.store.take(&payment_hash)
     }
 
     /// Decide what to do with an incoming claimable payment we cannot
@@ -234,39 +264,51 @@ impl HoldManager {
     pub fn claim(&self, payment_preimage: &str) -> error::Result<Hold> {
         let preimage: [u8; 32] = Self::parse_bytes(payment_preimage)?;
         let payment_hash = Sha256::hash(&preimage).to_string();
-        let Some(hold) = self.store.get(&payment_hash) else {
-            error::bail!("no hold found for payment hash `{payment_hash}`");
-        };
-        if hold.status != HoldStatus::Held {
-            error::bail!("hold `{payment_hash}` has no pending payment to claim");
-        }
-        if let Some(claim_deadline) = hold.claim_deadline {
-            let height = self.channel_manager.manager().current_best_block().height;
-            if height >= claim_deadline {
-                error::bail!(
-                    "claim deadline `{claim_deadline}` passed (current height `{height}`), the payment has been failed back"
-                );
+        // Check the deadline before taking the record, so a claim that
+        // arrives too late reports the real reason.
+        if let Some(hold) = self.store.get(&payment_hash) {
+            if let Some(claim_deadline) = hold.claim_deadline {
+                let height = self.channel_manager.manager().current_best_block().height;
+                if height >= claim_deadline {
+                    // LDK has already failed the HTLCs back, the record
+                    // is dead weight and would otherwise linger forever.
+                    let _ = self.store.take(&payment_hash);
+                    error::bail!(
+                        "claim deadline `{claim_deadline}` passed (current height `{height}`), the payment has been failed back"
+                    );
+                }
             }
         }
+        // Take the record first: it is what makes concurrent claims of
+        // the same payment mutually exclusive.
+        let hold = self.store.take_held(&payment_hash)?;
         self.channel_manager
             .manager()
             .claim_funds(PaymentPreimage(preimage));
-        self.store.take(&payment_hash)
+        Ok(hold)
     }
 
     /// Fail a registered payment back to the sender and forget it.
     pub fn fail(&self, payment_hash: &str) -> error::Result<Hold> {
-        let hash = Self::parse_hash(payment_hash)?;
-        let hold = self.store.take(payment_hash)?;
-        // Failing back HTLCs that are not pending is a harmless no-op.
+        let payment_hash = Self::canonical_hash(payment_hash)?;
+        let hash = Self::parse_hash(&payment_hash)?;
+        // Fail the HTLCs back before dropping the record: a crash in
+        // between would otherwise leave a held payment with nothing on
+        // disk to find it again.
         self.channel_manager
             .manager()
             .fail_htlc_backwards_with_reason(&hash, FailureCode::IncorrectOrUnknownPaymentDetails);
-        Ok(hold)
+        self.store.take(&payment_hash)
     }
 
     pub fn list(&self) -> Vec<Hold> {
         self.store.list()
+    }
+
+    /// Normalize a hex payment hash to the representation LDK events
+    /// use, so lookups match whatever casing the caller sent.
+    fn canonical_hash(payment_hash: &str) -> error::Result<String> {
+        Ok(Self::parse_hash(payment_hash)?.to_string())
     }
 
     fn parse_bytes(hex_str: &str) -> error::Result<[u8; 32]> {
@@ -328,6 +370,42 @@ mod tests {
         let reloaded = HoldStore::new(persister).unwrap();
         assert!(reloaded.get(&hash).is_none());
         let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn only_one_claim_can_take_a_held_payment() {
+        let (store, path) = store();
+        let hash = "44".repeat(32);
+        store.register(&hash, None).unwrap();
+        store.on_claimable(&hash, 1_000, None);
+        assert!(store.take_held(&hash).is_ok());
+        // the second claim finds nothing left to settle
+        assert!(store.take_held(&hash).is_err());
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn an_open_hold_cannot_be_claimed() {
+        let (store, path) = store();
+        let hash = "55".repeat(32);
+        store.register(&hash, None).unwrap();
+        // no payment arrived yet
+        assert!(store.take_held(&hash).is_err());
+        // and the record is still there for the payment to land on
+        assert!(store.get(&hash).is_some());
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn hashes_are_keyed_canonically() {
+        let hash = "AB".repeat(32);
+        let canonical = HoldManager::canonical_hash(&hash).unwrap();
+        assert_eq!(canonical, "ab".repeat(32));
+        // whatever casing the caller sends, lookups use the same key
+        assert_eq!(
+            HoldManager::canonical_hash(&"ab".repeat(32)).unwrap(),
+            canonical
+        );
     }
 
     #[test]

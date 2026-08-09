@@ -396,15 +396,15 @@ impl Handler for LampoHandler {
                                 );
                             }
                             HoldDecision::AlreadyHeld => {
+                                // Do not fail back here: LDK keys
+                                // claimable payments by hash, so failing
+                                // this one would also fail the payment
+                                // already being held. Leave it pending,
+                                // a claim settles both and the deadline
+                                // fails both back.
                                 log::warn!(
                                     target: "lampo::hold",
-                                    "a payment for `{hash_str}` is already held, failing the duplicate back"
-                                );
-                                self.channel_manager
-                                    .manager()
-                                    .fail_htlc_backwards_with_reason(
-                                    &payment_hash,
-                                    ldk::ln::channelmanager::FailureCode::IncorrectOrUnknownPaymentDetails,
+                                    "another payment for `{hash_str}` arrived while one is held, leaving it pending"
                                 );
                             }
                             HoldDecision::NotRegistered => {
@@ -597,6 +597,12 @@ impl Handler for LampoHandler {
                     },
                 };
 
+                let payment_hash = payment_hash.map(|hash| hash.to_string());
+                if let Some(hash) = payment_hash.as_ref() {
+                    // SAFETY: the mutex is never poisoned, we do not panic
+                    // while holding it.
+                    self.sent_preimages.lock().unwrap().remove(hash);
+                }
                 let hop = LightningEvent::PaymentEvent {
                     state: PaymentState::Failure,
                     payment_id: Some(lampo_common::hex::encode(payment_id.0)),
