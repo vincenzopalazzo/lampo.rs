@@ -360,9 +360,27 @@ impl Handler for LampoHandler {
                     } => payment_preimage,
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
                 };
-                self.channel_manager
-                    .manager()
-                    .claim_funds(preimage.unwrap());
+                // The preimage is unknown when the invoice was created for an
+                // external payment hash (e.g. via `create_inbound_payment_for_hash`).
+                // We cannot claim what we cannot settle, so fail the HTLC back
+                // instead of panicking inside the LDK event loop.
+                match preimage {
+                    Some(preimage) => {
+                        self.channel_manager.manager().claim_funds(preimage);
+                    }
+                    None => {
+                        log::warn!(
+                            target: "lampo::handler",
+                            "claimable payment `{payment_hash}` has no preimage, failing it back"
+                        );
+                        self.channel_manager
+                            .manager()
+                            .fail_htlc_backwards_with_reason(
+                            &payment_hash,
+                            ldk::ln::channelmanager::FailureCode::IncorrectOrUnknownPaymentDetails,
+                        );
+                    }
+                }
                 Ok(())
             }
             ldk::events::Event::PaymentClaimed {
