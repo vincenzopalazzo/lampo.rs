@@ -7,6 +7,15 @@
 | Date | 2026-06-03 |
 | Related issues | [#540](https://github.com/vincenzopalazzo/lampo.rs/issues/540) (fast sync), [#444](https://github.com/vincenzopalazzo/lampo.rs/issues/444) (`reindex` semantics) |
 
+> **Status update (2026-08-09):** two items from this design's comparison
+> table landed early as part of
+> [production-onchain-safety.md](production-onchain-safety.md): the
+> initial sync now uses per-listener block locators (each channel monitor
+> catches up from its own best block) and restored monitors are registered
+> with the chain monitor via `watch_channel`. The `ChainSyncCoordinator`,
+> the wallet `Listen` integration, and the single-pipeline sync remain to
+> be implemented as designed here.
+
 ## Summary
 
 Lampo currently runs **two independent, competing chain-sync pipelines** over the same Bitcoin Core RPC backend: LDK `synchronize_listeners` (channel manager + chain monitor) and a separate BDK `Emitter` full-block scan (on-chain wallet). Production on Ocean Signet (~307k blocks) shows multi-day catch-up, RPC saturation, and LDK listener sync that never logs completion while the BDK path dominates `getblock` traffic.
