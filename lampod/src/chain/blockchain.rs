@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use lampo_common::async_trait;
@@ -9,15 +10,46 @@ use lampo_common::bitcoin::Transaction;
 use lampo_common::error;
 use lampo_common::ldk::chain::chaininterface::{
     BroadcasterInterface, ConfirmationTarget, FeeEstimator, TransactionType,
+    FEERATE_FLOOR_SATS_PER_KW,
 };
 use lampo_common::ldk::routing::utxo::UtxoLookup;
 use lampo_common::ldk::util::wakers::Notifier;
 use lampo_common::wallet::WalletManager;
 
+/// How often the fee cache is refreshed from the backend.
+const FEE_REFRESH_INTERVAL_SECS: u64 = 60;
+
+/// Conservative defaults, in sats per 1000 weight units, used until the
+/// first successful refresh from the backend.
+const DEFAULT_URGENT_SAT_PER_KW: u32 = 5_000;
+const DEFAULT_NORMAL_SAT_PER_KW: u32 = 3_000;
+const DEFAULT_BACKGROUND_SAT_PER_KW: u32 = 1_000;
+
+/// Fee rates cached from the backend, in sats per 1000 weight units.
+///
+/// A value of `0` means "not fetched yet" and falls back to a conservative
+/// per-target default: [`FeeEstimator::get_est_sat_per_1000_weight`] is a
+/// synchronous callback invoked by LDK from commitment/HTLC signing paths,
+/// so it must never block on the backend.
+#[derive(Default)]
+struct FeeCache {
+    /// Confirmation within ~3 blocks, used for urgent on-chain sweeps.
+    urgent: AtomicU32,
+    /// Confirmation within ~6 blocks, used for commitment transactions.
+    normal: AtomicU32,
+    /// Confirmation within ~144 blocks, used where confirmation can wait
+    /// (channel close minimum, anchor commitments bumped via CPFP).
+    background: AtomicU32,
+    /// The backend's minimum mempool fee, used as the lower bound we
+    /// require from the counterparty's feerate.
+    mempool_min: AtomicU32,
+}
+
 #[derive(Clone)]
 pub struct LampoChainManager {
     pub backend: Arc<dyn Backend>,
     pub wallet_manager: Arc<dyn WalletManager>,
+    fees: Arc<FeeCache>,
 }
 
 /// Personal Lampo implementation
@@ -28,6 +60,34 @@ impl LampoChainManager {
         LampoChainManager {
             backend: client,
             wallet_manager,
+            fees: Arc::new(FeeCache::default()),
+        }
+    }
+
+    /// Refresh the fee cache from the backend. Each bucket is refreshed
+    /// independently so a single failing estimate does not blank the others.
+    async fn refresh_fee_cache(&self) {
+        let buckets = [
+            (&self.fees.urgent, 3u64, "urgent"),
+            (&self.fees.normal, 6u64, "normal"),
+            (&self.fees.background, 144u64, "background"),
+        ];
+        for (cell, blocks, label) in buckets {
+            match self.backend.fee_rate_estimation(blocks).await {
+                Ok(fee) => cell.store(fee.max(FEERATE_FLOOR_SATS_PER_KW), Ordering::Release),
+                Err(err) => {
+                    log::warn!(target: "lampo-chain", "fee estimation for `{label}` ({blocks} blocks) failed: {err}")
+                }
+            }
+        }
+        match self.backend.minimum_mempool_fee().await {
+            Ok(fee) => self
+                .fees
+                .mempool_min
+                .store(fee.max(FEERATE_FLOOR_SATS_PER_KW), Ordering::Release),
+            Err(err) => {
+                log::warn!(target: "lampo-chain", "minimum mempool fee estimation failed: {err}")
+            }
         }
     }
 
@@ -68,6 +128,13 @@ impl LampoChainManager {
     }
 
     pub fn listen(self: Arc<Self>) -> error::Result<()> {
+        let fee_refresher = self.clone();
+        tokio::spawn(async move {
+            loop {
+                fee_refresher.refresh_fee_cache().await;
+                tokio::time::sleep(std::time::Duration::from_secs(FEE_REFRESH_INTERVAL_SECS)).await;
+            }
+        });
         tokio::spawn(async move { self.backend.clone().listen().await });
         Ok(())
     }
@@ -77,9 +144,33 @@ impl LampoChainManager {
 #[async_trait]
 impl FeeEstimator for LampoChainManager {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        // FIXME: have the result in the cache to make easy the query of it.
-        // TODO: fix this
-        256
+        use ConfirmationTarget::*;
+
+        let (cell, default) = match confirmation_target {
+            MaximumFeeEstimate | UrgentOnChainSweep => {
+                (&self.fees.urgent, DEFAULT_URGENT_SAT_PER_KW)
+            }
+            OutputSpendingFee | NonAnchorChannelFee => {
+                (&self.fees.normal, DEFAULT_NORMAL_SAT_PER_KW)
+            }
+            AnchorChannelFee | ChannelCloseMinimum => {
+                (&self.fees.background, DEFAULT_BACKGROUND_SAT_PER_KW)
+            }
+            MinAllowedAnchorChannelRemoteFee | MinAllowedNonAnchorChannelRemoteFee => {
+                (&self.fees.mempool_min, FEERATE_FLOOR_SATS_PER_KW)
+            }
+        };
+        let value = cell.load(Ordering::Acquire);
+        let value = if value == 0 { default } else { value };
+        // `MaximumFeeEstimate` bounds the feerate we tolerate from the
+        // counterparty; LDK recommends adding headroom over the raw
+        // estimate so honest peers are not force-closed during fee spikes.
+        let value = if matches!(confirmation_target, MaximumFeeEstimate) {
+            value.saturating_mul(2)
+        } else {
+            value
+        };
+        value.max(FEERATE_FLOOR_SATS_PER_KW)
     }
 }
 

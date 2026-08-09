@@ -15,6 +15,7 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::ldk::chain;
+use lampo_common::ldk::chain::chaininterface::FEERATE_FLOOR_SATS_PER_KW;
 use lampo_common::serde::Deserialize;
 use lampo_common::types::{LampoChainMonitor, LampoChannel};
 
@@ -146,7 +147,7 @@ impl Backend for LampoChainSync {
         }
 
         if self.config.network == lampo_common::bitcoin::Network::Regtest {
-            return Ok(256);
+            return Ok(FEERATE_FLOOR_SATS_PER_KW);
         }
 
         let resp = self
@@ -160,8 +161,10 @@ impl Backend for LampoChainSync {
         let Some(feerate) = resp.feerate else {
             return Err(error::anyhow!("No fee rate estimation available").into());
         };
-        // estimate fee rate in BTC/kvB
-        Ok((feerate * (100_000_000 as f64)) as u32)
+        // `estimatesmartfee` returns BTC/kvB; convert to sat/kvB and then to
+        // sats per 1000 weight units (a vbyte is 4 weight units).
+        let sat_per_kvb = feerate * 100_000_000f64;
+        Ok(((sat_per_kvb / 4.0) as u32).max(FEERATE_FLOOR_SATS_PER_KW))
     }
 
     async fn get_transaction(
@@ -187,7 +190,6 @@ impl Backend for LampoChainSync {
         unimplemented!()
     }
 
-    // TODO: specify what kind of format the result should be!
     async fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
         #[derive(Debug, Deserialize)]
         struct MempoolInfo {
@@ -199,10 +201,12 @@ impl Backend for LampoChainSync {
             .call_method::<json::Value>("getmempoolinfo", &[])
             .await?;
         let mempool_info: MempoolInfo = json::from_value(mempool_info)?;
-        if mempool_info.loaded {
+        if !mempool_info.loaded {
             log::warn!("mempool is still loading, so the fee may be not accurate!");
         }
-        Ok((mempool_info.mempoolminfee * (100_000_000 as f64)) as u32)
+        // `mempoolminfee` is in BTC/kvB; convert to sats per 1000 weight units.
+        let sat_per_kvb = mempool_info.mempoolminfee * 100_000_000f64;
+        Ok(((sat_per_kvb / 4.0) as u32).max(FEERATE_FLOOR_SATS_PER_KW))
     }
 
     fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {

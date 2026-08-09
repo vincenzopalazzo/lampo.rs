@@ -43,11 +43,14 @@ pub trait Backend: Send + Sync {
     /// concrete backends implement `BlockSource` separately for chain sync.
     async fn get_best_block(&self) -> BlockSourceResult<(BlockHash, Option<u32>)>;
 
-    /// Fetch feerate give a number of blocks
+    /// Estimate the feerate to confirm within the given number of blocks,
+    /// in sats per 1000 weight units (the unit LDK's `FeeEstimator` uses).
     ///
     /// FIXME: use `FeeRate` instead of `u32`
     async fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32>;
 
+    /// The minimum feerate accepted into the backend's mempool, in sats
+    /// per 1000 weight units.
     async fn minimum_mempool_fee(&self) -> error::Result<u32>;
 
     async fn brodcast_tx(&self, tx: &Transaction);

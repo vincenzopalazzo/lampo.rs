@@ -258,7 +258,7 @@ impl Handler for LampoHandler {
                 }));
 
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
-                // FIXME: estimate the fee rate with a callback
+                // The backend returns sats per 1000 weight units.
                 let fee = self
                     .chain_manager
                     .backend
@@ -272,7 +272,7 @@ impl Handler for LampoHandler {
                         }));
                         err
                     })?;
-                log::info!("fee estimated {:?} sats", fee);
+                log::info!("fee estimated `{fee}` sat/kwu");
 
                 let best_block = self.channel_manager.manager().current_best_block().height;
                 let transaction = self
@@ -280,7 +280,7 @@ impl Handler for LampoHandler {
                     .create_transaction(
                         output_script,
                         Amount::from_sat(channel_value_satoshis),
-                        FeeRate::from_sat_per_vb_unchecked(fee as u64),
+                        FeeRate::from_sat_per_kwu(fee as u64),
                         // FIXME: remove unwrap
                         Height::from_consensus(best_block).unwrap(),
                     )
