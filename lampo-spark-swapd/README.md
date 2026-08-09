@@ -115,12 +115,42 @@ spark-operator=2|https://localhost:8537|0305ab8d485cc752394de4981f8a5ae004f2becf
 The Spark seed is created on first start next to the swap records.
 Both it and lampo's `wallet.dat` are hot wallets — back them up.
 
+## Regtest
+
+Spark's own "regtest" in the Breez SDK points at Lightspark's hosted
+operators and needs faucet credentials. For a self contained loop,
+run the operator stack from `buildonspark/spark` instead:
+
+```bash
+cd spark && docker compose up -d      # postgres, bitcoind regtest, 3 operators
+```
+
+Two things that stack does not give you out of the box:
+
+- Its `cert-init` issues self signed certificates, and a rust client
+  rejects those with `CaUsedAsEndEntity` because the same certificate
+  is both the trust anchor and the leaf. Issue a local CA and sign the
+  operator certificates with it, then hand the *CA* to the client.
+- Bitcoin's init step is not idempotent: a second `docker compose up`
+  after a plain `down` fails with "Database already exists". Use
+  `down -v`.
+
+Then `cargo test -- --ignored` runs `tests/spark_regtest.rs` against
+it. Those tests are the evidence that the swap design holds: a wallet
+reaches the operators, and queries htlcs, with no Spark service
+provider anywhere. The daemon is its own provider, so that had to be
+true.
+
 ## Status
 
-Builds and runs against lampo `feat/bolt12-swap-primitives` (PR #553)
-and breez/spark-sdk `8c6abb1`. Unit-tested state machines and store;
-regtest end-to-end (lampo regtest + spark-sdk `regtest/` operators) is
-the next milestone.
+Builds against lampo `feat/bolt12-swap-primitives` (PR #553) and
+breez/spark-sdk `8c6abb1`. State machines and the swap store are unit
+tested, and `tests/spark_regtest.rs` talks to real local operators.
+
+No swap has been executed end to end yet: that needs a funded spark
+wallet (deposit address, regtest coins, `claim_deposit`) and a second
+lampo node as the bolt12 counterparty. That is the next milestone, and
+until it passes nothing here should be trusted with money.
 
 Known limits, on purpose and documented in code:
 - Direction B trusted window (above).
