@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::handler::Handler;
-use crate::types::{LampoChainMonitor, LampoChannel};
+use crate::types::{LampoChainMonitor, LampoChannel, LampoMonitorListener};
+
+pub use lightning::chain::BlockLocator;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TxResult {
@@ -86,6 +88,20 @@ pub trait Backend: Send + Sync {
     fn set_channel_manager(&self, _: Arc<LampoChannel>) {}
 
     fn set_chain_monitor(&self, _: Arc<LampoChainMonitor>) {}
+
+    /// Hand over the channel monitors read from disk on restart, each
+    /// paired with the best block it was persisted at. The backend must
+    /// sync every monitor up to the chain tip individually and register
+    /// it with the chain monitor before connecting new blocks.
+    fn set_stale_monitors(&self, _: Vec<(BlockLocator, LampoMonitorListener)>) {}
+
+    /// Perform the initial chain synchronization: bring the channel
+    /// manager, the chain monitor, and any stale channel monitors up to
+    /// the current chain tip. Must complete before the node starts
+    /// processing peers or events.
+    async fn sync_chain(&self) -> error::Result<()> {
+        Ok(())
+    }
 
     /// Get the information of a transaction inside the blockchain.
     async fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;

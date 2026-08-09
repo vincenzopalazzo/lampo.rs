@@ -291,4 +291,18 @@ impl Backend for LampoChainManager {
     fn set_handler(&self, arc: Arc<dyn lampo_common::handler::Handler>) {
         self.backend.set_handler(arc);
     }
+
+    fn set_stale_monitors(
+        &self,
+        monitors: Vec<(
+            lampo_common::backend::BlockLocator,
+            lampo_common::types::LampoMonitorListener,
+        )>,
+    ) {
+        self.backend.set_stale_monitors(monitors);
+    }
+
+    async fn sync_chain(&self) -> lampo_common::error::Result<()> {
+        self.backend.sync_chain().await
+    }
 }

@@ -244,6 +244,30 @@ impl LampoDaemon {
         client.set_handler(self.handler());
         client.set_channel_manager(self.channel_manager().manager());
         client.set_chain_monitor(self.channel_manager().chain_monitor());
+        // On restart, hand the channel monitors read from disk to the
+        // backend: each one is synced from its own best block to the chain
+        // tip and registered with the chain monitor during `sync_chain`.
+        let broadcaster = self.onchain_manager()
+            as Arc<dyn ldk::chain::chaininterface::BroadcasterInterface + Send + Sync>;
+        let fee_estimator = self.onchain_manager()
+            as Arc<dyn ldk::chain::chaininterface::FeeEstimator + Send + Sync>;
+        let stale_monitors = self
+            .channel_manager()
+            .take_stale_monitors()
+            .into_iter()
+            .map(|(locator, monitor)| {
+                (
+                    locator,
+                    (
+                        monitor,
+                        broadcaster.clone(),
+                        fee_estimator.clone(),
+                        self.logger.clone(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        client.set_stale_monitors(stale_monitors);
         self.channel_manager().set_handler(self.handler());
         Ok(())
     }
@@ -273,15 +297,24 @@ impl LampoDaemon {
             self.logger.clone(),
         ));
 
-        log::info!(target: "lampo", "Stating onchaind");
-        let _ = self.onchain_manager().listen();
-        log::info!(target: "lampo", "Starting peer manager");
-        let shutdown = self.shutdown.clone();
-        let _ = self.peer_manager().run_with_shutdown(shutdown.clone());
-        log::info!(target: "lampo", "Starting channel manager");
-        let _ = self.channel_manager().listen();
-
         tokio::spawn(async move {
+            // Bring the channel manager, the chain monitor, and any channel
+            // monitors read from disk up to the chain tip *before* starting
+            // the peer manager or the event processor: nothing may mutate
+            // channel state while monitors are still catching up, and a
+            // node that cannot see the chain must not go live at all.
+            log::info!(target: "lampo", "Syncing to the chain tip");
+            self.onchain_manager().sync_chain().await.map_err(|err| {
+                log::error!(target: "lampo", "Initial chain sync failed: {err}");
+                io::Error::new(io::ErrorKind::Other, err.to_string())
+            })?;
+
+            log::info!(target: "lampo", "Stating onchaind");
+            let _ = self.onchain_manager().listen();
+            log::info!(target: "lampo", "Starting peer manager");
+            let shutdown = self.shutdown.clone();
+            let _ = self.peer_manager().run_with_shutdown(shutdown.clone());
+
             process_events_async(
                 self.persister.clone(),
                 |env| self.handler_ldk_events(env),

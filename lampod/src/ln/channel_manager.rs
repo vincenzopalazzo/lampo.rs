@@ -51,6 +51,7 @@ pub struct LampoChannelManager {
     score: OnceLock<Arc<Mutex<LampoScorer>>>,
     handler: OnceLock<Arc<LampoHandler>>,
     router: OnceLock<Arc<LampoRouter>>,
+    stale_monitors: Mutex<Vec<(BlockLocator, ChannelMonitor<InMemorySigner>)>>,
 
     pub(crate) onchain: Arc<LampoChainManager>,
     pub(crate) conf: LampoConf,
@@ -78,6 +79,7 @@ impl LampoChannelManager {
             graph: OnceLock::new(),
             score: OnceLock::new(),
             router: OnceLock::new(),
+            stale_monitors: Mutex::new(Vec::new()),
         }
     }
 
@@ -155,14 +157,20 @@ impl LampoChannelManager {
         Channels { channels }
     }
 
-    pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
+    pub fn get_channel_monitors(
+        &self,
+    ) -> error::Result<Vec<(BlockLocator, ChannelMonitor<InMemorySigner>)>> {
         let keys = self.wallet_manager.ldk_keys().inner();
-        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
-        let mut channel_monitors = Vec::new();
-        for (_, monitor) in monitors.drain(..) {
-            channel_monitors.push(monitor);
-        }
-        Ok(channel_monitors)
+        let monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
+        Ok(monitors)
+    }
+
+    /// Take the channel monitors read from disk during [`Self::restart`],
+    /// each paired with the best block it was persisted at. They must be
+    /// synced to the chain tip and registered with the chain monitor via
+    /// `watch_channel` before the node connects new blocks.
+    pub fn take_stale_monitors(&self) -> Vec<(BlockLocator, ChannelMonitor<InMemorySigner>)> {
+        std::mem::take(&mut self.stale_monitors.lock().unwrap())
     }
 
     pub fn graph(&self) -> Arc<LampoGraph> {
@@ -313,7 +321,10 @@ impl LampoChannelManager {
 
         let _ = self.network_graph();
         let monitors = self.get_channel_monitors()?;
-        let monitors = monitors.iter().collect::<Vec<_>>();
+        let monitor_refs = monitors
+            .iter()
+            .map(|(_, monitor)| monitor)
+            .collect::<Vec<_>>();
 
         let default_message_router = DefaultMessageRouter::new(
             self.graph(),
@@ -331,7 +342,7 @@ impl LampoChannelManager {
             default_message_router,
             self.logger.clone(),
             self.conf.ldk_conf.clone(),
-            monitors,
+            monitor_refs,
         );
         let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
         let (_, channel_manager) =
@@ -340,6 +351,10 @@ impl LampoChannelManager {
         self.channeld
             .set(Arc::new(channel_manager))
             .unwrap_or_else(|_| panic!("channel manager already initialized"));
+        // Keep the monitors around: they still need to be synced to the
+        // chain tip and registered with the chain monitor before the node
+        // goes live. See `take_stale_monitors`.
+        *self.stale_monitors.lock().unwrap() = monitors;
         Ok(())
     }
 

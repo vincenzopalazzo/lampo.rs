@@ -6,6 +6,7 @@ use lightning::onion_message::messenger::DefaultMessageRouter;
 
 use crate::bitcoin::secp256k1::PublicKey;
 use crate::ldk::chain::chainmonitor::ChainMonitor;
+use crate::ldk::chain::channelmonitor::ChannelMonitor;
 use crate::ldk::chain::Filter;
 use crate::ldk::ln::channelmanager::ChannelManager;
 use crate::ldk::persister::fs_store::v1::FilesystemStore;
@@ -43,6 +44,20 @@ pub type LampoArcChannelManager<M, L> = ChannelManager<
 >;
 
 pub type LampoChannel = LampoArcChannelManager<LampoChainMonitor, LampoLogger>;
+
+/// A [`ChannelMonitor`] read from disk on restart, paired with the chain
+/// context it needs to replay blocks on its own (LDK implements
+/// [`chain::Listen`] for this tuple). Each monitor must be synced from its
+/// own best block up to the chain tip and then registered with the
+/// [`LampoChainMonitor`] via `watch_channel` before the node goes live.
+///
+/// [`chain::Listen`]: crate::ldk::chain::Listen
+pub type LampoMonitorListener = (
+    ChannelMonitor<InMemorySigner>,
+    Arc<dyn BroadcasterInterface + Send + Sync>,
+    Arc<dyn FeeEstimator + Send + Sync>,
+    Arc<LampoLogger>,
+);
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
 pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
