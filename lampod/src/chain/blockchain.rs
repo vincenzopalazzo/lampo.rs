@@ -165,4 +165,24 @@ impl Backend for LampoChainManager {
     fn set_handler(&self, arc: Arc<dyn lampo_common::handler::Handler>) {
         self.backend.set_handler(arc);
     }
+
+    // Forward every injection hook to the wrapped backend. The `Backend`
+    // trait defaults them to no-ops, so a facade that does not forward
+    // silently swallows the injection and the coordinator/wallet never
+    // reaches the real backend.
+    fn set_channel_manager(&self, channel_manager: Arc<lampo_common::types::LampoChannel>) {
+        self.backend.set_channel_manager(channel_manager);
+    }
+
+    fn set_chain_monitor(&self, chain_monitor: Arc<lampo_common::types::LampoChainMonitor>) {
+        self.backend.set_chain_monitor(chain_monitor);
+    }
+
+    fn set_coordinator(&self, coordinator: Arc<lampo_common::chainsync::ChainSyncCoordinator>) {
+        self.backend.set_coordinator(coordinator);
+    }
+
+    fn set_wallet_manager(&self, wallet: Arc<dyn WalletManager>) {
+        self.backend.set_wallet_manager(wallet);
+    }
 }
