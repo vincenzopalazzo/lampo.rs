@@ -88,3 +88,8 @@ jobs:
             exit 1
           fi
           echo "OK: each lightning* crate resolves to a single version."
+
+      # Guards the unified-chain-sync invariant (#545): the on-chain wallet
+      # crate must stay free of LDK so it remains independently replaceable.
+      - name: Ensure the on-chain wallet stays free of LDK
+        run: ./tools/check-wallet-decoupling.sh
