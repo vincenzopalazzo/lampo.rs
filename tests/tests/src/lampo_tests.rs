@@ -269,6 +269,217 @@ pub async fn pay_offer_minimal_offer() -> error::Result<()> {
     Ok(())
 }
 
+/// Build a (preimage, payment_hash) pair for the hold invoice tests.
+fn hold_preimage(seed: u8) -> (String, String) {
+    use lampo_common::bitcoin::hashes::{sha256, Hash};
+    let preimage = [seed; 32];
+    let hash = sha256::Hash::hash(&preimage);
+    (
+        preimage.iter().map(|b| format!("{b:02x}")).collect(),
+        hash.to_string(),
+    )
+}
+
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn hold_invoice_claim_settles_payment() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
+
+    let (preimage, payment_hash) = hold_preimage(7);
+    let invoice: response::HoldInvoiceResult = node2
+        .lampod()
+        .call(
+            "holdinvoice",
+            request::HoldInvoice {
+                payment_hash: payment_hash.clone(),
+                amount_msat: Some(50_000),
+                description: "hold me".to_owned(),
+                expiring_in: None,
+                min_final_cltv_expiry_delta: Some(144),
+            },
+        )
+        .await?;
+    assert_eq!(invoice.payment_hash, payment_hash);
+
+    // subscribe before paying so the `PaymentHeld` event cannot be missed
+    let mut events = node2.lampod().events();
+    let payer = node1.lampod().clone();
+    let pay_task = tokio::spawn(async move {
+        payer
+            .call::<request::Pay, response::PayResult>(
+                "pay",
+                request::Pay {
+                    invoice_str: invoice.bolt11,
+                    amount: None,
+                    bolt12: None,
+                },
+            )
+            .await
+    });
+
+    // wait for the payment to be held on the receiver side
+    let held = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let event = events.recv().await.expect("event channel closed");
+            if let Event::Lightning(LightningEvent::PaymentHeld {
+                payment_hash: hash,
+                amount_msat,
+                ..
+            }) = event
+            {
+                return (hash, amount_msat);
+            }
+        }
+    })
+    .await?;
+    assert_eq!(held.0, payment_hash);
+    assert_eq!(held.1, 50_000);
+
+    let holds: response::ListHoldsResult =
+        node2.lampod().call("listholds", json::json!({})).await?;
+    assert_eq!(holds.holds.len(), 1);
+    assert_eq!(holds.holds[0].status, response::HoldStatus::Held);
+
+    let claim: response::HoldClaimResult = node2
+        .lampod()
+        .call(
+            "holdclaim",
+            request::HoldClaim {
+                payment_preimage: preimage.clone(),
+            },
+        )
+        .await?;
+    assert_eq!(claim.payment_hash, payment_hash);
+
+    let pay = pay_task.await??;
+    assert_eq!(pay.state, response::PaymentState::Success);
+    assert_eq!(pay.payment_preimage, Some(preimage));
+
+    // the hold record is gone once the payment settles
+    let holds: response::ListHoldsResult =
+        node2.lampod().call("listholds", json::json!({})).await?;
+    assert!(holds.holds.is_empty());
+    Ok(())
+}
+
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn hold_invoice_fail_rejects_payment() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
+
+    let (_, payment_hash) = hold_preimage(9);
+    let invoice: response::HoldInvoiceResult = node2
+        .lampod()
+        .call(
+            "holdinvoice",
+            request::HoldInvoice {
+                payment_hash: payment_hash.clone(),
+                amount_msat: Some(50_000),
+                description: "hold and fail".to_owned(),
+                expiring_in: None,
+                min_final_cltv_expiry_delta: Some(144),
+            },
+        )
+        .await?;
+
+    let mut events = node2.lampod().events();
+    let payer = node1.lampod().clone();
+    let pay_task = tokio::spawn(async move {
+        payer
+            .call::<request::Pay, response::PayResult>(
+                "pay",
+                request::Pay {
+                    invoice_str: invoice.bolt11,
+                    amount: None,
+                    bolt12: None,
+                },
+            )
+            .await
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let event = events.recv().await.expect("event channel closed");
+            if let Event::Lightning(LightningEvent::PaymentHeld { .. }) = event {
+                return;
+            }
+        }
+    })
+    .await?;
+
+    let _: response::HoldFailResult = node2
+        .lampod()
+        .call(
+            "holdfail",
+            request::HoldFail {
+                payment_hash: payment_hash.clone(),
+            },
+        )
+        .await?;
+
+    let pay = pay_task.await??;
+    assert_eq!(pay.state, response::PaymentState::Failure);
+
+    let holds: response::ListHoldsResult =
+        node2.lampod().call("listholds", json::json!({})).await?;
+    assert!(holds.holds.is_empty());
+    Ok(())
+}
+
+/// Regression test: a payment to an invoice with an external payment
+/// hash that is not registered as a hold must fail cleanly instead of
+/// killing the receiving node event loop.
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn pay_external_hash_without_hold_fails_cleanly() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
+
+    let (_, payment_hash) = hold_preimage(3);
+    let invoice: response::HoldInvoiceResult = node2
+        .lampod()
+        .call(
+            "holdinvoice",
+            request::HoldInvoice {
+                payment_hash: payment_hash.clone(),
+                amount_msat: Some(50_000),
+                description: "no hold".to_owned(),
+                expiring_in: None,
+                min_final_cltv_expiry_delta: Some(144),
+            },
+        )
+        .await?;
+    // drop the hold registration: the invoice is still payable, but the
+    // receiver has no record for it anymore
+    let _: response::HoldFailResult = node2
+        .lampod()
+        .call("holdfail", request::HoldFail { payment_hash })
+        .await?;
+
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: invoice.bolt11,
+                amount: None,
+                bolt12: None,
+            },
+        )
+        .await?;
+    assert_eq!(pay.state, response::PaymentState::Failure);
+
+    // the receiving node must still be alive and answering
+    let info: response::GetInfo = node2.lampod().call("getinfo", json::json!({})).await?;
+    assert_eq!(info.node_id, node2.info.node_id);
+    Ok(())
+}
+
 #[tokio_test_shutdown_timeout::test(10)]
 pub async fn decode_invoice() -> error::Result<()> {
     init();

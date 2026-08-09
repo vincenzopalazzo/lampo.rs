@@ -24,6 +24,7 @@ use lampo_common::model::response::PaymentState;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
+use crate::ln::{HoldDecision, HoldManager};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
@@ -37,6 +38,7 @@ pub struct LampoHandler {
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
     persister: Arc<LampoPersistence>,
+    hold_manager: Arc<HoldManager>,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
@@ -54,6 +56,7 @@ impl LampoHandler {
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
             persister: lampod.persister(),
+            hold_manager: lampod.hold_manager(),
             external_handlers: RwLock::new(Vec::new()),
             emitter,
             subscriber,
@@ -348,24 +351,73 @@ impl Handler for LampoHandler {
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
                 };
                 // The preimage is unknown when the invoice was created for an
-                // external payment hash (e.g. via `create_inbound_payment_for_hash`).
-                // We cannot claim what we cannot settle, so fail the HTLC back
-                // instead of panicking inside the LDK event loop.
+                // external payment hash (i.e. a hold invoice). In that case
+                // the hold manager decides whether the payment is kept
+                // pending; unknown or underpaying payments are failed back.
+                //
+                // This branch must never block: the whole node event loop
+                // waits on it.
                 match preimage {
                     Some(preimage) => {
                         self.channel_manager.manager().claim_funds(preimage);
                     }
                     None => {
-                        log::warn!(
-                            target: "lampo::handler",
-                            "claimable payment `{payment_hash}` has no preimage, failing it back"
-                        );
-                        self.channel_manager
-                            .manager()
-                            .fail_htlc_backwards_with_reason(
-                            &payment_hash,
-                            ldk::ln::channelmanager::FailureCode::IncorrectOrUnknownPaymentDetails,
-                        );
+                        let hash_str = payment_hash.to_string();
+                        match self
+                            .hold_manager
+                            .on_claimable(&hash_str, amount_msat, claim_deadline)
+                        {
+                            HoldDecision::Hold(_) => {
+                                log::info!(
+                                    target: "lampo::hold",
+                                    "holding payment `{hash_str}` of `{amount_msat}msat` (claim deadline `{claim_deadline:?}`)"
+                                );
+                                self.emit(Event::Lightning(LightningEvent::PaymentHeld {
+                                    payment_hash: hash_str,
+                                    amount_msat,
+                                    claim_deadline,
+                                }));
+                            }
+                            HoldDecision::Reject {
+                                expected_msat,
+                                received_msat,
+                            } => {
+                                log::warn!(
+                                    target: "lampo::hold",
+                                    "payment `{hash_str}` pays `{received_msat}msat` but the hold expects `{expected_msat}msat`, failing it back"
+                                );
+                                self.channel_manager
+                                    .manager()
+                                    .fail_htlc_backwards_with_reason(
+                                    &payment_hash,
+                                    ldk::ln::channelmanager::FailureCode::IncorrectOrUnknownPaymentDetails,
+                                );
+                            }
+                            HoldDecision::AlreadyHeld => {
+                                log::warn!(
+                                    target: "lampo::hold",
+                                    "a payment for `{hash_str}` is already held, failing the duplicate back"
+                                );
+                                self.channel_manager
+                                    .manager()
+                                    .fail_htlc_backwards_with_reason(
+                                    &payment_hash,
+                                    ldk::ln::channelmanager::FailureCode::IncorrectOrUnknownPaymentDetails,
+                                );
+                            }
+                            HoldDecision::NotRegistered => {
+                                log::warn!(
+                                    target: "lampo::handler",
+                                    "claimable payment `{payment_hash}` has no preimage and no hold, failing it back"
+                                );
+                                self.channel_manager
+                                    .manager()
+                                    .fail_htlc_backwards_with_reason(
+                                    &payment_hash,
+                                    ldk::ln::channelmanager::FailureCode::IncorrectOrUnknownPaymentDetails,
+                                );
+                            }
+                        }
                     }
                 }
                 Ok(())

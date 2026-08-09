@@ -1,6 +1,7 @@
 //! Offchain RPC methods
 use std::str::FromStr;
 
+use lampo_common::bitcoin::hex::FromHex;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
@@ -8,10 +9,10 @@ use lampo_common::hex;
 use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::ldk;
 use lampo_common::ldk::offers::offer;
-use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
 use lampo_common::model::request::Pay;
+use lampo_common::model::request::{self, GenerateInvoice};
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
@@ -160,6 +161,85 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
             _ => {}
         }
     }
+}
+
+pub async fn json_holdinvoice(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `holdinvoice` with request `{:?}`", request);
+    let request: request::HoldInvoice = json::from_value(request.clone())?;
+    let payment_hash = ldk::types::payment::PaymentHash(
+        Vec::<u8>::from_hex(&request.payment_hash)
+            .ok()
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or(crate::rpc_error!(
+                "`payment_hash` must be a 32 byte hex string"
+            ))?,
+    );
+    // Register the hold before the invoice leaves the node, so the
+    // payment can never arrive without a hold record in place.
+    ctx.hold_manager()
+        .register(&request.payment_hash, request.amount_msat)
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    let invoice = ctx.offchain_manager().generate_invoice_for_hash(
+        payment_hash,
+        request.amount_msat,
+        &request.description,
+        request.expiring_in.unwrap_or(10000),
+        request.min_final_cltv_expiry_delta,
+    );
+    let invoice = match invoice {
+        Ok(invoice) => invoice,
+        Err(err) => {
+            // roll the registration back, there is no invoice to pay
+            let _ = ctx.hold_manager().unregister(&request.payment_hash);
+            return Err(crate::rpc_error!("{err}"));
+        }
+    };
+    let result = response::HoldInvoiceResult {
+        bolt11: invoice.to_string(),
+        payment_hash: request.payment_hash,
+    };
+    Ok(json::to_value(&result)?)
+}
+
+pub async fn json_holdclaim(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `holdclaim`");
+    let request: request::HoldClaim = json::from_value(request.clone())?;
+    let hold = ctx
+        .hold_manager()
+        .claim(&request.payment_preimage)
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    Ok(json::to_value(&response::HoldClaimResult {
+        payment_hash: hold.payment_hash,
+    })?)
+}
+
+pub async fn json_holdfail(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+    log::info!("call for `holdfail` with request `{:?}`", request);
+    let request: request::HoldFail = json::from_value(request.clone())?;
+    let hold = ctx
+        .hold_manager()
+        .fail(&request.payment_hash)
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    Ok(json::to_value(&response::HoldFailResult {
+        payment_hash: hold.payment_hash,
+    })?)
+}
+
+pub async fn json_listholds(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `listholds`");
+    let _: request::ListHolds = json::from_value(request.clone())?;
+    Ok(json::to_value(&response::ListHoldsResult {
+        holds: ctx.hold_manager().list(),
+    })?)
 }
 
 pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
