@@ -176,7 +176,8 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
 
-    // Do wallet syncing in the background!
+    // Do wallet syncing in the background! (`LampoDaemon::new` already shared
+    // the chain-sync coordinator with the wallet.)
     wallet.listen().await?;
 
     // Init the lampod
