@@ -1,4 +1,5 @@
 pub mod backend;
+pub mod chainsync;
 pub mod conf;
 pub mod event;
 pub mod handler;
