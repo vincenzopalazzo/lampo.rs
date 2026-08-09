@@ -332,19 +332,20 @@ mod tests {
         let path = std::env::temp_dir().join(format!(
             "lampo-hold-store-{}-{}",
             std::process::id(),
-            rand_suffix()
+            unique_suffix()
         ));
         let _ = std::fs::remove_dir_all(&path);
         let persister = Arc::new(LampoPersistence::new(path.clone()));
         (HoldStore::new(persister).unwrap(), path)
     }
 
-    fn rand_suffix() -> u64 {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .subsec_nanos() as u64
+    /// A directory nobody else in this process will pick. Timestamps
+    /// are not enough: tests run in parallel and two of them can read
+    /// the same nanosecond, then share a store and wipe each other.
+    fn unique_suffix() -> usize {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        NEXT.fetch_add(1, Ordering::Relaxed)
     }
 
     #[test]
