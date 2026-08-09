@@ -16,19 +16,39 @@ use lampo_common::handler::ExternalHandler;
 use lampo_common::handler::Handler as EventHandler;
 use lampo_common::json;
 use lampo_common::jsonrpc::Request;
+use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
+use lampo_common::ldk::chain::chaininterface::BroadcasterInterface;
+use lampo_common::ldk::events::bump_transaction::BumpTransactionEventHandler;
 use lampo_common::ldk::sign::NodeSigner;
+use lampo_common::ldk::util::wallet_utils::Wallet as LdkWallet;
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
+use lampo_common::wallet::LampoWalletSource;
 
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
+use crate::utils::logger::LampoLogger;
 use crate::LampoDaemon;
 
 use super::Handler;
+
+/// Minimum confirmed on-chain balance required to accept an inbound anchor
+/// channel: the reserve that would fund a CPFP of its commitment on
+/// force-close. Matches ldk-node's per-channel anchor reserve default.
+const ANCHOR_RESERVE_SAT: u64 = 25_000;
+
+/// Handles `Event::BumpTransaction`: builds and broadcasts anchor CPFP and
+/// HTLC fee-bump transactions, funding them from the on-chain wallet.
+type LampoBumpEventHandler = BumpTransactionEventHandler<
+    Arc<dyn BroadcasterInterface + Send + Sync>,
+    Arc<LdkWallet<Arc<LampoWalletSource>, Arc<LampoLogger>>>,
+    Arc<LampoKeysManager>,
+    Arc<LampoLogger>,
+>;
 
 pub struct LampoHandler {
     channel_manager: Arc<LampoChannelManager>,
@@ -38,6 +58,7 @@ pub struct LampoHandler {
     chain_manager: Arc<LampoChainManager>,
     persister: Arc<LampoPersistence>,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
+    bump_event_handler: LampoBumpEventHandler,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
     subscriber: Subscriber<Event>,
@@ -47,6 +68,14 @@ impl LampoHandler {
     pub(crate) fn new(lampod: &LampoDaemon) -> Self {
         let emitter = Emitter::default();
         let subscriber = emitter.subscriber();
+        let logger = lampod.logger();
+        let wallet_source = Arc::new(LampoWalletSource::new(lampod.wallet_manager()));
+        let bump_event_handler = BumpTransactionEventHandler::new(
+            lampod.onchain_manager() as Arc<dyn BroadcasterInterface + Send + Sync>,
+            Arc::new(LdkWallet::new(wallet_source, logger.clone())),
+            lampod.wallet_manager().ldk_keys().keys_manager.clone(),
+            logger,
+        );
         Self {
             channel_manager: lampod.channel_manager(),
             peer_manager: lampod.peer_manager(),
@@ -55,6 +84,7 @@ impl LampoHandler {
             chain_manager: lampod.onchain_manager(),
             persister: lampod.persister(),
             external_handlers: RwLock::new(Vec::new()),
+            bump_event_handler,
             emitter,
             subscriber,
         }
@@ -124,16 +154,35 @@ impl Handler for LampoHandler {
             ldk::events::Event::OpenChannelRequest {
                 temporary_channel_id,
                 counterparty_node_id,
+                channel_type,
                 ..
             } => {
                 // LDK 0.3 removed `manually_accept_inbound_channels`; inbound
                 // channels are now always surfaced here and must be accepted
                 // explicitly.
-                if !self.channel_manager.conf.accept_inbound_channels {
+                let reject_reason = if !self.channel_manager.conf.accept_inbound_channels {
+                    Some("inbound channels are disabled on this node".to_owned())
+                } else if channel_type.supports_anchors_zero_fee_htlc_tx() {
+                    // An anchor channel needs confirmed on-chain funds to
+                    // CPFP its commitment on force-close; accepting one
+                    // with an empty wallet means a stuck commitment and
+                    // lost HTLCs when the counterparty goes silent.
+                    let balance = self.wallet_manager.get_onchain_balance().await.unwrap_or(0);
+                    if balance < ANCHOR_RESERVE_SAT {
+                        Some(format!(
+                            "insufficient on-chain reserve for an anchor channel \
+                             ({balance} sat confirmed, {ANCHOR_RESERVE_SAT} sat required)"
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(reason) = reject_reason {
                     log::warn!(
                         target: "lampod",
-                        "rejecting inbound channel request from `{counterparty_node_id}`: \
-                         `accept-inbound-channels` is disabled"
+                        "rejecting inbound channel request from `{counterparty_node_id}`: {reason}"
                     );
                     if let Err(err) = self
                         .channel_manager
@@ -141,7 +190,7 @@ impl Handler for LampoHandler {
                         .force_close_broadcasting_latest_txn(
                             &temporary_channel_id,
                             &counterparty_node_id,
-                            "inbound channels are disabled on this node".to_owned(),
+                            reason,
                         )
                     {
                         log::error!(target: "lampod", "failed to reject inbound channel: {err:?}");
@@ -413,6 +462,11 @@ impl Handler for LampoHandler {
                 };
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristent these information
+                Ok(())
+            }
+            ldk::events::Event::BumpTransaction(bump_event) => {
+                log::info!(target: "lampod", "bump transaction event: {:?}", bump_event);
+                self.bump_event_handler.handle_event(&bump_event).await;
                 Ok(())
             }
             ldk::events::Event::SpendableOutputs {

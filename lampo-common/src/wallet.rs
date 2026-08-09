@@ -4,12 +4,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::bitcoin::absolute::Height;
-use crate::bitcoin::{Address, Network, ScriptBuf, Transaction};
+use crate::bitcoin::{Address, Network, OutPoint, Psbt, ScriptBuf, Transaction, TxOut, Txid};
 use crate::bitcoin::{Amount, FeeRate};
 use crate::conf::LampoConf;
 use crate::error;
 use crate::keys::LampoKeys;
 use crate::ldk::sign::ChangeDestinationSource;
+use crate::ldk::util::wallet_utils::{Utxo as LdkUtxo, WalletSource};
 use crate::model::response::{NewAddress, Utxo};
 
 /// Wallet manager trait that define a generic interface
@@ -58,6 +59,20 @@ pub trait WalletManager: Send + Sync {
     /// Run a task for wallet sync operation, this usually need to
     /// be run in a `tokio::spawn(wallet.listen())`.
     async fn listen(self: Arc<Self>) -> error::Result<()>;
+
+    /// Return all wallet UTXOs with at least one confirmation, available
+    /// to fund fee bumps (anchor CPFP, HTLC transactions).
+    async fn list_confirmed_utxos(&self) -> error::Result<Vec<(OutPoint, TxOut)>>;
+
+    /// Return the full wallet transaction with the given txid, if known.
+    async fn get_wallet_transaction(&self, txid: Txid) -> error::Result<Option<Transaction>>;
+
+    /// Return a fresh change script from the wallet.
+    async fn get_change_script(&self) -> error::Result<ScriptBuf>;
+
+    /// Sign every wallet-owned input of the PSBT and return the resulting
+    /// transaction. Inputs the wallet does not own are left untouched.
+    async fn sign_psbt(&self, psbt: Psbt) -> error::Result<Transaction>;
 }
 
 /// [`ChangeDestinationSource`] backed by the node's on-chain wallet: swept
@@ -70,6 +85,88 @@ pub struct LampoChangeDestination {
 impl LampoChangeDestination {
     pub fn new(wallet: Arc<dyn WalletManager>, network: Network) -> Self {
         Self { wallet, network }
+    }
+}
+
+/// [`WalletSource`] backed by the node's on-chain wallet, used by LDK's
+/// coin selection when funding anchor CPFP and HTLC fee bumps.
+pub struct LampoWalletSource {
+    wallet: Arc<dyn WalletManager>,
+}
+
+impl LampoWalletSource {
+    pub fn new(wallet: Arc<dyn WalletManager>) -> Self {
+        Self { wallet }
+    }
+}
+
+impl WalletSource for LampoWalletSource {
+    fn list_confirmed_utxos<'a>(
+        &'a self,
+    ) -> impl std::future::Future<Output = Result<Vec<LdkUtxo>, ()>> + Send + 'a {
+        async move {
+            let utxos = self.wallet.list_confirmed_utxos().await.map_err(|err| {
+                log::error!(target: "lampo-wallet", "failed to list confirmed utxos: {err}");
+            })?;
+            // The wallet is BIP84, so every spendable output is P2WPKH;
+            // skip anything else instead of misreporting its weight.
+            let utxos = utxos
+                .into_iter()
+                .filter_map(|(outpoint, output)| {
+                    if output.script_pubkey.is_p2wpkh() {
+                        use crate::bitcoin::hashes::Hash;
+                        let pubkey_hash = crate::bitcoin::WPubkeyHash::from_slice(
+                            &output.script_pubkey.as_bytes()[2..22],
+                        )
+                        .ok()?;
+                        Some(LdkUtxo::new_v0_p2wpkh(outpoint, output.value, &pubkey_hash))
+                    } else {
+                        log::warn!(
+                            target: "lampo-wallet",
+                            "skipping non-p2wpkh utxo `{outpoint}` for fee bumping"
+                        );
+                        None
+                    }
+                })
+                .collect();
+            Ok(utxos)
+        }
+    }
+
+    fn get_prevtx<'a>(
+        &'a self,
+        outpoint: OutPoint,
+    ) -> impl std::future::Future<Output = Result<Transaction, ()>> + Send + 'a {
+        async move {
+            self.wallet
+                .get_wallet_transaction(outpoint.txid)
+                .await
+                .map_err(|err| {
+                    log::error!(target: "lampo-wallet", "failed to load prev tx `{}`: {err}", outpoint.txid);
+                })?
+                .ok_or(())
+        }
+    }
+
+    fn get_change_script<'a>(
+        &'a self,
+    ) -> impl std::future::Future<Output = Result<ScriptBuf, ()>> + Send + 'a {
+        async move {
+            self.wallet.get_change_script().await.map_err(|err| {
+                log::error!(target: "lampo-wallet", "failed to derive a change script: {err}");
+            })
+        }
+    }
+
+    fn sign_psbt<'a>(
+        &'a self,
+        psbt: Psbt,
+    ) -> impl std::future::Future<Output = Result<Transaction, ()>> + Send + 'a {
+        async move {
+            self.wallet.sign_psbt(psbt).await.map_err(|err| {
+                log::error!(target: "lampo-wallet", "failed to sign fee-bump psbt: {err}");
+            })
+        }
     }
 }
 

@@ -6,6 +6,20 @@ use clightningrpc_conf::{CLNConf, SyncCLNConf};
 pub use bitcoin::Network;
 pub use lightning::util::config::UserConfig;
 
+/// The LDK configuration lampo runs with.
+///
+/// Anchor channels are negotiated on purpose: commitment transactions are
+/// built at a low feerate and bumped via CPFP when they need to confirm
+/// (`Event::BumpTransaction`), so a congested mempool cannot strand a
+/// force-close. This matches the LDK default, but is set explicitly here
+/// because lampo's fee-bumping wiring depends on it.
+fn default_ldk_conf() -> UserConfig {
+    let mut conf = UserConfig::default();
+    conf.channel_handshake_config
+        .negotiate_anchors_zero_fee_htlc_tx = true;
+    conf
+}
+
 #[derive(Clone, Debug)]
 pub struct LampoConf {
     pub inner: Option<CLNConf>,
@@ -46,7 +60,7 @@ impl Default for LampoConf {
             inner: None,
             // default network is testnet
             network: Network::Testnet,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: default_ldk_conf(),
             // default port is 19735 for testnet
             port: 19735,
             root_path: lampo_home,
@@ -267,7 +281,7 @@ impl TryFrom<String> for LampoConf {
             inner: Some(conf),
             root_path,
             network,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: default_ldk_conf(),
             port: u64::from_str(&port)?,
             node,
             core_url,

@@ -202,6 +202,10 @@ impl LampoDaemon {
         self.wallet_manager.clone()
     }
 
+    pub fn logger(&self) -> Arc<LampoLogger> {
+        self.logger.clone()
+    }
+
     pub fn init_event_handler(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init inventory manager ...");
         let handler = LampoHandler::new(self);
