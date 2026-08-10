@@ -55,14 +55,22 @@ pub struct Swap {
     pub offer_id: Option<String>,
     pub direction: Direction,
     pub state: State,
-    /// msat on the lightning leg.
+    /// msat on the lightning leg: what we pay (A) or receive (B).
     pub amount_msat: u64,
+    /// sats on the spark leg: what the counterparty locks and we claim
+    /// (A) or what we deliver (B). The gap between this and the
+    /// lightning leg, minus routing, is our fee.
+    pub spark_amount_sat: u64,
     /// Direction A: the payment id handle for `payfetched`.
     pub lampo_payment_id: Option<String>,
     /// Direction B: the Spark transfer we owe, chosen *before* the
     /// transfer is created so a retry after a crash reuses the same id
     /// instead of paying a second time.
     pub spark_transfer_id: Option<String>,
+    /// Direction A: the preimage the lightning leg revealed, persisted
+    /// before we try to claim the counterparty's Spark HTLC so a crash
+    /// mid-claim can retry instead of losing it.
+    pub preimage: Option<String>,
     /// Direction B: where the Spark HTLC goes. Direction A: unused.
     pub counterparty_spark_address: Option<String>,
     /// The BOLT12 offer string (theirs in A, ours in B).
@@ -135,8 +143,10 @@ mod tests {
             direction,
             state,
             amount_msat: 1_000,
+            spark_amount_sat: 1,
             lampo_payment_id: None,
             spark_transfer_id: None,
+            preimage: None,
             counterparty_spark_address: None,
             offer: "lno1...".to_owned(),
             created_at: now(),

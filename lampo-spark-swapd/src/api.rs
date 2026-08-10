@@ -22,7 +22,9 @@ struct SwapOutRequest {
 struct SwapInRequest {
     /// Where the incoming funds land as a Spark HTLC.
     spark_address: String,
-    amount_msat: u64,
+    /// How much the caller wants to receive on Spark, in sats. They pay
+    /// this plus the fee on lightning.
+    payout_sat: u64,
     /// Hash of a preimage *the caller* generated. They keep the
     /// preimage: it is what makes the swap atomic, and what they will
     /// use to claim the Spark HTLC.
@@ -41,7 +43,7 @@ async fn swap_out(engine: web::Data<Arc<Engine>>, body: web::Json<SwapOutRequest
 
 async fn swap_in(engine: web::Data<Arc<Engine>>, body: web::Json<SwapInRequest>) -> HttpResponse {
     match engine
-        .create_hold_swap(&body.spark_address, body.amount_msat, &body.payment_hash)
+        .create_hold_swap(&body.spark_address, body.payout_sat, &body.payment_hash)
         .await
     {
         Ok(invoice) => HttpResponse::Ok().json(serde_json::json!({ "invoice": invoice })),

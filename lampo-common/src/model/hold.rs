@@ -30,6 +30,12 @@ pub mod request {
 
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct ListHolds {}
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct PaymentPreimage {
+        /// Hex 32 byte payment hash of an outbound payment.
+        pub payment_hash: String,
+    }
 }
 
 pub mod response {
@@ -77,5 +83,13 @@ pub mod response {
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct HoldFailResult {
         pub payment_hash: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct PaymentPreimageResult {
+        /// Hex preimage if the outbound payment settled and the node
+        /// still holds its receipt; `None` otherwise (unknown, pending,
+        /// or failed — the caller cannot tell those apart).
+        pub payment_preimage: Option<String>,
     }
 }

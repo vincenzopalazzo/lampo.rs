@@ -258,10 +258,7 @@ async fn spark_htlc_is_locked_and_claimed_with_the_preimage() {
     let payment_hash = sha256::Hash::hash(&preimage);
     let receiver_address = receiver.get_spark_address().expect("receiver address");
 
-    // A deposit lands as a single leaf, and create_htlc cannot mint
-    // change from it, so lock the whole balance. Splitting into partial
-    // amounts is a leaf-optimization concern the swap does not need to
-    // prove here.
+    // A single deposit leaf, locked whole.
     let amount_sat = sender_start;
     let transfer = sender
         .create_htlc(
@@ -345,6 +342,8 @@ fn engine_settings(quote_expiry_secs: u64) -> Settings {
         spark_htlc_expiry_secs: 3600,
         api_addr: "127.0.0.1:0".to_owned(),
         spark_operators: Vec::new(),
+        fee_base_sat: 1,
+        fee_ppm: 5_000,
     }
 }
 
@@ -378,10 +377,8 @@ async fn direction_a_full_swap_spark_to_lightning() {
     let swapd_spark = std::sync::Arc::new(wallet(nonce()).await);
     let user_spark = wallet(nonce()).await;
 
-    // The swap moves 50_000 sat == 50_000_000 msat across the two.
-    let amount_sat: u64 = 50_000;
-    let amount_msat = amount_sat * 1000;
-    fund(&user_spark, amount_sat).await;
+    // The swap moves 50_000_000 msat on lightning.
+    let amount_msat: u64 = 50_000_000;
 
     // M issues the offer the user wants to pay.
     let offer: response::Offer = node_m
@@ -407,12 +404,19 @@ async fn direction_a_full_swap_spark_to_lightning() {
     ));
 
     // Quote: fetch M's invoice through S, pin the payment hash, and get
-    // the address the user must lock against.
+    // the address the user must lock against. The quote already includes
+    // our fee, so fund the user with exactly what it asks for and lock
+    // the whole leaf.
     let quote = engine
         .quote_spark_to_ln(&offer.bolt12, None)
         .await
         .expect("quote");
     assert_eq!(quote.amount_msat, amount_msat);
+    assert!(quote.fee_sat > 0, "the quote must charge a fee");
+    let lock_sat = quote.lock_amount_sat;
+    assert_eq!(lock_sat, amount_msat / 1000 + quote.fee_sat);
+
+    fund(&user_spark, lock_sat).await;
 
     // The user locks their spark htlc on that hash, to the swap node.
     use bitcoin::hashes::sha256;
@@ -421,11 +425,11 @@ async fn direction_a_full_swap_spark_to_lightning() {
     let payment_hash = sha256::Hash::from_str(&quote.payment_hash).expect("hash");
     user_spark
         .create_htlc(
-            amount_sat,
+            lock_sat,
             &receiver,
             &payment_hash,
             std::time::Duration::from_secs(3600),
-            None,
+            Some(spark_wallet::TransferId::generate()),
         )
         .await
         .expect("user locks the spark htlc");
@@ -460,13 +464,13 @@ async fn direction_a_full_swap_spark_to_lightning() {
     for _ in 0..15 {
         swapd_spark.sync().await.ok();
         swapd_balance = swapd_spark.get_balance().await.unwrap_or(0);
-        if swapd_balance >= amount_sat {
+        if swapd_balance >= lock_sat {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
     assert!(
-        swapd_balance >= amount_sat,
+        swapd_balance >= lock_sat,
         "the swap node must hold the claimed spark funds, has {swapd_balance}"
     );
 
@@ -512,7 +516,6 @@ async fn direction_b_full_swap_lightning_to_spark() {
         .expect("channel U -> S");
 
     let amount_sat: u64 = 50_000;
-    let amount_msat = amount_sat * 1000;
     let swapd_spark = std::sync::Arc::new(wallet(nonce()).await);
     let user_spark = wallet(nonce()).await;
     fund(&swapd_spark, amount_sat).await;
@@ -538,14 +541,14 @@ async fn direction_b_full_swap_lightning_to_spark() {
     tokio::spawn(engine.clone().run());
 
     let invoice = engine
-        .create_hold_swap(&user_address, amount_msat, &payment_hash)
+        .create_hold_swap(&user_address, amount_sat, &payment_hash)
         .await
         .expect("hold swap");
 
     // The same hash must never back a second swap.
     assert!(
         engine
-            .create_hold_swap(&user_address, amount_msat, &payment_hash)
+            .create_hold_swap(&user_address, amount_sat, &payment_hash)
             .await
             .is_err(),
         "a reused payment hash must be refused"
@@ -627,4 +630,115 @@ async fn direction_b_full_swap_lightning_to_spark() {
         "the user must receive the spark funds, has {user_balance}"
     );
     println!("direction B complete, atomically: user received {user_balance} sat on spark");
+}
+
+/// Direction A crash recovery: a swap that settled its lightning leg
+/// and persisted the preimage, then died before claiming the spark
+/// htlc, must finish itself on restart with no human in the loop.
+///
+/// We stage exactly that state: a counterparty locks a spark htlc to
+/// the swap node, and a swap record is written in `Claiming` with the
+/// preimage, as the engine would have left it. A fresh engine on the
+/// same store then has to claim it and reach `Done`.
+#[tokio::test]
+#[ignore = "needs the spark operator stack and bitcoind, see the module docs"]
+async fn direction_a_recovers_a_crashed_claim() {
+    use bitcoin::hashes::{sha256, Hash as _};
+    use lampo_spark_swapd::swap::{now, Direction, Swap};
+    use lampo_testing::LampoTesting;
+    use std::str::FromStr;
+
+    init_logger();
+
+    // The swap node's spark wallet, and a counterparty who locks to it.
+    let node_s = LampoTesting::tmp().await.expect("node S");
+    let swapd_spark = std::sync::Arc::new(wallet(nonce()).await);
+    let counterparty = wallet(nonce()).await;
+
+    let amount_sat: u64 = 50_000;
+    fund(&counterparty, amount_sat).await;
+
+    let preimage = nonce();
+    let preimage_hex = hex_of(&preimage);
+    let payment_hash = sha256::Hash::hash(&preimage).to_string();
+    let swapd_address = swapd_spark
+        .get_spark_address()
+        .unwrap()
+        .to_address_string()
+        .unwrap();
+
+    // The counterparty locks their htlc to the swap node, exactly as in
+    // a live Direction A swap.
+    let receiver = spark::address::SparkAddress::from_str(&swapd_address).unwrap();
+    let hash = sha256::Hash::from_str(&payment_hash).unwrap();
+    counterparty
+        .create_htlc(
+            amount_sat,
+            &receiver,
+            &hash,
+            std::time::Duration::from_secs(3600),
+            Some(spark_wallet::TransferId::generate()),
+        )
+        .await
+        .expect("counterparty locks the htlc");
+
+    // Stage the crashed swap: lightning already settled, preimage saved,
+    // died before the spark claim.
+    let store_dir = std::env::temp_dir().join(format!("swapd-recover-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store_dir);
+    let store = SwapStore::new(store_dir.clone()).expect("store");
+    store
+        .persist(&Swap {
+            payment_hash: Some(payment_hash.clone()),
+            offer_id: None,
+            direction: Direction::SparkToLn,
+            state: State::Claiming,
+            amount_msat: amount_sat * 1000,
+            spark_amount_sat: amount_sat,
+            lampo_payment_id: Some("00".repeat(32)),
+            spark_transfer_id: None,
+            preimage: Some(preimage_hex),
+            counterparty_spark_address: None,
+            offer: String::new(),
+            created_at: now(),
+            updated_at: now(),
+        })
+        .expect("stage the crashed swap");
+    drop(store);
+
+    // A fresh engine on the same store, as if the daemon restarted.
+    let engine = std::sync::Arc::new(Engine::new(
+        LampoLeg::new(node_s.lampod()),
+        SparkLeg::new(swapd_spark.clone()),
+        SwapStore::new(store_dir).expect("reopen store"),
+        engine_settings(90),
+    ));
+    tokio::spawn(engine.clone().run());
+
+    // Reconcile must finish it: claim the htlc and reach Done, unaided.
+    let mut recovered = false;
+    for _ in 0..30 {
+        if engine
+            .list()
+            .iter()
+            .any(|s| s.payment_hash.as_deref() == Some(&payment_hash) && s.state == State::Done)
+        {
+            recovered = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+    assert!(recovered, "the crashed claim must recover to Done on its own");
+
+    let mut balance = 0;
+    for _ in 0..15 {
+        swapd_spark.sync().await.ok();
+        balance = swapd_spark.get_balance().await.unwrap_or(0);
+        if balance >= amount_sat {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    assert!(balance >= amount_sat, "recovery must land the funds, has {balance}");
+    println!("direction A recovery complete: crashed claim finished unaided");
 }

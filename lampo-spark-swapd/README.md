@@ -184,23 +184,34 @@ engine `run()` loop:
 The two lampo nodes run on their own bitcoind and the spark wallets on
 the operators' chain: nothing shares a chain, only the payment hash.
 
-Still not production ready. The protocol-level gaps are closed: both
-directions are atomic, a payment hash backs exactly one swap, the
-Spark transfer id is chosen and persisted before the transfer is sent
-so a retry cannot deliver twice, the two legs' expiries are derived
-from each other rather than set independently, and over- and
-under-payment are both refused with a hard cap.
+Still not production ready, but the protocol, economic and operational
+gaps are all closed now:
 
-What remains is economic and operational rather than protocol: there
-is no fee policy (quotes are pass-through, so lightning routing fees
-come out of the daemon's own pocket), no leaf-denomination management
-(a deposit lands as a single leaf, which limits partial-amount
-payouts), and the Direction A recovery paths for a crash mid-payment
-still ask for manual review rather than resolving themselves.
+- **Atomicity.** Both directions are atomic, a payment hash backs
+  exactly one swap, the Spark transfer id is chosen and persisted
+  before the transfer is sent so a retry cannot deliver twice, the two
+  legs' expiries are derived from each other rather than set
+  independently, and over- and under-payment are both refused with a
+  hard cap.
+- **Fee policy.** Quotes charge a spread, `swap-fee-base-sat` plus
+  `swap-fee-ppm` (defaults 1 sat + 5000 ppm), so the spark leg is sized
+  smaller than the lightning leg by the fee and lightning routing no
+  longer comes out of the daemon's pocket. Both directions apply it.
+- **Direction A crash recovery is automatic.** A crash mid-payment
+  resolves itself at reconcile: if it died in `LnPaying` the node is
+  asked for the preimage over the `paymentpreimage` RPC (settled →
+  claim the spark leg, unknown → fail safely); if it died in `Claiming`
+  the preimage was persisted before the attempt, so the claim just
+  retries. No manual review. Covered by
+  `direction_a_recovers_a_crashed_claim`.
 
 Known limits, on purpose and documented in code:
 - Direction B trusted window (above).
-- A crash during `payfetched` or `claim_htlc` needs manual review: the
-  preimage lives in the node's in-memory map and is not yet queryable
-  after restart. Surfaced loudly at reconcile, never guessed.
-- No fee policy yet: quotes are pass-through.
+- **Leaf denominations depend on the SSP.** Delivery tries
+  `create_htlc` for the exact payout first, which covers whole-leaf and
+  matching-denomination cases, and only falls back to `optimize_leaves`
+  to reshape. That fallback needs a Spark service provider for the leaf
+  swap, so on the operator-only stack an arbitrary partial payout that
+  requires minting change from a single leaf can still fail. Whole-leaf
+  and matched-amount payouts work today; on-demand denominations need
+  the SSP.

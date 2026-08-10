@@ -70,6 +70,24 @@ impl LampoLeg {
         Ok(())
     }
 
+    /// The preimage of an outbound payment, if the node settled it and
+    /// still holds the receipt. `None` means unknown, pending or failed:
+    /// the caller cannot distinguish those, only that no preimage is
+    /// available. Used to recover a Direction A swap that crashed
+    /// mid-payment, where the node kept the preimage swapd lost.
+    pub async fn payment_preimage(&self, payment_hash: &str) -> error::Result<Option<String>> {
+        let result: response::PaymentPreimageResult = self
+            .handler
+            .call(
+                "paymentpreimage",
+                request::PaymentPreimage {
+                    payment_hash: payment_hash.to_owned(),
+                },
+            )
+            .await?;
+        Ok(result.payment_preimage)
+    }
+
     /// Issue a hold invoice on a payment hash *the counterparty chose*.
     /// We cannot settle it: only they know the preimage. That is the
     /// whole point, it is what makes the receive direction atomic.

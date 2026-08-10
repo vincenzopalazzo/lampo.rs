@@ -31,6 +31,12 @@ pub struct Settings {
     pub spark_htlc_expiry_secs: u64,
     /// Address of the daemon's own swap API.
     pub api_addr: String,
+    /// Flat fee taken on every swap, in sats. Covers the base cost of
+    /// existing regardless of size.
+    pub fee_base_sat: u64,
+    /// Proportional fee in parts per million of the swap amount. Covers
+    /// lightning routing and the capital/risk of fronting both legs.
+    pub fee_ppm: u64,
     /// Spark signing operators to talk to. Empty means the defaults
     /// baked into the SDK, which are Lightspark's hosted ones; a local
     /// regtest stack must be named explicitly.
@@ -62,6 +68,10 @@ impl Settings {
             quote_expiry_secs: parsed(conf, "swap-quote-expiry-secs")?.unwrap_or(45),
             spark_htlc_expiry_secs: parsed(conf, "swap-htlc-expiry-secs")?.unwrap_or(3600),
             api_addr: value(conf, "swap-api-addr")?.unwrap_or_else(|| "127.0.0.1:9736".to_owned()),
+            // Defaults chosen to cover lightning routing with margin:
+            // 1 sat flat plus 0.5%, the low end of what boltz charges.
+            fee_base_sat: parsed(conf, "swap-fee-base-sat")?.unwrap_or(1),
+            fee_ppm: parsed(conf, "swap-fee-ppm")?.unwrap_or(5_000),
             spark_operators: operators(conf)?,
         })
     }

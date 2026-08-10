@@ -377,6 +377,31 @@ pub async fn json_holdfail(ctx: &LampoDaemon, request: &json::Value) -> Result<j
     })?)
 }
 
+pub async fn json_paymentpreimage(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `paymentpreimage` with request `{:?}`", request);
+    let request: request::PaymentPreimage = json::from_value(request.clone())?;
+    let payment_hash = ldk::types::payment::PaymentHash(
+        Vec::<u8>::from_hex(&request.payment_hash)
+            .ok()
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or(crate::rpc_error!(
+                "`payment_hash` must be a 32 byte hex string"
+            ))?,
+    );
+    // The receipt persisted on `PaymentSent` is the source of truth that
+    // an outbound payment settled. Reading it back lets a caller that
+    // crashed mid-payment learn the preimage instead of losing it.
+    let preimage = crate::ln::payer_proof::load(&ctx.persister(), &payment_hash)
+        .map_err(|err| crate::rpc_error!("{err}"))?
+        .map(|record| hex::encode(record.preimage.0));
+    Ok(json::to_value(&response::PaymentPreimageResult {
+        payment_preimage: preimage,
+    })?)
+}
+
 pub async fn json_listholds(
     ctx: &LampoDaemon,
     request: &json::Value,

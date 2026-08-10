@@ -43,7 +43,13 @@ pub struct Engine {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Quote {
     pub payment_hash: String,
+    /// What the merchant's invoice is for, in msat. Informational.
     pub amount_msat: u64,
+    /// What the caller must lock on Spark, in sats: the invoice amount
+    /// plus our fee. This is the number that matters to them.
+    pub lock_amount_sat: u64,
+    /// Our fee, in sats, broken out so the quote is auditable.
+    pub fee_sat: u64,
     /// Where the Spark HTLC must be locked.
     pub spark_address: String,
     /// Seconds the quote stays payable. Bounded by LDK reaping the
@@ -77,14 +83,23 @@ impl Engine {
                 fetched.amount_msat
             );
         }
+        // The lightning leg is the invoice; the spark leg is that plus
+        // our fee. The counterparty locks the larger amount, we claim
+        // it, and we pay the smaller invoice: the gap is what covers
+        // routing and pays us.
+        let invoice_sat = fetched.amount_msat / 1000;
+        let fee_sat = self.fee_sat(invoice_sat);
+        let lock_amount_sat = invoice_sat + fee_sat;
         let swap = Swap {
             payment_hash: Some(fetched.payment_hash.clone()),
             offer_id: None,
             direction: Direction::SparkToLn,
             state: State::Quoted,
             amount_msat: fetched.amount_msat,
+            spark_amount_sat: lock_amount_sat,
             lampo_payment_id: Some(fetched.payment_id),
             spark_transfer_id: None,
+            preimage: None,
             counterparty_spark_address: None,
             offer: offer.to_owned(),
             created_at: now(),
@@ -94,9 +109,18 @@ impl Engine {
         Ok(Quote {
             payment_hash: fetched.payment_hash,
             amount_msat: fetched.amount_msat,
+            lock_amount_sat,
+            fee_sat,
             spark_address: self.spark.spark_address().await?,
             expires_in_secs: self.cfg.quote_expiry_secs,
         })
+    }
+
+    /// Our fee for a swap of `amount_sat`: a flat base plus a
+    /// proportional part. Covers lightning routing, which we absorb, and
+    /// the capital and timing risk of fronting both legs.
+    fn fee_sat(&self, amount_sat: u64) -> u64 {
+        self.cfg.fee_base_sat + amount_sat * self.cfg.fee_ppm / 1_000_000
     }
 
     /// Direction B entry point: the counterparty gives us the payment
@@ -110,12 +134,9 @@ impl Engine {
     pub async fn create_hold_swap(
         &self,
         spark_address: &str,
-        amount_msat: u64,
+        payout_sat: u64,
         payment_hash: &str,
     ) -> error::Result<String> {
-        if amount_msat % 1000 != 0 {
-            error::bail!("{amount_msat}msat is not a whole number of sats");
-        }
         if hex_bytes(payment_hash).map(|bytes| bytes.len()) != Some(32) {
             error::bail!("`payment_hash` must be 32 bytes of hex");
         }
@@ -125,6 +146,12 @@ impl Engine {
             error::bail!("a swap for this payment hash already exists");
         }
 
+        // They ask to receive `payout_sat` on spark; the invoice they
+        // pay is that plus our fee. We receive the larger amount on
+        // lightning and deliver the smaller on spark.
+        let fee_sat = self.fee_sat(payout_sat);
+        let invoice_msat = (payout_sat + fee_sat) * 1000;
+
         // The lightning hold must outlive the spark htlc: we can only
         // settle it after they claim, and they can only claim while the
         // spark leg is alive. `LN_HOLD_MARGIN` is the room this leaves.
@@ -133,18 +160,20 @@ impl Engine {
 
         let invoice = self
             .lampo
-            .hold_invoice(payment_hash, amount_msat, cltv, hold_secs as u32)
+            .hold_invoice(payment_hash, invoice_msat, cltv, hold_secs as u32)
             .await?;
         let swap = Swap {
             payment_hash: Some(payment_hash.to_owned()),
             offer_id: None,
             direction: Direction::LnToSpark,
             state: State::HoldInvoiceIssued,
-            amount_msat,
+            amount_msat: invoice_msat,
+            spark_amount_sat: payout_sat,
             lampo_payment_id: None,
             // Chosen now, before anything is sent, so a retry after a
             // crash reuses it instead of delivering twice.
             spark_transfer_id: Some(new_transfer_id()),
+            preimage: None,
             counterparty_spark_address: Some(spark_address.to_owned()),
             offer: invoice.bolt11.clone(),
             created_at: now(),
@@ -233,15 +262,14 @@ impl Engine {
         ) else {
             error::bail!("direction B swap `{}` is missing its fields", swap.id());
         };
-        if swap.amount_msat % 1000 != 0 {
-            error::bail!(
-                "swap `{}` is {}msat, which is not a whole number of sats",
-                swap.id(),
-                swap.amount_msat
-            );
-        }
-        let amount_sat = swap.amount_msat / 1000;
-        match self
+        let amount_sat = swap.spark_amount_sat;
+        // Try the payout as-is first: if a leaf already covers the
+        // amount (the common case, and always true when the amount
+        // matches a deposit), this just works. Only if leaf selection
+        // fails do we reshape into spendable denominations and retry,
+        // because the optimizer reserves leaves and can leave the wallet
+        // briefly unspendable if it stumbles.
+        let mut result = self
             .spark
             .create_htlc(
                 amount_sat,
@@ -250,8 +278,22 @@ impl Engine {
                 Duration::from_secs(self.cfg.spark_htlc_expiry_secs),
                 &transfer_id,
             )
-            .await
-        {
+            .await;
+        if result.is_err() {
+            log::info!(target: "swapd", "reshaping leaves to cover {amount_sat} sat");
+            self.spark.optimize(LEAF_OPTIMIZE_ROUNDS).await.ok();
+            result = self
+                .spark
+                .create_htlc(
+                    amount_sat,
+                    &address,
+                    &hash,
+                    Duration::from_secs(self.cfg.spark_htlc_expiry_secs),
+                    &transfer_id,
+                )
+                .await;
+        }
+        match result {
             Ok(id) => {
                 log::info!(target: "swapd", "spark htlc `{id}` locked for `{hash}`");
                 swap.transition(State::SparkHtlcLocked)?;
@@ -321,12 +363,58 @@ impl Engine {
                 return Err(err);
             }
         };
+        // Persist the preimage *before* claiming, so a crash between the
+        // lightning settling and the spark claim can retry instead of
+        // losing the secret. This is what makes `Claiming` recoverable.
+        swap.preimage = Some(preimage.clone());
         swap.transition(State::Claiming)?;
         self.store.persist(swap)?;
         self.spark.claim_htlc(&preimage).await?;
         swap.transition(State::Done)?;
         self.store.persist(swap)?;
         log::info!(target: "swapd", "swap `{}` complete", swap.id());
+        Ok(())
+    }
+
+    /// Recover a Direction A swap that crashed while paying. The node
+    /// persisted the preimage on settlement, so ask it: settled means we
+    /// can claim; not settled means the payment never went through and
+    /// the counterparty's htlc simply refunds to them.
+    async fn recover_ln_paying(&self, swap: &mut Swap) -> error::Result<()> {
+        let hash = swap.payment_hash.clone().unwrap_or_default();
+        match self.lampo.payment_preimage(&hash).await? {
+            Some(preimage) => {
+                log::info!(target: "swapd", "swap `{hash}` settled while down, resuming the claim");
+                swap.preimage = Some(preimage);
+                swap.transition(State::Claiming)?;
+                self.store.persist(swap)?;
+                self.retry_claim(swap).await
+            }
+            None => {
+                log::warn!(
+                    target: "swapd",
+                    "swap `{hash}` was not settled, treating the payment as not made"
+                );
+                swap.transition(State::Failed {
+                    reason: "interrupted while paying; the payment did not settle".to_owned(),
+                })?;
+                self.store.persist(swap)?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Claim the counterparty's Spark HTLC with the preimage we persisted
+    /// before the claim. Idempotent: an already-claimed htlc is a
+    /// harmless no-op, so retrying after a crash is safe.
+    async fn retry_claim(&self, swap: &mut Swap) -> error::Result<()> {
+        let Some(preimage) = swap.preimage.clone() else {
+            error::bail!("swap `{}` is claiming without a stored preimage", swap.id());
+        };
+        self.spark.claim_htlc(&preimage).await?;
+        swap.transition(State::Done)?;
+        self.store.persist(swap)?;
+        log::info!(target: "swapd", "swap `{}` complete after recovery", swap.id());
         Ok(())
     }
 
@@ -365,7 +453,7 @@ impl Engine {
                     let locked_sat = locked.map(|htlc| htlc.amount_sat);
                     match quoted_action(
                         locked_sat,
-                        swap.amount_msat,
+                        swap.spark_amount_sat,
                         swap.created_at,
                         now(),
                         self.cfg.quote_expiry_secs,
@@ -393,29 +481,21 @@ impl Engine {
                     }
                 }
                 (Direction::SparkToLn, State::LnPaying) => {
-                    // A restart interrupted `payfetched`. The payment
-                    // may have settled, but the preimage lived in the
-                    // node's in-memory map: it cannot be recovered over
-                    // the API today. Flag loudly instead of guessing.
-                    log::error!(
-                        target: "swapd",
-                        "swap `{}` was paying at restart: the preimage may be lost, manual review needed",
-                        swap.id()
-                    );
-                    swap.transition(State::Failed {
-                        reason: "interrupted while paying, needs manual review".to_owned(),
-                    })?;
-                    self.store.persist(&swap)?;
+                    // A restart interrupted `payfetched`. Ask the node
+                    // whether the payment settled: it kept the preimage
+                    // even though we lost it. If settled, we move to
+                    // claiming; if not, the payment never went through and
+                    // the counterparty's htlc refunds to them.
+                    if let Err(err) = self.recover_ln_paying(&mut swap).await {
+                        log::error!(target: "swapd", "swap `{}`: {err}", swap.id());
+                    }
                 }
                 (Direction::SparkToLn, State::Claiming) => {
-                    // The lightning leg settled but the claim was
-                    // interrupted; without the preimage in the store we
-                    // cannot retry blindly. Manual review.
-                    log::error!(
-                        target: "swapd",
-                        "swap `{}` was claiming at restart, manual review needed",
-                        swap.id()
-                    );
+                    // The lightning leg settled and we persisted the
+                    // preimage before crashing, so just retry the claim.
+                    if let Err(err) = self.retry_claim(&mut swap).await {
+                        log::error!(target: "swapd", "swap `{}`: {err}", swap.id());
+                    }
                 }
                 (Direction::LnToSpark, State::LnHeld) => {
                     // We owe the htlc. Retrying is safe: the transfer id
@@ -458,6 +538,10 @@ impl Engine {
         Ok(())
     }
 }
+
+/// How many rounds of leaf optimization to run before a payout, enough
+/// to split a single deposit leaf into spendable denominations.
+const LEAF_OPTIMIZE_ROUNDS: u32 = 3;
 
 /// How much longer the held lightning payment must live than the spark
 /// htlc it is paired with. We can only settle lightning *after* they
@@ -578,12 +662,11 @@ enum QuotedAction {
 
 fn quoted_action(
     locked_sat: Option<u64>,
-    owed_msat: u64,
+    expected_sat: u64,
     created_at: u64,
     now: u64,
     quote_expiry_secs: u64,
 ) -> QuotedAction {
-    let expected_sat = owed_msat / 1000;
     match locked_sat {
         Some(locked_sat) if locked_sat < expected_sat => QuotedAction::Reject {
             reason: format!("spark htlc locks {locked_sat} sat, the swap needs {expected_sat} sat"),
@@ -597,6 +680,35 @@ fn quoted_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_settings(base: u64, ppm: u64) -> Settings {
+        Settings {
+            spark_network: "regtest".to_owned(),
+            spark_seed_file: std::path::PathBuf::from("/dev/null"),
+            quote_expiry_secs: 45,
+            spark_htlc_expiry_secs: 3600,
+            api_addr: "127.0.0.1:0".to_owned(),
+            spark_operators: Vec::new(),
+            fee_base_sat: base,
+            fee_ppm: ppm,
+        }
+    }
+
+    fn fee_of(base: u64, ppm: u64, amount: u64) -> u64 {
+        // mirror Engine::fee_sat without constructing the legs
+        let cfg = test_settings(base, ppm);
+        cfg.fee_base_sat + amount * cfg.fee_ppm / 1_000_000
+    }
+
+    #[test]
+    fn the_fee_is_base_plus_proportional() {
+        // 1 sat flat + 0.5% of 50_000 = 1 + 250
+        assert_eq!(fee_of(1, 5_000, 50_000), 251);
+        // pure base
+        assert_eq!(fee_of(10, 0, 50_000), 10);
+        // pure proportional, 1%
+        assert_eq!(fee_of(0, 10_000, 1_000_000), 10_000);
+    }
 
     #[test]
     fn underpayment_is_refused() {
@@ -668,19 +780,19 @@ mod tests {
     #[test]
     fn a_sufficient_lock_advances() {
         assert_eq!(
-            quoted_action(Some(10_000), 10_000_000, 100, 110, 45),
+            quoted_action(Some(10_000), 10_000, 100, 110, 45),
             QuotedAction::Advance
         );
         // overpaying is the counterparty's problem, not a reason to stall
         assert_eq!(
-            quoted_action(Some(20_000), 10_000_000, 100, 110, 45),
+            quoted_action(Some(20_000), 10_000, 100, 110, 45),
             QuotedAction::Advance
         );
     }
 
     #[test]
     fn an_underpaying_lock_is_rejected_not_paid() {
-        let action = quoted_action(Some(1), 10_000_000, 100, 110, 45);
+        let action = quoted_action(Some(1), 10_000, 100, 110, 45);
         assert!(
             matches!(action, QuotedAction::Reject { .. }),
             "got {action:?}"
@@ -691,7 +803,7 @@ mod tests {
     fn an_underpaying_lock_is_rejected_even_after_expiry() {
         // The lock exists, so this must never be treated as an expired
         // quote: the counterparty's funds are in play.
-        let action = quoted_action(Some(1), 10_000_000, 100, 100 + 3600, 45);
+        let action = quoted_action(Some(1), 10_000, 100, 100 + 3600, 45);
         assert!(
             matches!(action, QuotedAction::Reject { .. }),
             "got {action:?}"
@@ -701,12 +813,12 @@ mod tests {
     #[test]
     fn a_fresh_unlocked_quote_waits() {
         assert_eq!(
-            quoted_action(None, 10_000_000, 100, 110, 45),
+            quoted_action(None, 10_000, 100, 110, 45),
             QuotedAction::Wait
         );
         // the boundary second still waits, expiry is strictly after
         assert_eq!(
-            quoted_action(None, 10_000_000, 100, 145, 45),
+            quoted_action(None, 10_000, 100, 145, 45),
             QuotedAction::Wait
         );
     }
@@ -714,7 +826,7 @@ mod tests {
     #[test]
     fn an_unlocked_quote_expires_after_the_window() {
         assert_eq!(
-            quoted_action(None, 10_000_000, 100, 146, 45),
+            quoted_action(None, 10_000, 100, 146, 45),
             QuotedAction::Expire
         );
     }

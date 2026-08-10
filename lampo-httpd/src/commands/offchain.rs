@@ -8,6 +8,7 @@ use lampo_common::model::{request, response};
 use lampod::jsonrpc::offchain::{
     json_cancelfetched, json_decode, json_fetchinvoice, json_holdclaim, json_holdfail,
     json_holdinvoice, json_invoice, json_listholds, json_offer, json_pay, json_payfetched,
+    json_paymentpreimage,
 };
 
 use crate::{post, AppState, ResultJson};
@@ -24,3 +25,4 @@ post!(holdinvoice, request: request::HoldInvoice, response: response::HoldInvoic
 post!(holdclaim, request: request::HoldClaim, response: response::HoldClaimResult);
 post!(holdfail, request: request::HoldFail, response: response::HoldFailResult);
 post!(listholds, request: request::ListHolds, response: response::ListHoldsResult);
+post!(paymentpreimage, request: request::PaymentPreimage, response: response::PaymentPreimageResult);

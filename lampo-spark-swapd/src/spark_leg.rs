@@ -116,6 +116,22 @@ impl SparkLeg {
         }))
     }
 
+    /// Re-shape the wallet's leaves so an arbitrary amount can be sent.
+    ///
+    /// A deposit lands as one leaf, and `create_htlc` cannot mint change
+    /// from a single leaf, so a partial-amount payout fails with
+    /// `InsufficientFunds`. Running the optimizer splits and merges
+    /// leaves into spendable denominations first. Best effort: if it
+    /// makes no progress the subsequent `create_htlc` will surface the
+    /// real error.
+    pub async fn optimize(&self, max_rounds: u32) -> error::Result<()> {
+        self.wallet
+            .optimize_leaves(Some(max_rounds))
+            .await
+            .map_err(|err| error::anyhow!("spark optimize_leaves: {err}"))?;
+        Ok(())
+    }
+
     pub async fn spark_address(&self) -> error::Result<String> {
         let address = self
             .wallet
