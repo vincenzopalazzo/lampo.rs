@@ -73,6 +73,13 @@ pub struct Swap {
     pub preimage: Option<String>,
     /// Direction B: where the Spark HTLC goes. Direction A: unused.
     pub counterparty_spark_address: Option<String>,
+    /// Direction B: unix seconds when we actually locked the Spark HTLC.
+    /// The HTLC's real expiry is measured from *here*, not from
+    /// `created_at`, so we never return the held lightning payment while
+    /// the counterparty can still claim the Spark leg. `#[serde(default)]`
+    /// so records written before this field load as `None`.
+    #[serde(default)]
+    pub spark_locked_at: Option<u64>,
     /// The BOLT12 offer string (theirs in A, ours in B).
     pub offer: String,
     /// Unix seconds.
@@ -148,6 +155,7 @@ mod tests {
             spark_transfer_id: None,
             preimage: None,
             counterparty_spark_address: None,
+            spark_locked_at: None,
             offer: "lno1...".to_owned(),
             created_at: now(),
             updated_at: now(),

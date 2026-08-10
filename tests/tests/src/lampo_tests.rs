@@ -446,6 +446,7 @@ pub async fn fetchinvoice_then_payfetched() -> error::Result<()> {
                 offer_str: offer.bolt12,
                 amount_msat: None,
                 payer_note: None,
+                max_cltv_expiry_delta: None,
             },
         )
         .await?;
@@ -502,6 +503,7 @@ pub async fn fetchinvoice_cancel_prevents_payment() -> error::Result<()> {
                 offer_str: offer.bolt12,
                 amount_msat: None,
                 payer_note: None,
+                max_cltv_expiry_delta: None,
             },
         )
         .await?;

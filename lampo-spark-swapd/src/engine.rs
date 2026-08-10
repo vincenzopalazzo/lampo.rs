@@ -55,6 +55,11 @@ pub struct Quote {
     /// Seconds the quote stays payable. Bounded by LDK reaping the
     /// fetched invoice roughly a minute after the fetch.
     pub expires_in_secs: u64,
+    /// The minimum life the locked Spark HTLC must have. Anything
+    /// shorter is refused: the lightning payment's CLTV budget must fit
+    /// inside the lock, or a slow payment could settle after the lock
+    /// refunded and we would pay out with nothing to claim.
+    pub min_lock_expiry_secs: u64,
 }
 
 impl Engine {
@@ -73,7 +78,10 @@ impl Engine {
         offer: &str,
         amount_msat: Option<u64>,
     ) -> error::Result<Quote> {
-        let fetched = self.lampo.fetch_invoice(offer, amount_msat).await?;
+        let fetched = self
+            .lampo
+            .fetch_invoice(offer, amount_msat, PAY_CLTV_BUDGET_BLOCKS)
+            .await?;
         // The spark leg settles in sats: reject the swap now rather than
         // after the counterparty has locked funds against the quote.
         if fetched.amount_msat % 1000 != 0 {
@@ -88,7 +96,18 @@ impl Engine {
         // it, and we pay the smaller invoice: the gap is what covers
         // routing and pays us.
         let invoice_sat = fetched.amount_msat / 1000;
-        let fee_sat = self.fee_sat(invoice_sat);
+        if invoice_sat > self.cfg.max_swap_sat {
+            self.lampo.cancel_fetched(&fetched.payment_id).await.ok();
+            error::bail!(
+                "the invoice asks {invoice_sat} sat, above the {} sat swap limit",
+                self.cfg.max_swap_sat
+            );
+        }
+        // The fee has to cover the lightning routing *we* pay on this
+        // leg. LDK caps BOLT12 routing at 1% + 50 sat by default, so if
+        // we charged less we could route-pay more than we collect and
+        // settle the swap at a loss. Floor the fee at that cap.
+        let fee_sat = self.fee_sat(invoice_sat).max(max_routing_sat(invoice_sat));
         let lock_amount_sat = invoice_sat + fee_sat;
         let swap = Swap {
             payment_hash: Some(fetched.payment_hash.clone()),
@@ -101,6 +120,7 @@ impl Engine {
             spark_transfer_id: None,
             preimage: None,
             counterparty_spark_address: None,
+            spark_locked_at: None,
             offer: offer.to_owned(),
             created_at: now(),
             updated_at: now(),
@@ -113,6 +133,7 @@ impl Engine {
             fee_sat,
             spark_address: self.spark.spark_address().await?,
             expires_in_secs: self.cfg.quote_expiry_secs,
+            min_lock_expiry_secs: required_lock_secs(),
         })
     }
 
@@ -139,6 +160,15 @@ impl Engine {
     ) -> error::Result<String> {
         if hex_bytes(payment_hash).map(|bytes| bytes.len()) != Some(32) {
             error::bail!("`payment_hash` must be 32 bytes of hex");
+        }
+        if payout_sat > self.cfg.max_swap_sat {
+            // Every accepted swap locks our own funds in an htlc for its
+            // whole expiry, at no cost to a counterparty who never
+            // claims. The cap bounds that exposure.
+            error::bail!(
+                "a {payout_sat} sat payout is above the {} sat swap limit",
+                self.cfg.max_swap_sat
+            );
         }
         if self.store.get(payment_hash).is_some() {
             // A hash may back exactly one swap, ever. Reusing one would
@@ -175,6 +205,7 @@ impl Engine {
             spark_transfer_id: Some(new_transfer_id()),
             preimage: None,
             counterparty_spark_address: Some(spark_address.to_owned()),
+            spark_locked_at: None,
             offer: invoice.bolt11.clone(),
             created_at: now(),
             updated_at: now(),
@@ -296,6 +327,11 @@ impl Engine {
         match result {
             Ok(id) => {
                 log::info!(target: "swapd", "spark htlc `{id}` locked for `{hash}`");
+                // Stamp when the htlc was actually locked: its real
+                // expiry is measured from now, and returning the held
+                // lightning payment before that expiry (plus a margin)
+                // would let them claim spark *and* keep their refund.
+                swap.spark_locked_at = Some(now());
                 swap.transition(State::SparkHtlcLocked)?;
                 self.store.persist(swap)?;
                 Ok(())
@@ -312,20 +348,22 @@ impl Engine {
     /// Direction B settlement: they claimed the Spark HTLC, which
     /// revealed the preimage; that is the only thing that lets us take
     /// the held lightning payment.
-    async fn settle_from_revealed_preimage(&self, swap: &mut Swap) -> error::Result<()> {
+    /// Returns `true` if it settled (the preimage was revealed and the
+    /// held payment claimed), `false` if there is still no preimage.
+    async fn settle_from_revealed_preimage(&self, swap: &mut Swap) -> error::Result<bool> {
         let (Some(hash), Some(transfer_id)) =
             (swap.payment_hash.clone(), swap.spark_transfer_id.clone())
         else {
             error::bail!("direction B swap `{}` is missing its fields", swap.id());
         };
         let Some(preimage) = self.spark.revealed_preimage(&transfer_id).await? else {
-            return Ok(());
+            return Ok(false);
         };
         log::info!(target: "swapd", "swap `{hash}` preimage revealed, settling the held payment");
         self.lampo.hold_claim(&preimage).await?;
         swap.transition(State::Done)?;
         self.store.persist(swap)?;
-        Ok(())
+        Ok(true)
     }
 
     /// Direction A advance: the counterparty locked their Spark HTLC,
@@ -354,12 +392,19 @@ impl Engine {
                 error::bail!("{reason}");
             }
             Err(err) => {
-                // The Spark HTLC refunds to the counterparty at its
-                // expiry; nothing is owed.
-                swap.transition(State::Failed {
-                    reason: format!("lightning payment failed: {err}"),
-                })?;
-                self.store.persist(swap)?;
+                // An error here does NOT mean the payment failed: the
+                // node's wait has a timeout and its htlcs may still be
+                // in flight. Marking the swap failed now would strand a
+                // late settlement -- paid out, never claimed. Stay in
+                // `LnPaying`; reconcile resolves it from evidence: the
+                // preimage appears (claim) or the htlc dies without one
+                // (close). A payment that truly failed simply never
+                // produces a preimage and the record closes at expiry.
+                log::warn!(
+                    target: "swapd",
+                    "swap `{}` payment outcome unknown ({err}), reconcile will resolve it",
+                    swap.id()
+                );
                 return Err(err);
             }
         };
@@ -378,9 +423,17 @@ impl Engine {
 
     /// Recover a Direction A swap that crashed while paying. The node
     /// persisted the preimage on settlement, so ask it: settled means we
-    /// can claim; not settled means the payment never went through and
-    /// the counterparty's htlc simply refunds to them.
-    async fn recover_ln_paying(&self, swap: &mut Swap) -> error::Result<()> {
+    /// can claim. Not settled is ambiguous — the payment may have failed
+    /// *or still be in flight* — so while the counterparty's htlc is
+    /// still claimable we wait and ask again next tick. Declaring the
+    /// payment dead while it can still settle would strand a later
+    /// settlement: paid out, nothing claimed. Only once the htlc is gone
+    /// (nothing left to claim either way) do we close the record.
+    async fn recover_ln_paying(
+        &self,
+        swap: &mut Swap,
+        htlc_still_claimable: bool,
+    ) -> error::Result<()> {
         let hash = swap.payment_hash.clone().unwrap_or_default();
         match self.lampo.payment_preimage(&hash).await? {
             Some(preimage) => {
@@ -390,10 +443,20 @@ impl Engine {
                 self.store.persist(swap)?;
                 self.retry_claim(swap).await
             }
+            None if htlc_still_claimable => {
+                // The payment's cltv budget fits inside the htlc's life,
+                // so if it ever settles it does so while we can still
+                // claim. Keep waiting; the next tick asks again.
+                log::info!(
+                    target: "swapd",
+                    "swap `{hash}` not settled yet, waiting while the spark htlc is alive"
+                );
+                Ok(())
+            }
             None => {
                 log::warn!(
                     target: "swapd",
-                    "swap `{hash}` was not settled, treating the payment as not made"
+                    "swap `{hash}` was not settled and the spark htlc is gone, closing it"
                 );
                 swap.transition(State::Failed {
                     reason: "interrupted while paying; the payment did not settle".to_owned(),
@@ -431,12 +494,13 @@ impl Engine {
                 (Direction::SparkToLn, State::Quoted) => {
                     let hash = swap.payment_hash.clone().unwrap_or_default();
                     let locked = claimable.iter().find(|htlc| htlc.payment_hash == hash);
-                    // Their expiry is their choice. If it does not leave
-                    // room to pay lightning and then claim, paying would
-                    // mean paying the merchant and watching their lock
-                    // refund out from under us.
+                    // Their expiry is their choice. It must outlive the
+                    // payment's whole CLTV budget plus the claim margin:
+                    // a payment can stay in flight for its full budget,
+                    // and if the lock refunds first, a late settlement
+                    // pays the merchant with nothing left to claim.
                     if let Some(htlc) = locked {
-                        if !expiry_leaves_room(htlc.expiry, CLAIM_MARGIN_SECS) {
+                        if !expiry_leaves_room(htlc.expiry, required_lock_secs()) {
                             log::error!(
                                 target: "swapd",
                                 "swap `{}` locked with too little time left to claim safely",
@@ -483,10 +547,15 @@ impl Engine {
                 (Direction::SparkToLn, State::LnPaying) => {
                     // A restart interrupted `payfetched`. Ask the node
                     // whether the payment settled: it kept the preimage
-                    // even though we lost it. If settled, we move to
-                    // claiming; if not, the payment never went through and
-                    // the counterparty's htlc refunds to them.
-                    if let Err(err) = self.recover_ln_paying(&mut swap).await {
+                    // even though we lost it. Settled means claim; not
+                    // settled means wait while the htlc lives (the
+                    // payment may still be in flight) and close only
+                    // once it is gone.
+                    let hash = swap.payment_hash.clone().unwrap_or_default();
+                    let htlc_alive = claimable
+                        .iter()
+                        .any(|htlc| htlc.payment_hash == hash && expiry_leaves_room(htlc.expiry, 0));
+                    if let Err(err) = self.recover_ln_paying(&mut swap, htlc_alive).await {
                         log::error!(target: "swapd", "swap `{}`: {err}", swap.id());
                     }
                 }
@@ -509,23 +578,43 @@ impl Engine {
                     // preimage appears and settles our side. If they
                     // never claim, the spark htlc refunds to us and the
                     // held payment goes back to them: both or neither.
-                    if let Err(err) = self.settle_from_revealed_preimage(&mut swap).await {
-                        log::error!(target: "swapd", "swap `{}`: {err}", swap.id());
-                    } else if !swap.is_terminal()
-                        && now() > swap.created_at + self.cfg.spark_htlc_expiry_secs
-                    {
-                        log::warn!(
-                            target: "swapd",
-                            "swap `{}` expired unclaimed, returning the held payment",
-                            swap.id()
-                        );
-                        if let Some(hash) = swap.payment_hash.clone() {
-                            self.lampo.hold_fail(&hash).await.ok();
+                    match self.settle_from_revealed_preimage(&mut swap).await {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            // Not claimed yet. We may only return the held
+                            // lightning payment once the spark htlc is
+                            // provably dead: past its real expiry, which is
+                            // measured from when we *locked* it (not from
+                            // `created_at`, which precedes the lock), plus a
+                            // safety margin. Returning it any earlier lets
+                            // the counterparty claim the still-live spark
+                            // htlc *after* we have refunded them on
+                            // lightning -- a total loss of the payout. The
+                            // lightning hold outlives the spark htlc by
+                            // LN_HOLD_MARGIN_SECS, so there is room to wait.
+                            let locked_at = swap.spark_locked_at.unwrap_or(swap.updated_at);
+                            if held_payment_returnable(
+                                locked_at,
+                                self.cfg.spark_htlc_expiry_secs,
+                                now(),
+                            ) {
+                                log::warn!(
+                                    target: "swapd",
+                                    "swap `{}` expired unclaimed, returning the held payment",
+                                    swap.id()
+                                );
+                                if let Some(hash) = swap.payment_hash.clone() {
+                                    self.lampo.hold_fail(&hash).await.ok();
+                                }
+                                swap.transition(State::Failed {
+                                    reason: "counterparty never claimed the spark htlc".to_owned(),
+                                })?;
+                                self.store.persist(&swap)?;
+                            }
                         }
-                        swap.transition(State::Failed {
-                            reason: "counterparty never claimed the spark htlc".to_owned(),
-                        })?;
-                        self.store.persist(&swap)?;
+                        Err(err) => {
+                            log::error!(target: "swapd", "swap `{}`: {err}", swap.id());
+                        }
                     }
                 }
                 (Direction::LnToSpark, State::HoldInvoiceIssued) => {
@@ -543,14 +632,51 @@ impl Engine {
 /// to split a single deposit leaf into spendable denominations.
 const LEAF_OPTIMIZE_ROUNDS: u32 = 3;
 
+/// The most lightning routing we might pay on a Direction A leg, in sats.
+/// LDK's default BOLT12 route budget is 1% of the amount plus 50 sat
+/// (`RouteParameters::from_payment_params_and_value`); our fee must never
+/// dip below this or the swap can settle for a loss.
+fn max_routing_sat(amount_sat: u64) -> u64 {
+    amount_sat / 100 + 50
+}
+
 /// How much longer the held lightning payment must live than the spark
 /// htlc it is paired with. We can only settle lightning *after* they
 /// claim spark, so the lightning side has to be the last to expire.
 const LN_HOLD_MARGIN_SECS: u64 = 3600;
 
+/// How long past a spark htlc's expiry we wait before returning the
+/// paired held lightning payment, so the htlc is provably refunded to us
+/// and can no longer be claimed. Must be well under `LN_HOLD_MARGIN_SECS`
+/// so we still return the payment before the lightning hold itself times
+/// out on the node.
+const SETTLE_SAFETY_MARGIN_SECS: u64 = 600;
+
 /// How much of a spark htlc's remaining life we insist on before paying
 /// the other leg, so learning the preimage still leaves time to claim.
 const CLAIM_MARGIN_SECS: u64 = 600;
+
+/// The total CLTV budget we give a Direction A lightning payment, in
+/// blocks. This bounds how long the payment can stay in flight: it must
+/// settle or fail within this many blocks. Passed to the node at fetch
+/// time, and the counterparty's spark htlc must outlive it (plus the
+/// claim margin), or a payment stuck for its full CLTV could settle
+/// *after* their htlc refunded to them, leaving us paid-out with
+/// nothing to claim.
+///
+/// 432 blocks is three days. It cannot be much tighter: a BOLT12
+/// blinded path alone aggregates the final delta, the intro hop's
+/// delta (72 on a plain LDK channel) and padding — 144 already fails
+/// with `RouteNotFound` on a *direct* channel — while LDK's default
+/// budget of 1008 (a week) would demand a spark lock nobody wants.
+const PAY_CLTV_BUDGET_BLOCKS: u32 = 432;
+
+/// The spark htlc life a Direction A counterparty must lock for: the
+/// payment's worst-case in-flight time plus the room to claim after
+/// the preimage is revealed.
+const fn required_lock_secs() -> u64 {
+    PAY_CLTV_BUDGET_BLOCKS as u64 * SECS_PER_BLOCK + CLAIM_MARGIN_SECS
+}
 
 /// Lightning measures time in blocks; spark in seconds. Ten minutes a
 /// block is the usual approximation, and rounding up is the safe
@@ -574,6 +700,15 @@ fn cltv_blocks_for(hold_secs: u64) -> error::Result<u16> {
     let blocks = blocks + 40;
     u16::try_from(blocks)
         .map_err(|_| error::anyhow!("a {hold_secs}s hold needs {blocks} blocks, too many"))
+}
+
+/// May we return a Direction B held lightning payment yet? Only once the
+/// paired spark htlc is provably dead: past its expiry, measured from
+/// when we locked it, plus a safety margin so it has refunded to us and
+/// can no longer be claimed. Returning it earlier is a fund drain -- the
+/// counterparty could claim the live spark htlc after we refund them.
+fn held_payment_returnable(spark_locked_at: u64, spark_expiry_secs: u64, now: u64) -> bool {
+    now > spark_locked_at + spark_expiry_secs + SETTLE_SAFETY_MARGIN_SECS
 }
 
 /// Does `expiry` leave at least `margin` from now?
@@ -691,6 +826,7 @@ mod tests {
             spark_operators: Vec::new(),
             fee_base_sat: base,
             fee_ppm: ppm,
+            max_swap_sat: 1_000_000,
         }
     }
 
@@ -708,6 +844,20 @@ mod tests {
         assert_eq!(fee_of(10, 0, 50_000), 10);
         // pure proportional, 1%
         assert_eq!(fee_of(0, 10_000, 1_000_000), 10_000);
+    }
+
+    #[test]
+    fn the_fee_never_dips_below_the_routing_we_might_pay() {
+        // Direction A pays lightning routing out of the fee. LDK's
+        // default budget is 1% + 50 sat; the effective fee (config vs
+        // that floor, whichever is larger) must cover it, or the swap
+        // settles for a loss.
+        let invoice_sat = 1_000_000u64;
+        let configured = fee_of(1, 5_000, invoice_sat); // 0.5% + 1 = 5_001
+        let floor = max_routing_sat(invoice_sat); // 1% + 50 = 10_050
+        let effective = configured.max(floor);
+        assert_eq!(effective, floor, "the routing floor must win when config is thinner");
+        assert!(effective >= max_routing_sat(invoice_sat));
     }
 
     #[test]
@@ -748,6 +898,57 @@ mod tests {
             (blocks as u64) * SECS_PER_BLOCK > spark_secs + LN_HOLD_MARGIN_SECS,
             "cltv {blocks} blocks must outlast the spark leg"
         );
+    }
+
+    #[test]
+    fn the_held_payment_is_not_returned_before_the_spark_htlc_is_dead() {
+        let locked_at = 1_000;
+        let expiry = 3_600;
+        // While the htlc is still live, the held payment must NOT be
+        // returned: returning it lets the counterparty claim spark and
+        // keep their lightning refund. This is the drain the anchor bug
+        // caused when it measured from `created_at` instead of lock time.
+        assert!(!held_payment_returnable(locked_at, expiry, locked_at));
+        assert!(!held_payment_returnable(locked_at, expiry, locked_at + expiry));
+        // At expiry it is still not safe: no margin for the refund to
+        // settle and for clock skew.
+        assert!(!held_payment_returnable(
+            locked_at,
+            expiry,
+            locked_at + expiry + SETTLE_SAFETY_MARGIN_SECS
+        ));
+        // Only once the htlc is provably dead, expiry + margin past the
+        // lock, may we return it.
+        assert!(held_payment_returnable(
+            locked_at,
+            expiry,
+            locked_at + expiry + SETTLE_SAFETY_MARGIN_SECS + 1
+        ));
+    }
+
+    #[test]
+    fn the_required_lock_outlives_the_payment_cltv_budget() {
+        // A Direction A payment can stay in flight for its whole cltv
+        // budget. The lock we demand from the counterparty must cover
+        // that entire window plus the room to claim afterwards --
+        // anything less and a stuck payment can settle after their
+        // htlc refunded, paying out with nothing left to claim.
+        assert!(
+            required_lock_secs() >= PAY_CLTV_BUDGET_BLOCKS as u64 * SECS_PER_BLOCK + CLAIM_MARGIN_SECS
+        );
+        // And the budget itself must leave room for a realistic route:
+        // a final delta of ~72 plus a few hops.
+        assert!(PAY_CLTV_BUDGET_BLOCKS >= 100);
+    }
+
+    #[test]
+    fn the_return_margin_stays_within_the_lightning_hold() {
+        // We must return the held payment before the lightning hold
+        // itself expires on the node, or LDK fails it back for us and
+        // the margin bought nothing. The hold outlives the spark htlc by
+        // LN_HOLD_MARGIN_SECS, and we act SETTLE_SAFETY_MARGIN_SECS after
+        // the spark expiry, so the safety margin must be the smaller.
+        assert!(SETTLE_SAFETY_MARGIN_SECS < LN_HOLD_MARGIN_SECS);
     }
 
     #[test]

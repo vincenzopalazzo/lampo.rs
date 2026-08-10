@@ -35,6 +35,13 @@ pub mod request {
         pub offer_str: String,
         pub amount_msat: Option<u64>,
         pub payer_note: Option<String>,
+        /// Cap on the payment's total CLTV budget, in blocks: the
+        /// payment must resolve (settle or fail) within it. A swap
+        /// service sets this so the payment cannot still be in flight
+        /// after the collateral it holds on the other leg has expired.
+        /// `None` keeps LDK's default.
+        #[serde(default)]
+        pub max_cltv_expiry_delta: Option<u32>,
     }
 
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]

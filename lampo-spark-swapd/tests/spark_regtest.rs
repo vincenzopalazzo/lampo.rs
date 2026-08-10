@@ -344,6 +344,7 @@ fn engine_settings(quote_expiry_secs: u64) -> Settings {
         spark_operators: Vec::new(),
         fee_base_sat: 1,
         fee_ppm: 5_000,
+        max_swap_sat: 1_000_000,
     }
 }
 
@@ -423,12 +424,20 @@ async fn direction_a_full_swap_spark_to_lightning() {
     use std::str::FromStr;
     let receiver = spark::address::SparkAddress::from_str(&quote.spark_address).expect("addr");
     let payment_hash = sha256::Hash::from_str(&quote.payment_hash).expect("hash");
+    // The lock must outlive the payment's whole cltv budget: the quote
+    // says how long, and shorter locks are refused (a stuck payment
+    // could settle after a shorter lock refunded).
+    assert!(
+        quote.min_lock_expiry_secs > 3600,
+        "the required lock must exceed a naive hour, got {}",
+        quote.min_lock_expiry_secs
+    );
     user_spark
         .create_htlc(
             lock_sat,
             &receiver,
             &payment_hash,
-            std::time::Duration::from_secs(3600),
+            std::time::Duration::from_secs(quote.min_lock_expiry_secs + 600),
             Some(spark_wallet::TransferId::generate()),
         )
         .await
@@ -699,6 +708,7 @@ async fn direction_a_recovers_a_crashed_claim() {
             spark_transfer_id: None,
             preimage: Some(preimage_hex),
             counterparty_spark_address: None,
+            spark_locked_at: None,
             offer: String::new(),
             created_at: now(),
             updated_at: now(),

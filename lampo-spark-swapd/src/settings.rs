@@ -37,6 +37,11 @@ pub struct Settings {
     /// Proportional fee in parts per million of the swap amount. Covers
     /// lightning routing and the capital/risk of fronting both legs.
     pub fee_ppm: u64,
+    /// The largest single swap accepted, in sats on the spark leg.
+    /// Bounds how much of the daemon's capital one counterparty can tie
+    /// up: a Direction B swap locks our funds in an HTLC for its whole
+    /// expiry even if the counterparty never claims, at no cost to them.
+    pub max_swap_sat: u64,
     /// Spark signing operators to talk to. Empty means the defaults
     /// baked into the SDK, which are Lightspark's hosted ones; a local
     /// regtest stack must be named explicitly.
@@ -72,6 +77,9 @@ impl Settings {
             // 1 sat flat plus 0.5%, the low end of what boltz charges.
             fee_base_sat: parsed(conf, "swap-fee-base-sat")?.unwrap_or(1),
             fee_ppm: parsed(conf, "swap-fee-ppm")?.unwrap_or(5_000),
+            // 0.01 BTC: enough for real use, small enough that a
+            // griefer cannot tie up the treasury with one request.
+            max_swap_sat: parsed(conf, "swap-max-sat")?.unwrap_or(1_000_000),
             spark_operators: operators(conf)?,
         })
     }
@@ -244,6 +252,14 @@ mod tests {
         assert_eq!(settings.api_addr, "0.0.0.0:9999");
         // and the network falls back to the node's, mapped for spark
         assert_eq!(settings.spark_network, "regtest");
+    }
+
+    #[test]
+    fn the_swap_size_cap_reads_and_defaults() {
+        let settings = Settings::from_lampo_conf(&conf_with("swap-max-sat=250000")).unwrap();
+        assert_eq!(settings.max_swap_sat, 250_000);
+        let defaults = Settings::from_lampo_conf(&conf_with("")).unwrap();
+        assert_eq!(defaults.max_swap_sat, 1_000_000);
     }
 
     #[test]

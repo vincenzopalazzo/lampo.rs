@@ -27,10 +27,16 @@ impl LampoLeg {
 
     /// Fetch a BOLT12 invoice from an offer without paying it. The
     /// returned payment hash is what the Spark leg locks on.
+    ///
+    /// `max_cltv_expiry_delta` caps how long the eventual payment can
+    /// stay in flight, in blocks. Without it a stuck payment can outlive
+    /// the counterparty's Spark HTLC: it refunds to them, then our
+    /// payment settles, and we have paid with nothing left to claim.
     pub async fn fetch_invoice(
         &self,
         offer: &str,
         amount_msat: Option<u64>,
+        max_cltv_expiry_delta: u32,
     ) -> error::Result<response::FetchInvoiceResult> {
         self.handler
             .call(
@@ -39,6 +45,7 @@ impl LampoLeg {
                     offer_str: offer.to_owned(),
                     amount_msat,
                     payer_note: None,
+                    max_cltv_expiry_delta: Some(max_cltv_expiry_delta),
                 },
             )
             .await

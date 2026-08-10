@@ -216,7 +216,12 @@ pub async fn json_fetchinvoice(
     let mut events = ctx.handler().events();
     let payment_id = ctx
         .offchain_manager()
-        .fetch_invoice_from_offer(&request.offer_str, request.amount_msat, request.payer_note)
+        .fetch_invoice_from_offer(
+            &request.offer_str,
+            request.amount_msat,
+            request.payer_note,
+            request.max_cltv_expiry_delta,
+        )
         .map_err(|err| crate::rpc_error!("{err}"))?;
     let payment_id_str = payment_id.to_string();
 

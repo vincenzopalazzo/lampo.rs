@@ -31,7 +31,9 @@ use lampo_common::ldk::ln::outbound_payment::{RecipientOnionFields, Retry};
 use lampo_common::ldk::offers::invoice::Bolt12Invoice;
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
-use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
+use lampo_common::ldk::routing::router::{
+    PaymentParameters, RouteParameters, RouteParametersConfig,
+};
 use lampo_common::ldk::sign::EntropySource;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
 
@@ -246,12 +248,21 @@ impl OffchainManager {
         offer_str: &str,
         amount_msat: Option<u64>,
         payer_note: Option<String>,
+        max_cltv_expiry_delta: Option<u32>,
     ) -> error::Result<PaymentId> {
         let payment_id = PaymentId(self.entropy());
         let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
         let amount = Self::offer_amount(&offer, amount_msat)?;
 
         log::debug!(target: "lampo::offchain", "fetching invoice for offer with amount `{amount}msat`");
+        // The route params are fixed at fetch time and reused by the
+        // later `payfetched`. Capping the total cltv bounds how long the
+        // payment can stay in flight, which a swap service needs: its
+        // collateral on the other leg must outlive the payment.
+        let mut route_params_config = RouteParametersConfig::default();
+        if let Some(max_cltv) = max_cltv_expiry_delta {
+            route_params_config.max_total_cltv_expiry_delta = max_cltv;
+        }
         // SAFETY: the mutex is never poisoned, we do not panic while holding it.
         self.bolt12_flows
             .lock()
@@ -263,6 +274,7 @@ impl OffchainManager {
             payment_id,
             OptionalOfferPaymentParams {
                 payer_note,
+                route_params_config,
                 retry_strategy: Retry::Timeout(std::time::Duration::from_secs(1)),
                 ..Default::default()
             },

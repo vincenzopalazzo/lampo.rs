@@ -128,6 +128,7 @@ mod tests {
             spark_transfer_id: None,
             preimage: None,
             counterparty_spark_address: None,
+            spark_locked_at: None,
             offer: "lno1qq".to_owned(),
             created_at: now(),
             updated_at: now(),

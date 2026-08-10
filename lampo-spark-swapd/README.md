@@ -196,7 +196,32 @@ gaps are all closed now:
 - **Fee policy.** Quotes charge a spread, `swap-fee-base-sat` plus
   `swap-fee-ppm` (defaults 1 sat + 5000 ppm), so the spark leg is sized
   smaller than the lightning leg by the fee and lightning routing no
-  longer comes out of the daemon's pocket. Both directions apply it.
+  longer comes out of the daemon's pocket. Both directions apply it, and
+  Direction A additionally floors the fee at LDK's routing budget
+  (1% + 50 sat), so we can never route-pay more than we collected.
+- **No held payment is returned while the spark leg is live.** In
+  Direction B the daemon only refunds the held lightning payment once
+  the paired spark htlc is provably dead — past its expiry *measured
+  from when we locked it* plus a safety margin — never at `created_at +
+  expiry`, which precedes the lock and would let a counterparty claim
+  the still-live spark htlc after being refunded on lightning, draining
+  the full payout. Covered by
+  `the_held_payment_is_not_returned_before_the_spark_htlc_is_dead`.
+- **A stuck lightning payment cannot outlive its spark collateral.** A
+  Direction A payment gets a hard CLTV budget (432 blocks) at fetch
+  time, and the counterparty's spark htlc must outlive that budget plus
+  the claim margin (`min_lock_expiry_secs` in the quote). Without the
+  bound, a payment stuck for LDK's default week-long budget could
+  settle *after* the htlc refunded — paid out, nothing to claim. For
+  the same reason a payment whose outcome is unknown (timeout, crash)
+  is never declared failed while the htlc is alive: reconcile waits for
+  evidence — the preimage appears (claim) or the htlc dies (close).
+- **Bounded exposure per swap.** `swap-max-sat` (default 0.01 BTC) caps
+  both directions: every accepted Direction B swap locks our funds for
+  its whole expiry even if the counterparty walks away, so unbounded
+  requests would let a costless griefer tie up the treasury. The swap
+  list API also returns a sanitized view — stored secrets (the
+  Direction A preimage) never leave the daemon.
 - **Direction A crash recovery is automatic.** A crash mid-payment
   resolves itself at reconcile: if it died in `LnPaying` the node is
   asked for the preimage over the `paymentpreimage` RPC (settled →

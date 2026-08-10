@@ -52,7 +52,24 @@ async fn swap_in(engine: web::Data<Arc<Engine>>, body: web::Json<SwapInRequest>)
 }
 
 async fn swaps(engine: web::Data<Arc<Engine>>) -> HttpResponse {
-    HttpResponse::Ok().json(engine.list())
+    // A sanitized view, never the raw record: the store keeps secrets
+    // (the Direction A preimage) that must not leave the daemon.
+    let listed: Vec<_> = engine
+        .list()
+        .into_iter()
+        .map(|swap| {
+            serde_json::json!({
+                "payment_hash": swap.payment_hash,
+                "direction": swap.direction,
+                "state": swap.state,
+                "amount_msat": swap.amount_msat,
+                "spark_amount_sat": swap.spark_amount_sat,
+                "created_at": swap.created_at,
+                "updated_at": swap.updated_at,
+            })
+        })
+        .collect();
+    HttpResponse::Ok().json(listed)
 }
 
 fn error_response(err: error::Error) -> HttpResponse {
