@@ -27,15 +27,21 @@ use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
 use lampo_common::ldk::sign::{InMemorySigner, NodeSigner};
-use lampo_common::ldk::util::persist::read_channel_monitors;
+use lampo_common::ldk::util::persist::{
+    read_channel_monitors, KVStoreSync, OUTPUT_SWEEPER_PERSISTENCE_KEY,
+    OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE, OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
+};
 use lampo_common::ldk::util::ser::ReadableArgs;
+use lampo_common::ldk::util::sweep::OutputSweeper;
 use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel, Channels};
 use lampo_common::types::LampoChannel;
 use lampo_common::types::LampoGraph;
 use lampo_common::types::LampoRouter;
 use lampo_common::types::LampoScorer;
+use lampo_common::types::LampoSweeper;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
+use lampo_common::wallet::LampoChangeDestination;
 
 use crate::actions::handler::LampoHandler;
 use crate::async_run;
@@ -51,6 +57,8 @@ pub struct LampoChannelManager {
     score: OnceLock<Arc<Mutex<LampoScorer>>>,
     handler: OnceLock<Arc<LampoHandler>>,
     router: OnceLock<Arc<LampoRouter>>,
+    stale_monitors: Mutex<Vec<(BlockLocator, ChannelMonitor<InMemorySigner>)>>,
+    sweeper: OnceLock<(BlockLocator, Arc<LampoSweeper>)>,
 
     pub(crate) onchain: Arc<LampoChainManager>,
     pub(crate) conf: LampoConf,
@@ -78,6 +86,8 @@ impl LampoChannelManager {
             graph: OnceLock::new(),
             score: OnceLock::new(),
             router: OnceLock::new(),
+            stale_monitors: Mutex::new(Vec::new()),
+            sweeper: OnceLock::new(),
         }
     }
 
@@ -97,7 +107,79 @@ impl LampoChannelManager {
         } else {
             self.start().await?;
         }
+        self.init_sweeper()?;
         Ok(())
+    }
+
+    /// Build the [`LampoSweeper`], restoring its persisted state (tracked
+    /// spendable outputs and best block) when present.
+    fn init_sweeper(&self) -> error::Result<()> {
+        let broadcaster = self.onchain.clone() as Arc<dyn BroadcasterInterface + Send + Sync>;
+        let fee_estimator = self.onchain.clone() as Arc<dyn FeeEstimator + Send + Sync>;
+        let change_destination = Arc::new(LampoChangeDestination::new(
+            self.wallet_manager.clone(),
+            self.conf.network,
+        ));
+        let spender = self.wallet_manager.ldk_keys().keys_manager.clone();
+
+        let state = KVStoreSync::read(
+            &*self.persister,
+            OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE,
+            OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
+            OUTPUT_SWEEPER_PERSISTENCE_KEY,
+        );
+        let (best_block, sweeper) = match state {
+            Ok(bytes) => <(BlockLocator, LampoSweeper)>::read(
+                &mut std::io::Cursor::new(bytes),
+                (
+                    broadcaster,
+                    fee_estimator,
+                    None,
+                    spender,
+                    change_destination,
+                    self.persister.clone(),
+                    self.logger.clone(),
+                ),
+            )
+            .map_err(|err| error::anyhow!("failed to read the sweeper state: {err}"))?,
+            Err(err) if err.kind() == lampo_common::ldk::io::ErrorKind::NotFound => {
+                let best_block = self.manager().current_best_block();
+                let sweeper = OutputSweeper::new(
+                    best_block.clone(),
+                    broadcaster,
+                    fee_estimator,
+                    None,
+                    spender,
+                    change_destination,
+                    self.persister.clone(),
+                    self.logger.clone(),
+                );
+                (best_block, sweeper)
+            }
+            Err(err) => error::bail!("failed to read the sweeper state: {err}"),
+        };
+        self.sweeper
+            .set((best_block, Arc::new(sweeper)))
+            .unwrap_or_else(|_| panic!("sweeper already initialized"));
+        Ok(())
+    }
+
+    pub fn sweeper(&self) -> Arc<LampoSweeper> {
+        self.sweeper
+            .get()
+            .expect("sweeper not initialized")
+            .1
+            .clone()
+    }
+
+    /// The best block the sweeper state was persisted at: the chain backend
+    /// must replay blocks from here before going live.
+    pub fn sweeper_best_block(&self) -> BlockLocator {
+        self.sweeper
+            .get()
+            .expect("sweeper not initialized")
+            .0
+            .clone()
     }
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {
@@ -155,14 +237,20 @@ impl LampoChannelManager {
         Channels { channels }
     }
 
-    pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
+    pub fn get_channel_monitors(
+        &self,
+    ) -> error::Result<Vec<(BlockLocator, ChannelMonitor<InMemorySigner>)>> {
         let keys = self.wallet_manager.ldk_keys().inner();
-        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
-        let mut channel_monitors = Vec::new();
-        for (_, monitor) in monitors.drain(..) {
-            channel_monitors.push(monitor);
-        }
-        Ok(channel_monitors)
+        let monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
+        Ok(monitors)
+    }
+
+    /// Take the channel monitors read from disk during [`Self::restart`],
+    /// each paired with the best block it was persisted at. They must be
+    /// synced to the chain tip and registered with the chain monitor via
+    /// `watch_channel` before the node connects new blocks.
+    pub fn take_stale_monitors(&self) -> Vec<(BlockLocator, ChannelMonitor<InMemorySigner>)> {
+        std::mem::take(&mut self.stale_monitors.lock().unwrap())
     }
 
     pub fn graph(&self) -> Arc<LampoGraph> {
@@ -222,20 +310,48 @@ impl LampoChannelManager {
         graph: &Arc<LampoGraph>,
     ) -> ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>> {
         let params = ProbabilisticScoringDecayParameters::default();
-        if let Ok(file) = File::open(path) {
-            let args = (params, Arc::clone(graph), self.logger.clone());
-            if let Ok(scorer) = ProbabilisticScorer::read(&mut BufReader::new(file), args) {
-                return scorer;
+        match File::open(path) {
+            Ok(file) => {
+                let args = (params, Arc::clone(graph), self.logger.clone());
+                match ProbabilisticScorer::read(&mut BufReader::new(file), args) {
+                    Ok(scorer) => return scorer,
+                    // A corrupt file on a datadir that persists channel
+                    // monitors deserves a loud warning, not a silent reset.
+                    Err(err) => log::error!(
+                        target: "lampod",
+                        "scorer at `{}` is unreadable ({err}); starting fresh. If this \
+                         was not expected, check the datadir for disk corruption",
+                        path.display()
+                    ),
+                }
             }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => log::error!(
+                target: "lampod",
+                "failed to open scorer at `{}`: {err}; starting fresh",
+                path.display()
+            ),
         }
         ProbabilisticScorer::new(params, graph.clone(), self.logger.clone())
     }
 
     pub(crate) fn read_network(&self, path: &Path) -> Arc<LampoGraph> {
-        if let Ok(file) = File::open(path) {
-            if let Ok(graph) = NetworkGraph::read(&mut BufReader::new(file), self.logger.clone()) {
-                return Arc::new(graph);
-            }
+        match File::open(path) {
+            Ok(file) => match NetworkGraph::read(&mut BufReader::new(file), self.logger.clone()) {
+                Ok(graph) => return Arc::new(graph),
+                Err(err) => log::error!(
+                    target: "lampod",
+                    "network graph at `{}` is unreadable ({err}); starting fresh. If \
+                     this was not expected, check the datadir for disk corruption",
+                    path.display()
+                ),
+            },
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => log::error!(
+                target: "lampod",
+                "failed to open network graph at `{}`: {err}; starting fresh",
+                path.display()
+            ),
         }
         Arc::new(NetworkGraph::new(self.conf.network, self.logger.clone()))
     }
@@ -266,8 +382,12 @@ impl LampoChannelManager {
                 .await
                 .ok_or(error::anyhow!("Channel close no event received"))?;
 
-            if let Event::OnChain(OnChainEvent::SendRawTransaction(tx)) = event {
-                break Some(tx);
+            match event {
+                Event::OnChain(OnChainEvent::SendRawTransaction(tx)) => break Some(tx),
+                Event::OnChain(OnChainEvent::BroadcastFailed(txid)) => {
+                    error::bail!("funding transaction `{txid}` failed to broadcast");
+                }
+                _ => continue,
             }
         };
 
@@ -309,7 +429,10 @@ impl LampoChannelManager {
 
         let _ = self.network_graph();
         let monitors = self.get_channel_monitors()?;
-        let monitors = monitors.iter().collect::<Vec<_>>();
+        let monitor_refs = monitors
+            .iter()
+            .map(|(_, monitor)| monitor)
+            .collect::<Vec<_>>();
 
         let default_message_router = DefaultMessageRouter::new(
             self.graph(),
@@ -327,7 +450,7 @@ impl LampoChannelManager {
             default_message_router,
             self.logger.clone(),
             self.conf.ldk_conf.clone(),
-            monitors,
+            monitor_refs,
         );
         let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
         let (_, channel_manager) =
@@ -336,6 +459,10 @@ impl LampoChannelManager {
         self.channeld
             .set(Arc::new(channel_manager))
             .unwrap_or_else(|_| panic!("channel manager already initialized"));
+        // Keep the monitors around: they still need to be synced to the
+        // chain tip and registered with the chain monitor before the node
+        // goes live. See `take_stale_monitors`.
+        *self.stale_monitors.lock().unwrap() = monitors;
         Ok(())
     }
 

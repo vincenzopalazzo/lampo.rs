@@ -21,7 +21,9 @@ use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::bip32::Xpriv;
 use lampo_common::bitcoin::blockdata::locktime::absolute::LockTime;
 use lampo_common::bitcoin::PrivateKey;
-use lampo_common::bitcoin::{Amount, Block, FeeRate, ScriptBuf, Transaction};
+use lampo_common::bitcoin::{
+    Amount, Block, FeeRate, OutPoint, Psbt, ScriptBuf, Transaction, TxOut, Txid,
+};
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::keys::LampoKeys;
 use lampo_common::model::response::NewAddress;
@@ -367,6 +369,42 @@ impl WalletManager for BDKWalletManager {
         let tip = wallet.latest_checkpoint().height();
         let tip = Height::from_consensus(tip)?;
         Ok(tip)
+    }
+
+    async fn list_confirmed_utxos(&self) -> error::Result<Vec<(OutPoint, TxOut)>> {
+        let wallet = self.wallet.lock().await;
+        let utxos = wallet
+            .list_unspent()
+            .filter(|utxo| !utxo.is_spent && utxo.chain_position.is_confirmed())
+            .map(|utxo| (utxo.outpoint, utxo.txout))
+            .collect();
+        Ok(utxos)
+    }
+
+    async fn get_wallet_transaction(&self, txid: Txid) -> error::Result<Option<Transaction>> {
+        let wallet = self.wallet.lock().await;
+        Ok(wallet.get_tx(txid).map(|tx| tx.tx_node.tx.as_ref().clone()))
+    }
+
+    async fn get_change_script(&self) -> error::Result<ScriptBuf> {
+        let mut wallet = self.wallet.lock().await;
+        let mut wallet_db = self.wallet_db.lock().await;
+        let address = wallet.reveal_next_address(KeychainKind::Internal);
+        wallet.persist(&mut wallet_db)?;
+        Ok(address.address.script_pubkey())
+    }
+
+    async fn sign_psbt(&self, mut psbt: Psbt) -> error::Result<Transaction> {
+        let wallet = self.wallet.lock().await;
+        let opts = SignOptions {
+            // The PSBT may spend inputs the wallet does not own (e.g. the
+            // anchor output in a CPFP transaction): sign what belongs to
+            // the wallet and leave the rest for LDK to fill in.
+            trust_witness_utxo: true,
+            ..Default::default()
+        };
+        let _finalized = wallet.sign(&mut psbt, opts)?;
+        Ok(psbt.extract_tx()?)
     }
 
     async fn listen(self: Arc<Self>) -> error::Result<()> {

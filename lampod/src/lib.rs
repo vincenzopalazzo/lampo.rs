@@ -48,34 +48,6 @@ use crate::utils::logger::LampoLogger;
 pub(crate) type P2PGossipSync =
     ldk::routing::gossip::P2PGossipSync<Arc<LampoGraph>, Arc<LampoChainManager>, Arc<LampoLogger>>;
 
-/// No-op [`ChangeDestinationSource`] used only to *name* the `OutputSweeper`
-/// type when passing `sweeper: None` to the background processor. Lampo does
-/// not run an output sweeper, so this is never constructed or called.
-///
-/// [`ChangeDestinationSource`]: lampo_common::ldk::sign::ChangeDestinationSource
-struct NoChangeDestinationSource;
-
-impl ldk::sign::ChangeDestinationSource for NoChangeDestinationSource {
-    fn get_change_destination_script<'a>(
-        &'a self,
-    ) -> impl std::future::Future<Output = Result<lampo_common::bitcoin::ScriptBuf, ()>> + Send + 'a
-    {
-        std::future::ready(Err(()))
-    }
-}
-
-/// Concrete `OutputSweeper` type matching lampo's chain-monitor wiring, used
-/// solely to type the `None` sweeper argument to [`process_events_async`].
-type LampoSweeper = ldk::util::sweep::OutputSweeper<
-    Arc<dyn ldk::chain::chaininterface::BroadcasterInterface + Send + Sync>,
-    Arc<NoChangeDestinationSource>,
-    Arc<dyn ldk::chain::chaininterface::FeeEstimator + Send + Sync>,
-    Arc<dyn ldk::chain::Filter + Send + Sync>,
-    Arc<LampoPersistence>,
-    Arc<LampoLogger>,
-    LampoKeysManager,
->;
-
 /// LampoDaemon is the main data structure that uses the facade
 /// pattern to hide the complexity of the LDK library. You can interact
 /// with the LampoDaemon's components through access
@@ -98,6 +70,7 @@ pub struct LampoDaemon {
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
 }
 
 impl LampoDaemon {
@@ -115,6 +88,17 @@ impl LampoDaemon {
             offchain_manager: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
+            ready: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Wait until the initial chain sync completed and every channel
+    /// monitor is registered with the chain monitor. The RPC surface must
+    /// not accept channel-mutating commands before this point: a monitor
+    /// update issued while the chain monitor is still empty is dropped.
+    pub async fn wait_ready(&self) {
+        while !self.ready.load(Ordering::Acquire) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
@@ -218,6 +202,10 @@ impl LampoDaemon {
         self.wallet_manager.clone()
     }
 
+    pub fn logger(&self) -> Arc<LampoLogger> {
+        self.logger.clone()
+    }
+
     pub fn init_event_handler(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init inventory manager ...");
         let handler = LampoHandler::new(self);
@@ -244,6 +232,36 @@ impl LampoDaemon {
         client.set_handler(self.handler());
         client.set_channel_manager(self.channel_manager().manager());
         client.set_chain_monitor(self.channel_manager().chain_monitor());
+        // On restart, hand the channel monitors read from disk to the
+        // backend: each one is synced from its own best block to the chain
+        // tip and registered with the chain monitor during `sync_chain`.
+        let broadcaster = self.onchain_manager()
+            as Arc<dyn ldk::chain::chaininterface::BroadcasterInterface + Send + Sync>;
+        let fee_estimator = self.onchain_manager()
+            as Arc<dyn ldk::chain::chaininterface::FeeEstimator + Send + Sync>;
+        let stale_monitors = self
+            .channel_manager()
+            .take_stale_monitors()
+            .into_iter()
+            .map(|(locator, monitor)| {
+                (
+                    locator,
+                    (
+                        monitor,
+                        broadcaster.clone(),
+                        fee_estimator.clone(),
+                        self.logger.clone(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        client.set_stale_monitors(stale_monitors);
+        // The sweeper follows the chain as an ongoing listener, starting
+        // from the best block its persisted state was last synced to.
+        client.set_sweeper(
+            self.channel_manager().sweeper_best_block(),
+            self.channel_manager().sweeper(),
+        );
         self.channel_manager().set_handler(self.handler());
         Ok(())
     }
@@ -273,15 +291,25 @@ impl LampoDaemon {
             self.logger.clone(),
         ));
 
-        log::info!(target: "lampo", "Stating onchaind");
-        let _ = self.onchain_manager().listen();
-        log::info!(target: "lampo", "Starting peer manager");
-        let shutdown = self.shutdown.clone();
-        let _ = self.peer_manager().run_with_shutdown(shutdown.clone());
-        log::info!(target: "lampo", "Starting channel manager");
-        let _ = self.channel_manager().listen();
-
         tokio::spawn(async move {
+            // Bring the channel manager, the chain monitor, and any channel
+            // monitors read from disk up to the chain tip *before* starting
+            // the peer manager or the event processor: nothing may mutate
+            // channel state while monitors are still catching up, and a
+            // node that cannot see the chain must not go live at all.
+            log::info!(target: "lampo", "Syncing to the chain tip");
+            self.onchain_manager().sync_chain().await.map_err(|err| {
+                log::error!(target: "lampo", "Initial chain sync failed: {err}");
+                io::Error::new(io::ErrorKind::Other, err.to_string())
+            })?;
+            self.ready.store(true, Ordering::Release);
+
+            log::info!(target: "lampo", "Stating onchaind");
+            let _ = self.onchain_manager().listen();
+            log::info!(target: "lampo", "Starting peer manager");
+            let shutdown = self.shutdown.clone();
+            let _ = self.peer_manager().run_with_shutdown(shutdown.clone());
+
             process_events_async(
                 self.persister.clone(),
                 |env| self.handler_ldk_events(env),
@@ -291,7 +319,7 @@ impl LampoDaemon {
                 GossipSync::p2p(gossip_sync),
                 self.peer_manager().manager(),
                 NO_LIQUIDITY_MANAGER,
-                None::<Arc<LampoSweeper>>,
+                Some(self.channel_manager().sweeper()),
                 self.logger.clone(),
                 Some(self.channel_manager().scorer()),
                 |d| {
@@ -330,9 +358,19 @@ impl LampoDaemon {
         })
     }
 
-    // FIXME: what about replay event?
     async fn handler_ldk_events(&self, env: Event) -> Result<(), ReplayEvent> {
+        // Only `SpendableOutputs` is replayed on failure: its only failure
+        // mode is a transient persistence error, and dropping it would lose
+        // funds. Other handlers can fail permanently (peer disconnected,
+        // wallet without funds); LDK keeps a failed event at the head of
+        // the queue, so replaying those would block every later event
+        // forever.
+        let replay_on_failure = matches!(env, Event::SpendableOutputs { .. });
         if let Err(err) = self.handler().handle(env).await {
+            if replay_on_failure {
+                log::error!(target: "lampod", "Error handling event, will replay it: {:?}", err);
+                return Err(ReplayEvent());
+            }
             log::error!(target: "lampod", "Error handling event: {:?}", err);
         }
         Ok(())

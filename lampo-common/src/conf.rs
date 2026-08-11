@@ -6,6 +6,20 @@ use clightningrpc_conf::{CLNConf, SyncCLNConf};
 pub use bitcoin::Network;
 pub use lightning::util::config::UserConfig;
 
+/// The LDK configuration lampo runs with.
+///
+/// Anchor channels are negotiated on purpose: commitment transactions are
+/// built at a low feerate and bumped via CPFP when they need to confirm
+/// (`Event::BumpTransaction`), so a congested mempool cannot strand a
+/// force-close. This matches the LDK default, but is set explicitly here
+/// because lampo's fee-bumping wiring depends on it.
+fn default_ldk_conf() -> UserConfig {
+    let mut conf = UserConfig::default();
+    conf.channel_handshake_config
+        .negotiate_anchors_zero_fee_htlc_tx = true;
+    conf
+}
+
 #[derive(Clone, Debug)]
 pub struct LampoConf {
     pub inner: Option<CLNConf>,
@@ -28,6 +42,10 @@ pub struct LampoConf {
     pub api_port: u64,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
+    /// Whether inbound channel requests are accepted (`accept-inbound-channels`,
+    /// default `true`). Operators that do not want arbitrary peers opening
+    /// channels to them can turn this off.
+    pub accept_inbound_channels: bool,
 }
 
 impl Default for LampoConf {
@@ -42,7 +60,7 @@ impl Default for LampoConf {
             inner: None,
             // default network is testnet
             network: Network::Testnet,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: default_ldk_conf(),
             // default port is 19735 for testnet
             port: 19735,
             root_path: lampo_home,
@@ -60,6 +78,7 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             dev_sync: None,
+            accept_inbound_channels: true,
         }
     }
 }
@@ -249,11 +268,20 @@ impl TryFrom<String> for LampoConf {
             .get_conf("dev-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+
+        let accept_inbound_channels = conf
+            .get_conf("accept-inbound-channels")
+            .unwrap_or(None)
+            .map(|s| {
+                let s = s.to_trimmed().to_lowercase();
+                s == "true" || s == "1"
+            })
+            .unwrap_or(true);
         Ok(Self {
             inner: Some(conf),
             root_path,
             network,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: default_ldk_conf(),
             port: u64::from_str(&port)?,
             node,
             core_url,
@@ -269,6 +297,7 @@ impl TryFrom<String> for LampoConf {
             api_port,
             reindex,
             dev_sync,
+            accept_inbound_channels,
         })
     }
 }

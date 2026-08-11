@@ -1,9 +1,11 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lightning_block_sync::init;
+use lightning_block_sync::poll::ValidatedBlockHeader;
 use lightning_block_sync::rpc::RpcClient;
+use lightning_block_sync::HeaderCache;
 use lightning_block_sync::{poll, BlockHeaderData, BlockSourceResult};
 use lightning_block_sync::{BlockSource, SpvClient};
 
@@ -15,8 +17,10 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::json;
 use lampo_common::ldk::chain;
+use lampo_common::ldk::chain::chaininterface::FEERATE_FLOOR_SATS_PER_KW;
+use lampo_common::ldk::chain::{BlockLocator, ChannelMonitorUpdateStatus, Listen, Watch};
 use lampo_common::serde::Deserialize;
-use lampo_common::types::{LampoChainMonitor, LampoChannel};
+use lampo_common::types::{LampoChainMonitor, LampoChannel, LampoMonitorListener, LampoSweeper};
 
 /// Welcome in another Facede pattern implementation
 pub struct LampoChainSync {
@@ -25,6 +29,49 @@ pub struct LampoChainSync {
     channel_manager: OnceLock<Arc<LampoChannel>>,
     chain_monitor: OnceLock<Arc<LampoChainMonitor>>,
     handler: OnceLock<Arc<dyn lampo_common::handler::Handler>>,
+    /// Channel monitors read from disk on restart. Each is synced to the
+    /// chain tip from its own best block during [`Backend::sync_chain`] and
+    /// then registered with the chain monitor via `watch_channel`.
+    stale_monitors: Mutex<Vec<(BlockLocator, LampoMonitorListener)>>,
+    /// Header cache and validated chain tip produced by the initial sync,
+    /// consumed by [`Backend::listen`] to seed the SPV client.
+    sync_state: Mutex<Option<(HeaderCache, ValidatedBlockHeader)>>,
+    /// The output sweeper, registered as an ongoing chain listener with the
+    /// best block its persisted state was last synced to.
+    sweeper: OnceLock<(BlockLocator, Arc<LampoSweeper>)>,
+}
+
+/// The set of ongoing chain listeners fed by the SPV client after the
+/// initial synchronization.
+struct ChainListeners {
+    chain_monitor: Arc<LampoChainMonitor>,
+    channel_manager: Arc<LampoChannel>,
+    sweeper: Option<Arc<LampoSweeper>>,
+}
+
+impl chain::Listen for ChainListeners {
+    fn filtered_block_connected(
+        &self,
+        header: &lampo_common::bitcoin::block::Header,
+        txdata: &chain::transaction::TransactionData,
+        height: u32,
+    ) {
+        self.chain_monitor
+            .filtered_block_connected(header, txdata, height);
+        self.channel_manager
+            .filtered_block_connected(header, txdata, height);
+        if let Some(ref sweeper) = self.sweeper {
+            sweeper.filtered_block_connected(header, txdata, height);
+        }
+    }
+
+    fn blocks_disconnected(&self, fork_point: BlockLocator) {
+        self.chain_monitor.blocks_disconnected(fork_point.clone());
+        self.channel_manager.blocks_disconnected(fork_point.clone());
+        if let Some(ref sweeper) = self.sweeper {
+            sweeper.blocks_disconnected(fork_point);
+        }
+    }
 }
 
 impl LampoChainSync {
@@ -59,6 +106,9 @@ impl LampoChainSync {
             channel_manager: OnceLock::new(),
             chain_monitor: OnceLock::new(),
             handler: OnceLock::new(),
+            stale_monitors: Mutex::new(Vec::new()),
+            sync_state: Mutex::new(None),
+            sweeper: OnceLock::new(),
         })
     }
 
@@ -87,6 +137,29 @@ impl LampoChainSync {
             .expect("chain monitor not set")
             .clone()
     }
+
+    fn emit_broadcast_success(&self, tx: &lampo_common::bitcoin::Transaction) {
+        if let Some(handler) = self.handler.get() {
+            handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
+        }
+    }
+
+    fn emit_broadcast_failure(&self, tx: &lampo_common::bitcoin::Transaction) {
+        if let Some(handler) = self.handler.get() {
+            handler.emit(Event::OnChain(OnChainEvent::BroadcastFailed(
+                tx.compute_txid(),
+            )));
+        }
+    }
+}
+
+/// Whether a bitcoind broadcast error means the transaction (or package)
+/// is already in the mempool or the chain, i.e. the broadcast goal is met.
+fn is_already_broadcast_error(err: &str) -> bool {
+    err.contains("already in block chain")
+        || err.contains("txn-already-in-mempool")
+        || err.contains("txn-already-known")
+        || err.contains("already known")
 }
 
 impl BlockSource for LampoChainSync {
@@ -123,19 +196,85 @@ impl Backend for LampoChainSync {
         self.rpc_client.get_best_block().await
     }
 
-    async fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
+    async fn brodcast_tx(
+        &self,
+        tx: &lampo_common::bitcoin::Transaction,
+    ) -> lampo_common::error::Result<()> {
         let resp = self
             .rpc_client
             .call_method::<json::Value>("sendrawtransaction", &[serialize_hex(tx).into()])
             .await;
-        log::info!("Broadcasting tx result: {:?}", resp);
-        if resp.is_ok() {
-            let Some(handler) = self.handler.get() else {
-                return;
-            };
-            handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
+        log::debug!(target: "lampo-chain", "broadcasting tx `{}` result: {:?}", tx.compute_txid(), resp);
+        match resp {
+            Ok(_) => {
+                self.emit_broadcast_success(tx);
+                Ok(())
+            }
+            // LDK's rebroadcast timer resends transactions that may already
+            // be in the mempool or confirmed; bitcoind rejects those with
+            // "already known"-style errors that mean the broadcast goal is
+            // achieved, not failed.
+            Err(err) if is_already_broadcast_error(&format!("{err:?}")) => {
+                self.emit_broadcast_success(tx);
+                Ok(())
+            }
+            Err(err) => {
+                self.emit_broadcast_failure(tx);
+                Err(error::anyhow!(
+                    "failed to broadcast tx `{}`: {:?}",
+                    tx.compute_txid(),
+                    err
+                ))
+            }
         }
-        // FIXME: emit the brodcast event for lampo in case of errors, just to unlock the client
+    }
+
+    async fn brodcast_txs(
+        &self,
+        txs: &[lampo_common::bitcoin::Transaction],
+    ) -> lampo_common::error::Result<()> {
+        let [_, _, ..] = txs else {
+            // Zero or one transaction: no package semantics needed.
+            if let Some(tx) = txs.first() {
+                return self.brodcast_tx(tx).await;
+            }
+            return Ok(());
+        };
+        // More than one transaction is a package (a child and its
+        // parents, e.g. an anchor CPFP paying for a low-feerate
+        // commitment): it must be submitted atomically or the parent can
+        // be rejected for paying below the mempool minimum feerate.
+        let hexes = txs
+            .iter()
+            .map(|tx| json::Value::from(serialize_hex(tx)))
+            .collect::<Vec<_>>();
+        let resp = self
+            .rpc_client
+            .call_method::<json::Value>("submitpackage", &[json::Value::from(hexes)])
+            .await;
+        log::debug!(target: "lampo-chain", "submitpackage result: {:?}", resp);
+        let err = match resp {
+            Ok(resp) => {
+                if resp.get("package_msg").and_then(|msg| msg.as_str()) == Some("success") {
+                    for tx in txs {
+                        self.emit_broadcast_success(tx);
+                    }
+                    return Ok(());
+                }
+                error::anyhow!("submitpackage rejected the package: {resp}")
+            }
+            Err(err) if is_already_broadcast_error(&format!("{err:?}")) => {
+                for tx in txs {
+                    self.emit_broadcast_success(tx);
+                }
+                return Ok(());
+            }
+            Err(err) => error::anyhow!("submitpackage failed: {err:?}"),
+        };
+        for tx in txs {
+            self.emit_broadcast_failure(tx);
+        }
+        Err(err)
     }
 
     async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
@@ -146,7 +285,7 @@ impl Backend for LampoChainSync {
         }
 
         if self.config.network == lampo_common::bitcoin::Network::Regtest {
-            return Ok(256);
+            return Ok(FEERATE_FLOOR_SATS_PER_KW);
         }
 
         let resp = self
@@ -160,8 +299,10 @@ impl Backend for LampoChainSync {
         let Some(feerate) = resp.feerate else {
             return Err(error::anyhow!("No fee rate estimation available").into());
         };
-        // estimate fee rate in BTC/kvB
-        Ok((feerate * (100_000_000 as f64)) as u32)
+        // `estimatesmartfee` returns BTC/kvB; convert to sat/kvB and then to
+        // sats per 1000 weight units (a vbyte is 4 weight units).
+        let sat_per_kvb = feerate * 100_000_000f64;
+        Ok(((sat_per_kvb / 4.0) as u32).max(FEERATE_FLOOR_SATS_PER_KW))
     }
 
     async fn get_transaction(
@@ -187,7 +328,6 @@ impl Backend for LampoChainSync {
         unimplemented!()
     }
 
-    // TODO: specify what kind of format the result should be!
     async fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
         #[derive(Debug, Deserialize)]
         struct MempoolInfo {
@@ -199,10 +339,12 @@ impl Backend for LampoChainSync {
             .call_method::<json::Value>("getmempoolinfo", &[])
             .await?;
         let mempool_info: MempoolInfo = json::from_value(mempool_info)?;
-        if mempool_info.loaded {
+        if !mempool_info.loaded {
             log::warn!("mempool is still loading, so the fee may be not accurate!");
         }
-        Ok((mempool_info.mempoolminfee * (100_000_000 as f64)) as u32)
+        // `mempoolminfee` is in BTC/kvB; convert to sats per 1000 weight units.
+        let sat_per_kvb = mempool_info.mempoolminfee * 100_000_000f64;
+        Ok(((sat_per_kvb / 4.0) as u32).max(FEERATE_FLOOR_SATS_PER_KW))
     }
 
     fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {
@@ -219,28 +361,60 @@ impl Backend for LampoChainSync {
         self.set_chain_monitor(chain_monitor);
     }
 
-    async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
+    fn set_stale_monitors(&self, monitors: Vec<(BlockLocator, LampoMonitorListener)>) {
+        *self.stale_monitors.lock().unwrap() = monitors;
+    }
+
+    fn set_sweeper(&self, best_block: BlockLocator, sweeper: Arc<LampoSweeper>) {
+        self.sweeper
+            .set((best_block, sweeper))
+            .unwrap_or_else(|_| panic!("sweeper already set"));
+    }
+
+    async fn sync_chain(&self) -> lampo_common::error::Result<()> {
         let channel_manager = self.channel_manager();
         let chain_monitor = self.chain_monitor();
 
-        // Synchronize the channel manager and chain monitor from their
-        // persisted best block up to the current chain tip. This is critical
-        // on restart: the ChannelManager may have been persisted at block N,
-        // but the chain may now be at block N+M. Without this sync, the
-        // SpvClient would start at the current tip and try to connect block
-        // N+M+1 to the ChannelManager which still thinks it's at block N,
-        // causing a "Blocks must be connected in chain-order" assertion.
+        // Synchronize the channel manager, the chain monitor, and every
+        // channel monitor read from disk, each from its own persisted best
+        // block up to the current chain tip. This is critical on restart:
+        // the ChannelManager may have been persisted at block N while a
+        // ChannelMonitor was persisted at block N-M; each listener gets
+        // exactly the blocks it is missing, so no on-chain HTLC claim or
+        // counterparty revocation in that window can be skipped.
+        let stale_monitors = std::mem::take(&mut *self.stale_monitors.lock().unwrap());
         let manager_best = channel_manager.current_best_block();
-        let chain_listeners: Vec<(chain::BlockLocator, &(dyn chain::Listen + Send + Sync))> = vec![
+        let mut chain_listeners: Vec<(chain::BlockLocator, &(dyn chain::Listen + Send + Sync))> = vec![
             (
                 manager_best.clone(),
                 &*channel_manager as &(dyn chain::Listen + Send + Sync),
             ),
+            // On restart the chain monitor holds no monitors yet (they are
+            // registered below, after they synced individually), so the
+            // manager's best block is a valid starting point for it.
             (
                 manager_best.clone(),
                 &*chain_monitor as &(dyn chain::Listen + Send + Sync),
             ),
         ];
+        for (locator, listener) in &stale_monitors {
+            log::info!(
+                target: "lampo-chain",
+                "Syncing channel monitor `{}` from height {} to current tip",
+                listener.0.channel_id(),
+                locator.height,
+            );
+            chain_listeners.push((
+                locator.clone(),
+                listener as &(dyn chain::Listen + Send + Sync),
+            ));
+        }
+        if let Some((sweeper_best, sweeper)) = self.sweeper.get() {
+            chain_listeners.push((
+                sweeper_best.clone(),
+                &**sweeper as &(dyn chain::Listen + Send + Sync),
+            ));
+        }
 
         log::info!(
             target: "lampo-chain",
@@ -250,13 +424,53 @@ impl Backend for LampoChainSync {
         );
 
         let (cache, synced_chain_tip) =
-            init::synchronize_listeners(self.as_ref(), self.config.network, chain_listeners)
+            init::synchronize_listeners(self, self.config.network, chain_listeners)
                 .await
                 .map_err(|e| error::anyhow!("Failed to synchronize chain listeners: {:?}", e))?;
 
         log::info!(target: "lampo-chain", "Chain listeners synced to current tip");
 
-        let chain_listener = (chain_monitor, channel_manager);
+        // Now that every monitor is at the chain tip, hand it to the chain
+        // monitor so it keeps watching the channel from here on. Failing to
+        // register a monitor means force-closes and HTLC claims for that
+        // channel would go undetected: abort startup instead.
+        for (_, (monitor, ..)) in stale_monitors {
+            let channel_id = monitor.channel_id();
+            match chain_monitor.watch_channel(channel_id, monitor) {
+                Ok(ChannelMonitorUpdateStatus::Completed)
+                | Ok(ChannelMonitorUpdateStatus::InProgress) => {
+                    log::info!(target: "lampo-chain", "Watching channel `{channel_id}`");
+                }
+                Ok(ChannelMonitorUpdateStatus::UnrecoverableError) | Err(()) => {
+                    error::bail!(
+                        "failed to register channel monitor `{channel_id}` with the chain monitor"
+                    );
+                }
+            }
+        }
+
+        *self.sync_state.lock().unwrap() = Some((cache, synced_chain_tip));
+        Ok(())
+    }
+
+    async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
+        // If the caller did not run `sync_chain` yet, do it now: the SPV
+        // client below must start from a synced tip.
+        if self.sync_state.lock().unwrap().is_none() {
+            self.sync_chain().await?;
+        }
+        let (cache, synced_chain_tip) = self
+            .sync_state
+            .lock()
+            .unwrap()
+            .take()
+            .expect("sync_chain populated the state above");
+
+        let chain_listener = ChainListeners {
+            chain_monitor: self.chain_monitor(),
+            channel_manager: self.channel_manager(),
+            sweeper: self.sweeper.get().map(|(_, sweeper)| sweeper.clone()),
+        };
         let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
         let mut spv_client = SpvClient::new(synced_chain_tip, chain_poller, cache, &chain_listener);
         log::info!(target: "lampo-chain", "Start Backend ...");

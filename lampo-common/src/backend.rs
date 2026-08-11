@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error;
 use crate::handler::Handler;
-use crate::types::{LampoChainMonitor, LampoChannel};
+use crate::types::{LampoChainMonitor, LampoChannel, LampoMonitorListener, LampoSweeper};
+
+pub use lightning::chain::BlockLocator;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TxResult {
@@ -43,14 +45,39 @@ pub trait Backend: Send + Sync {
     /// concrete backends implement `BlockSource` separately for chain sync.
     async fn get_best_block(&self) -> BlockSourceResult<(BlockHash, Option<u32>)>;
 
-    /// Fetch feerate give a number of blocks
+    /// Estimate the feerate to confirm within the given number of blocks,
+    /// in sats per 1000 weight units (the unit LDK's `FeeEstimator` uses).
     ///
     /// FIXME: use `FeeRate` instead of `u32`
     async fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32>;
 
+    /// The minimum feerate accepted into the backend's mempool, in sats
+    /// per 1000 weight units.
     async fn minimum_mempool_fee(&self) -> error::Result<u32>;
 
-    async fn brodcast_tx(&self, tx: &Transaction);
+    /// Broadcast the transaction to the network.
+    ///
+    /// Returns an error when the backend rejected or failed to relay the
+    /// transaction, so callers can retry or surface the failure. Silently
+    /// dropping a failed broadcast of a commitment or HTLC transaction can
+    /// cost funds.
+    async fn brodcast_tx(&self, tx: &Transaction) -> error::Result<()>;
+
+    /// Broadcast a set of transactions that form a single package (a
+    /// child paying for its parents), preserving order.
+    ///
+    /// LDK hands anchor CPFP transactions to the broadcaster together
+    /// with their low-feerate commitment parent: submitting them one by
+    /// one can leave the parent stuck below the mempool minimum feerate
+    /// and the child rejected for missing inputs. Backends should use a
+    /// package-aware RPC (`submitpackage`) when more than one transaction
+    /// is given.
+    async fn brodcast_txs(&self, txs: &[Transaction]) -> error::Result<()> {
+        for tx in txs {
+            self.brodcast_tx(tx).await?;
+        }
+        Ok(())
+    }
 
     async fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
 
@@ -61,6 +88,24 @@ pub trait Backend: Send + Sync {
     fn set_channel_manager(&self, _: Arc<LampoChannel>) {}
 
     fn set_chain_monitor(&self, _: Arc<LampoChainMonitor>) {}
+
+    /// Hand over the channel monitors read from disk on restart, each
+    /// paired with the best block it was persisted at. The backend must
+    /// sync every monitor up to the chain tip individually and register
+    /// it with the chain monitor before connecting new blocks.
+    fn set_stale_monitors(&self, _: Vec<(BlockLocator, LampoMonitorListener)>) {}
+
+    /// Register the output sweeper as a chain listener, together with the
+    /// best block its persisted state was last synced to.
+    fn set_sweeper(&self, _: BlockLocator, _: Arc<LampoSweeper>) {}
+
+    /// Perform the initial chain synchronization: bring the channel
+    /// manager, the chain monitor, and any stale channel monitors up to
+    /// the current chain tip. Must complete before the node starts
+    /// processing peers or events.
+    async fn sync_chain(&self) -> error::Result<()> {
+        Ok(())
+    }
 
     /// Get the information of a transaction inside the blockchain.
     async fn get_transaction(&self, txid: &Txid) -> error::Result<TxResult>;

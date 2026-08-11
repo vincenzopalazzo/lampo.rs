@@ -12,6 +12,6 @@ use lampod::jsonrpc::peer_control::*;
 use crate::{post, AppState, ResultJson};
 
 post!(connect, request: request::Connect, response: request::Connect);
-post!(close, response: response::CloseChannel);
+post!(close, request: request::CloseChannel, response: response::CloseChannel);
 post!(channels, request: json::Value, response: json::Value);
 post!(fundchannel, request: request::OpenChannel, response: json::Value);
