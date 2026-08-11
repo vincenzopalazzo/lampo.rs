@@ -116,6 +116,28 @@ impl SparkLeg {
         }))
     }
 
+    /// Does a transfer with this id exist?
+    ///
+    /// A failed `create_htlc` is ambiguous: the transfer may never have
+    /// been created, or it may have been created and the response lost.
+    /// Treating the second case as "not delivered" is a funds-loss bug —
+    /// the counterparty holds a live, claimable HTLC while we believe we
+    /// owe them one. Because the transfer id is chosen before the call,
+    /// we can settle the question by asking.
+    pub async fn transfer_exists(&self, transfer_id: &str) -> error::Result<bool> {
+        let id = TransferId::from_str(transfer_id)
+            .map_err(|err| error::anyhow!("invalid transfer id: {err}"))?;
+        let transfers = self
+            .wallet
+            .list_transfers(ListTransfersRequest {
+                paging: None,
+                transfer_ids: vec![id],
+            })
+            .await
+            .map_err(|err| error::anyhow!("spark list_transfers: {err}"))?;
+        Ok(!transfers.items.is_empty())
+    }
+
     /// Re-shape the wallet's leaves so an arbitrary amount can be sent.
     ///
     /// A deposit lands as one leaf, and `create_htlc` cannot mint change

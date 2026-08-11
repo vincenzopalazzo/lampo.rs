@@ -216,6 +216,19 @@ gaps are all closed now:
   the same reason a payment whose outcome is unknown (timeout, crash)
   is never declared failed while the htlc is alive: reconcile waits for
   evidence — the preimage appears (claim) or the htlc dies (close).
+- **Every invoice we did not create is amount-validated.** A quote
+  refuses an amountless invoice (settleable for any amount, so paying
+  one hands over the preimage for a token payment), refuses an invoice
+  whose amount differs from what the caller asked for, refuses
+  sub-satoshi amounts, and refuses a zero payout on the receive side.
+  Above all we never pay a leg until the counterparty's leg is locked
+  for what we are about to pay plus the fee. See `AGENTS.md` §7.
+- **An error is never read as "nothing happened".** A failed
+  `create_htlc` may mean the transfer was created and the response
+  lost, so the daemon asks (`transfer_exists`, answerable because the
+  transfer id is picked before the call) rather than assuming — an
+  assumption that would leave the counterparty holding a live HTLC
+  while we thought we still owed one. See `AGENTS.md` §8.
 - **Bounded exposure per swap.** `swap-max-sat` (default 0.01 BTC) caps
   both directions: every accepted Direction B swap locks our funds for
   its whole expiry even if the counterparty walks away, so unbounded

@@ -154,10 +154,81 @@ merely unpriced.
    alone?** Write the sequence out. Every gap we have found so far in
    swapd reduces to getting this wrong.
 
+---
+
+## Source: a private security-findings corpus
+
+A review pass took the bug *classes* from a private working tree of
+security findings across Bitcoin and Lightning projects
+(`bitcoin-security-council/findings`), including entries against swap
+daemons, the Spark stack we depend on, and LDK-based nodes.
+
+**Information hazard — read before adding to this section.** Findings
+under `found/` in that tree are *undisclosed* vulnerabilities in other
+people's software (`Reported upstream: no`), and this file lives in a
+public repository. Record the class and what *we* do about it. Never
+copy an unreported finding's exploit chain, commit hash, or `file:line`
+here — that is someone else's disclosure to make, not ours.
+
+### 7. Validate the amount on any invoice you did not create
+
+The most repeated theft class in the corpus: a swap client accepts a
+counterparty's invoice and checks only the payment hash, or computes
+`amount - fee` with no lower bound. Both land in the same place — a
+**zero-amount invoice**, which is settleable for any amount, so paying
+it reveals the preimage for a token payment while the counterparty
+takes the full other leg.
+
+What we do (`quote_spark_to_ln`): refuse an amountless invoice; refuse
+one whose amount differs from what the caller asked for (bait and
+switch between the quote and the invoice we would pay); refuse
+sub-satoshi amounts; cap against `swap-max-sat`. Direction B refuses a
+zero payout for the same reason. Tests:
+`an_amountless_invoice_is_refused`,
+`an_invoice_that_does_not_match_the_asked_amount_is_refused`.
+
+The structural defense matters more than any of those, though: we never
+pay a leg before the counterparty's leg is locked for at least what we
+are about to pay, plus our fee (`quoted_action`). The published thefts
+all work by defeating a *fee cap*; none of them survives a check
+against the collateral actually locked.
+
+### 8. A failed call is not proof that nothing happened
+
+Another recurring class: a daemon moves funds, the follow-up call
+fails, and the failure is recorded as "nothing happened". A lost
+response after a successful write means the counterparty holds
+something live while we believe we still owe it — and we may then
+refund the other leg on top.
+
+What we do: the Spark transfer id is chosen and persisted *before*
+`create_htlc`, so "did it actually happen?" has an answer. On any
+`create_htlc` error we ask (`SparkLeg::transfer_exists`) before
+retrying or giving up, and treat an existing transfer as delivered. The
+same rule drives Direction A recovery: an unknown payment outcome is
+never recorded as a failure while the counterparty's HTLC is alive.
+
+### 9. Persist intent before acting on it
+
+A related class: initiating a payment in the node *before* writing the
+local record, so a persistence failure plus a retry pays twice.
+
+Checked — we already follow the safe order. `advance_spark_to_ln`
+transitions to `LnPaying` and persists before calling `payfetched`, the
+payment id is fixed so LDK deduplicates a retry, and the preimage is
+persisted before the claim it authorizes. Keep it that way: **persist,
+then act** is the rule the store is built around.
+
+### 10. Do not log secrets
+
+Preimages and payment secrets reaching logs is a recurring
+low-severity finding. Checked: swapd logs *that* a preimage was
+revealed, never its value, and the swaps API returns a sanitized view
+rather than raw records. Do not add `{preimage}` to a log line or to an
+API response.
+
 ## Our open gaps, for cross-reference
 
-Tracked in `README.md` and the code. In rough priority order: reusable
-BOLT12 offers producing unaccounted payments; the Direction B trust
-window; `create_htlc` idempotency across a crash; debt durability when
-the process dies between lightning settling and the record being
-written; leaf denomination management; and fee policy.
+Tracked in `README.md` and the code. The protocol, economic and
+operational gaps are closed; what remains is the Direction B trusted
+window and leaf denomination management, which depends on an SSP.

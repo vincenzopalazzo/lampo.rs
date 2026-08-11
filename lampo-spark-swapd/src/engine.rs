@@ -82,6 +82,30 @@ impl Engine {
             .lampo
             .fetch_invoice(offer, amount_msat, PAY_CLTV_BUDGET_BLOCKS)
             .await?;
+        // The invoice amount comes from the offer's issuer, who is not
+        // us and may be colluding with the caller. Validate it before it
+        // sizes anything.
+        //
+        // A zero-amount invoice is the shape behind a family of swap
+        // thefts (see AGENTS.md, "amount validation"): an amountless
+        // invoice is settleable for any amount, so paying one reveals
+        // the preimage for a token payment. Refuse it outright.
+        if fetched.amount_msat == 0 {
+            self.lampo.cancel_fetched(&fetched.payment_id).await.ok();
+            error::bail!("the invoice is amountless, which cannot back a swap");
+        }
+        // If the caller named an amount, the invoice must be for exactly
+        // that. Anything else is a bait and switch between the quote the
+        // caller asked for and the invoice we would pay.
+        if let Some(asked_msat) = amount_msat {
+            if fetched.amount_msat != asked_msat {
+                self.lampo.cancel_fetched(&fetched.payment_id).await.ok();
+                error::bail!(
+                    "the invoice asks {}msat but the swap asked for {asked_msat}msat",
+                    fetched.amount_msat
+                );
+            }
+        }
         // The spark leg settles in sats: reject the swap now rather than
         // after the counterparty has locked funds against the quote.
         if fetched.amount_msat % 1000 != 0 {
@@ -160,6 +184,12 @@ impl Engine {
     ) -> error::Result<String> {
         if hex_bytes(payment_hash).map(|bytes| bytes.len()) != Some(32) {
             error::bail!("`payment_hash` must be 32 bytes of hex");
+        }
+        if payout_sat == 0 {
+            // Mirrors the amountless-invoice guard in Direction A: a
+            // zero payout would issue an invoice for the fee alone and
+            // deliver nothing, which is never a swap anyone wants.
+            error::bail!("`payout_sat` must be greater than zero");
         }
         if payout_sat > self.cfg.max_swap_sat {
             // Every accepted swap locks our own funds in an htlc for its
@@ -311,18 +341,53 @@ impl Engine {
             )
             .await;
         if result.is_err() {
-            log::info!(target: "swapd", "reshaping leaves to cover {amount_sat} sat");
-            self.spark.optimize(LEAF_OPTIMIZE_ROUNDS).await.ok();
-            result = self
+            // A failure here is ambiguous: it can mean the transfer was
+            // never created, *or* that it was created and the response
+            // was lost. Ask before assuming, because assuming "not
+            // delivered" when it was leaves the counterparty holding a
+            // live claimable htlc while we still think we owe them one —
+            // and we would eventually return their lightning payment
+            // too. The id was chosen before the call precisely so this
+            // question has an answer.
+            if self
                 .spark
-                .create_htlc(
-                    amount_sat,
-                    &address,
-                    &hash,
-                    Duration::from_secs(self.cfg.spark_htlc_expiry_secs),
-                    &transfer_id,
-                )
-                .await;
+                .transfer_exists(&transfer_id)
+                .await
+                .unwrap_or(false)
+            {
+                log::warn!(
+                    target: "swapd",
+                    "spark htlc `{transfer_id}` exists despite the error, treating it as delivered"
+                );
+                result = Ok(transfer_id.clone());
+            } else {
+                log::info!(target: "swapd", "reshaping leaves to cover {amount_sat} sat");
+                self.spark.optimize(LEAF_OPTIMIZE_ROUNDS).await.ok();
+                result = self
+                    .spark
+                    .create_htlc(
+                        amount_sat,
+                        &address,
+                        &hash,
+                        Duration::from_secs(self.cfg.spark_htlc_expiry_secs),
+                        &transfer_id,
+                    )
+                    .await;
+                // The retry is ambiguous for the same reason.
+                if result.is_err()
+                    && self
+                        .spark
+                        .transfer_exists(&transfer_id)
+                        .await
+                        .unwrap_or(false)
+                {
+                    log::warn!(
+                        target: "swapd",
+                        "spark htlc `{transfer_id}` exists after the retry error, treating it as delivered"
+                    );
+                    result = Ok(transfer_id.clone());
+                }
+            }
         }
         match result {
             Ok(id) => {
@@ -858,6 +923,46 @@ mod tests {
         let effective = configured.max(floor);
         assert_eq!(effective, floor, "the routing floor must win when config is thinner");
         assert!(effective >= max_routing_sat(invoice_sat));
+    }
+
+    /// The guard `quote_spark_to_ln` applies to a fetched invoice,
+    /// factored out so the rules can be tested without a node. Mirrors
+    /// the checks in order: amountless, bait-and-switch, whole sats.
+    fn invoice_is_acceptable(fetched_msat: u64, asked_msat: Option<u64>) -> bool {
+        if fetched_msat == 0 {
+            return false;
+        }
+        if let Some(asked) = asked_msat {
+            if fetched_msat != asked {
+                return false;
+            }
+        }
+        fetched_msat % 1000 == 0
+    }
+
+    #[test]
+    fn an_amountless_invoice_is_refused() {
+        // An amountless invoice settles for *any* amount, so paying one
+        // hands over the preimage for a token payment. This is the shape
+        // behind several published swap thefts.
+        assert!(!invoice_is_acceptable(0, None));
+        assert!(!invoice_is_acceptable(0, Some(0)));
+    }
+
+    #[test]
+    fn an_invoice_that_does_not_match_the_asked_amount_is_refused() {
+        // Bait and switch: we asked for one amount, the issuer's invoice
+        // says another. Refuse rather than resize the swap around it.
+        assert!(!invoice_is_acceptable(10_000_000, Some(1_000_000)));
+        assert!(!invoice_is_acceptable(999_000, Some(1_000_000)));
+        assert!(invoice_is_acceptable(1_000_000, Some(1_000_000)));
+        // no amount asked: any whole-sat, non-zero invoice is fine here
+        assert!(invoice_is_acceptable(1_000_000, None));
+    }
+
+    #[test]
+    fn a_sub_satoshi_invoice_is_refused() {
+        assert!(!invoice_is_acceptable(1_500, None));
     }
 
     #[test]
