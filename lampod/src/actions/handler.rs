@@ -11,6 +11,7 @@ use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::error::Ok;
 use lampo_common::event::ln::LightningEvent;
+use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::{Emitter, Event, Subscriber};
 use lampo_common::handler::ExternalHandler;
 use lampo_common::handler::Handler as EventHandler;
@@ -275,7 +276,7 @@ impl Handler for LampoHandler {
                 log::info!("fee estimated {:?} sats", fee);
 
                 let best_block = self.channel_manager.manager().current_best_block().height;
-                let transaction = self
+                let transaction = match self
                     .wallet_manager
                     .create_transaction(
                         output_script,
@@ -284,7 +285,18 @@ impl Handler for LampoHandler {
                         // FIXME: remove unwrap
                         Height::from_consensus(best_block).unwrap(),
                     )
-                    .await?;
+                    .await
+                {
+                    std::result::Result::Ok(tx) => tx,
+                    Err(err) => {
+                        let msg = format!("Failed to create funding transaction: {err}");
+                        log::error!(target: "lampo", "{}", msg);
+                        self.emit(Event::OnChain(OnChainEvent::FundingChannelFailed(
+                            msg.clone(),
+                        )));
+                        return Err(err);
+                    }
+                };
                 log::info!(
                     "funding transaction created `{}`",
                     transaction.compute_txid()
