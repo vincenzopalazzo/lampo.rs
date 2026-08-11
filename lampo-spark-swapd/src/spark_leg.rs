@@ -158,6 +158,14 @@ impl SparkLeg {
     /// Direction B swap up front when we could not deliver it, rather
     /// than making the counterparty pay into a hold we cannot fulfil.
     pub async fn balance(&self) -> error::Result<u64> {
+        // Sync first. Leaves claimed outside this process -- an operator
+        // topping the daemon up with a deposit is the normal case -- are
+        // invisible to a cached balance, so without this the daemon
+        // reports 0 forever and the deliverability fence refuses every
+        // receive swap with no way to tell why.
+        if let Err(err) = self.wallet.sync().await {
+            log::warn!(target: "swapd", "spark sync before balance failed: {err}");
+        }
         self.wallet
             .get_balance()
             .await
