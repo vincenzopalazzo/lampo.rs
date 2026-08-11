@@ -263,6 +263,20 @@ impl Engine {
         self.store.list()
     }
 
+    /// Where to top the daemon up, and how much it currently holds.
+    ///
+    /// Without this there is no way to fund the spark side or to see
+    /// whether the daemon can serve a receive swap at all -- the
+    /// deliverability fence would just start refusing swaps with no way
+    /// for the operator to find out why. The balance is not a secret:
+    /// it is the ceiling a counterparty can ask for, which any swap
+    /// service publishes as its limits.
+    pub async fn spark_info(&self) -> error::Result<(String, u64, u64)> {
+        let address = self.spark.spark_address().await?;
+        let balance = self.spark.balance().await?;
+        Ok((address, balance, self.cfg.max_swap_sat))
+    }
+
     /// Run the engine until the process shuts down: consume lampo
     /// events and reconcile pending swaps on a tick.
     pub async fn run(self: Arc<Self>) {

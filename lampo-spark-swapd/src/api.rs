@@ -51,6 +51,25 @@ async fn swap_in(engine: web::Data<Arc<Engine>>, body: web::Json<SwapInRequest>)
     }
 }
 
+/// What the daemon can serve, and where to top it up. Operators need
+/// this to fund the spark side; callers need `max_swap_sat` to know what
+/// they can ask for before a quote is refused.
+async fn spark_info(engine: web::Data<Arc<Engine>>) -> HttpResponse {
+    match engine.spark_info().await {
+        Ok((address, balance_sat, max_swap_sat)) => HttpResponse::Ok().json(serde_json::json!({
+            "spark_address": address,
+            "balance_sat": balance_sat,
+            "max_swap_sat": max_swap_sat,
+            // The largest receive swap that could actually be delivered
+            // right now: holding enough is necessary but not sufficient
+            // (denominations still have to work out), so this is an
+            // upper bound, not a promise.
+            "max_payout_sat_now": balance_sat.min(max_swap_sat),
+        })),
+        Err(err) => error_response(err),
+    }
+}
+
 async fn swaps(engine: web::Data<Arc<Engine>>) -> HttpResponse {
     // A sanitized view, never the raw record: the store keeps secrets
     // (the Direction A preimage) that must not leave the daemon.
@@ -83,6 +102,7 @@ pub async fn run(engine: Arc<Engine>, addr: String) -> error::Result<()> {
             .route("/v1/swap/out", web::post().to(swap_out))
             .route("/v1/swap/in", web::post().to(swap_in))
             .route("/v1/swaps", web::get().to(swaps))
+            .route("/v1/spark/info", web::get().to(spark_info))
     })
     .bind(&addr)
     .map_err(|err| error::anyhow!("cannot bind the swap api on `{addr}`: {err}"))?;
