@@ -154,6 +154,16 @@ impl SparkLeg {
         Ok(())
     }
 
+    /// The wallet's spendable balance in sats. Used to refuse a
+    /// Direction B swap up front when we could not deliver it, rather
+    /// than making the counterparty pay into a hold we cannot fulfil.
+    pub async fn balance(&self) -> error::Result<u64> {
+        self.wallet
+            .get_balance()
+            .await
+            .map_err(|err| error::anyhow!("spark get_balance: {err}"))
+    }
+
     pub async fn spark_address(&self) -> error::Result<String> {
         let address = self
             .wallet

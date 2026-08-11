@@ -38,9 +38,10 @@ struct Args {
     /// `lampo.conf`. Swap settings are read from that same file.
     #[arg(long)]
     data_dir: Option<String>,
-    /// Lampo network. Spark rides on mainnet and regtest only, so the
-    /// default is regtest rather than lampo's own testnet default: a
-    /// daemon started with no flags should come up, not fail on the
+    /// Lampo network: mainnet, signet (incl. mutinynet), testnet, or
+    /// regtest. Only mainnet has SDK-hosted spark operators; the others
+    /// need self-hosted `spark-operator` lines. Defaults to regtest so a
+    /// daemon started with no flags comes up rather than failing on the
     /// spark leg.
     #[arg(long, default_value = "regtest")]
     network: String,
@@ -220,8 +221,49 @@ fn parse_ln_network(network: &str) -> error::Result<Network> {
 fn parse_spark_network(network: &str) -> error::Result<spark::Network> {
     match network {
         "mainnet" | "bitcoin" => Ok(spark::Network::Mainnet),
+        // signet covers mutinynet, which is a signet with fast blocks:
+        // the network params are signet's, only the chain differs. Note
+        // Spark's SDK hosts operators for mainnet only, so signet and
+        // testnet require self-hosted operators (`spark-operator` lines).
+        "signet" | "mutinynet" => Ok(spark::Network::Signet),
+        "testnet" => Ok(spark::Network::Testnet),
         "regtest" => Ok(spark::Network::Regtest),
         other => error::bail!("spark network `{other}` not supported"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spark_networks_parse_including_mutinynet() {
+        assert!(matches!(
+            parse_spark_network("mainnet").unwrap(),
+            spark::Network::Mainnet
+        ));
+        assert!(matches!(
+            parse_spark_network("bitcoin").unwrap(),
+            spark::Network::Mainnet
+        ));
+        // mutinynet is a signet: same params, fast blocks.
+        assert!(matches!(
+            parse_spark_network("mutinynet").unwrap(),
+            spark::Network::Signet
+        ));
+        assert!(matches!(
+            parse_spark_network("signet").unwrap(),
+            spark::Network::Signet
+        ));
+        assert!(matches!(
+            parse_spark_network("testnet").unwrap(),
+            spark::Network::Testnet
+        ));
+        assert!(matches!(
+            parse_spark_network("regtest").unwrap(),
+            spark::Network::Regtest
+        ));
+        assert!(parse_spark_network("nonsense").is_err());
     }
 }
 

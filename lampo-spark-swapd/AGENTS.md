@@ -44,13 +44,16 @@ argument from the caller (`lib/service/Service.ts:1183`), and
 (`lib/service/Service.ts:1779`). Boltz never generates the secret for a
 user-facing swap; it only ever learns it when the user reveals it.
 
-**[inference]** This is the property our Direction B lacks. We publish
-a BOLT12 offer, so *our* node generates the preimage, so our lightning
-leg settles unconditionally and the user is trusting us for the window
-between settlement and the Spark HTLC existing. Adopting "the client
-supplies the hash" is what makes the direction atomic, and lampo now
-has the primitive for it: `holdinvoice` takes an external payment hash,
-and `holdclaim` settles it once we learn the preimage.
+**[inference]** This is the property our Direction B now has. It once
+lacked it: an earlier design published a BOLT12 offer, so *our* node
+generated the preimage and our lightning leg settled unconditionally,
+leaving the user trusting us for the window between settlement and the
+Spark HTLC existing. That design is gone. The live flow takes the
+caller's payment hash and issues a hold invoice via `holdinvoice`,
+which we cannot settle until `holdclaim` with the preimage the caller
+reveals by claiming the Spark HTLC — so the window is closed. The
+offer-publishing primitives were removed so the unsafe path cannot be
+wired up again.
 
 **[verified]** `createReverseSwap` also accepts a BOLT12 invoice
 "instead of the preimage hash and invoice amount"

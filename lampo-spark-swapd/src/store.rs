@@ -51,32 +51,9 @@ impl SwapStore {
         Ok(())
     }
 
-    /// Re-key a Direction B swap once its payment hash becomes known
-    /// (it was stored under the offer id until a payer showed up).
-    pub fn rekey(&self, old_id: &str, swap: &Swap) -> error::Result<()> {
-        self.persist(swap)?;
-        if old_id != swap.id() {
-            let old_path = self.dir.join(format!("{old_id}.json"));
-            let _ = std::fs::remove_file(old_path);
-            // SAFETY: the mutex is never poisoned, we do not panic while holding it.
-            self.swaps.lock().unwrap().remove(old_id);
-        }
-        Ok(())
-    }
-
     pub fn get(&self, id: &str) -> Option<Swap> {
         // SAFETY: the mutex is never poisoned, we do not panic while holding it.
         self.swaps.lock().unwrap().get(id).cloned()
-    }
-
-    pub fn find_by_offer_id(&self, offer_id: &str) -> Option<Swap> {
-        // SAFETY: the mutex is never poisoned, we do not panic while holding it.
-        self.swaps
-            .lock()
-            .unwrap()
-            .values()
-            .find(|swap| swap.offer_id.as_deref() == Some(offer_id))
-            .cloned()
     }
 
     pub fn pending(&self) -> Vec<Swap> {
@@ -151,25 +128,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn rekey_moves_the_record() {
-        let dir = tmp_dir();
-        let store = SwapStore::new(dir.clone()).unwrap();
-        let mut swap = a_swap(&"cd".repeat(32));
-        swap.payment_hash = None;
-        swap.offer_id = Some("offer123".to_owned());
-        swap.direction = Direction::LnToSpark;
-        swap.state = State::HoldInvoiceIssued;
-        store.persist(&swap).unwrap();
-        assert!(store.find_by_offer_id("offer123").is_some());
-
-        let old_id = swap.id();
-        swap.payment_hash = Some("ef".repeat(32));
-        store.rekey(&old_id, &swap).unwrap();
-
-        let reloaded = SwapStore::new(dir.clone()).unwrap();
-        assert!(reloaded.get("offer123").is_none());
-        assert!(reloaded.get(&"ef".repeat(32)).is_some());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }

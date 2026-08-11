@@ -160,32 +160,4 @@ impl LampoLeg {
             .await?;
         Ok(holds.holds)
     }
-
-    /// Publish a fresh BOLT12 offer of ours (Direction B entry point).
-    pub async fn create_offer(&self, amount_msat: Option<u64>) -> error::Result<response::Offer> {
-        self.handler
-            .call(
-                "offer",
-                request::GenerateOffer {
-                    amount_msat,
-                    description: Some("lampo-spark-swapd".to_owned()),
-                },
-            )
-            .await
-    }
-}
-
-/// The offer id LDK derives for an offer string: the merkle-root
-/// derived `OfferId`, hex encoded. Used to correlate a
-/// `PaymentClaimed` back to the Direction B swap that published the
-/// offer.
-pub fn offer_id(offer_str: &str) -> error::Result<String> {
-    use std::str::FromStr;
-    let offer = lampo_common::ldk::offers::offer::Offer::from_str(offer_str)
-        .map_err(|err| error::anyhow!("invalid offer: {err:?}"))?;
-    Ok(hex_encode(offer.id().0))
-}
-
-pub fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
-    bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }

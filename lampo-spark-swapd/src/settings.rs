@@ -19,7 +19,7 @@ use lampo_common::error;
 
 #[derive(Debug, Clone)]
 pub struct Settings {
-    /// `mainnet` or `regtest`.
+    /// `mainnet`, `signet` (incl. `mutinynet`), `testnet`, or `regtest`.
     pub spark_network: String,
     /// Path to the 32 byte hex seed of the Spark wallet. Created on
     /// first start when missing.

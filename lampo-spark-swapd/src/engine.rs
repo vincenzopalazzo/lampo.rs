@@ -205,6 +205,21 @@ impl Engine {
             // let a second payment ride on the first swap's htlc.
             error::bail!("a swap for this payment hash already exists");
         }
+        // Refuse the swap now if we could not deliver it. Without this
+        // the counterparty pays the hold invoice, the payment is held,
+        // delivery fails for want of funds, and they wait out the whole
+        // expiry for a refund. No funds are lost either way -- the hold
+        // is never settled -- but failing before they pay is the honest
+        // behaviour. This is a necessary check, not a sufficient one:
+        // holding enough total does not guarantee a spendable
+        // denomination (see the SSP/leaf limit in the README), so
+        // delivery can still fail and reconcile still refunds safely.
+        let balance = self.spark.balance().await?;
+        if balance < payout_sat {
+            error::bail!(
+                "cannot take this swap: spark balance {balance} sat is below the {payout_sat} sat payout"
+            );
+        }
 
         // They ask to receive `payout_sat` on spark; the invoice they
         // pay is that plus our fee. We receive the larger amount on

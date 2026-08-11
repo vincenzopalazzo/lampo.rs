@@ -244,7 +244,20 @@ gaps are all closed now:
   `direction_a_recovers_a_crashed_claim`.
 
 Known limits, on purpose and documented in code:
-- Direction B trusted window (above).
+- **Direction B is atomic; the old "trusted window" is gone.** Earlier
+  notes listed a window where the caller trusted us between our
+  lightning settlement and the spark htlc existing. That belonged to a
+  superseded design where we published a BOLT12 offer and generated the
+  preimage ourselves. The live flow takes the caller's payment hash and
+  issues a hold invoice we *cannot* settle until they claim the spark
+  htlc, so the window does not exist. The offer-publishing code has been
+  removed to keep the unsafe path from being wired up by accident.
+- **A receive swap is refused up front if we cannot fund it.**
+  `create_hold_swap` checks the spark balance against the payout before
+  issuing the hold invoice, so a caller is not made to pay into a swap
+  that would stall. This is necessary, not sufficient: holding enough
+  total does not guarantee a spendable denomination (next point), so
+  delivery can still fail — safely, with the held payment refunded.
 - **Leaf denominations depend on the SSP.** Delivery tries
   `create_htlc` for the exact payout first, which covers whole-leaf and
   matching-denomination cases, and only falls back to `optimize_leaves`

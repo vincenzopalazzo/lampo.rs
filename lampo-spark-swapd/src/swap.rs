@@ -51,7 +51,12 @@ pub struct Swap {
     /// Hex payment hash; also the record id. Empty until known for
     /// Direction B (the hash only exists once a payer shows up).
     pub payment_hash: Option<String>,
-    /// Direction B swaps are found by offer id before the hash exists.
+    /// Reserved, always `None`. Both directions are keyed by payment
+    /// hash: Direction A pins it from the fetched invoice, Direction B
+    /// takes it from the caller. The old non-atomic flow that published
+    /// an offer and correlated later payments by offer id is gone (it
+    /// was the source of the "trusted window"); this field is kept only
+    /// so existing records deserialize.
     pub offer_id: Option<String>,
     pub direction: Direction,
     pub state: State,
