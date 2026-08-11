@@ -190,6 +190,19 @@ fn read_to_string(path: &str) -> error::Result<String> {
 fn load_or_create_seed(settings: &Settings) -> error::Result<Vec<u8>> {
     let path = &settings.spark_seed_file;
     if path.exists() {
+        // Refuse to run on a seed anyone else on the box can read. This
+        // catches seeds created before the 0600 default and seeds copied
+        // in by hand -- silently using one would be custody theatre.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(path)?.permissions().mode() & 0o077;
+            if mode != 0 {
+                error::bail!(
+                    "the spark seed `{path:?}` is group/world accessible; run `chmod 600` on it"
+                );
+            }
+        }
         let content = std::fs::read_to_string(path)?;
         let content = content.trim();
         if content.len() != 64 {
@@ -208,6 +221,23 @@ fn load_or_create_seed(settings: &Settings) -> error::Result<Vec<u8>> {
     let mut seed = [0u8; 32];
     std::fs::File::open("/dev/urandom")?.read_exact(&mut seed)?;
     let hex: String = seed.iter().map(|b| format!("{b:02x}")).collect();
+    // Create it 0600 *before* the secret goes in: whoever holds this
+    // file holds every sat the swap wallet controls, and a default-mode
+    // write leaves it readable by every user on the box. Creating with
+    // the mode set avoids the window a write-then-chmod would open.
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(hex.as_bytes())?;
+        file.sync_all()?;
+    }
+    #[cfg(not(unix))]
     std::fs::write(path, &hex)?;
     log::warn!(target: "swapd", "created a new spark seed at `{path:?}` - BACK IT UP");
     Ok(seed.to_vec())
