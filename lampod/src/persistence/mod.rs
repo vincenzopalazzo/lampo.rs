@@ -10,3 +10,7 @@ use lampo_common::ldk::persister::fs_store::v1::FilesystemStore;
 // giving more time to understand how to make a custom one without
 // lost funds :-P
 pub type LampoPersistence = FilesystemStore;
+
+/// The persister lampo hands to the chain monitor: the filesystem
+/// store plus optional watchtower justice-transaction capture.
+pub use lampo_watchtower::WatchtowerPersister;

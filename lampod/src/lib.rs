@@ -42,7 +42,7 @@ use crate::actions::Handler;
 use crate::chain::LampoChainManager;
 use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::persistence::LampoPersistence;
+use crate::persistence::{LampoPersistence, WatchtowerPersister};
 use crate::utils::logger::LampoLogger;
 
 pub(crate) type P2PGossipSync =
@@ -95,7 +95,7 @@ pub struct LampoDaemon {
     wallet_manager: Arc<dyn WalletManager>,
     offchain_manager: Option<Arc<OffchainManager>>,
     logger: Arc<LampoLogger>,
-    persister: Arc<LampoPersistence>,
+    persister: Arc<WatchtowerPersister>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
 }
@@ -106,7 +106,9 @@ impl LampoDaemon {
         LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
-            persister: Arc::new(LampoPersistence::new(root_path.into())),
+            persister: Arc::new(WatchtowerPersister::new(Arc::new(LampoPersistence::new(
+                root_path.into(),
+            )))),
             peer_manager: None,
             onchain_manager: None,
             channel_manager: None,
@@ -135,7 +137,7 @@ impl LampoDaemon {
     }
 
     pub fn persister(&self) -> Arc<LampoPersistence> {
-        self.persister.clone()
+        self.persister.kv_store()
     }
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
@@ -159,8 +161,43 @@ impl LampoDaemon {
             self.persister.clone(),
         );
         self.channel_manager = Some(Arc::new(manager));
+        // The watchtower must be enabled before the chain monitor is
+        // built, so the very first monitor persist is captured.
+        self.init_watchtower().await?;
         self.channel_manager().listen().await?;
         Ok(())
+    }
+
+    /// Enables the TEOS watchtower client when a tower is configured.
+    async fn init_watchtower(&self) -> error::Result<()> {
+        use std::str::FromStr;
+
+        let (url, id) = match (&self.conf.watchtower_url, &self.conf.watchtower_id) {
+            (Some(url), Some(id)) => (url.clone(), id.clone()),
+            (None, None) => return Ok(()),
+            _ => error::bail!(
+                "watchtower configuration is incomplete: both `watchtower-url` and `watchtower-id` must be set"
+            ),
+        };
+        log::debug!(target: "lampod", "init watchtower client ...");
+        let tower_id = lampo_common::secp256k1::PublicKey::from_str(&id)
+            .map_err(|err| error::anyhow!("invalid `watchtower-id`: {err}"))?;
+        // Justice transactions pay out to a fresh address of our
+        // onchain wallet.
+        let address = self.wallet_manager.get_onchain_address().await?;
+        let address = lampo_common::bitcoin::Address::from_str(&address.address)?
+            .require_network(self.conf.network)?;
+        let config = lampo_watchtower::WatchtowerConfig {
+            tower_url: url,
+            tower_id,
+            datadir: self.conf.path().into(),
+        };
+        lampo_watchtower::start(
+            &self.persister,
+            config,
+            address.script_pubkey(),
+            self.onchain_manager(),
+        )
     }
 
     pub fn channel_manager(&self) -> Arc<LampoChannelManager> {
@@ -283,7 +320,7 @@ impl LampoDaemon {
 
         tokio::spawn(async move {
             process_events_async(
-                self.persister.clone(),
+                self.persister.kv_store(),
                 |env| self.handler_ldk_events(env),
                 self.channel_manager().chain_monitor(),
                 self.channel_manager().manager(),

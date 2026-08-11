@@ -40,13 +40,13 @@ use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
 use crate::actions::handler::LampoHandler;
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
-use crate::persistence::LampoPersistence;
+use crate::persistence::WatchtowerPersister;
 use crate::utils::logger::LampoLogger;
 
 pub struct LampoChannelManager {
     monitor: OnceLock<Arc<LampoChainMonitor>>,
     wallet_manager: Arc<dyn WalletManager>,
-    persister: Arc<LampoPersistence>,
+    persister: Arc<WatchtowerPersister>,
     graph: OnceLock<Arc<LampoGraph>>,
     score: OnceLock<Arc<Mutex<LampoScorer>>>,
     handler: OnceLock<Arc<LampoHandler>>,
@@ -64,7 +64,7 @@ impl LampoChannelManager {
         logger: Arc<LampoLogger>,
         onchain: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
-        persister: Arc<LampoPersistence>,
+        persister: Arc<WatchtowerPersister>,
     ) -> Self {
         LampoChannelManager {
             conf: conf.to_owned(),
@@ -157,7 +157,7 @@ impl LampoChannelManager {
 
     pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
         let keys = self.wallet_manager.ldk_keys().inner();
-        let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
+        let mut monitors = read_channel_monitors(self.persister.kv_store(), keys.clone(), keys)?;
         let mut channel_monitors = Vec::new();
         for (_, monitor) in monitors.drain(..) {
             channel_monitors.push(monitor);
