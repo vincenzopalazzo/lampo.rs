@@ -628,3 +628,107 @@ async fn direction_b_full_swap_lightning_to_spark() {
     );
     println!("direction B complete, atomically: user received {user_balance} sat on spark");
 }
+
+/// An unpaid Direction B swap must END, and must not strand the hash.
+///
+/// Before this, `HoldInvoiceIssued` had no expiry arm: the record stayed
+/// pending forever and its payment hash was burned for good, because
+/// `create_hold_swap` refuses to reuse a hash. Every abandoned quote
+/// permanently consumed a hash and a slot in every reconcile pass.
+///
+/// The hold window is an hour by construction (`spark_htlc_expiry_secs`
+/// plus `LN_HOLD_MARGIN_SECS`), so rather than wait it out we stage the
+/// state a stale swap would be in -- the same trick the crash-recovery
+/// test uses -- and let a fresh engine reconcile it.
+#[tokio::test]
+#[ignore = "needs the spark operator stack and bitcoind, see the module docs"]
+async fn unpaid_hold_swap_expires_and_releases_its_hash() {
+    use bitcoin::hashes::{sha256, Hash as _};
+    use lampo_testing::LampoTesting;
+
+    init_logger();
+
+    let node_s = std::sync::Arc::new(LampoTesting::tmp().await.expect("node S"));
+    let swapd_spark = std::sync::Arc::new(wallet(nonce()).await);
+    let user_spark = wallet(nonce()).await;
+    let user_address = user_spark
+        .get_spark_address()
+        .unwrap()
+        .to_address_string()
+        .unwrap();
+
+    let preimage = nonce();
+    let payment_hash = sha256::Hash::hash(&preimage).to_string();
+
+    let store_dir = std::env::temp_dir().join(format!("swapd-e2e-exp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store_dir);
+
+    // Issue a real hold invoice, so the node genuinely holds the hash.
+    let engine = std::sync::Arc::new(Engine::new(
+        LampoLeg::new(node_s.lampod()),
+        SparkLeg::new(swapd_spark.clone()),
+        SwapStore::new(store_dir.clone()).expect("store"),
+        engine_settings(90),
+    ));
+    engine
+        .create_hold_swap(&user_address, 50_000, &payment_hash)
+        .await
+        .expect("hold swap");
+
+    // The node must know about the hash before we expire it, otherwise
+    // the test would pass even if the release did nothing.
+    let leg = LampoLeg::new(node_s.lampod());
+    let holds = leg.list_holds().await.expect("list holds");
+    assert!(
+        holds.iter().any(|h| h.payment_hash == payment_hash),
+        "the node must be holding the invoice before we expire it"
+    );
+
+    // Age the record past its hold window and reconcile with a fresh
+    // engine, exactly as a restart would see it.
+    let path = store_dir.join(format!("{payment_hash}.json"));
+    let raw = std::fs::read_to_string(&path).expect("record on disk");
+    let mut record: serde_json::Value = serde_json::from_str(&raw).expect("record json");
+    record["created_at"] = serde_json::json!(1_000u64);
+    std::fs::write(&path, serde_json::to_string_pretty(&record).unwrap()).expect("stage");
+
+    let engine = std::sync::Arc::new(Engine::new(
+        LampoLeg::new(node_s.lampod()),
+        SparkLeg::new(swapd_spark.clone()),
+        SwapStore::new(store_dir).expect("store reload"),
+        engine_settings(90),
+    ));
+    tokio::spawn(engine.clone().run());
+
+    let mut failed = false;
+    for _ in 0..30 {
+        if engine
+            .list()
+            .iter()
+            .any(|s| matches!(s.state, State::Failed { .. }))
+        {
+            failed = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+    assert!(
+        failed,
+        "an unpaid swap past its hold window must fail, states: {:?}",
+        engine.list().iter().map(|s| s.state.clone()).collect::<Vec<_>>()
+    );
+
+    // And the hash must be released on the node: a hash we abandon while
+    // the node still holds it can strand a later payer.
+    let mut released = false;
+    for _ in 0..15 {
+        let holds = leg.list_holds().await.unwrap_or_default();
+        if !holds.iter().any(|h| h.payment_hash == payment_hash) {
+            released = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    assert!(released, "the expired swap must release its hold on the node");
+    println!("unpaid hold swap expired and released its hash");
+}
