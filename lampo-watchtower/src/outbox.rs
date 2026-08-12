@@ -143,9 +143,16 @@ impl Outbox {
 /// Writes a file through a temporary sibling + rename, so a crash never
 /// leaves a half-written entry behind.
 fn write_atomic(path: &PathBuf, bytes: &[u8]) -> error::Result<()> {
+    use std::io::Write;
+
     let tmp = path.with_extension("tmp");
-    fs::write(&tmp, bytes)?;
+    let mut file = fs::File::create(&tmp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
     fs::rename(&tmp, path)?;
+    if let Some(parent) = path.parent() {
+        fs::File::open(parent)?.sync_all()?;
+    }
     Ok(())
 }
 

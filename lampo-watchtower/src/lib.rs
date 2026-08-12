@@ -96,7 +96,21 @@ fn load_or_create_user_sk(root: &PathBuf) -> error::Result<SecretKey> {
             break sk;
         }
     };
-    std::fs::write(&path, hex::encode(sk.secret_bytes()))?;
+    let secret = hex::encode(sk.secret_bytes());
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)?;
+        file.write_all(secret.as_bytes())?;
+        file.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    std::fs::write(&path, secret)?;
     Ok(sk)
 }
 
@@ -172,7 +186,9 @@ async fn delivery_loop(client: TowerClient, outbox: Outbox, notifier: Arc<Notify
                             "tower rejected appointment for dispute {}: {} (code {})",
                             signed.dispute_txid, api.error, api.error_code
                         );
-                        let _ = outbox.remove_signed(&signed.dispute_txid);
+                        // Keep unknown API failures queued. New tower versions may add
+                        // transient error codes, and dropping a justice transaction here
+                        // would permanently remove breach protection.
                     }
                 },
                 Err(TowerError::Signature(err)) => {
