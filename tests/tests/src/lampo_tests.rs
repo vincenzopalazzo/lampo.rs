@@ -111,6 +111,91 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
     Ok(())
 }
 
+/// `fundchannel` must honor the `public` flag it accepts.
+///
+/// This used to fail: `open_channel` parsed `public` into the request and
+/// then handed LDK the global `ldk_conf`, whose `announce_for_forwarding`
+/// is false by default. Every channel came up unannounced no matter what
+/// the caller asked for, so gossip never learned the channel existed and
+/// nothing could be routed *through* a lampo node -- while `fundchannel`
+/// returned success and reported the channel as whatever was requested.
+///
+/// `public` on the channel list is LDK's own `ChannelDetails::is_announced`
+/// ("true if this channel is (or will be) publicly-announced"), so this
+/// asserts the negotiated state rather than echoing the request back.
+#[tokio_test_shutdown_timeout::test(5)]
+pub async fn fundchannel_honors_the_public_flag() -> error::Result<()> {
+    init();
+
+    // Both directions are pinned: asserting only the announced case would
+    // still pass if the flag were hardcoded the other way.
+    for announce in [true, false] {
+        let node1 = LampoTesting::tmp().await?;
+        let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+
+        let _: response::Connect = node2
+            .lampod()
+            .call(
+                "connect",
+                request::Connect {
+                    node_id: node1.info.node_id.clone(),
+                    addr: "127.0.0.1".to_owned(),
+                    port: node1.port,
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut events = node2.lampod().events();
+        let response: json::Value = node1
+            .lampod()
+            .call(
+                "fundchannel",
+                request::OpenChannel {
+                    node_id: node2.info.node_id.clone(),
+                    amount: 100000,
+                    public: announce,
+                    port: None,
+                    addr: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(response.get("tx").is_some());
+        node2.fund_wallet(10).await.unwrap();
+
+        async_wait!(async {
+            while let Some(event) = events.recv().await {
+                if let Event::Lightning(LightningEvent::ChannelReady { .. }) = event {
+                    return Ok(());
+                }
+                let channels: response::Channels = node1
+                    .lampod()
+                    .call("channels", json::json!({}))
+                    .await
+                    .unwrap();
+                if channels.channels.iter().any(|chan| chan.ready) {
+                    return Ok(());
+                }
+            }
+            Err(())
+        });
+
+        // The opener is the side that chose the flag, so assert there.
+        let channels: response::Channels = node1.lampod().call("channels", json::json!({})).await?;
+        let channel = channels
+            .channels
+            .first()
+            .expect("the channel we just opened should be listed");
+        assert_eq!(
+            channel.public, announce,
+            "asked for public={announce}, got public={} -- the flag was ignored",
+            channel.public
+        );
+    }
+    Ok(())
+}
+
 #[tokio_test_shutdown_timeout::test(5)]
 pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
     init();
