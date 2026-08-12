@@ -156,10 +156,7 @@ pub async fn json_sendpaymentnotification(
     ctx: &LampoDaemon,
     request: &json::Value,
 ) -> Result<json::Value, Error> {
-    log::info!(
-        "call for `sendpaymentnotification` with request `{:?}`",
-        request
-    );
+    log::info!("call for sendpaymentnotification");
     let request: SendPaymentNotification = json::from_value(request.clone())?;
     let payment_hash = decode_hash32(&request.payment_hash)?;
     let preimage = decode_hash32(&request.preimage)?;
