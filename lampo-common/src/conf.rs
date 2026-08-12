@@ -61,7 +61,7 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             dev_sync: None,
-            metrics: true,
+            metrics: false,
         }
     }
 }
@@ -255,8 +255,8 @@ impl TryFrom<String> for LampoConf {
         let metrics = conf
             .get_conf("metrics")
             .unwrap_or(None)
-            .map(|s| s.to_lowercase() != "false" && s != "0")
-            .unwrap_or(true);
+            .map(|s| s.to_lowercase() == "true" || s == "1")
+            .unwrap_or(false);
         Ok(Self {
             inner: Some(conf),
             root_path,

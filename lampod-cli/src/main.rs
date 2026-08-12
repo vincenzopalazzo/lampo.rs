@@ -196,8 +196,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
                 Some(handle)
             }
             Err(err) => {
-                log::warn!("Failed to initialize metrics: {err}");
-                None
+                return Err(error::anyhow!("failed to initialize metrics: {err}"));
             }
         }
     } else {

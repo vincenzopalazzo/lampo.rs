@@ -358,17 +358,23 @@ impl Handler for LampoHandler {
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => (Some(preimage), None),
                 };
                 counter!("lampo_payments_received_total").increment(1);
+                self.update_channel_gauges();
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristent these information
                 Ok(())
             }
+            ldk::events::Event::PaymentForwarded { .. } => {
+                counter!("lampo_payments_forwarded_total").increment(1);
+                self.update_channel_gauges();
+                Ok(())
+            },
             ldk::events::Event::PaymentSent { .. } => {
                 counter!("lampo_payments_sent_total").increment(1);
+                self.update_channel_gauges();
                 log::info!("payment sent: `{:?}`", event);
                 Ok(())
             },
             ldk::events::Event::PaymentPathSuccessful { payment_hash, path, .. } => {
-                counter!("lampo_payments_forwarded_total").increment(1);
                 let path = path.hops.iter().map(|hop| PaymentHop::from(hop.clone())).collect::<Vec<PaymentHop>>();
                 let hop = LightningEvent::PaymentEvent { state: PaymentState::Success, payment_hash: payment_hash.map(|hash| hash.to_string()), path, reason: None };
                 self.emit(Event::Lightning(hop));
