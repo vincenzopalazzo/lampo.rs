@@ -4,11 +4,12 @@ use std::sync::{Arc, Mutex};
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use lightning::onion_message::messenger::DefaultMessageRouter;
 
+use lampo_watchtower::WatchtowerPersister;
+
 use crate::bitcoin::secp256k1::PublicKey;
 use crate::ldk::chain::chainmonitor::ChainMonitor;
 use crate::ldk::chain::Filter;
 use crate::ldk::ln::channelmanager::ChannelManager;
-use crate::ldk::persister::fs_store::v1::FilesystemStore;
 use crate::ldk::routing::gossip::NetworkGraph;
 use crate::ldk::routing::router::DefaultRouter;
 use crate::ldk::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
@@ -26,7 +27,7 @@ pub type LampoChainMonitor = ChainMonitor<
     Arc<dyn BroadcasterInterface + Send + Sync>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoLogger>,
-    Arc<FilesystemStore>,
+    Arc<WatchtowerPersister>,
     Arc<LampoKeysManager>,
 >;
 

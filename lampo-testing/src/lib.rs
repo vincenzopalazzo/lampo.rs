@@ -135,6 +135,16 @@ impl LampoTesting {
     }
 
     pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
+        Self::new_with_conf(btc, |_| {}).await
+    }
+
+    /// Like [`Self::new`], but lets the test tweak the lampo
+    /// configuration (e.g. to point the node at a watchtower) before
+    /// the daemon starts.
+    pub async fn new_with_conf(
+        btc: Arc<BtcNode>,
+        edit_conf: impl FnOnce(&mut LampoConf),
+    ) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -161,6 +171,7 @@ impl LampoTesting {
             .ldk_conf
             .channel_handshake_limits
             .force_announced_channel_preference = false;
+        edit_conf(&mut lampo_conf);
         log::info!("creating bitcoin core wallet");
 
         let lampo_conf = Arc::new(lampo_conf);

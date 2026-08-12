@@ -28,6 +28,10 @@ pub struct LampoConf {
     pub api_port: u64,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
+    /// Base URL of a TEOS watchtower public API, e.g. `http://host:port`.
+    pub watchtower_url: Option<String>,
+    /// The tower id (public key) of the watchtower.
+    pub watchtower_id: Option<String>,
 }
 
 impl Default for LampoConf {
@@ -60,6 +64,8 @@ impl Default for LampoConf {
             api_port: 7878,
             reindex: None,
             dev_sync: None,
+            watchtower_url: None,
+            watchtower_id: None,
         }
     }
 }
@@ -249,6 +255,15 @@ impl TryFrom<String> for LampoConf {
             .get_conf("dev-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+
+        let watchtower_url = conf
+            .get_conf("watchtower-url")
+            .unwrap_or(None)
+            .map(|url| url.to_trimmed());
+        let watchtower_id = conf
+            .get_conf("watchtower-id")
+            .unwrap_or(None)
+            .map(|id| id.to_trimmed());
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -269,6 +284,8 @@ impl TryFrom<String> for LampoConf {
             api_port,
             reindex,
             dev_sync,
+            watchtower_url,
+            watchtower_id,
         })
     }
 }
