@@ -1,4 +1,5 @@
 //! Handler module implementation that
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use lampo_common::bitcoin::absolute::Height;
@@ -523,6 +524,51 @@ impl Handler for LampoHandler {
                     reason: Some(detailed_reason),
                 };
                 self.emit(Event::Lightning(hop));
+                Ok(())
+            }
+            ldk::events::Event::ConnectionNeeded { node_id, addresses } => {
+                // LDK cannot deliver an onion message to a node it has no
+                // connection to, and asks us to open one. Dropping this is
+                // why BOLT12 offers failed with `InvoiceRequestExpired`
+                // whenever the blinded path's introduction node was not
+                // already a peer: the invoice request was never sent at all.
+                //
+                // Connecting blocks until the peer disconnects, so it runs on
+                // its own task -- the event handler must not stall the whole
+                // LDK event loop on a single dial. Addresses are tried in
+                // order, stopping at the first that connects, as ldk-node does.
+                let peer_manager = self.peer_manager.clone();
+                tokio::spawn(async move {
+                    for address in addresses {
+                        // Only the plain TCP forms can be dialled directly.
+                        // Onion and hostname addresses need a proxy/resolver
+                        // lampo does not have, so they are skipped rather than
+                        // counted as a failure to connect.
+                        let host = match address {
+                            ldk::ln::msgs::SocketAddress::TcpIpV4 { addr, port } => {
+                                SocketAddr::from((std::net::Ipv4Addr::from(addr), port))
+                            }
+                            ldk::ln::msgs::SocketAddress::TcpIpV6 { addr, port } => {
+                                SocketAddr::from((std::net::Ipv6Addr::from(addr), port))
+                            }
+                            other => {
+                                log::warn!(target: "lampo::handler", "cannot dial `{other:?}` for `{node_id}`: unsupported address type");
+                                continue;
+                            }
+                        };
+                        log::info!(target: "lampo::handler", "connecting to `{node_id}` at `{host}` to deliver an onion message");
+                        // `Ok` is shadowed by `lampo_common::error::Ok` (a
+                        // function) in this module, so the variant has to be
+                        // spelled out in pattern position.
+                        match peer_manager.connect(node_id, host).await {
+                            std::result::Result::Ok(()) => return,
+                            Err(err) => {
+                                log::warn!(target: "lampo::handler", "failed to connect to `{node_id}` at `{host}`: {err}");
+                            }
+                        }
+                    }
+                    log::error!(target: "lampo::handler", "no reachable address for `{node_id}`; an onion message to it will not be delivered");
+                });
                 Ok(())
             }
             _ => {
