@@ -244,6 +244,14 @@ impl LampoChannelManager {
         &self,
         open_channel: request::OpenChannel,
     ) -> error::Result<response::OpenChannel> {
+        // The caller decides whether this channel is announced. Passing the
+        // global config unmodified here silently dropped `public`: LDK's
+        // `announce_for_forwarding` defaults to false, so every channel came
+        // up unannounced no matter what the caller asked for, and a payment
+        // could never route *through* a lampo node — gossip never learned
+        // its channels existed.
+        let mut config = self.conf.ldk_conf.clone();
+        config.channel_handshake_config.announce_for_forwarding = open_channel.public;
         self.manager()
             .create_channel(
                 open_channel.node_id()?,
@@ -251,7 +259,7 @@ impl LampoChannelManager {
                 0,
                 0,
                 None,
-                Some(self.conf.ldk_conf.clone()),
+                Some(config),
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
 
