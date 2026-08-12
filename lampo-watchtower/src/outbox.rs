@@ -149,6 +149,7 @@ fn write_atomic(path: &PathBuf, bytes: &[u8]) -> error::Result<()> {
     let mut file = fs::File::create(&tmp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
+    drop(file);
     fs::rename(&tmp, path)?;
     if let Some(parent) = path.parent() {
         fs::File::open(parent)?.sync_all()?;

@@ -110,7 +110,15 @@ fn load_or_create_user_sk(root: &PathBuf) -> error::Result<SecretKey> {
         file.sync_all()?;
     }
     #[cfg(not(unix))]
-    std::fs::write(&path, secret)?;
+    {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        file.write_all(secret.as_bytes())?;
+        file.sync_all()?;
+    }
     Ok(sk)
 }
 
