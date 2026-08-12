@@ -25,6 +25,7 @@ use std::time::Duration;
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
+use lampo_common::model::response::HoldStatus;
 
 use crate::lampo_leg::LampoLeg;
 use crate::settings::Settings;
@@ -712,8 +713,82 @@ impl Engine {
                     }
                 }
                 (Direction::LnToSpark, State::HoldInvoiceIssued) => {
-                    // Nobody paid yet. Nothing is at risk, so just let
-                    // the invoice expire on the node.
+                    // Nobody has paid yet, so no funds are at risk -- but
+                    // the swap must still END. Left alone the record stayed
+                    // pending forever and its payment hash was burned for
+                    // good, because `create_hold_swap` refuses to reuse a
+                    // hash: every abandoned quote permanently consumed a
+                    // hash and a slot in every future reconcile pass.
+                    //
+                    // The deadline is the hold window the invoice itself
+                    // was issued with. Past it the node will not accept a
+                    // payment against this hash any more, so the record is
+                    // dead by construction.
+                    let hold_secs = self.cfg.spark_htlc_expiry_secs + LN_HOLD_MARGIN_SECS;
+                    if hold_invoice_action(swap.created_at, now(), hold_secs)
+                        == HoldInvoiceAction::Wait
+                    {
+                        continue;
+                    }
+                    let Some(hash) = swap.payment_hash.clone() else {
+                        // No hash to release; nothing can be held against
+                        // it either, so the record is simply over.
+                        swap.transition(State::Failed {
+                            reason: "hold invoice expired unpaid".to_owned(),
+                        })?;
+                        self.store.persist(&swap)?;
+                        continue;
+                    };
+                    // A payment can arrive at any moment before the node
+                    // drops the invoice, including between the check above
+                    // and this line. Ask the node what it is actually
+                    // holding rather than assuming the race did not happen.
+                    let holds = self.lampo.list_holds().await.unwrap_or_default();
+                    if holds
+                        .iter()
+                        .any(|hold| hold.payment_hash == hash && hold.status == HoldStatus::Held)
+                    {
+                        // Someone paid after all. This is now a live swap
+                        // with our counterparty's money held: hand it to
+                        // the LnHeld path, which owes them a delivery.
+                        log::info!(
+                            target: "swapd",
+                            "swap `{}` was paid as its hold window lapsed; delivering",
+                            swap.id()
+                        );
+                        swap.transition(State::LnHeld)?;
+                        self.store.persist(&swap)?;
+                        continue;
+                    }
+                    // Release the hash on the node before forgetting the
+                    // swap. A payment arriving after we drop our record
+                    // would otherwise be held with nobody left to settle or
+                    // fail it.
+                    if let Err(err) = self.lampo.hold_fail(&hash).await {
+                        log::warn!(
+                            target: "swapd",
+                            "swap `{}`: could not release the expired hold: {err}",
+                            swap.id()
+                        );
+                    }
+                    // Only forget the swap once the node confirms the hold
+                    // is gone. Staying pending is the safe direction: a
+                    // record we keep costs a reconcile pass, while a hash we
+                    // abandon while the node still holds it can strand a
+                    // counterparty's payment.
+                    let holds = self.lampo.list_holds().await.unwrap_or_default();
+                    if holds.iter().any(|hold| hold.payment_hash == hash) {
+                        log::warn!(
+                            target: "swapd",
+                            "swap `{}`: hold still present after release, retrying next pass",
+                            swap.id()
+                        );
+                        continue;
+                    }
+                    swap.transition(State::Failed {
+                        reason: "hold invoice expired unpaid".to_owned(),
+                    })?;
+                    self.store.persist(&swap)?;
                 }
                 _ => {}
             }
@@ -889,6 +964,28 @@ enum QuotedAction {
     Expire,
 }
 
+/// What to do with an unpaid Direction B swap. The deadline is the same
+/// hold window the invoice was issued with: once the node would no longer
+/// accept a payment against the hash, the record is dead.
+///
+/// `saturating_add` matters: a `created_at` in the future (a clock that
+/// jumped backwards) must wait, never expire early. Expiring is the
+/// irreversible arm -- it releases the hash -- so it is the one that has
+/// to be wrong-proof.
+#[derive(Debug, PartialEq, Eq)]
+enum HoldInvoiceAction {
+    Wait,
+    Expire,
+}
+
+fn hold_invoice_action(created_at: u64, now: u64, hold_secs: u64) -> HoldInvoiceAction {
+    if now >= created_at.saturating_add(hold_secs) {
+        HoldInvoiceAction::Expire
+    } else {
+        HoldInvoiceAction::Wait
+    }
+}
+
 fn quoted_action(
     locked_sat: Option<u64>,
     expected_sat: u64,
@@ -908,6 +1005,28 @@ fn quoted_action(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unpaid_hold_swaps_expire_only_after_the_hold_window() {
+        // Inside the window the swap waits.
+        assert_eq!(hold_invoice_action(100, 100, 50), HoldInvoiceAction::Wait);
+        assert_eq!(hold_invoice_action(100, 149, 50), HoldInvoiceAction::Wait);
+        // It dies the moment the node's own hold would have lapsed.
+        assert_eq!(hold_invoice_action(100, 150, 50), HoldInvoiceAction::Expire);
+        assert_eq!(
+            hold_invoice_action(100, 10_000, 50),
+            HoldInvoiceAction::Expire
+        );
+        // A created_at in the future must wait, not expire early: the
+        // saturating add is what keeps a backwards clock from releasing a
+        // hash that is still live.
+        assert_eq!(
+            hold_invoice_action(u64::MAX, 10, u64::MAX),
+            HoldInvoiceAction::Wait
+        );
+        // A zero window expires immediately rather than underflowing.
+        assert_eq!(hold_invoice_action(100, 100, 0), HoldInvoiceAction::Expire);
+    }
+
     use super::*;
 
     fn test_settings(base: u64, ppm: u64) -> Settings {
