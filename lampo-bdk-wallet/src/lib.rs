@@ -403,7 +403,10 @@ impl WalletManager for BDKWalletManager {
             trust_witness_utxo: true,
             ..Default::default()
         };
-        let _finalized = wallet.sign(&mut psbt, opts)?;
+        let finalized = wallet.sign(&mut psbt, opts)?;
+        if !finalized {
+            error::bail!("wallet could not finalize every PSBT input");
+        }
         Ok(psbt.extract_tx()?)
     }
 
