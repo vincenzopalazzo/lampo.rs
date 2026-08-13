@@ -196,6 +196,52 @@ pub async fn fundchannel_honors_the_public_flag() -> error::Result<()> {
     Ok(())
 }
 
+/// A node must redial its channel counterparties on its own.
+///
+/// LDK never reconnects to anyone; without lampo's reconnect loop a node
+/// that loses a TCP connection (or restarts) sits at zero peers forever
+/// with a live channel -- it stops forwarding and cannot be paid. This
+/// was observed on a real deployment: two nodes with a ready channel,
+/// both restarted, both at `peers=0` indefinitely.
+///
+/// The loop dials from the persisted last-known address, so it works for
+/// unannounced peers too -- which is what this test exercises, since the
+/// nodes here have no announce address and the graph knows nothing.
+#[tokio_test_shutdown_timeout::test(60)]
+pub async fn channel_peer_reconnects_after_disconnect() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
+
+    let peer = lampo_common::types::NodeId::from_str(&node2.info.node_id)?;
+    let peer_manager = node1.lampod().peer_manager();
+    assert!(
+        peer_manager.is_connected_with(peer),
+        "funding a channel should leave the peers connected"
+    );
+
+    peer_manager.disconnect(peer).await?;
+    assert!(
+        !peer_manager.is_connected_with(peer),
+        "disconnect should actually drop the connection"
+    );
+
+    // No RPC, no manual connect: the reconnect loop alone must bring the
+    // channel peer back (it ticks every 10s).
+    async_wait!(
+        async {
+            if node1.lampod().peer_manager().is_connected_with(peer) {
+                Ok(())
+            } else {
+                Err(())
+            }
+        },
+        5
+    );
+    Ok(())
+}
+
 #[tokio_test_shutdown_timeout::test(5)]
 pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
     init();
