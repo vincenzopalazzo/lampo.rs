@@ -71,6 +71,10 @@ impl LampoHandler {
         Ok(())
     }
 
+    pub fn peer_manager(&self) -> Arc<LampoPeerManager> {
+        self.peer_manager.clone()
+    }
+
     /// Call any method supported by the lampod configuration. This includes
     /// a lot of handler code. This function serves as a broker pattern in some ways,
     /// but it may also function as a chain of responsibility pattern in certain cases.

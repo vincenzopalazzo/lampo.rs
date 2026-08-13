@@ -168,6 +168,57 @@ impl LampoPeerManager {
             .unwrap_or_else(|| "127.0.0.1".to_string());
         let bind_addr = format!("{bind_host}:{listen_port}");
 
+        // Reconnect to channel counterparties. LDK never redials anyone:
+        // after a restart (or any TCP drop) a node with live, ready channels
+        // sits at zero peers forever -- it stops forwarding and cannot be
+        // paid -- unless something above it re-establishes the connections.
+        // `ConnectionNeeded` does not cover this: it only fires when LDK has
+        // an onion message to deliver AND knows an address. This loop is
+        // lampo's equivalent of ldk-node's PEER_RECONNECTION_INTERVAL task:
+        // every tick, dial every disconnected channel counterparty at the
+        // address we last reached them on. Announced peers are already
+        // handled by `ConnectionNeeded`.
+        {
+            let peer_manager = peer_manager.clone();
+            let chan_manager = chan_manager.clone();
+            let shutdown = shutdown.clone();
+            let store_path = peer_store_path(&self.conf);
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(10));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    interval.tick().await;
+                    if shutdown.load(Ordering::Acquire) {
+                        break;
+                    }
+                    let known = load_peers(&store_path);
+                    for channel in chan_manager.manager().list_channels() {
+                        let peer = channel.counterparty.node_id;
+                        if peer_manager.peer_by_node_id(&peer).is_some() {
+                            continue;
+                        }
+                        let Some(host) = known
+                            .get(&peer.to_string())
+                            .and_then(|addr| addr.parse().ok())
+                        else {
+                            continue;
+                        };
+                        log::info!(
+                            target: "lampo",
+                            "reconnecting to channel peer `{peer}` at `{host}`"
+                        );
+                        // Bound each attempt so one hung TCP cannot stall
+                        // the rest of the channel list.
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs(5),
+                            dial(peer_manager.clone(), peer, host),
+                        )
+                        .await;
+                    }
+                }
+            });
+        }
+
         tokio::spawn(async move {
             log::info!(target: "lampo", "Listening for in-bound connection on {bind_addr}");
             let listener = match tokio::net::TcpListener::bind(bind_addr.clone()).await {
@@ -272,30 +323,17 @@ impl LampoPeerManager {
     }
 
     pub async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
-        let Some(close_callback) = net::connect_outbound(self.manager(), node_id, host).await
-        else {
-            log::warn!("impossible connect with the peer `{node_id}`");
-            error::bail!("impossible connect with the peer `{node_id}`");
-        };
-        let mut connection_closed_future = Box::pin(close_callback);
-        let manager = self.manager();
-        loop {
-            match futures::poll!(&mut connection_closed_future) {
-                std::task::Poll::Ready(_) => {
-                    log::info!("node `{node_id}` disconnected");
-                    return Ok(());
-                }
-                std::task::Poll::Pending => {}
-            }
-            // Avoid blocking the tokio context by sleeping a bit
-            match manager.peer_by_node_id(&node_id) {
-                Some(_) => return Ok(()),
-                None => tokio::time::sleep(Duration::from_millis(10)).await,
-            }
-        }
+        dial(self.manager(), node_id, host).await?;
+        // Remember where this peer lives. LDK does not redial anyone on
+        // restart, and a peer that never announced an address -- the common
+        // case for an unannounced node -- is unreachable through the network
+        // graph, so this file is the only durable record of how to get back
+        // to a channel counterparty. The reconnect loop reads it.
+        remember_peer(&peer_store_path(&self.conf), &node_id, &host);
+        Ok(())
     }
 
-    async fn disconnect(&self, node_id: NodeId) -> error::Result<()> {
+    pub async fn disconnect(&self, node_id: NodeId) -> error::Result<()> {
         //check the pubkey matches a valid connected peer
         if self.manager().peer_by_node_id(&node_id).is_none() {
             error::bail!("Error: Could not find peer `{node_id}`");
@@ -303,5 +341,60 @@ impl LampoPeerManager {
 
         self.manager().disconnect_by_node_id(node_id);
         Ok(())
+    }
+}
+
+/// Dial `host` and wait until the handshake completes. A close before
+/// that is a failed connect, not success. Shared by user-driven
+/// `connect` and the reconnect loop.
+async fn dial(
+    manager: Arc<InnerLampoPeerManager>,
+    node_id: NodeId,
+    host: SocketAddr,
+) -> error::Result<()> {
+    let Some(close_callback) = net::connect_outbound(manager.clone(), node_id, host).await else {
+        log::warn!(target: "lampo", "impossible connect with the peer `{node_id}`");
+        error::bail!("impossible connect with the peer `{node_id}`");
+    };
+    let mut connection_closed_future = Box::pin(close_callback);
+    loop {
+        match futures::poll!(&mut connection_closed_future) {
+            std::task::Poll::Ready(_) => {
+                log::info!(target: "lampo", "node `{node_id}` disconnected before handshake");
+                error::bail!("peer `{node_id}` closed before handshake");
+            }
+            std::task::Poll::Pending => {}
+        }
+        // Avoid blocking the tokio context by sleeping a bit
+        match manager.peer_by_node_id(&node_id) {
+            Some(_) => return Ok(()),
+            None => tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    }
+}
+
+/// Where the last-known address of every peer we dialled is kept:
+/// `<lampo dir>/peers.json`, a flat `node_id -> "host:port"` map.
+fn peer_store_path(conf: &LampoConf) -> std::path::PathBuf {
+    std::path::Path::new(&conf.path()).join("peers.json")
+}
+
+fn load_peers(path: &std::path::Path) -> std::collections::HashMap<String, String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|content| lampo_common::json::from_str(&content).ok())
+        .unwrap_or_default()
+}
+
+fn remember_peer(path: &std::path::Path, node_id: &NodeId, host: &SocketAddr) {
+    let mut peers = load_peers(path);
+    peers.insert(node_id.to_string(), host.to_string());
+    match lampo_common::json::to_string_pretty(&peers) {
+        Ok(json) => {
+            if let Err(err) = std::fs::write(path, json) {
+                log::warn!(target: "lampo", "failed to persist peer address: {err}");
+            }
+        }
+        Err(err) => log::warn!(target: "lampo", "failed to serialize peer store: {err}"),
     }
 }
