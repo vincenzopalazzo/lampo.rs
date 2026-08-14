@@ -184,6 +184,9 @@ the sim cluster uses fresh data dirs and disjoint ports.
 | 09:48 | Harness fixed (valid JSON, tagged deterministic RNG, capped retries) |
 | 10:00 | **Smoke PASS**: invoice `n3→n2` (7 s) + keysend `n2→n1` OK; chaos churn survived |
 | 10:03 | Endless soak started (NODES=3, ROUNDS=0, CHAOS_EVERY=8, SEED=1337) |
+| 10:36 | **Bug #2 found**: after chaos `restart9` (SIGKILL+relaunch), next `pay` from the restarted node **blocked forever** — LDK `no such monitor registered`, no failure event, handler loops on `recv()` (the in-code FIXME) → artifacts auto-collected at round 89 (88/88 payments before it) |
+| 10:40 | Fix `fix/pay-event-timeout`: bound the wait with `tokio::time::timeout(120s)` → **PR #562** |
+| 10:47 | Soak binary rebuilt as `sim/main` = main + both fixes (cherry-picked); regtest endless soak relaunched with `KEEP_GOING=1`; mutinet leg relaunched on the same binary (connectivity-soak mode) |
 
 Operational lessons encoded into the harness:
 - lampo wallet applies ~1 block/s in 2-min windows → poll `wallet_height` vs `blockheight` before opening channels
