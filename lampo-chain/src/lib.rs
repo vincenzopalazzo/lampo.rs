@@ -245,8 +245,14 @@ impl Backend for LampoChainSync {
         let Some(feerate) = resp.feerate else {
             return Err(error::anyhow!("No fee rate estimation available").into());
         };
-        // estimate fee rate in BTC/kvB
-        Ok((feerate * (100_000_000 as f64)) as u32)
+        // bitcoind returns BTC/kvB. The callers expect sat/vB (see
+        // `FeeRate::from_sat_per_vb_unchecked` in the channel funding path),
+        // so convert: BTC/kvB * 1e8 sat/BTC / 1000 vB/kvB = * 1e5 sat/vB.
+        // Returning sat/kvB here (a plain * 1e8) inflated fees by 1000x and
+        // made small wallets fail every channel open with "Insufficient
+        // funds" (found on the mutinynet leg: 7 sat/vB used as 7092 sat/vB).
+        let sats_per_vb = feerate * 100_000.0;
+        Ok(sats_per_vb.ceil() as u32)
     }
 
     async fn get_transaction(
