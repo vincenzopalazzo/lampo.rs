@@ -318,6 +318,12 @@ if [ -n "$local_pids" ]; then
   kill -9 $local_pids 2>/dev/null || true
   sleep 3
 fi
+# refuse to run twice against the same SIMDIR (a zombie harness would
+# fight over nodes, ports and this log)
+if pgrep -f "bash.*$(basename "$0")" | grep -vq "^$$\$" && pgrep -f "[s]imulate.sh" | grep -vq "^$$\$"; then
+  say "another simulate.sh instance is already running — refusing to start"
+  exit 3
+fi
 
 say "phase 1: starting ${NAMES[*]}"
 declare -A ID
