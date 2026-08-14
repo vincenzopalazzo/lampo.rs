@@ -205,7 +205,7 @@ churn_peer_name() { # map peer_id back to a node name via stored IDs
 chaos_zapconn() { # kill established TCP conns of one node; auto-reconnect must repair
   local n; n=$(rand_pick "${NAMES[@]:1}") idx=${n#n}
   say "CHAOS zapconn: killing TCP conns of $n (auto-reconnect regression)"
-  ss -K "dst 127.0.0.1 and ( sport = :$(P2P "$idx") or dport = :$(P2P "$idx") )" 2>/dev/null | head -2 >/dev/null
+  ss -K state established "( sport = :$(P2P "$idx") or dport = :$(P2P "$idx") )" 2>/dev/null | head -2 >/dev/null
   sleep 15
   pay_probe "n1" || fail "zapconn: payment probe failed after connection loss on $n"
 }
