@@ -157,6 +157,7 @@ fund_via_faucet() {
   [ "$code2" = 200 ]
 }
 for attempt in 1 2 3; do
+  [ "$FUNDED" = 1 ] && break
   addr=$(rpc "$(api 1)" new_addr | jqf 'd["address"]')
   [ -n "$addr" ] || { say "no address from m1 (attempt $attempt)"; sleep 10; continue; }
   fund_via_faucet "$addr" || { sleep 30; continue; }
