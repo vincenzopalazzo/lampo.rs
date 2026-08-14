@@ -80,9 +80,29 @@ collect_artifacts() {
 fail() { say "FAIL: $*"; collect_artifacts "$(echo "$*" | tr ' /' '__' | head -c 40)"; exit 2; }
 
 health() {
-  rpc "$(api 1)" getinfo | jqf 'd["blockheight"]' | grep -qE '^[0-9]+$' || return 1
-  rpc "$(api 2)" getinfo | jqf 'd["blockheight"]' | grep -qE '^[0-9]+$' || return 1
-  grep -hiE "panic|corrupt|invariant" "$RUN"/m*/mh.log 2>/dev/null | head -3 | while read -r l; do say "HEALTH: $l"; return 1; done
+  # API liveness with retries: a single transient empty/slow getinfo
+  # (e.g. colliding with a monitor persist) must not kill the soak.
+  local i
+  for i in 1 2 3; do
+    if rpc "$(api 1)" getinfo | jqf 'd["blockheight"]' | grep -qE '^[0-9]+$' && \
+       rpc "$(api 2)" getinfo | jqf 'd["blockheight"]' | grep -qE '^[0-9]+$'; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+log_scan() {
+  # NOTE: a `return` inside `while read` on a pipe runs in a subshell and
+  # never propagates — collect hits to a file first.
+  local hits=/tmp/mutinet-health.$$
+  grep -hiE "panic|corrupt|invariant" "$RUN"/m*/mh.log 2>/dev/null | head -3 >"$hits" || true
+  if [ -s "$hits" ]; then
+    while read -r l; do say "HEALTH: $l"; done <"$hits"
+    rm -f "$hits"; return 1
+  fi
+  rm -f "$hits"; return 0
 }
 
 # ============================ main ====================================
@@ -197,6 +217,7 @@ for _ in $(seq 1 24); do
   sleep 30
   ready=$(rpc "$(api 1)" channels | jqf 'sum(1 for c in d.get("channels",[]) if c.get("ready"))')
   health >/dev/null 2>&1 || true
+  log_scan >/dev/null 2>&1 || true
   [ "${ready:-0}" -ge 1 ] && break
 done
 [ "${ready:-0}" -ge 1 ] || fail "channel m1->m2 never became ready (ready=$ready)"
@@ -220,6 +241,7 @@ while :; do
     fail "round $r payment failed"
   fi
   health || fail "health scan tripped after round $r"
+  log_scan || fail "log scan tripped after round $r"
   [ "$ROUNDS" != 0 ] && [ "$r" -ge "$ROUNDS" ] && break
   sleep "$WAIT"
 done
