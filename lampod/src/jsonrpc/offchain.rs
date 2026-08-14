@@ -139,16 +139,18 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
         log::warn!("Waiting for payment event...");
         let event = tokio::time::timeout(PAY_EVENT_TIMEOUT, events.recv())
             .await
-            .map_err(|_| Error::Rpc(RpcError {
-                code: -1,
-                message: format!(
-                    "payment `{}` did not complete within {}s (no Payment event; \
+            .map_err(|_| {
+                Error::Rpc(RpcError {
+                    code: -1,
+                    message: format!(
+                        "payment `{}` did not complete within {}s (no Payment event; \
                      the payment may still be retried in the background)",
-                    payment_id,
-                    PAY_EVENT_TIMEOUT.as_secs()
-                ),
-                data: None,
-            }))?
+                        payment_id,
+                        PAY_EVENT_TIMEOUT.as_secs()
+                    ),
+                    data: None,
+                })
+            })?
             .ok_or(Error::Rpc(RpcError {
                 code: -1,
                 message: format!("No event received, communication channel dropped"),
