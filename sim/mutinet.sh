@@ -176,6 +176,21 @@ fund_via_faucet() {
   say "faucet(l402) http=$code2 body=$(head -c 120 /tmp/faucet.out)"
   [ "$code2" = 200 ]
 }
+# Resume: if m1 already has a ready channel (e.g. harness relaunch after a
+# failure while the channel persisted on disk), skip funding entirely and
+# go straight to the payment soak. Reconnect the link in case the nodes
+# were restarted.
+RESUME=0
+for _ in $(seq 1 10); do
+  ready=$(rpc "$(api 1)" channels | jqf 'sum(1 for c in d.get("channels",[]) if c.get("ready"))')
+  [ "${ready:-0}" -ge 1 ] && { RESUME=1; break; }
+  sleep 30
+done
+if [ "$RESUME" = 1 ]; then
+  say "m1 already has a ready channel — resuming payment soak"
+  rpc "$(api 1)" connect "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2)}" >/dev/null 2>&1
+fi
+if [ "$RESUME" != 1 ]; then
 for attempt in 1 2 3; do
   [ "$FUNDED" = 1 ] && break
   addr=$(rpc "$(api 1)" new_addr | jqf 'd["address"]')
@@ -221,6 +236,7 @@ for _ in $(seq 1 24); do
   [ "${ready:-0}" -ge 1 ] && break
 done
 [ "${ready:-0}" -ge 1 ] || fail "channel m1->m2 never became ready (ready=$ready)"
+fi
 say "channel ready; starting payment soak"
 
 # --- endless alternating payments ---
