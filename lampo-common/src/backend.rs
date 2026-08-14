@@ -47,6 +47,8 @@ pub trait Backend: Send + Sync {
 
     /// Fetch feerate give a number of blocks
     ///
+    /// Returns the feerate in **sats/vbyte**.
+    ///
     /// FIXME: use `FeeRate` instead of `u32`
     async fn fee_rate_estimation(&self, blocks: u64) -> error::Result<u32>;
 
