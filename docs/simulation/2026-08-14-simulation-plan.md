@@ -198,6 +198,12 @@ the sim cluster uses fresh data dirs and disjoint ports.
 | 17:44 | Smoke on patched binary (SEED=4242, ROUNDS=10, CHAOS_EVERY=2): **10/10 payments OK** — but the seeded picks were feespam/reorg×3/zapconn, no restart9 → manual targeted verification instead |
 | 18:04 | **#563 regression VERIFIED**: manual SIGKILL n2 (2 channels open) + cold relaunch → log shows `restored channel monitor for channel … (Completed)` ×2, **0** `no such monitor registered`, peers=2 channels=2; then invoice **to** n2 (n1→n2), invoice **from** n2 (n2→n1), and BOLT12 **offer** n2→n3 all `state=Success`. Root cause closed pending PR #564 merge |
 | 18:08 | Endless soak relaunched on the patched binary: NODES=3, ROUNDS=0, CHAOS_EVERY=8, SEED=5678, KEEP_GOING=1. Harness blind spot noted for v2: keysend marks Success on RPC-return only (no preimage verification) |
+| 18:24 | Mutinet leg audit: was conn-soak only (faucet L402 unpayable: RouteNotFound even from node-mut-r/swapd-mutiny), nodes on the pre-#564 binary |
+| 18:30 | Funded m1 on-chain from the sim bitcoind wallet (0.0005); harness: `CHANNEL_SAT` env + skip-faucet-when-funded (commits 83a7643, 0ffda9f) |
+| 18:46 | **Bug #5 found**: channel open failed — `fee estimated 7092 sats` vs bitcoind's ~7 sat/vB. `fee_rate_estimation` returns **sats/kvB** but the caller uses `FeeRate::from_sat_per_vb_unchecked` → fees ×1000. Small wallets fail every open (`0.00409422 BTC needed` for a 30k sat channel); big wallets overpay ~1000× → **PR #565** `fix/fee-rate-units` |
+| 19:07 | #565 shipped+rebuilt: `fee estimated 8 sats`, funding tx created, channel m1→m2 (30k sat) open → ready at 19:10; round 1 OK. #564 also verified organically: the channel **survived** the 19:15 harness-relaunch restart (`restored channel monitor` in m1's log) |
+| 19:28 | Harness fixes: health() getinfo retry + broken subshell return (0ffda9f), resume-if-ready-channel (e458f3b). Reserve lesson: 0-push 30k sat channel keeps all of m2's balance under the ~1% reserve → m2 spendable 0 forever → reverse payments RouteNotFound (expected LN behaviour; **issue #566** asks for fundchannel `push_msat`) |
+| 19:50 | Mutinet leg now a real payment soak: one-directional m1→m2, preimage-verified, endless. Both legs live on the patched binary (sim/main @ 818076c) |
 
 Operational lessons encoded into the harness:
 - lampo wallet applies ~1 block/s in 2-min windows → poll `wallet_height` vs `blockheight` before opening channels
