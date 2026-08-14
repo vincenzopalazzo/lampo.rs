@@ -39,21 +39,24 @@ ART=$SIMDIR/artifacts
 CSV=$SIMDIR/results.csv
 LOG=$SIMDIR/sim.log
 
-# Seeded RNG helpers: rand_n <max_exclusive>, rand_pick <item...>
-RSTATE=$SEED
-rnd() { # xorshift64 on $RSTATE
-  RSTATE=$(( (RSTATE ^ (RSTATE << 13)) & 0x7fffffffffffffff ))
-  RSTATE=$(( (RSTATE ^ (RSTATE >> 7))  & 0x7fffffffffffffff ))
-  RSTATE=$(( (RSTATE ^ (RSTATE << 17)) & 0x7fffffffffffffff ))
-  echo $RSTATE
+# Seeded RNG: every draw is `random.Random("<seed>:<tag>)` — stateless,
+# deterministic, reproducible. (Two earlier attempts failed: a hand-rolled
+# xorshift in bash's signed 64-bit arithmetic collapsed into a 3-value
+# cycle; a pool+index lost its index inside $() subshells.)
+rand0() { # rand0 <tag> <n>  -> deterministic value in [0,n)
+  python3 -c "import random;print(random.Random('$SEED:$1').randrange($2))"
 }
-rand_n() { echo $(( $(rnd) % $1 )); }
-rand_pick() { local i=$(( $(rand_n $#) + 1 )); echo "${!i}"; }
-# log-uniform amount in [min,max] msat
-rand_amount() {
-  local lo=$(python3 -c "import math;print(math.log($PAY_MIN_MSAT))")
-  local hi=$(python3 -c "import math;print(math.log($PAY_MAX_MSAT))")
-  python3 -c "import math,random;print(int(math.exp($lo+($hi-$lo)*($(rnd)/9223372036854775807.0))))"
+rand_pick() { # rand_pick <tag> <item...>
+  local tag=$1; shift
+  local i=$(( $(rand0 "$tag" $#) + 1 ))
+  echo "${!i}"
+}
+# log-uniform amount in [min,max] msat, per-tag deterministic
+rand_amount() { # rand_amount <tag>
+  python3 -c "
+import math, random
+r = random.Random('$SEED:amt:$1')
+print(int(math.exp(math.log($PAY_MIN_MSAT) + (math.log($PAY_MAX_MSAT)-math.log($PAY_MIN_MSAT)) * r.random())))"
 }
 
 bcli() { # bcli <method> [params-json] -> result json (uses the loaded `default` wallet)
@@ -189,8 +192,8 @@ health_scan() {
 }
 
 # --- chaos events ----------------------------------------------------
-chaos_restart9() { # unclean kill of one node, relaunch, immediate payment probe
-  local n; n=$(rand_pick "${NAMES[@]:1}")   # never n1: it funds the probe payments
+chaos_restart9() { # $1 = tag
+  local n; n=$(rand_pick "chaos-$1-n" "${NAMES[@]:1}")   # never n1: it funds the probe payments
   say "CHAOS restart9: SIGKILL $n (channels open)"
   local p; p=$(node_pid "$n")
   [ -n "$p" ] && kill -9 "$p"
@@ -200,8 +203,8 @@ chaos_restart9() { # unclean kill of one node, relaunch, immediate payment probe
   sleep 10
   pay_probe "n1" || fail "restart9: payment probe failed after $n restart"
 }
-chaos_storm() {
-  local k=$(( 10 + $(rand_n 40) ))
+chaos_storm() { # $1 = tag
+  local k=$(( 10 + $(rand0 "storm-$1" 40) ))
   say "CHAOS storm: mining $k blocks at once"
   mine "$k"
 }
@@ -220,8 +223,8 @@ chaos_feespam() {
   local feerate; feerate=$(bcli estimatesmartfee "[2,\"CONSERVATIVE\"]" | jqf 'd["result"]["feerate"]')
   say "CHAOS feespam: est feerate(2)=$feerate"
 }
-chaos_churn() { # coop-close one channel and reopen it
-  local n; n=$(rand_pick "${NAMES[@]:1}")
+chaos_churn() { # $1 = tag
+  local n; n=$(rand_pick "churn-$1-n" "${NAMES[@]:1}")
   local cid pid
   pid=$(rpc "$(API "${n#n}")" channels | jqf '(d["channels"][0]["peer_id"] if d.get("channels") else "")')
   [ -z "$pid" ] && { say "CHAOS churn: no channel found, skip"; return; }
@@ -234,8 +237,8 @@ churn_peer_name() { # map peer_id back to a node name via stored IDs
   for n in "${NAMES[@]}"; do [ "${ID[$n]:-}" = "$1" ] && echo "$n" && return; done
   echo "${NAMES[0]}"
 }
-chaos_zapconn() { # kill established TCP conns of one node; auto-reconnect must repair
-  local n; n=$(rand_pick "${NAMES[@]:1}") idx=${n#n}
+chaos_zapconn() { # $1 = tag
+  local n; n=$(rand_pick "zap-$1-n" "${NAMES[@]:1}") idx=${n#n}
   say "CHAOS zapconn: killing TCP conns of $n (auto-reconnect regression)"
   ss -K state established "( sport = :$(P2P "$idx") or dport = :$(P2P "$idx") )" 2>/dev/null | head -2 >/dev/null
   sleep 15
@@ -243,8 +246,8 @@ chaos_zapconn() { # kill established TCP conns of one node; auto-reconnect must 
 }
 CHAOS_EVENTS=(restart9 storm reorg feespam churn zapconn)
 run_chaos() {
-  local ev; ev=$(rand_pick "${CHAOS_EVENTS[@]}")
-  "chaos_$ev"
+  local ev; ev=$(rand_pick "chaos-$1" "${CHAOS_EVENTS[@]}")
+  "chaos_$ev" "$1-$ev"
   health_scan || fail "health scan tripped after chaos '$ev'"
 }
 
@@ -252,7 +255,7 @@ run_chaos() {
 # pay_probe <src>: small known-good payment to a random OTHER node (asserted)
 pay_probe() {
   local src=$1 dst amt inv offer res state pre
-  dst=$(rand_pick "${NAMES[@]}"); [ "$dst" = "$src" ] && dst=$([ "$src" = "${NAMES[0]}" ] && echo "${NAMES[1]}" || echo "${NAMES[0]}")
+  dst=$(rand_pick "probe-$1-dst" "${NAMES[@]}"); [ "$dst" = "$src" ] && dst=$([ "$src" = "${NAMES[0]}" ] && echo "${NAMES[1]}" || echo "${NAMES[0]}")
   amt=1000000
   inv=$(TMO=30 rpc "$(API "${dst#n}")" invoice "{\"amount_msat\":$amt,\"description\":\"probe\"}" | jqf 'd.get("bolt11","")')
   [ -n "$inv" ] || { say "probe: $dst issued no invoice"; return 1; }
@@ -263,10 +266,15 @@ pay_probe() {
 # do_round: one simulated payment, method chosen from $METHODS
 do_round() {
   local r=$1 src dst m amt t0 t1 res state pre dur ok=FAIL
-  src=$(rand_pick "${NAMES[@]}")
-  dst=$(rand_pick "${NAMES[@]}"); while [ "$dst" = "$src" ]; do dst=$(rand_pick "${NAMES[@]}"); done
-  m=$(rand_pick $METHODS)
-  amt=$(rand_amount)
+  src=$(rand_pick "round-$r-src" "${NAMES[@]}")
+  dst=$(rand_pick "round-$r-dst" "${NAMES[@]}")
+  local tries=0
+  while [ "$dst" = "$src" ] && [ "$tries" -lt 4 ]; do
+    tries=$((tries+1)); dst=$(rand_pick "round-$r-dst-$tries" "${NAMES[@]}")
+  done
+  [ "$dst" = "$src" ] && dst=$([ "$src" = "${NAMES[0]}" ] && echo "${NAMES[1]}" || echo "${NAMES[0]}")
+  m=$(rand_pick "round-$r-m" $METHODS)
+  amt=$(rand_amount "round-$r")
   t0=$(date +%s)
   case $m in
     invoice)
@@ -372,7 +380,7 @@ r=0
 while :; do
   r=$((r+1))
   do_round "$r"
-  if [ "$(( r % CHAOS_EVERY ))" = 0 ]; then run_chaos; fi
+  if [ "$(( r % CHAOS_EVERY ))" = 0 ]; then run_chaos "$r"; fi
   health_scan || fail "periodic health scan"
   [ "$ROUNDS" != 0 ] && [ "$r" -ge "$ROUNDS" ] && break
 done
