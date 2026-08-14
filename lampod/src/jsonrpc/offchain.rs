@@ -1,5 +1,6 @@
 //! Offchain RPC methods
 use std::str::FromStr;
+use std::time::Duration;
 
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
@@ -96,6 +97,15 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
 
 pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `pay` with request `{:?}`", request);
+    // Upper bound for how long a single `pay` call waits for the terminal
+    // PaymentEvent. Without it the handler below waits forever whenever the
+    // event is never generated — observed live after an unclean node
+    // restart, where LDK logs `Failed to update channel monitor: no such
+    // monitor registered`, the payment stalls and no failure event fires.
+    // The payment itself may still be retried in the background; the RPC
+    // simply stops blocking.
+    const PAY_EVENT_TIMEOUT: Duration = Duration::from_secs(120);
+
     let request: Pay = json::from_value(request.clone())?;
     let mut events = ctx.handler().events();
 
@@ -122,13 +132,28 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     let mut receipt: Option<(String, Option<String>)> = None;
 
     // FIXME: this will loop when the Payment event is not generated
+    // If the terminal PaymentEvent is never generated (e.g. the payment
+    // stalls after an unclean restart), stop waiting after
+    // PAY_EVENT_TIMEOUT instead of blocking the caller forever.
     loop {
         log::warn!("Waiting for payment event...");
-        let event = events.recv().await.ok_or(Error::Rpc(RpcError {
-            code: -1,
-            message: format!("No event received, communication channel dropped"),
-            data: None,
-        }))?;
+        let event = tokio::time::timeout(PAY_EVENT_TIMEOUT, events.recv())
+            .await
+            .map_err(|_| Error::Rpc(RpcError {
+                code: -1,
+                message: format!(
+                    "payment `{}` did not complete within {}s (no Payment event; \
+                     the payment may still be retried in the background)",
+                    payment_id,
+                    PAY_EVENT_TIMEOUT.as_secs()
+                ),
+                data: None,
+            }))?
+            .ok_or(Error::Rpc(RpcError {
+                code: -1,
+                message: format!("No event received, communication channel dropped"),
+                data: None,
+            }))?;
 
         match event {
             Event::Lightning(LightningEvent::PaymentReceipt {
