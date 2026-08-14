@@ -169,3 +169,25 @@ the sim cluster uses fresh data dirs and disjoint ports.
 - Mutinynet: https://mutinynet.com , faucet.mutinynet.com
 - Past lampo findings encoded in `~/multihop.sh` comments (peer manager, wallet-sync race,
   manager-file corruption, invoice-vs-offer propagation timing)
+
+## 10. Run log (first day, 2026-08-14)
+
+| Time (EDT) | Event |
+|---|---|
+| 08:06 | Binary built on server from `sim/main` (updated main + harness) |
+| 08:08 | Smoke run #1: FAIL `n1 ready_channels=0` → artifacts collected automatically |
+| 08:2x | **Bug found (real)**: `fundchannel` with malformed pubkey **panics the actix worker** (`open_channel.rs:21` `.unwrap()`) |
+| 08:31 | Fix branch `fix/fundchannel-panic` shipped via git bundle, rebuilt on server |
+| 08:36 | Regression verified: proper JSON-RPC error, node alive, 0 panics |
+| 08:37 | **PR #561 opened** against main |
+| 08:5x | Smoke #2/3: FAIL — traced via `bash -x` to harness payload typo (`"port":19902"` → 400 before handler) and a bash-arithmetic RNG that collapsed into a 3-value cycle |
+| 09:48 | Harness fixed (valid JSON, tagged deterministic RNG, capped retries) |
+| 10:00 | **Smoke PASS**: invoice `n3→n2` (7 s) + keysend `n2→n1` OK; chaos churn survived |
+| 10:03 | Endless soak started (NODES=3, ROUNDS=0, CHAOS_EVERY=8, SEED=1337) |
+
+Operational lessons encoded into the harness:
+- lampo wallet applies ~1 block/s in 2-min windows → poll `wallet_height` vs `blockheight` before opening channels
+- actix answers 400 (plain text) *before* the lampo handler runs — check for non-JSON bodies, don't grep for handler logs to decide if a call happened
+- cold data dirs sometimes need a second launch (kept from multihop.sh)
+- never `pkill -f` a pattern that appears in your own session's cmdline
+
