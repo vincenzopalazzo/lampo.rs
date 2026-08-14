@@ -107,6 +107,21 @@ say "  m1=${ID1:0:16}… :$(api 1)   m2=${ID2:0:16}… :$(api 2)"
 # PAY_NODE_URL lets you pick the node used to pay the challenge
 # (default: the old node-mut-r API).
 FUNDED=0
+# Channel size in sats. The old default (2M) is regtest-scale; on mutinynet
+# pick something the funding wallet can actually afford (e.g. 30000).
+CHANNEL_SAT=${CHANNEL_SAT:-2000000}
+# m1 may already be funded on-chain (e.g. manually from the bitcoind wallet,
+# or left over from a previous run) — skip the faucet entirely then.
+# The wallet syncs on a 2-min cadence, so retry the check for a few minutes.
+for _ in $(seq 1 8); do
+  funds_pre=$(rpc "$(api 1)" funds | jqf 'sum(int(t["amount_msat"]) for t in d.get("transactions",[]) if int(t.get("amount_msat",0))>0)')
+  [ "${funds_pre:-0}" -gt $((CHANNEL_SAT * 800)) ] && break
+  sleep 30
+done
+if [ "${funds_pre:-0}" -gt $((CHANNEL_SAT * 800)) ]; then
+  FUNDED=1; funds=$funds_pre
+  say "m1 already funded ($funds msat visible) — skipping faucet"
+fi
 fund_via_faucet() {
   local addr=$1
   if [ -n "${FAUCET_TOKEN:-}" ]; then
@@ -169,9 +184,9 @@ fi
 say "m1 funded ($funds msat visible)"
 
 # --- open one channel m1 -> m2 ---
-say "connecting + opening channel m1->m2 (2_000_000 sat)"
+say "connecting + opening channel m1->m2 (${CHANNEL_SAT} sat)"
 rpc "$(api 1)" connect "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2)}" >/dev/null
-resp=$(rpc "$(api 1)" fundchannel "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2),\"amount\":2000000,\"public\":true}")
+resp=$(rpc "$(api 1)" fundchannel "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2),\"amount\":$CHANNEL_SAT,\"public\":true}")
 case "$resp" in "{"*) : ;; *) fail "fundchannel non-JSON: $resp" ;; esac
 echo "$resp" | jqf 'd.get("error",{}).get("message","")' | grep -q . && fail "fundchannel error: $resp"
 
