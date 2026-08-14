@@ -187,6 +187,8 @@ the sim cluster uses fresh data dirs and disjoint ports.
 | 10:36 | **Bug #2 found**: after chaos `restart9` (SIGKILL+relaunch), next `pay` from the restarted node **blocked forever** — LDK `no such monitor registered`, no failure event, handler loops on `recv()` (the in-code FIXME) → artifacts auto-collected at round 89 (88/88 payments before it) |
 | 10:40 | Fix `fix/pay-event-timeout`: bound the wait with `tokio::time::timeout(120s)` → **PR #562** |
 | 10:47 | Soak binary rebuilt as `sim/main` = main + both fixes (cherry-picked); regtest endless soak relaunched with `KEEP_GOING=1`; mutinet leg relaunched on the same binary (connectivity-soak mode) |
+| 11:30 | Fresh cluster (SEED=4242) to keep hunting new bugs; #563 evidence preserved in `~/lampo-sim/issue-563-artifacts/`; `launch-sim.sh` cleanup pattern fixed (it was killing the mutinet harness too) |
+| 11:49 | **Bug #3 reconfirmed on second seed** (restart9 probe failure, n2-involved; n2-uninvolved rounds keep passing) — not seed-specific |
 | 11:22 | **Bug #3 (root cause) isolated**: same deterministic repro (SEED=1337, restart9 at round 88) — after unclean restart the node's channels are *silently broken*: payments from (89, 90), to (92) and through it stall with **no failure event**; LDK `no such monitor registered`. PR #562's timeout verified firing (4 bounded errors — graceful degradation works) → **issue #563** filed for the monitor/persistence root cause |
 
 Operational lessons encoded into the harness:
