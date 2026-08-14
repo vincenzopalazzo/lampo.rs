@@ -279,12 +279,12 @@ do_round() {
   case $m in
     invoice)
       local inv; inv=$(TMO=30 rpc "$(API "${dst#n}")" invoice "{\"amount_msat\":$amt,\"description\":\"round $r\"}" | jqf 'd.get("bolt11","")')
-      [ -n "$inv" ] || { say "round $r: $dst issued no invoice"; echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,NoInvoice,,$(( $(date +%s)-t0 ))" >> "$CSV"; return 1; }
+      [ -n "$inv" ] || { say "round $r: $dst issued no invoice"; echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,NoInvoice,,$(( $(date +%s)-t0 )), " >> "$CSV"; return 1; }
       res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$inv\"}")
       ;;
     offer)
       local off; off=$(TMO=30 rpc "$(API "${dst#n}")" offer "{\"amount_msat\":$amt,\"description\":\"round $r\"}" | jqf 'd.get("bolt12","")')
-      [ -n "$off" ] || { say "round $r: $dst issued no offer"; echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,NoOffer,,$(( $(date +%s)-t0 ))" >> "$CSV"; return 1; }
+      [ -n "$off" ] || { say "round $r: $dst issued no offer"; echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,NoOffer,,$(( $(date +%s)-t0 )), " >> "$CSV"; return 1; }
       res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$off\",\"amount\":$amt}")
       ;;
     keysend)
@@ -300,7 +300,9 @@ do_round() {
     if [ -z "$err" ]; then state=Success; pre=keysend-ok; else state="RpcError:$err"; pre=""; fi
   fi
   if [ "$state" = "Success" ] && [ -n "$pre" ]; then ok=OK; else ok=FAIL; fi
-  echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,$state,${pre:0:16},$dur" >> "$CSV"
+  local hops=" "
+  if [ "$m" != keysend ]; then hops=$(echo "$res" | jqf 'len(d.get("path",[]))'); fi
+  echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,$state,${pre:0:16},$dur,${hops:- }" >> "$CSV"
   if [ "$ok" = OK ]; then
     say "round $r OK: $src -> $dst via $m ${amt}msat (${dur}s, preimage ${pre:0:8}..)"
   else
@@ -314,7 +316,7 @@ do_round() {
 # ============================ main ====================================
 mkdir -p "$SIMDIR" "$ART"
 : > "$CSV"; : > "$LOG"
-echo "ts,round,src,dst,method,amount_msat,state,preimage16,dur_s" > "$CSV"
+echo "ts,round,src,dst,method,amount_msat,state,preimage16,dur_s,hops" > "$CSV"
 
 say "phase 0: preflight (bin=$BIN nodes=$Nnodes rounds=$ROUNDS seed=$SEED)"
 [ -x "$BIN" ] || { say "binary missing: $BIN"; exit 1; }
