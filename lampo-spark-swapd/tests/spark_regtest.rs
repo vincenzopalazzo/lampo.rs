@@ -846,3 +846,176 @@ async fn unpaid_hold_swap_expires_and_releases_its_hash() {
     assert!(released, "the expired swap must release its hold on the node");
     println!("unpaid hold swap expired and released its hash");
 }
+
+/// The failure path that costs money if it is wrong: the payer
+/// force-closes the channel while the lightning payment is HELD and the
+/// spark htlc is already locked to the user.
+///
+/// The dangerous order of events: the user can still claim the spark
+/// htlc (revealing the preimage) after the channel starts closing. If
+/// the swap node cannot turn that preimage into an on-chain claim of the
+/// held htlc, it has paid out spark and receives nothing. LDK handles
+/// exactly this -- `claim_funds` on a closing channel routes the
+/// preimage to the channel monitor, which claims the htlc output
+/// on-chain -- but nothing in this stack had ever exercised it.
+#[tokio::test]
+#[ignore = "needs the spark operator stack and bitcoind, see the module docs"]
+async fn direction_b_stays_atomic_through_a_force_close() {
+    use bitcoin::hashes::{sha256, Hash as _};
+    use lampo_common::model::{request, response};
+    use lampo_testing::prelude::*;
+    use lampo_testing::LampoTesting;
+
+    init_logger();
+
+    let node_s = std::sync::Arc::new(LampoTesting::tmp().await.expect("node S"));
+    let node_u = LampoTesting::new(node_s.btc.clone()).await.expect("node U");
+    node_u
+        .fund_channel_with(node_s.clone(), 1_000_000)
+        .await
+        .expect("channel U -> S");
+
+    let amount_sat: u64 = 50_000;
+    let swapd_spark = std::sync::Arc::new(wallet(nonce()).await);
+    let user_spark = wallet(nonce()).await;
+    fund(&swapd_spark, amount_sat).await;
+    let user_address = user_spark
+        .get_spark_address()
+        .unwrap()
+        .to_address_string()
+        .unwrap();
+
+    let preimage = nonce();
+    let payment_hash = sha256::Hash::hash(&preimage).to_string();
+    let preimage_hex = hex_of(&preimage);
+
+    let store_dir = std::env::temp_dir().join(format!("swapd-e2e-fc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store_dir);
+    let engine = std::sync::Arc::new(Engine::new(
+        LampoLeg::new(node_s.lampod()),
+        SparkLeg::new(swapd_spark.clone()),
+        SwapStore::new(store_dir).expect("store"),
+        engine_settings(90),
+    ));
+    tokio::spawn(engine.clone().run());
+
+    let invoice = engine
+        .create_hold_swap(&user_address, amount_sat, &payment_hash)
+        .await
+        .expect("hold swap");
+
+    let payer = node_u.lampod().clone();
+    let pay_task = tokio::spawn(async move {
+        payer
+            .call::<request::Pay, response::PayResult>(
+                "pay",
+                request::Pay {
+                    invoice_str: invoice,
+                    amount: None,
+                    bolt12: None,
+                },
+            )
+            .await
+    });
+
+    // Wait until the spark htlc is locked: payment held, spark delivered,
+    // preimage not yet revealed. The worst possible moment to lose the
+    // channel.
+    let mut delivered = false;
+    // Generous window: this staging step raced the shared stack once and
+    // failed at 60s while the same flow passes standalone in 33s. The
+    // interesting assertions are after the force-close; a tight staging
+    // timeout only manufactures false alarms.
+    for _ in 0..90 {
+        if engine
+            .list()
+            .iter()
+            .any(|s| s.state == State::SparkHtlcLocked)
+        {
+            delivered = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+    assert!(delivered, "the engine must deliver the spark htlc first");
+
+    // The payer force-closes with the held htlc in flight.
+    let cm = node_u.lampod().channel_manager();
+    let channel = cm
+        .manager()
+        .list_channels()
+        .pop()
+        .expect("payer has the channel");
+    cm.manager()
+        .force_close_broadcasting_latest_txn(
+            &channel.channel_id,
+            &channel.counterparty.node_id,
+            "force close mid-swap".to_string(),
+        )
+        .expect("force close");
+
+    // Keep regtest moving so commitment and claim transactions confirm.
+    let miner = tokio::spawn(async {
+        for _ in 0..40 {
+            mine(1);
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        }
+    });
+
+    // The user claims spark with the preimage anyway -- their right, and
+    // the moment of danger: the secret is now public.
+    let mut claimed = false;
+    for _ in 0..15 {
+        user_spark.sync().await.ok();
+        if user_spark
+            .claim_htlc(&spark::services::Preimage::from_hex(&preimage_hex).expect("preimage"))
+            .await
+            .is_ok()
+        {
+            claimed = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    assert!(claimed, "the user must still be able to claim the spark htlc");
+
+    // The atomic invariant: the engine must still reach Done -- meaning
+    // it learned the claim happened and handed the preimage to the node,
+    // whose monitor claims the held htlc on-chain during the close. If
+    // this stalls, the swap node paid spark and got nothing.
+    let mut done = false;
+    for _ in 0..45 {
+        if engine.list().iter().any(|s| s.state == State::Done) {
+            done = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+    assert!(
+        done,
+        "the engine must settle with the preimage even while the channel closes; states: {:?}",
+        engine.list().iter().map(|s| s.state.clone()).collect::<Vec<_>>()
+    );
+
+    // The payer's call may resolve as success or failure depending on how
+    // LDK reports an on-chain-claimed htlc; what must NOT happen is the
+    // user keeping both legs. They got spark; the lightning value is now
+    // the monitor's to sweep.
+    let _ = pay_task.abort();
+    let _ = miner.await;
+
+    let mut user_balance = 0;
+    for _ in 0..15 {
+        user_spark.sync().await.ok();
+        user_balance = user_spark.get_balance().await.unwrap_or(0);
+        if user_balance >= amount_sat {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    assert!(
+        user_balance >= amount_sat,
+        "the user keeps their spark payout, has {user_balance}"
+    );
+    println!("force-close mid-swap: engine reached Done, preimage handed to the closing channel");
+}

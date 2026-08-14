@@ -67,6 +67,10 @@ impl LampoHandler {
         }
     }
 
+    pub fn channel_manager(&self) -> Arc<LampoChannelManager> {
+        self.channel_manager.clone()
+    }
+
     pub async fn add_external_handler(
         &self,
         handler: Arc<dyn ExternalHandler>,
