@@ -135,8 +135,15 @@ fund_node() { # $1 name $2 btc
 open_channel() { # from-name to-name to-id [amount]
   local from=$1 to=$2 id=$3 amt=${4:-1000000}
   rpc "$(API "${from#n}")" connect "{\"node_id\":\"$id\",\"addr\":\"127.0.0.1\",\"port\":$(P2P "${to#n}")}" >/dev/null
-  TMO=120 rpc "$(API "${from#n}")" fundchannel \
-    "{\"node_id\":\"$id\",\"addr\":\"127.0.0.1\",\"port\":$(P2P "${to#n}")\",\"amount\":$amt,\"public\":true}" >/dev/null
+  # Capture the fundchannel response: discarding it (like the first smoke
+  # run did) turns a failing/hanging open into a silent empty channel list.
+  local resp
+  resp=$(TMO=150 rpc "$(API "${from#n}")" fundchannel \
+    "{\"node_id\":\"$id\",\"addr\":\"127.0.0.1\",\"port\":$(P2P "${to#n}")\",\"amount\":$amt,\"public\":true}")
+  if echo "$resp" | jqf 'd.get("error",{}).get("message","")' | grep -q .; then
+    say "open_channel $from->$to RPC error: $(echo "$resp" | head -c 300)"
+    return 1
+  fi
   # wait funding tx hits mempool BEFORE mining (race lesson)
   local sz=0
   for _ in $(seq 1 20); do
@@ -147,6 +154,25 @@ open_channel() { # from-name to-name to-id [amount]
 
 ready_channels() { rpc "$(API "${1#n}")" channels | jqf 'sum(1 for c in d["channels"] if c["ready"])'; }
 peers_of() { rpc "$(API "${1#n}")" getinfo | jqf 'd["peers"]'; }
+
+# wait until every node's wallet catches up with the chain tip (the wallet
+# applies ~1 block/s in 2-min windows, so big mined stretches lag badly —
+# the first smoke run failed exactly here: fundchannel hit a wallet whose
+# funding UTXOs were not spendable yet)
+wait_wallet_synced() { # [timeout_s]
+  local deadline=$(( $(date +%s) + ${1:-420} ))
+  for n in "${NAMES[@]}"; do
+    local idx=${n#n} info h w
+    while :; do
+      info=$(rpc "$(API "$idx")" getinfo)
+      h=$(echo "$info" | jqf 'd.get("blockheight",-1)'); w=$(echo "$info" | jqf 'd.get("wallet_height",-2)')
+      [ "$(( h - w ))" -le 1 ] && break
+      [ "$(date +%s)" -gt "$deadline" ] && { say "wallet of $n still behind: chain=$h wallet=$w"; return 1; }
+      sleep 10
+    done
+  done
+  say "all wallets synced to chain tip"
+}
 
 # --- health monitor: panics / errors in node logs -------------------
 health_scan() {
@@ -288,10 +314,11 @@ for n in "${NAMES[@]}"; do
   say "  $n = ${ID[$n]:0:16}… (api :$(API "${n#n}") p2p :$(P2P "${n#n}"))"
 done
 
-say "phase 2: funding ${Nnames:-${NAMES[*]}}"
+say "phase 2: funding ${NAMES[*]}"
 for n in "${NAMES[@]}"; do fund_node "$n" 0.05 || fail "funding $n"; done
 say "waiting wallet sync (production sync schedule: every 2 min)"
 sleep 140
+wait_wallet_synced 420 || fail "wallets never synced after funding"
 
 say "phase 3: opening channels (ring + chords)"
 # ring n_i -> n_{i+1} (opener holds outbound)
@@ -300,14 +327,23 @@ open_channel "n$Nnodes" "n1" "${ID[n1]}"
 # chords (only meaningful with >=4 nodes): n1->n3, n4->n6
 if [ "$Nnodes" -ge 3 ]; then open_channel "n1" "n3" "${ID[n3]}"; fi
 if [ "$Nnodes" -ge 6 ]; then open_channel "n4" "n6" "${ID[n6]}"; fi
+# channels need 6 confs to become ready; give wallets time to process them
 sleep 30
+wait_wallet_synced 300 || true
 
-say "phase 4: assertions"
-for n in "${NAMES[@]}"; do
-  p=$(peers_of "$n"); c=$(ready_channels "$n")
-  say "  $n peers=$p ready_channels=$c"
-  [ "${p:-0}" -ge 2 ] || fail "$n has <2 peers (multi-inbound regression)"
-  [ "${c:-0}" -ge 1 ] || fail "$n has no ready channel"
+say "phase 4: assertions (retry up to 180s: readiness lags confirmations)"
+a_deadline=$(( $(date +%s) + 180 ))
+while :; do
+  a_ok=1
+  for n in "${NAMES[@]}"; do
+    p=$(peers_of "$n"); c=$(ready_channels "$n")
+    say "  $n peers=$p ready_channels=$c"
+    [ "${p:-0}" -ge 2 ] || a_ok=0
+    [ "${c:-0}" -ge 1 ] || a_ok=0
+  done
+  [ "$a_ok" = 1 ] && break
+  [ "$(date +%s)" -gt "$a_deadline" ] && { fail "assertions failed after 180s (see above)"; break; }
+  sleep 15
 done
 say "phase 5: waiting 150s for node_announcement propagation (BOLT12 precondition)"
 sleep 150
