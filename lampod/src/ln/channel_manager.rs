@@ -18,7 +18,7 @@ use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
-use lampo_common::ldk::chain::BlockLocator;
+use lampo_common::ldk::chain::{BlockLocator, Watch};
 use lampo_common::ldk::ln::channelmanager::{ChainParameters, ChannelManagerReadArgs};
 use lampo_common::ldk::onion_message::messenger::DefaultMessageRouter;
 use lampo_common::ldk::routing::gossip::NetworkGraph;
@@ -320,7 +320,6 @@ impl LampoChannelManager {
 
         let _ = self.network_graph();
         let monitors = self.get_channel_monitors()?;
-        let monitors = monitors.iter().collect::<Vec<_>>();
 
         let default_message_router = DefaultMessageRouter::new(
             self.graph(),
@@ -338,12 +337,35 @@ impl LampoChannelManager {
             default_message_router,
             self.logger.clone(),
             self.conf.ldk_conf.clone(),
-            monitors,
+            monitors.iter().collect(),
         );
         let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
         let (_, channel_manager) =
             <(BlockLocator, LampoChannel)>::read(&mut channel_manager_file, read_args)
                 .map_err(|err| error::anyhow!("{err}"))?;
+
+        // Move the persisted channel monitors into the `ChainMonitor`, as
+        // required by LDK when restoring a node from disk (see the
+        // `ChannelManagerReadArgs` documentation). Without this the monitor
+        // of every channel that predates the restart is missing from the
+        // `ChainMonitor`, so the first monitor update fails with
+        // `no such monitor registered` and the restored channels are left
+        // silently broken: payments stall without a failure event and the
+        // peers keep reconnecting without making progress (issue #563).
+        for monitor in monitors {
+            let channel_id = monitor.channel_id();
+            match self.chain_monitor().watch_channel(channel_id, monitor) {
+                Ok(status) => log::info!(
+                    target: "lampod",
+                    "restored channel monitor for channel `{channel_id}` ({status:?})"
+                ),
+                Err(()) => log::error!(
+                    target: "lampod",
+                    "unable to register the persisted channel monitor for channel `{channel_id}`"
+                ),
+            }
+        }
+
         self.channeld
             .set(Arc::new(channel_manager))
             .unwrap_or_else(|_| panic!("channel manager already initialized"));
