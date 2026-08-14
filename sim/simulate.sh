@@ -305,6 +305,13 @@ echo "ts,round,src,dst,method,amount_msat,state,preimage16,dur_s" > "$CSV"
 say "phase 0: preflight (bin=$BIN nodes=$Nnodes rounds=$ROUNDS seed=$SEED)"
 [ -x "$BIN" ] || { say "binary missing: $BIN"; exit 1; }
 bcli getblockchaininfo | jqf 'd["result"]["chain"]' | grep -q regtest || { say "bitcoind at $CORE_URL not regtest"; exit 1; }
+# kill leftovers from a previous run: they still hold the API/P2P ports
+local_pids=$(pgrep -f "lampod-cli --data-dir $SIMDIR/" || true)
+if [ -n "$local_pids" ]; then
+  say "phase 0: killing leftover sim nodes: $local_pids"
+  kill -9 $local_pids 2>/dev/null || true
+  sleep 3
+fi
 
 say "phase 1: starting ${NAMES[*]}"
 declare -A ID
