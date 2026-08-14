@@ -161,6 +161,8 @@ the sim cluster uses fresh data dirs and disjoint ports.
   auto-reconnect, chain-sync) asserted every run.
 - Any bug found → PR merged → simulation rebuilt on top → regression passes.
 
+| 12:55 | **Multi-hop explicitly re-validated on the patched binary**: adapted `~/multihop.sh` to `~/lampo-mh/` (ports 8121-8123/19921-19923, fresh dirs, `~/lampo-sim` binary). PASS: invoice **S→M→R** (preimage c18b4240…) and **BOLT12 offer S→M→R** (preimage 9f392340…), path shows 2 hops with 1000msat hop fees; `M peers=2` (multi-inbound regression) and `channels ready S=1 M=2 R=1`. Note: the ring soak's payments mostly take direct channels (LDK prefers them); explicit multi-hop comes from this S↔M↔R run and from post-churn/post-#563 rerouting. |
+
 ## 9. Sources
 
 - SimLN: https://github.com/bitcoin-dev-project/sim-ln (activity model, keysend usage)
