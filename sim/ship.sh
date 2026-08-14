@@ -36,7 +36,12 @@ echo "bundle: $BUNDLE ($(du -h "$BUNDLE" | cut -f1))"
 scp -q "$BUNDLE" "$HOST:/tmp/ship.bundle"
 # Keep the harness usable on the server regardless of which branch is
 # checked out (fix branches do not contain sim/): synced out-of-repo.
-rsync -a --delete "$(git rev-parse --show-toplevel)/sim/" "$HOST:lampo-sim-harness/"
+if ssh "$HOST" 'command -v rsync >/dev/null'; then
+  rsync -a --delete "$(git rev-parse --show-toplevel)/sim/" "$HOST:lampo-sim-harness/"
+else
+  ssh "$HOST" 'rm -rf ~/lampo-sim-harness && mkdir -p ~/lampo-sim-harness'
+  scp -q "$(git rev-parse --show-toplevel)/sim/"* "$HOST:lampo-sim-harness/"
+fi
 ssh "$HOST" 'chmod +x ~/lampo-sim-harness/simulate.sh ~/lampo-sim-harness/ship.sh 2>/dev/null || true'
 ssh "$HOST" bash -s "$BRANCH" "$NOBUILD" "$REMOTE_DIR" "$BUNDLES" <<'REMOTE'
 set -euo pipefail
