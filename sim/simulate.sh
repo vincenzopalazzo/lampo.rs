@@ -139,7 +139,13 @@ open_channel() { # from-name to-name to-id [amount]
   # run did) turns a failing/hanging open into a silent empty channel list.
   local resp
   resp=$(TMO=150 rpc "$(API "${from#n}")" fundchannel \
-    "{\"node_id\":\"$id\",\"addr\":\"127.0.0.1\",\"port\":$(P2P "${to#n}")\",\"amount\":$amt,\"public\":true}")
+    "{\"node_id\":\"$id\",\"addr\":\"127.0.0.1\",\"port\":$(P2P "${to#n}"),\"amount\":$amt,\"public\":true}")
+  # A 4xx from actix returns a plain-text body ("Json deserialize error: ...")
+  # which is not valid JSON: treat that as a failure too, not just {"error":...}
+  case "$resp" in
+    "{"*) : ;;
+    *) say "open_channel $from->$to non-JSON response: $(echo "$resp" | head -c 200)"; return 1 ;;
+  esac
   if echo "$resp" | jqf 'd.get("error",{}).get("message","")' | grep -q .; then
     say "open_channel $from->$to RPC error: $(echo "$resp" | head -c 300)"
     return 1
