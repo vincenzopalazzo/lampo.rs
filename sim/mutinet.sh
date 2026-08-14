@@ -241,10 +241,21 @@ say "channel ready; starting payment soak"
 
 # --- endless alternating payments ---
 r=0
+PREV_AMT=0
 while :; do
   r=$((r+1))
   if [ $(( r % 2 )) = 1 ]; then src=1; dst=2; else src=2; dst=1; fi
-  amt=$(( 20000 + (r % 7) * 10000 ))
+  # Odd rounds m1 sends a fresh amount; even rounds m2 pays back EXACTLY
+  # what it just received. With a 0-push channel any larger even-round
+  # amount fails with SendingFailed(RouteNotFound) — the router's way of
+  # saying "no outbound balance" — which is expected LN behaviour, not a
+  # node bug, but it would kill the soak every second round.
+  if [ $(( r % 2 )) = 1 ]; then
+    amt=$(( 5000 + (r % 7) * 2500 ))
+  else
+    amt=$PREV_AMT
+  fi
+  PREV_AMT=$amt
   inv=$(rpc "$(api "$dst")" invoice "{\"amount_msat\":$amt,\"description\":\"multinet round $r\"}" | jqf 'd.get("bolt11","")')
   [ -n "$inv" ] || { say "round $r: m$dst issued no invoice"; sleep 60; continue; }
   res=$(rpc "$(api "$src")" pay "{\"invoice_str\":\"$inv\"}")
