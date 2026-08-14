@@ -100,15 +100,51 @@ ID2=$(wait_up 2) || fail "m2 never came up"
 say "  m1=${ID1:0:16}… :$(api 1)   m2=${ID2:0:16}… :$(api 2)"
 
 # --- fund m1 from the faucet (once) ---
+# The hosted faucet uses L402: GET /api/l402 -> {invoice(500msat), token};
+# pay the invoice with ANY lightning node that can route on mutinynet, poll
+# /api/l402/check until "settled", then the token unlocks POST /api/onchain.
+# Set FAUCET_TOKEN directly if you already hold a settled token.
+# PAY_NODE_URL lets you pick the node used to pay the challenge
+# (default: the old node-mut-r API).
 FUNDED=0
+fund_via_faucet() {
+  local addr=$1
+  if [ -n "${FAUCET_TOKEN:-}" ]; then
+    local code
+    code=$(curl -s -o /tmp/faucet.out -w "%{http_code}" --max-time 30 \
+      -X POST "$FAUCET/api/onchain" -H 'content-type: application/json' \
+      -H "Authorization: Bearer $FAUCET_TOKEN" \
+      -d "{\"sats\":1000000,\"address\":\"$addr\"}")
+    say "faucet(bearer) http=$code body=$(head -c 120 /tmp/faucet.out)"
+    [ "$code" = 200 ] && return 0
+    return 1
+  fi
+  local ch inv tok st
+  ch=$(curl -s --max-time 15 "$FAUCET/api/l402") || return 1
+  inv=$(echo "$ch" | jqf 'd.get("invoice","")'); tok=$(echo "$ch" | jqf 'd.get("token","")')
+  [ -n "$inv" ] && [ -n "$tok" ] || { say "faucet: no L402 challenge"; return 1; }
+  local pres
+  pres=$(curl -sS --max-time 90 -X POST "${PAY_NODE_URL:-http://127.0.0.1:7996}/pay" \
+      -H 'content-type: application/json' -d "{\"invoice_str\":\"$inv\"}" 2>/dev/null | head -c 120)
+  echo "$pres" | grep -q '"payment_preimage"' || { say "faucet: challenge unpaid ($pres)"; return 1; }
+  for _ in $(seq 1 12); do
+    sleep 5
+    st=$(curl -s --max-time 10 "$FAUCET/api/l402/check?token=$tok" | jqf 'd.get("status","")')
+    [ "$st" = "settled" ] && break
+  done
+  [ "$st" = "settled" ] || { say "faucet: L402 never settled"; return 1; }
+  local code2
+  code2=$(curl -s -o /tmp/faucet.out -w "%{http_code}" --max-time 30 \
+    -X POST "$FAUCET/api/onchain" -H 'content-type: application/json' \
+    -H "Authorization: Bearer $tok" \
+    -d "{\"sats\":1000000,\"address\":\"$addr\"}")
+  say "faucet(l402) http=$code2 body=$(head -c 120 /tmp/faucet.out)"
+  [ "$code2" = 200 ]
+}
 for attempt in 1 2 3; do
   addr=$(rpc "$(api 1)" new_addr | jqf 'd["address"]')
   [ -n "$addr" ] || { say "no address from m1 (attempt $attempt)"; sleep 10; continue; }
-  say "requesting faucet funds for $addr (attempt $attempt)"
-  code=$(curl -s -o /tmp/faucet.out -w "%{http_code}" --max-time 30 \
-     -X POST "$FAUCET/api/onchain" -H 'content-type: application/json' \
-     -d "{\"address\":\"$addr\"}" 2>/dev/null || echo 000)
-  say "faucet http=$code body=$(head -c 120 /tmp/faucet.out 2>/dev/null)"
+  fund_via_faucet "$addr" || { sleep 30; continue; }
   # wait for the funds to appear (wallet syncs every 2 min)
   for _ in $(seq 1 20); do
     sleep 30
@@ -117,7 +153,19 @@ for attempt in 1 2 3; do
   done
   [ "$FUNDED" = 1 ] && break
 done
-[ "$FUNDED" = 1 ] || fail "m1 never got faucet funds"
+if [ "$FUNDED" != 1 ]; then
+  say "no faucet funds — falling back to CONNECTIVITY SOAK (sync + peering + health only; payments need FAUCET_TOKEN or a payable mutinynet node)"
+  rpc "$(api 1)" connect "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2)}" >/dev/null 2>&1
+  while :; do
+    sleep 60
+    h1=$(rpc "$(api 1)" getinfo | jqf 'd.get("blockheight",-1)'); p1=$(rpc "$(api 1)" getinfo | jqf 'd.get("peers",-1)')
+    h2=$(rpc "$(api 2)" getinfo | jqf 'd.get("blockheight",-1)')
+    say "conn-soak: m1 h=$h1 peers=$p1 | m2 h=$h2"
+    grep -hiE "panic|corrupt|invariant" "$RUN"/m*/mh.log 2>/dev/null | head -2 | while read -r l; do say "HEALTH: $l"; done
+    [ "${h1:-0}" -lt 0 ] && fail "m1 api dead"
+    [ "${h2:-0}" -lt 0 ] && fail "m2 api dead"
+  done
+fi
 say "m1 funded ($funds msat visible)"
 
 # --- open one channel m1 -> m2 ---
