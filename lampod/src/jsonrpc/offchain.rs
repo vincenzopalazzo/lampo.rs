@@ -116,7 +116,18 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     // otherwise see this payment's result -- and now its preimage and payer
     // proof too. Only accept events carrying our own payment id.
     let payment_id = hex::encode(payment_id.0);
+    wait_for_payment_result(events, &payment_id).await
+}
 
+/// Hold the `PaymentReceipt` (preimage, payer proof) until the terminal
+/// `PaymentEvent` for `payment_id` arrives, and build the `PayResult`.
+/// The event bus broadcasts to every subscriber, so only events carrying
+/// our own payment id are accepted -- a concurrent payment must not leak
+/// its result into ours.
+async fn wait_for_payment_result(
+    mut events: lampo_common::chan::UnboundedReceiver<Event>,
+    payment_id: &str,
+) -> Result<json::Value, Error> {
     // The receipt lands on `PaymentReceipt` and the hop path on the terminal
     // `PaymentEvent`, so hold the receipt until the payment finishes.
     let mut receipt: Option<(String, Option<String>)> = None;
@@ -163,10 +174,15 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
 }
 
 pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
-    log::debug!("call for `keysend` with request `{:?}`", request);
+    log::info!("call for `keysend` with request `{:?}`", request);
     let request: KeySend = json::from_value(request.clone())?;
-    ctx.offchain_manager()
-        .keysend(request.destination, request.amount_msat)?;
-    // FIXME: return a better response
-    Ok(json::json!({}))
+    let destination = request.destination()?;
+    let mut events = ctx.handler().events();
+    let payment_id = ctx
+        .offchain_manager()
+        .keysend(destination, request.amount_msat)?;
+    // Same id semantics as `pay`: the hex payment hash identifies the
+    // payment on the event bus.
+    let payment_id = hex::encode(payment_id.0);
+    wait_for_payment_result(events, &payment_id).await
 }
