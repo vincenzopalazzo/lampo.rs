@@ -178,7 +178,17 @@ LDK-Server; lampo relays carry the traffic. Metrics from `sim-cli` CSV output
 - [x] `ldk-deploy.sh` on server: protoc + ldk-server + cli built, lk1/lk2 up
 - [x] `interop.sh` first run: found harness scope bug (`bash -c` hid lib.sh
       functions → checks now `eval` in the harness shell)
-- [ ] `interop.sh` full pass on server (rerun after harness fix)
+- [ ] `interop.sh` full pass on server — **I01 green** (lampo↔ldk peering OK);
+      **I02 blocked by interop finding F-3** (see below)
+- [ ] **F-3 (open, lampo side): channel to LDK-Server peer never flips
+      `ready:true`** — funding confirmed (short_channel_id assigned, balances
+      populated), lk1 received `channel_ready`, but lampo reports
+      `ready:false` and payments fail with `RouteNotFound` (verified manually:
+      lp1→lk1 bolt11 over c1). Suspects: announcement_signatures flow for
+      public channels; ready-derivation in the channels handler. Artifacts:
+      `interop/artifacts/20260815-164023-*`. Harness bugs fixed along the way:
+      bash -c scope (eval), lib.sh P2P() lampo-names-only (inline fundchannel),
+      ldk bolt11-receive positional amount.
 - [x] Tier-2 smoke (3 nodes / 2 rounds) — **found 2 main bugs**:
       1. `/keysend` REST route never registered (empty-body 404) →
          **PR #585** (`fix/httpd-keysend-route`, shipped+rebuilt, route and
@@ -187,7 +197,16 @@ LDK-Server; lampo relays carry the traffic. Metrics from `sim-cli` CSV output
          forever (`Failed to update channel monitor: no such monitor
          registered`) → **PR #580** (`fix/restart-monitor-registration`,
          cherry-pick of 8a68eb3)
-- [ ] smoke3 regression on fresh data dirs (same SEED=42) validates #585
+- [x] smoke3 regression on fresh data dirs (same SEED=42) validates #585
+      (keysend Success+preimage 15s) — **#585 merged into main** (1ce4261);
+      #568 keeps only the 120s-bounded-wait value (noted on the PR)
+- [x] PR #564 verified with the restart regression (SIGKILL+relaunch →
+      invoice Success+preimage 4.8s, zero monitor errors); #580 closed as
+      byte-identical duplicate
+- [x] Endless soak **running**: `sim/soak-combined` (main+#585+monitor fix),
+      NODES=6 ROUNDS=0 SEED=1337 KEEP_GOING=1 — 67+ OK rounds, chaos firing
+      (storm/reorg/feespam/churn/zapconn/restart9); round-5 keysend failure
+      artifacted for triage (`artifacts/20260815-155804-*`)
 - [ ] Endless soak on main-next once both PRs merge
 - [ ] Tier-4 sim-ln wiring
 - [ ] Remaining fixes from `sim/test-573-577` graduated to PRs
