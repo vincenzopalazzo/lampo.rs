@@ -16,6 +16,7 @@ use lampo_common::ldk::net;
 use lampo_common::ldk::net::SocketDescriptor;
 use lampo_common::ldk::onion_message::messenger::{DefaultMessageRouter, OnionMessenger};
 use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
+use lampo_common::ldk::sign::EntropySource;
 use lampo_common::types::NodeId;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph};
 
@@ -83,13 +84,21 @@ impl LampoPeerManager {
         wallet_manager: Arc<dyn WalletManager>,
         channel_manager: Arc<LampoChannelManager>,
     ) -> error::Result<()> {
-        let ephemeral_bytes = [0; 32];
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs();
 
         let keys = wallet_manager.ldk_keys().keys_manager.clone();
+        // LDK derives every per-connection BOLT-8 noise ephemeral key from
+        // these bytes, and `PeerManager::new` documents them as
+        // "cryptographically secure random bytes". A constant seed makes
+        // `midstate = SHA256(seed)` public, so every handshake ephemeral is
+        // publicly derivable from the cleartext pubkeys in Acts One/Two --
+        // which voids Noise_XK confidentiality and authentication (an active
+        // attacker can forge Act Two toward an initiator or Act Three toward a
+        // responder under any node_id). Seed from the node's CSPRNG instead.
+        let ephemeral_bytes = keys.get_secure_random_bytes();
         let graph = channel_manager.graph();
         let onion_messenger = Arc::new(OnionMessenger::new(
             keys.clone(),
