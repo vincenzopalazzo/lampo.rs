@@ -58,6 +58,16 @@ pub struct LampoConf {
     /// `setasyncinvoicepaths`. Other RPCs stay unauthenticated (localhost
     /// plus the HTTP DNS-rebinding guard).
     pub api_token: Option<String>,
+    /// Where the node keeps its state: `"fs"` (default) for LDK's filesystem
+    /// store, `"sqlite"` or `"postgres"` for a database. The database backends
+    /// need [`Self::storage_url`].
+    pub storage: Option<String>,
+    /// Connection string for the chosen backend: a file path for SQLite, a
+    /// `postgres://` URL for Postgres. Ignored by the filesystem backend.
+    pub storage_url: Option<String>,
+    /// Base URL of a VSS server to keep a shadow copy of the node state on, for
+    /// recovery. Unset means no shadow copy.
+    pub vss_url: Option<String>,
 }
 
 impl LampoConf {
@@ -116,6 +126,9 @@ impl Default for LampoConf {
             async_payments_role: None,
             async_invoice_server_paths: None,
             api_token: None,
+            storage: None,
+            storage_url: None,
+            vss_url: None,
         }
     }
 }
@@ -344,6 +357,10 @@ impl TryFrom<String> for LampoConf {
                     Some(token)
                 }
             });
+        // Parse storage fields - default to None (the filesystem store)
+        let storage = conf.get_conf("storage").unwrap_or(None);
+        let storage_url = conf.get_conf("storage-url").unwrap_or(None);
+        let vss_url = conf.get_conf("vss-url").unwrap_or(None);
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -372,6 +389,9 @@ impl TryFrom<String> for LampoConf {
             async_payments_role,
             async_invoice_server_paths,
             api_token,
+            storage,
+            storage_url,
+            vss_url,
         })
     }
 }
