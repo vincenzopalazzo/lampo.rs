@@ -227,7 +227,10 @@ say "connecting + opening channel m1->m2 (${CHANNEL_SAT} sat)"
 rpc "$(api 1)" connect "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2)}" >/dev/null
 resp=$(rpc "$(api 1)" fundchannel "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2),\"amount\":$CHANNEL_SAT,\"push_msat\":$PUSH_MSAT,\"public\":true}")
 case "$resp" in "{"*) : ;; *) fail "fundchannel non-JSON: $resp" ;; esac
-echo "$resp" | jqf 'd.get("error",{}).get("message","")' | grep -q . && fail "fundchannel error: $resp"
+# lampo-httpd returns RPC errors with a TOP-LEVEL "message" field (not
+# nested under "error") — check both shapes.
+FM=$(echo "$resp" | jqf 'd.get("error",{}).get("message","") or d.get("message","")')
+[ -n "$FM" ] && fail "fundchannel error: $resp"
 
 # channel needs 6 signet confirmations (~30s blocks) + wallet sync
 say "waiting for channel to mature (up to 12 min)"
