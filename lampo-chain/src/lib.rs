@@ -218,7 +218,14 @@ impl Backend for LampoChainSync {
             Err(err) => {
                 let msg = format!("Failed to broadcast transaction: {err}");
                 log::error!(target: "lampo-chain", "{}", msg);
-                handler.emit(Event::OnChain(OnChainEvent::FundingChannelFailed(msg)));
+                // Tag with txid so an `open_channel` waiter waiting on this
+                // funding broadcast can fail without reacting to unrelated
+                // (e.g. unilateral-close) broadcast errors.
+                handler.emit(Event::OnChain(OnChainEvent::FundingChannelFailed {
+                    temporary_channel_id: None,
+                    txid: Some(tx.compute_txid()),
+                    reason: msg,
+                }));
             }
         }
     }

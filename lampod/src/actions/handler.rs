@@ -271,20 +271,50 @@ impl Handler for LampoHandler {
                 }));
 
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
+                // Drop the outbound channel when funding cannot proceed: LDK
+                // still holds the temporary channel after `FundingGenerationReady`,
+                // and leaving it live after a fee/wallet failure means a retry
+                // races the original open while the waiter already returned.
+                let abandon_temp_channel = |this: &LampoHandler, msg: &str| {
+                    this.emit(Event::OnChain(OnChainEvent::FundingChannelFailed {
+                        temporary_channel_id: Some(temporary_channel_id.to_string()),
+                        txid: None,
+                        reason: msg.to_owned(),
+                    }));
+                    if let Err(err) = this
+                        .channel_manager
+                        .manager()
+                        .force_close_broadcasting_latest_txn(
+                            &temporary_channel_id,
+                            &counterparty_node_id,
+                            msg.to_owned(),
+                        )
+                    {
+                        log::warn!(
+                            target: "lampo",
+                            "failed to abandon channel `{temporary_channel_id}` after funding error: {err:?}"
+                        );
+                    }
+                };
                 // FIXME: estimate the fee rate with a callback
-                let fee = self
-                    .chain_manager
-                    .backend
-                    .fee_rate_estimation(6)
-                    .await
-                    .map_err(|err| {
+                let fee = match self.chain_manager.backend.fee_rate_estimation(6).await {
+                    std::result::Result::Ok(fee) => fee,
+                    Err(err) => {
                         let msg = format!("Channel Opening Error: {err}");
+                        // The `open_channel` waiter only wakes on a matching
+                        // `SendRawTransaction` or `FundingChannelFailed`; without
+                        // emitting the latter a fee-estimation failure leaves that
+                        // request task hanging forever (socket + event-bus
+                        // subscription leaked), which an unauthenticated caller
+                        // can exploit.
+                        abandon_temp_channel(self, &msg);
                         self.emit(Event::Lightning(LightningEvent::ChannelEvent {
                             state: "error".to_owned(),
                             message: msg,
                         }));
-                        err
-                    })?;
+                        return Err(err);
+                    }
+                };
                 log::info!("fee estimated {:?} sats", fee);
 
                 let best_block = self.channel_manager.manager().current_best_block().height;
@@ -303,9 +333,7 @@ impl Handler for LampoHandler {
                     Err(err) => {
                         let msg = format!("Failed to create funding transaction: {err}");
                         log::error!(target: "lampo", "{}", msg);
-                        self.emit(Event::OnChain(OnChainEvent::FundingChannelFailed(
-                            msg.clone(),
-                        )));
+                        abandon_temp_channel(self, &msg);
                         return Err(err);
                     }
                 };
@@ -317,20 +345,39 @@ impl Handler for LampoHandler {
                     "transaction hex `{}`",
                     lampo_common::bitcoin::consensus::encode::serialize_hex(&transaction)
                 );
+                // Hand the tx to LDK *before* emitting `FundingChannelEnd`,
+                // under the shared wait-state lock so a concurrent timeout
+                // cannot force-close an already-accepted funding (and so we
+                // skip handoff if the waiter already abandoned).
+                match self
+                    .channel_manager
+                    .funding_transaction_generated_if_waiting(
+                        temporary_channel_id,
+                        counterparty_node_id,
+                        transaction.clone(),
+                    ) {
+                    std::result::Result::Ok(false) => {
+                        let msg =
+                            "funding wait already abandoned; skipped funding_transaction_generated"
+                                .to_owned();
+                        log::warn!(target: "lampo", "{}", msg);
+                        abandon_temp_channel(self, &msg);
+                        return Err(error::anyhow!("{}", msg));
+                    }
+                    std::result::Result::Err(err) => {
+                        let msg = format!("funding_transaction_generated failed: {err}");
+                        log::error!(target: "lampo", "{}", msg);
+                        abandon_temp_channel(self, &msg);
+                        return Err(err);
+                    }
+                    std::result::Result::Ok(true) => {}
+                }
                 self.emit(Event::Lightning(LightningEvent::FundingChannelEnd {
                     counterparty_node_id,
                     temporary_channel_id,
                     channel_value_satoshis,
-                    funding_transaction: transaction.clone(),
+                    funding_transaction: transaction,
                 }));
-                self.channel_manager
-                    .manager()
-                    .funding_transaction_generated(
-                        temporary_channel_id,
-                        counterparty_node_id,
-                        transaction,
-                    )
-                    .map_err(|err| error::anyhow!("{:?}", err))?;
                 Ok(())
             }
             ldk::events::Event::ChannelPending {

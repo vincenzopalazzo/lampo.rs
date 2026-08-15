@@ -14,7 +14,15 @@ pub enum OnChainEvent {
     /// Emitted when funding a channel fails (e.g. insufficient funds),
     /// so that the `open_channel` wait loop can return an error
     /// instead of blocking forever.
-    FundingChannelFailed(String),
+    ///
+    /// Waiters must filter on `temporary_channel_id` and/or `txid`: the
+    /// event bus is process-wide, so an unrelated open's fee failure or a
+    /// non-funding broadcast error must not abort a different waiter.
+    FundingChannelFailed {
+        temporary_channel_id: Option<String>,
+        txid: Option<Txid>,
+        reason: String,
+    },
     ConfirmedTransaction((Transaction, u32, Header, Height)),
     DiscardedTransaction(Txid),
     UnconfirmedTransaction(Txid),
@@ -26,18 +34,25 @@ impl Debug for OnChainEvent {
             Self::ConfirmedTransaction((tx, idx, header, height)) => write!(
                 f,
                 "ConfirmedTransaction(txid: {}, idx {idx}, block: {:?}, height: {height})",
-                tx.txid(),
+                tx.compute_txid(),
                 header
             ),
             Self::NewBestBlock((header, height)) => {
                 write!(f, "NewBestBlock({}, {height})", header.block_hash())
             }
             Self::NewBlock(block) => write!(f, "NewBlock({})", block.block_hash()),
-            Self::SendRawTransaction(tx) => write!(f, "SendRawTransaction({})", tx.txid()),
-            Self::UnconfirmedTransaction(tx) => write!(f, "UnconfirmedTransaction({})", tx),
-            Self::FundingChannelFailed(reason) => {
-                write!(f, "FundingChannelFailed({})", reason)
+            Self::SendRawTransaction(tx) => {
+                write!(f, "SendRawTransaction({})", tx.compute_txid())
             }
+            Self::UnconfirmedTransaction(tx) => write!(f, "UnconfirmedTransaction({})", tx),
+            Self::FundingChannelFailed {
+                temporary_channel_id,
+                txid,
+                reason,
+            } => write!(
+                f,
+                "FundingChannelFailed(channel={temporary_channel_id:?}, txid={txid:?}, {reason})"
+            ),
             _ => write!(f, "Debug fmt not unsupported"),
         }
     }
