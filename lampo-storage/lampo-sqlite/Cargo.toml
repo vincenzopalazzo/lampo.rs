@@ -1,0 +1,13 @@
+[package]
+name = "lampo-sqlite"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lampo-common = { path = "../../lampo-common" }
+lampo-storage-common = { path = "../lampo-storage-common" }
+
+# Pinned to the version bdk_chain already pulls in: libsqlite3-sys declares
+# `links = "sqlite3"`, so two rusqlite versions in one binary fail to link.
+rusqlite = { version = "0.31", features = ["bundled"] }
+log = { version = "0.4", features = ["std"] }
