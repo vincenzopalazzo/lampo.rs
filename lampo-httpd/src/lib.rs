@@ -326,6 +326,15 @@ macro_rules! post {
             #[actix::post($name)]
             pub async fn [<rest_$name>](
                 state: web::Data<AppState>,
+                // Even though the backend takes no input, require a JSON body.
+                // The `Json` extractor rejects any request without
+                // `Content-Type: application/json`, and that content type is
+                // not CORS-safelisted -- so a cross-origin page cannot reach
+                // this endpoint with a "simple request" (it forces a preflight,
+                // which the API answers with no CORS headers). Without this,
+                // these bodyless endpoints (e.g. `/stop`) are trivially
+                // CSRF-able from any page the operator visits.
+                _body: Json<json::Value>,
             ) -> ResultJson<$res_ty> {
                 log::debug!(target: "httpd", "request with empty json body");
                 let response = [<json_$name>](&state.lampod, &json::json!({})).await;
