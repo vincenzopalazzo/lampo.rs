@@ -149,9 +149,22 @@ for n in lk1 lk2; do
   ID[$n]=$(ldk_id "$n"); say "$n id=${ID[$n]:0:16}.. (grpc $(ldk_port $n), p2p $(ldk_p2p $n))"
 done
 
-fund_node lp1 50 || ko SETUP "fund lp1"
-fund_node lp2 50 || ko SETUP "fund lp2"
-wait_wallet_synced || ko SETUP "wallet sync"
+# The shared regtest chain is also carrying the endless soak's chaos
+# (reorgs, restarts, feespam -> transient bitcoind 503s): retry funding.
+for _n in lp1 lp2; do
+  _ok=0
+  for _try in 1 2 3; do
+    if fund_node "$_n" 50; then _ok=1; break; fi
+    say "fund $_n failed (try $_try) — backing off 30s"
+    sleep 30
+  done
+  [ "$_ok" = 1 ] || ko SETUP "fund $_n"
+done
+for _try in 1 2 3; do
+  wait_wallet_synced 420 && break
+  say "wallet sync failed (try $_try)"
+  [ "$_try" = 3 ] && ko SETUP "wallet sync"
+done
 
 # I01 connect lampo -> ldk
 check I01 "lp1<->lk1 connect" '
