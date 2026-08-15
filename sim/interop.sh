@@ -72,6 +72,15 @@ try: d=json.load(sys.stdin)
 except Exception: sys.exit(1)
 chs=d.get("channels") or d.get("list_channels") or []
 print(sum(1 for c in chs if c.get("is_ready", c.get("ready", True))))' 2>/dev/null; }
+
+ldk_channel_ready_with() { # ldk_channel_ready_with <node> <peer-id> -> 0/1
+  lcli "$1" list-channels 2>/dev/null | python3 -c '
+import json,sys
+d=json.load(sys.stdin); chs=d.get("channels",d) if isinstance(d,dict) else d
+peer=sys.argv[1]
+print(1 if any(c.get("counterparty_node_id")==peer and c.get("is_channel_ready") for c in chs) else 0)' "$2" 2>/dev/null
+}
+
 ldk_bolt11() { # ldk_bolt11 <node> <amt_msat> -> invoice string (amount is POSITIONAL)
   lcli "$1" bolt11-receive "${2}msat" -d interop 2>>"$LOG" | python3 -c 'import json,sys
 try: d=json.load(sys.stdin)
@@ -116,7 +125,7 @@ lampo_keysend_ok() { # <src> <dst-id> <amt_msat>
   [ "$(echo "$res" | jqf 'd.get("state","")')" = Success ] && [ -n "$(echo "$res" | jqf 'd.get("payment_preimage") or ""')" ]
 }
 ldk_pay_bolt11() { # <node> <invoice> -> 0 iff paid
-  local out; out=$(lcli "$1" bolt11-send --invoice "$2" 2>>"$LOG")
+  local out; out=$(lcli "$1" bolt11-send "$2" 2>>"$LOG")
   echo "$out" >> "$LOG"
   echo "$out" | grep -qiE 'succe|paid|preimage|complete' && return 0
   sleep 5
@@ -124,7 +133,7 @@ ldk_pay_bolt11() { # <node> <invoice> -> 0 iff paid
   return 1
 }
 ldk_spontaneous() { # <node> <node-id> <amt_msat> -> 0 iff paid
-  local out; out=$(lcli "$1" spontaneous-send --node-id "$2" --amount "${3}msat" 2>>"$LOG")
+  local out; out=$(lcli "$1" spontaneous-send "$2" "${3}msat" 2>>"$LOG")
   echo "$out" >> "$LOG"
   echo "$out" | grep -qiE 'succe|paid|preimage|pending' && return 0
   return 1
@@ -188,20 +197,18 @@ check I02 "open c1 lp1->lk1 (lampo, public)" '
 # I03 c2: ldk opens to ldk (announced)
 check I03 "open c2 lk1->lk2 (ldk, announced)" '
   o=$(lcli lk1 connect-peer "${ID[lk2]}@127.0.0.1:$(ldk_p2p lk2)" 2>>"$LOG"); echo "$o" >> "$LOG"
-  o=$(lcli lk1 open-channel --node-id "${ID[lk2]}" --address "127.0.0.1:$(ldk_p2p lk2)" \
-        --channel-value-sats $CHANNEL_SAT --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
+  o=$(lcli lk1 open-channel "${ID[lk2]}" "127.0.0.1:$(ldk_p2p lk2)" "${CHANNEL_SAT}sat" --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
   sleep 5; mine 8; sleep 10
-  for i in $(seq 1 120); do [ "$(ldk_channels_ready lk1)" -ge 2 ] && break; sleep 5; done
-  [ "$(ldk_channels_ready lk1)" -ge 2 ]'
+  for i in $(seq 1 120); do [ "$(ldk_channel_ready_with lk1 "${ID[lk2]}")" = 1 ] && break; sleep 5; done
+  [ "$(ldk_channel_ready_with lk1 "${ID[lk2]}")" = 1 ]'
 
 # I04 c3: ldk opens to lampo (announced)
 check I04 "open c3 lk2->lp2 (ldk, announced)" '
   o=$(lcli lk2 connect-peer "${ID[lp2]}@127.0.0.1:$(P2P lp2)" 2>>"$LOG"); echo "$o" >> "$LOG"
-  o=$(lcli lk2 open-channel --node-id "${ID[lp2]}" --address "127.0.0.1:$(P2P lp2)" \
-        --channel-value-sats $CHANNEL_SAT --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
+  o=$(lcli lk2 open-channel "${ID[lp2]}" "127.0.0.1:$(P2P lp2)" "${CHANNEL_SAT}sat" --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
   sleep 5; mine 8; sleep 10
-  for i in $(seq 1 120); do [ "$(ready_channels lp2)" -ge 1 ] && break; sleep 5; done
-  [ "$(ready_channels lp2)" -ge 1 ]'
+  for i in $(seq 1 120); do { [ "$(ldk_channel_ready_with lk2 "${ID[lp2]}")" = 1 ] && [ "$(ready_channels lp2)" -ge 1 ]; } && break; sleep 5; done
+  [ "$(ldk_channel_ready_with lk2 "${ID[lp2]}")" = 1 ] && [ "$(ready_channels lp2)" -ge 1 ]'
 
 wait_wallet_synced || true
 
