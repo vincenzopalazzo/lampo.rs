@@ -1,4 +1,5 @@
 use paperclip::actix::web;
+use paperclip::actix::web::Json;
 use paperclip::actix::{self, CreatedJson};
 use paste::paste;
 
