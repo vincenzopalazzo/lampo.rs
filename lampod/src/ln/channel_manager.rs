@@ -1,14 +1,16 @@
 //! Channel Manager Implementation
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use lampo_common::backend::Backend;
 use lampo_common::bitcoin::{BlockHash, Transaction};
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
@@ -35,13 +37,30 @@ use lampo_common::types::LampoChannel;
 use lampo_common::types::LampoGraph;
 use lampo_common::types::LampoRouter;
 use lampo_common::types::LampoScorer;
-use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
+use lampo_common::types::{ChannelId, LampoArcChannelManager, LampoChainMonitor};
 
 use crate::actions::handler::LampoHandler;
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
+
+/// How long `open_channel` waits for the funding transaction to be broadcast
+/// before giving up. LDK reaps a stalled unfunded channel after roughly a
+/// minute of ping ticks; this outer bound guarantees the request always
+/// returns even if the peer stalls in a state that emits no terminal event.
+const FUNDING_WAIT_TIMEOUT_SECS: u64 = 120;
+
+/// Coordinates the `open_channel` waiter with `FundingGenerationReady` so a
+/// timeout cannot force-close a channel whose funding LDK already accepted
+/// (and vice versa: the producer must not hand off after the waiter abandoned).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FundingWaitState {
+    /// Waiter timed out; producer must not call `funding_transaction_generated`.
+    Abandoned,
+    /// Producer handed funding to LDK; waiter must not force-close.
+    Accepted,
+}
 
 pub struct LampoChannelManager {
     monitor: OnceLock<Arc<LampoChainMonitor>>,
@@ -51,6 +70,8 @@ pub struct LampoChannelManager {
     score: OnceLock<Arc<Mutex<LampoScorer>>>,
     handler: OnceLock<Arc<LampoHandler>>,
     router: OnceLock<Arc<LampoRouter>>,
+    /// Shared with the event handler; see [`FundingWaitState`].
+    funding_wait_state: Mutex<HashMap<ChannelId, FundingWaitState>>,
 
     pub(crate) onchain: Arc<LampoChainManager>,
     pub(crate) conf: LampoConf,
@@ -78,7 +99,62 @@ impl LampoChannelManager {
             graph: OnceLock::new(),
             score: OnceLock::new(),
             router: OnceLock::new(),
+            funding_wait_state: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Hand funding to LDK only if the waiter has not already abandoned.
+    /// Holds the wait-state lock across the LDK call so timeout cleanup cannot
+    /// race the handoff.
+    pub(crate) fn funding_transaction_generated_if_waiting(
+        &self,
+        temporary_channel_id: ChannelId,
+        counterparty_node_id: lampo_common::types::NodeId,
+        transaction: Transaction,
+    ) -> error::Result<bool> {
+        let mut state = self
+            .funding_wait_state
+            .lock()
+            .expect("funding wait state poisoned");
+        if matches!(
+            state.get(&temporary_channel_id),
+            Some(FundingWaitState::Abandoned)
+        ) {
+            return Ok(false);
+        }
+        self.manager()
+            .funding_transaction_generated(temporary_channel_id, counterparty_node_id, transaction)
+            .map_err(|err| error::anyhow!("{:?}", err))?;
+        state.insert(temporary_channel_id, FundingWaitState::Accepted);
+        Ok(true)
+    }
+
+    /// Returns `true` when the waiter should force-close (handoff not yet
+    /// accepted). Marks the open as abandoned so a concurrent producer skips
+    /// `funding_transaction_generated`.
+    pub(crate) fn abandon_funding_wait_if_unaccepted(
+        &self,
+        temporary_channel_id: ChannelId,
+    ) -> bool {
+        let mut state = self
+            .funding_wait_state
+            .lock()
+            .expect("funding wait state poisoned");
+        if matches!(
+            state.get(&temporary_channel_id),
+            Some(FundingWaitState::Accepted)
+        ) {
+            return false;
+        }
+        state.insert(temporary_channel_id, FundingWaitState::Abandoned);
+        true
+    }
+
+    pub(crate) fn clear_funding_wait(&self, temporary_channel_id: &ChannelId) {
+        self.funding_wait_state
+            .lock()
+            .expect("funding wait state poisoned")
+            .remove(temporary_channel_id);
     }
 
     pub fn set_handler(&self, handler: Arc<LampoHandler>) {
@@ -252,10 +328,18 @@ impl LampoChannelManager {
         // its channels existed.
         let mut config = self.conf.ldk_conf.clone();
         config.channel_handshake_config.announce_for_forwarding = open_channel.public;
+        let peer_id = open_channel.node_id()?;
         let push_msat = open_channel.push_msat.unwrap_or(0);
-        self.manager()
+        // Subscribe *before* `create_channel`: a fast peer can finish
+        // negotiation on another runtime thread and emit `FundingChannelEnd`
+        // before a post-create subscription would see it, leaving the handoff
+        // flag false and the timeout path force-closing an already-funded
+        // channel.
+        let mut events = self.handler().events();
+        let temp_channel_id = self
+            .manager()
             .create_channel(
-                open_channel.node_id()?,
+                peer_id,
                 open_channel.amount,
                 push_msat,
                 0,
@@ -264,25 +348,153 @@ impl LampoChannelManager {
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
 
-        // Wait for SendRawTransaction or FundingChannelFailed to be received
-        let mut events = self.handler().events();
-        let tx: Option<Transaction> = loop {
-            let event = events
-                .recv()
-                .await
-                .ok_or(error::anyhow!("Channel funding: no event received"))?;
+        // Wait for *this* channel's funding transaction to be broadcast, or
+        // for the open to fail. The event bus is process-wide: any
+        // `SendRawTransaction` (including unilateral-close / bump broadcasts)
+        // or any `FundingChannelFailed` would otherwise complete or abort an
+        // unrelated waiter. Close events are matched on the temporary channel
+        // id returned by `create_channel` for the same reason. Without a
+        // terminal case and an overall timeout the request task blocks on
+        // `recv().await` forever, leaking its actix task, socket and event-bus
+        // subscription; an unauthenticated flood of such requests exhausts the
+        // process fd table and takes the node down.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(FUNDING_WAIT_TIMEOUT_SECS);
+        let mut expected_funding_txid = None;
+        let mut funding_handed_to_ldk = false;
+        let mut early_broadcast: Option<Transaction> = None;
+        let tx: Option<Transaction> = 'wait: loop {
+            // Apply one event. `None` keeps waiting; `Some` ends the loop.
+            let apply = |event: Event,
+                         expected: &mut Option<lampo_common::bitcoin::Txid>,
+                         handed: &mut bool,
+                         early: &mut Option<Transaction>|
+             -> Option<error::Result<Option<Transaction>>> {
+                match event {
+                    Event::Lightning(LightningEvent::FundingChannelEnd {
+                        temporary_channel_id,
+                        funding_transaction,
+                        ..
+                    }) if temporary_channel_id == temp_channel_id => {
+                        let txid = funding_transaction.compute_txid();
+                        *expected = Some(txid);
+                        *handed = true;
+                        // Broadcast can race ahead of this event on a fast
+                        // peer; accept a buffered matching SendRawTransaction.
+                        if early.as_ref().is_some_and(|tx| tx.compute_txid() == txid) {
+                            return Some(Ok(early.take()));
+                        }
+                        None
+                    }
+                    Event::OnChain(OnChainEvent::SendRawTransaction(tx)) => {
+                        if *expected == Some(tx.compute_txid()) {
+                            Some(Ok(Some(tx)))
+                        } else if expected.is_none() {
+                            *early = Some(tx);
+                            None
+                        } else {
+                            None
+                        }
+                    }
+                    Event::OnChain(OnChainEvent::FundingChannelFailed {
+                        temporary_channel_id: Some(channel_id),
+                        reason,
+                        ..
+                    }) if channel_id == temp_channel_id.to_string() => {
+                        Some(Err(error::anyhow!("{}", reason)))
+                    }
+                    Event::OnChain(OnChainEvent::FundingChannelFailed {
+                        txid: Some(failed_txid),
+                        reason,
+                        ..
+                    }) if *expected == Some(failed_txid) => {
+                        // Handoff already succeeded; broadcast RPC errors are
+                        // ambiguous (backend may have accepted the tx) and LDK
+                        // may still rebroadcast. Do not present this as a
+                        // safely-retryable open failure.
+                        Some(Err(error::anyhow!(
+                            "channel funding broadcast reported failure after handoff ({reason}); channel left open (broadcast may still be pending)"
+                        )))
+                    }
+                    Event::Lightning(LightningEvent::CloseChannelEvent {
+                        channel_id,
+                        message,
+                        ..
+                    }) if channel_id == temp_channel_id.to_string() => Some(Err(error::anyhow!(
+                        "channel closed before funding: {message}"
+                    ))),
+                    _ => None,
+                }
+            };
 
-            match event {
-                Event::OnChain(OnChainEvent::SendRawTransaction(tx)) => {
-                    break Some(tx);
+            if tokio::time::Instant::now() >= deadline {
+                // Drain events that arrived as the deadline fired so a queued
+                // `FundingChannelEnd` cannot be missed before force-close.
+                while let Ok(event) = events.try_recv() {
+                    if let Some(done) = apply(
+                        event,
+                        &mut expected_funding_txid,
+                        &mut funding_handed_to_ldk,
+                        &mut early_broadcast,
+                    ) {
+                        self.clear_funding_wait(&temp_channel_id);
+                        break 'wait done?;
+                    }
                 }
-                Event::OnChain(OnChainEvent::FundingChannelFailed(reason)) => {
-                    return Err(error::anyhow!("{}", reason));
+                // Producer-owned wait state serializes with handoff: if LDK
+                // already accepted funding, do not force-close; if not, mark
+                // Abandoned so a concurrent producer skips handoff.
+                if funding_handed_to_ldk
+                    || !self.abandon_funding_wait_if_unaccepted(temp_channel_id)
+                {
+                    return Err(error::anyhow!(
+                        "channel funding broadcast still pending after {FUNDING_WAIT_TIMEOUT_SECS}s for peer {peer_id}; channel left open"
+                    ));
                 }
-                _ => {}
+                if let Err(err) = self.manager().force_close_broadcasting_latest_txn(
+                    &temp_channel_id,
+                    &peer_id,
+                    format!("funding wait timed out after {FUNDING_WAIT_TIMEOUT_SECS}s"),
+                ) {
+                    log::warn!(
+                        target: "lampo",
+                        "failed to abandon timed-out channel `{temp_channel_id}` with `{peer_id}`: {err:?}"
+                    );
+                    // Keep the `Abandoned` tombstone: a late
+                    // `FundingGenerationReady` must not hand funding to LDK
+                    // after we already reported timeout to the caller.
+                    return Err(error::anyhow!(
+                        "channel funding timed out after {FUNDING_WAIT_TIMEOUT_SECS}s waiting for peer {peer_id}"
+                    ));
+                }
+                self.clear_funding_wait(&temp_channel_id);
+                return Err(error::anyhow!(
+                    "channel funding timed out after {FUNDING_WAIT_TIMEOUT_SECS}s waiting for peer {peer_id}"
+                ));
+            }
+
+            match tokio::time::timeout_at(deadline, events.recv()).await {
+                Ok(Some(event)) => {
+                    if let Some(done) = apply(
+                        event,
+                        &mut expected_funding_txid,
+                        &mut funding_handed_to_ldk,
+                        &mut early_broadcast,
+                    ) {
+                        self.clear_funding_wait(&temp_channel_id);
+                        break 'wait done?;
+                    }
+                }
+                Ok(None) => {
+                    self.clear_funding_wait(&temp_channel_id);
+                    return Err(error::anyhow!("Channel funding: no event received"));
+                }
+                Err(_) => {
+                    // Deadline elapsed while waiting; next iteration drains.
+                }
             }
         };
 
+        self.clear_funding_wait(&temp_channel_id);
         let txid = tx.as_ref().map(|tx| tx.txid());
 
         Ok(response::OpenChannel {
