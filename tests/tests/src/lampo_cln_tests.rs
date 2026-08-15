@@ -864,7 +864,7 @@ fn be_able_to_kesend_payments() {
     let result: error::Result<json::Value> = lampo.call(
         "keysend",
         request::KeySend {
-            destination: PublicKey::from_str(info_cln.id.as_str()).unwrap(),
+            destination: info_cln.id.clone(),
             amount_msat: 100_00_000,
         },
     );

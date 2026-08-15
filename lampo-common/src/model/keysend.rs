@@ -1,13 +1,24 @@
 //! keysend model
 
 pub mod request {
-    use bitcoin::secp256k1::PublicKey;
+    use std::str::FromStr;
+
+    use paperclip::actix::Apiv2Schema;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Serialize, Deserialize)]
+    use crate::bitcoin::secp256k1::PublicKey;
+    use crate::error;
+    #[derive(Serialize, Deserialize, Apiv2Schema)]
     pub struct KeySend {
-        pub destination: PublicKey,
+        pub destination: String,
         pub amount_msat: u64,
+    }
+
+    impl KeySend {
+        pub fn destination(&self) -> error::Result<PublicKey> {
+            let destination = PublicKey::from_str(&self.destination)?;
+            Ok(destination)
+        }
     }
 }
 
