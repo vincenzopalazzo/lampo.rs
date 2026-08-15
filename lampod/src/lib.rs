@@ -16,6 +16,7 @@ pub mod chain;
 pub mod command;
 pub mod jsonrpc;
 pub mod ln;
+pub mod payments;
 pub mod persistence;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +99,7 @@ pub struct LampoDaemon {
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
+    payments: crate::payments::PaymentHistory,
     shutdown: Arc<AtomicBool>,
     chain_sync: Arc<ChainSyncCoordinator>,
 }
@@ -118,6 +120,7 @@ impl LampoDaemon {
             onchain_manager: None,
             channel_manager: None,
             inventory_manager: None,
+            payments: crate::payments::PaymentHistory::new(),
             wallet_manager,
             offchain_manager: None,
             handler: None,
@@ -150,6 +153,10 @@ impl LampoDaemon {
 
     pub fn persister(&self) -> Arc<LampoPersistence> {
         self.persister.clone()
+    }
+
+    pub fn payments(&self) -> &crate::payments::PaymentHistory {
+        &self.payments
     }
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
@@ -296,6 +303,9 @@ impl LampoDaemon {
         let _ = self.peer_manager().run_with_shutdown(shutdown.clone());
         log::info!(target: "lampo", "Starting channel manager");
         let _ = self.channel_manager().listen();
+
+        // Record every terminal/received payment for the `listpayments` RPC.
+        tokio::spawn(crate::payments::record_payments(self.clone()));
 
         tokio::spawn(async move {
             process_events_async(

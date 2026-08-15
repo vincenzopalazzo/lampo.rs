@@ -405,6 +405,12 @@ impl Handler for LampoHandler {
                 };
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristent these information
+                self.emit(Event::Lightning(LightningEvent::PaymentReceived {
+                    payment_hash: lampo_common::hex::encode(payment_hash.0),
+                    amount_msat,
+                    payment_preimage: payment_preimage
+                        .map(|preimage| lampo_common::hex::encode(preimage.0)),
+                }));
                 Ok(())
             }
             ldk::events::Event::PaymentSent {

@@ -57,6 +57,18 @@ pub enum LightningEvent {
         // to help the user understand what went wrong.
         reason: Option<String>,
     },
+    /// A payment was received and claimed (one of our invoices or a
+    /// keysend to us got paid). Emitted by the LDK `PaymentClaimed`
+    /// handler so subscribers (e.g. the payment history behind
+    /// `listpayments`) can record inbound payments too.
+    PaymentReceived {
+        /// Hex encoded payment hash.
+        payment_hash: String,
+        /// Amount received, in msat.
+        amount_msat: u64,
+        /// Hex encoded preimage, when the purpose carried one.
+        payment_preimage: Option<String>,
+    },
     ChannelEvent {
         state: String,
         message: String,

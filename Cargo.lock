@@ -1847,6 +1847,7 @@ dependencies = [
  "lampo-common",
  "log",
  "once_cell",
+ "serde",
  "time",
  "tokio",
 ]
