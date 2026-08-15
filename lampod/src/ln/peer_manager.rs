@@ -202,6 +202,22 @@ impl LampoPeerManager {
             .unwrap_or_else(|| "127.0.0.1".to_string());
         let bind_addr = format!("{bind_host}:{listen_port}");
 
+        // Bind the p2p listener eagerly, *before* detaching the accept loop.
+        // The bind used to live inside the spawned task, so a failure (most
+        // commonly the port being already taken) died in a dropped
+        // `JoinHandle` -- unlogged and unobserved -- and the node came up
+        // "healthy" (REST answering, chain syncing, getinfo echoing the
+        // configured address, the log even claiming it was listening) with no
+        // inbound peer plane at all: no inbound channels, no node-announcement
+        // refresh, and no way for monitoring to notice. A Lightning node must
+        // not run headless, so surface the error to the caller and refuse to
+        // start instead.
+        let listener = std::net::TcpListener::bind(&bind_addr)
+            .map_err(|e| error::anyhow!("failed to bind LN p2p listener on `{bind_addr}`: {e}"))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| error::anyhow!("failed to set the LN p2p listener non-blocking: {e}"))?;
+
         // Reconnect to channel counterparties. LDK never redials anyone:
         // after a restart (or any TCP drop) a node with live, ready channels
         // sits at zero peers forever -- it stops forwarding and cannot be
@@ -262,15 +278,14 @@ impl LampoPeerManager {
             });
         }
 
+        // Adopt the std listener into tokio *before* detaching the accept
+        // loop. `from_std` only fails if the socket is still blocking; that
+        // is a startup error and must surface from this function, not panic
+        // inside a dropped JoinHandle and leave the node running headless.
+        let listener = tokio::net::TcpListener::from_std(listener)
+            .map_err(|e| error::anyhow!("failed to adopt LN p2p listener into tokio: {e}"))?;
+        log::info!(target: "lampo", "Listening for in-bound connection on {bind_addr}");
         tokio::spawn(async move {
-            log::info!(target: "lampo", "Listening for in-bound connection on {bind_addr}");
-            let listener = match tokio::net::TcpListener::bind(bind_addr.clone()).await {
-                Ok(listener) => listener,
-                Err(e) => {
-                    return Err::<(), _>(error::anyhow!("Error binding to address: {}", e));
-                }
-            };
-
             // Node announcement runs in its own task, not inside each
             // inbound connection's task -- there is one announcement to
             // refresh, not one per peer, and the old per-connection
@@ -353,7 +368,7 @@ impl LampoPeerManager {
                     .await;
                 });
             }
-            Ok(())
+            Ok::<(), error::Error>(())
         });
         Ok(())
     }

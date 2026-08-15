@@ -293,7 +293,21 @@ impl LampoDaemon {
         let _ = self.onchain_manager().listen();
         log::info!(target: "lampo", "Starting peer manager");
         let shutdown = self.shutdown.clone();
-        let _ = self.peer_manager().run_with_shutdown(shutdown.clone());
+        // A failed p2p listener bind must stop the node, not leave it running
+        // without an inbound peer plane. Surface the error to the caller
+        // (`listen().await??` in the binary, or the returned `JoinHandle` for
+        // embedders) and flip the shutdown flag so the rest of the daemon
+        // winds down instead of serving headless.
+        if let Err(err) = self.peer_manager().run_with_shutdown(shutdown.clone()) {
+            log::error!(target: "lampod", "peer manager failed to start: {err}");
+            self.shutdown.store(true, Ordering::Release);
+            return tokio::spawn(async move {
+                // Bind failures are the common case, but `run_with_shutdown`
+                // also fails on nonblocking setup / internal state. Do not
+                // collapse every error into `AddrInUse`.
+                Err(io::Error::new(io::ErrorKind::Other, err.to_string()))
+            });
+        }
         log::info!(target: "lampo", "Starting channel manager");
         let _ = self.channel_manager().listen();
 
