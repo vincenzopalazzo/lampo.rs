@@ -1822,6 +1822,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lampo-storage-common"
+version = "0.1.0"
+dependencies = [
+ "lampo-common",
+]
+
+[[package]]
 name = "lampo-testing"
 version = "0.1.0"
 dependencies = [
