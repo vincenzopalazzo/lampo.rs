@@ -190,10 +190,77 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
 }
 
 pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
-    log::debug!("call for `keysend` with request `{:?}`", request);
+    log::info!("call for `keysend` with request `{:?}`", request);
+    // Same bound as `pay`: without it the handler would block forever
+    // whenever the terminal PaymentEvent is never generated.
+    const KEYSEND_EVENT_TIMEOUT: Duration = Duration::from_secs(120);
+
     let request: KeySend = json::from_value(request.clone())?;
-    ctx.offchain_manager()
+    let mut events = ctx.handler().events();
+    let payment_hash = ctx
+        .offchain_manager()
         .keysend(request.destination, request.amount_msat)?;
-    // FIXME: return a better response
-    Ok(json::json!({}))
+
+    // `OffchainManager::keysend` registers the payment with
+    // `PaymentId(payment_hash.0)`, so the terminal PaymentEvent carries the
+    // hash as its payment id. Returning it also gives callers a handle to
+    // correlate the payment (see issue #567).
+    let payment_id = hex::encode(payment_hash.0);
+
+    // Mirror `json_pay`: hold the PaymentReceipt (preimage) until the
+    // terminal PaymentEvent arrives, then answer with the full result
+    // instead of an empty object — keysend outcomes were unauditable.
+    let mut receipt: Option<(String, Option<String>)> = None;
+
+    loop {
+        let event = tokio::time::timeout(KEYSEND_EVENT_TIMEOUT, events.recv())
+            .await
+            .map_err(|_| {
+                Error::Rpc(RpcError {
+                    code: -1,
+                    message: format!(
+                        "keysend `{}` did not complete within {}s (no Payment event; \
+                         the payment may still be retried in the background)",
+                        payment_id,
+                        KEYSEND_EVENT_TIMEOUT.as_secs()
+                    ),
+                    data: None,
+                })
+            })?
+            .ok_or(Error::Rpc(RpcError {
+                code: -1,
+                message: "No event received, communication channel dropped".to_string(),
+                data: None,
+            }))?;
+
+        match event {
+            Event::Lightning(LightningEvent::PaymentReceipt {
+                payment_id: id,
+                payment_preimage,
+                payer_proof,
+            }) if id == payment_id => {
+                receipt = Some((payment_preimage, payer_proof));
+            }
+            Event::Lightning(LightningEvent::PaymentEvent {
+                payment_id: Some(id),
+                payment_hash,
+                path,
+                state,
+                reason: _,
+            }) if id == payment_id => {
+                let (payment_preimage, payer_proof) = match receipt {
+                    Some((preimage, proof)) => (Some(preimage), proof),
+                    None => (None, None),
+                };
+                return Ok(json::to_value(PayResult {
+                    state,
+                    path,
+                    payment_hash,
+                    payment_preimage,
+                    payer_proof,
+                })?);
+            }
+            _ => {}
+        }
+    }
 }
