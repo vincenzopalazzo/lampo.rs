@@ -287,7 +287,25 @@ impl Handler for LampoHandler {
                     })?;
                 log::info!("fee estimated {:?} sats", fee);
 
-                let best_block = self.channel_manager.manager().current_best_block().height;
+                // The funding tx nLockTime must never run ahead of what the
+                // chain will consider final: LDK's `current_best_block` can
+                // be ahead of the backend tip while views catch up, and a
+                // locktime above the tip makes bitcoind reject the funding
+                // broadcast with `-26 non-final` — the channel then sits
+                // zombie-pending until some later block event happens to
+                // trigger a monitor rebroadcast (issue #572). Use the
+                // minimum of both views, minus one block of headroom: the
+                // anti-fee-sniping property is preserved either way.
+                let ldk_height = self.channel_manager.manager().current_best_block().height;
+                let chain_height = self
+                    .chain_manager
+                    .backend
+                    .get_best_block()
+                    .await
+                    .ok()
+                    .and_then(|(_, height)| height)
+                    .unwrap_or(ldk_height);
+                let best_block = ldk_height.min(chain_height).saturating_sub(1);
                 let transaction = match self
                     .wallet_manager
                     .create_transaction(
