@@ -108,11 +108,18 @@ impl EventHandler for LampoHandler {
 impl Handler for LampoHandler {
     // FIXME: this is not needed anymore? we can assume that all command are external?
     async fn react(&self, event: crate::command::Command) -> error::Result<json::Value> {
-        let handler = self.external_handlers.read().await;
+        // Never hold the read guard across the `handle().await`: a parked
+        // external handler (e.g. a replayed command after an unclean
+        // shutdown whose reply path never completes) would keep the guard
+        // forever and starve `add_external_handler`'s write() — observed
+        // live as a full startup hang (issue #576: log stops before
+        // `Starting Server`, API never binds, pid lock held). Cloning the
+        // Arc list keeps the critical section await-free.
+        let external_handlers = self.external_handlers.read().await.clone();
         match event {
             Command::ExternalCommand(req) => {
-                log::debug!(target: "lampo", "external handler size {}", handler.len());
-                for handler in handler.iter() {
+                log::debug!(target: "lampo", "external handler size {}", external_handlers.len());
+                for handler in external_handlers.iter() {
                     if let Some(resp) = handler.handle(&req).await? {
                         return Ok(resp);
                     }
