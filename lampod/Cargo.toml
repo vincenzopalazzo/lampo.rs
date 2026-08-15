@@ -8,6 +8,9 @@ edition = "2021"
 [dependencies]
 tokio = { version = "^1.50.0", features = ["rt-multi-thread", "parking_lot", "macros", "time"] }
 lampo-common = { path = "../lampo-common" }
+lampo-sqlite = { path = "../lampo-storage/lampo-sqlite" }
+lampo-postgres = { path = "../lampo-storage/lampo-postgres" }
+lampo-vss = { path = "../lampo-storage/lampo-vss" }
 log = "0.4.17"
 time = "0.3.43"
 futures = "0.3.28"

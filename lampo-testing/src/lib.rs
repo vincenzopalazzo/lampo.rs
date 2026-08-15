@@ -156,6 +156,11 @@ impl LampoTesting {
         lampo_conf.core_user = values.as_ref().and_then(|v| Some(v.user.to_owned()));
         lampo_conf.core_pass = values.and_then(|v| Some(v.password));
         lampo_conf.dev_sync = Some(true);
+        // Run the whole suite against a database backend with
+        // `LAMPO_TEST_STORAGE=sqlite`, which is how the storage backends get
+        // exercised by real channels rather than only by their own unit tests.
+        lampo_conf.storage = std::env::var("LAMPO_TEST_STORAGE").ok();
+        lampo_conf.storage_url = std::env::var("LAMPO_TEST_STORAGE_URL").ok();
 
         lampo_conf
             .ldk_conf
@@ -169,7 +174,7 @@ impl LampoTesting {
 
         // `LampoDaemon::new` shares the coordinator with the wallet, so the
         // wallet gates its Emitter on listener sync (production startup flow).
-        let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+        let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone())?;
         wallet.clone().listen().await?;
 
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);

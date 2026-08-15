@@ -158,8 +158,15 @@ pub struct LampoDaemon {
 }
 
 impl LampoDaemon {
-    pub fn new(config: Arc<LampoConf>, wallet_manager: Arc<dyn WalletManager>) -> Self {
-        let root_path = config.path();
+    /// Build a daemon around `config`.
+    ///
+    /// Fallible because the persistence backend is opened here, and a database
+    /// backend can fail to connect or migrate.
+    pub fn new(
+        config: Arc<LampoConf>,
+        wallet_manager: Arc<dyn WalletManager>,
+    ) -> error::Result<Self> {
+        let persister = persistence_for(&config)?;
         let chain_sync = Arc::new(ChainSyncCoordinator::new());
         // Wire the wallet to the coordinator here so every daemon (CLI, tests,
         // embedders) gets consistent sync-progress reporting with no per-caller
@@ -169,10 +176,10 @@ impl LampoDaemon {
             .ldk_keys()
             .keys_manager
             .set_wallet(wallet_manager.clone());
-        LampoDaemon {
+        Ok(LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
-            persister: persistence_for(&root_path),
+            persister,
             peer_manager: None,
             onchain_manager: None,
             channel_manager: None,
@@ -182,7 +189,7 @@ impl LampoDaemon {
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             chain_sync,
-        }
+        })
     }
 
     /// Backend-agnostic chain-sync coordinator shared across the daemon's

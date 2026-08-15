@@ -40,6 +40,16 @@ pub struct LampoConf {
     /// instead of scanning from genesis. Defaults to `true` and only applies
     /// to a fresh wallet (no UTXOs to miss); set `false` to force a full scan.
     pub fast_sync: Option<bool>,
+    /// Where the node keeps its state: `"fs"` (default) for LDK's filesystem
+    /// store, `"sqlite"` or `"postgres"` for a database. The database backends
+    /// need [`Self::storage_url`].
+    pub storage: Option<String>,
+    /// Connection string for the chosen backend: a file path for SQLite, a
+    /// `postgres://` URL for Postgres. Ignored by the filesystem backend.
+    pub storage_url: Option<String>,
+    /// Base URL of a VSS server to keep a shadow copy of the node state on, for
+    /// recovery. Unset means no shadow copy.
+    pub vss_url: Option<String>,
 }
 
 impl Default for LampoConf {
@@ -75,6 +85,9 @@ impl Default for LampoConf {
             wallet_sync_parallel: None,
             sync_mode: None,
             fast_sync: None,
+            storage: None,
+            storage_url: None,
+            vss_url: None,
         }
     }
 }
@@ -276,6 +289,10 @@ impl TryFrom<String> for LampoConf {
             .get_conf("fast-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+        // Parse storage fields - default to None (the filesystem store)
+        let storage = conf.get_conf("storage").unwrap_or(None);
+        let storage_url = conf.get_conf("storage-url").unwrap_or(None);
+        let vss_url = conf.get_conf("vss-url").unwrap_or(None);
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -299,6 +316,9 @@ impl TryFrom<String> for LampoConf {
             wallet_sync_parallel,
             sync_mode,
             fast_sync,
+            storage,
+            storage_url,
+            vss_url,
         })
     }
 }
