@@ -1,0 +1,12 @@
+[package]
+name = "lampo-postgres"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lampo-common = { path = "../../lampo-common" }
+lampo-storage-common = { path = "../lampo-storage-common" }
+
+tokio-postgres = "0.7"
+tokio = { version = "1", features = ["rt", "net", "time"] }
+log = { version = "0.4", features = ["std"] }

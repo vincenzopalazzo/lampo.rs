@@ -10,7 +10,8 @@ members = [
         "lampo-chain",
         "lampo-bdk-wallet",
         "lampo-storage/lampo-storage-common",
-        "lampo-storage/lampo-sqlite"
+        "lampo-storage/lampo-sqlite",
+        "lampo-storage/lampo-postgres"
 ]
 
 default-members = [
@@ -22,7 +23,8 @@ default-members = [
         "lampo-chain",
         "lampo-bdk-wallet",
         "lampo-storage/lampo-storage-common",
-        "lampo-storage/lampo-sqlite"
+        "lampo-storage/lampo-sqlite",
+        "lampo-storage/lampo-postgres"
 ]
 resolver = "2"
 
