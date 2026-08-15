@@ -174,12 +174,23 @@ LDK-Server; lampo relays carry the traffic. Metrics from `sim-cli` CSV output
 - [x] `sim/ldk-deploy.sh` (clone/build/protoc/config/run ldk-server nodes)
 - [x] `sim/interop.sh` (tier-3 mixed cluster + assertions I01–I14)
 - [x] `sim/simln/` templates (tier 4)
-- [ ] Ship `sim/main-next` → `~/lampo-main-sim`, release build `BUILD_OK`
-- [ ] `ldk-deploy.sh` on server: protoc + ldk-server + cli built, lk1/lk2 up
-- [ ] `interop.sh` full pass on server
-- [ ] Tier-2 smoke (3 nodes / 2 rounds) then endless soak on main-next
+- [x] Ship `sim/main-next` → `~/lampo-main-sim`, release build `BUILD_OK`
+- [x] `ldk-deploy.sh` on server: protoc + ldk-server + cli built, lk1/lk2 up
+- [x] `interop.sh` first run: found harness scope bug (`bash -c` hid lib.sh
+      functions → checks now `eval` in the harness shell)
+- [ ] `interop.sh` full pass on server (rerun after harness fix)
+- [x] Tier-2 smoke (3 nodes / 2 rounds) — **found 2 main bugs**:
+      1. `/keysend` REST route never registered (empty-body 404) →
+         **PR #585** (`fix/httpd-keysend-route`, shipped+rebuilt, route and
+         handler verified live)
+      2. channel monitors not re-registered on restart → payments hang
+         forever (`Failed to update channel monitor: no such monitor
+         registered`) → **PR #580** (`fix/restart-monitor-registration`,
+         cherry-pick of 8a68eb3)
+- [ ] smoke3 regression on fresh data dirs (same SEED=42) validates #585
+- [ ] Endless soak on main-next once both PRs merge
 - [ ] Tier-4 sim-ln wiring
-- [ ] PRs opened for the 9 ahead fixes
+- [ ] Remaining fixes from `sim/test-573-577` graduated to PRs
 
 ## 8. Risks / notes
 
