@@ -14,6 +14,8 @@ pub mod request {
         pub addr: Option<String>,
         pub port: Option<u64>,
         pub amount: u64,
+        #[serde(default)]
+        pub push_msat: Option<u64>,
         pub public: bool,
     }
 

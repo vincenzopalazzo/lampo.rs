@@ -252,11 +252,12 @@ impl LampoChannelManager {
         // its channels existed.
         let mut config = self.conf.ldk_conf.clone();
         config.channel_handshake_config.announce_for_forwarding = open_channel.public;
+        let push_msat = open_channel.push_msat.unwrap_or(0);
         self.manager()
             .create_channel(
                 open_channel.node_id()?,
                 open_channel.amount,
-                0,
+                push_msat,
                 0,
                 None,
                 Some(config),
@@ -288,7 +289,7 @@ impl LampoChannelManager {
             node_id: open_channel.node_id,
             amount: open_channel.amount,
             public: open_channel.public,
-            push_msat: 0,
+            push_msat: open_channel.push_msat.unwrap_or(0),
             to_self_delay: 2016,
             tx,
             txid,
