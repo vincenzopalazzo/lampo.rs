@@ -264,3 +264,13 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         }
     }
 }
+
+/// List the in-memory payment history (issue #567): every terminal sent
+/// payment and every claimed inbound payment since node start.
+pub async fn json_listpayments(
+    ctx: &LampoDaemon,
+    _request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `listpayments`");
+    Ok(json::to_value(ctx.payments().list())?)
+}
