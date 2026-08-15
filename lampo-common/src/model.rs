@@ -1,6 +1,7 @@
 mod close_channel;
 mod connect;
 mod getinfo;
+mod hold;
 mod invoice;
 mod keysend;
 mod network;
@@ -15,6 +16,7 @@ pub mod request {
     pub use crate::model::close_channel::request::*;
     pub use crate::model::connect::Connect;
     pub use crate::model::getinfo::*;
+    pub use crate::model::hold::request::*;
     pub use crate::model::invoice::request::*;
     pub use crate::model::keysend::request::*;
     pub use crate::model::network::request::*;
@@ -28,6 +30,7 @@ pub mod response {
     pub use crate::model::close_channel::response::*;
     pub use crate::model::connect::Connect;
     pub use crate::model::getinfo::*;
+    pub use crate::model::hold::response::*;
     pub use crate::model::invoice::response::*;
     pub use crate::model::keysend::response::*;
     pub use crate::model::network::response::*;

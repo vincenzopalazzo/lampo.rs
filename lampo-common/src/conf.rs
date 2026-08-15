@@ -6,6 +6,18 @@ use clightningrpc_conf::{CLNConf, SyncCLNConf};
 pub use bitcoin::Network;
 pub use lightning::util::config::UserConfig;
 
+/// The LDK configuration used by lampo.
+///
+/// BOLT12 invoices are always handled manually: the daemon decides in
+/// the `InvoiceReceived` handler whether an invoice is paid right away
+/// (`pay`), stored for later (`fetchinvoice`) or abandoned when nobody
+/// asked for it (e.g. an invoice replayed after a restart).
+fn default_ldk_conf() -> UserConfig {
+    let mut conf = UserConfig::default();
+    conf.manually_handle_bolt12_invoices = true;
+    conf
+}
+
 #[derive(Clone, Debug)]
 pub struct LampoConf {
     pub inner: Option<CLNConf>,
@@ -54,7 +66,7 @@ impl Default for LampoConf {
             inner: None,
             // default network is testnet
             network: Network::Testnet,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: default_ldk_conf(),
             // default port is 19735 for testnet
             port: 19735,
             root_path: lampo_home,
@@ -280,7 +292,7 @@ impl TryFrom<String> for LampoConf {
             inner: Some(conf),
             root_path,
             network,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: default_ldk_conf(),
             port: u64::from_str(&port)?,
             node,
             core_url,

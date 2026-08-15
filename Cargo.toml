@@ -1,4 +1,10 @@
 [workspace]
+# lampo-spark-swapd is intentionally excluded: it pulls the Spark
+# stack, roughly 160 crates lampo itself does not need, and must never
+# be built by `cargo test --all` or audited by cargo-deny as part of
+# the node. Build it explicitly with its own manifest path.
+exclude = ["lampo-spark-swapd"]
+
 members = [
         "lampo-common",
         "lampod",

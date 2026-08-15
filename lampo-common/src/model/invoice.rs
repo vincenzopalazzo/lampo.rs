@@ -29,6 +29,33 @@ pub mod request {
         pub bolt12: Option<Bolt12Pay>,
     }
 
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct FetchInvoice {
+        /// The BOLT12 offer to fetch an invoice from.
+        pub offer_str: String,
+        pub amount_msat: Option<u64>,
+        pub payer_note: Option<String>,
+        /// Cap on the payment's total CLTV budget, in blocks: the
+        /// payment must resolve (settle or fail) within it. A swap
+        /// service sets this so the payment cannot still be in flight
+        /// after the collateral it holds on the other leg has expired.
+        /// `None` keeps LDK's default.
+        #[serde(default)]
+        pub max_cltv_expiry_delta: Option<u32>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct PayFetched {
+        /// The payment id returned by `fetchinvoice`.
+        pub payment_id: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct CancelFetched {
+        /// The payment id returned by `fetchinvoice`.
+        pub payment_id: String,
+    }
+
     #[derive(Serialize, Deserialize, Apiv2Schema)]
     pub struct Bolt12Pay {
         pub payer_note: Option<String>,
@@ -161,6 +188,23 @@ pub mod response {
     pub struct BlindedPath {
         pub blinded_hops: Vec<String>,
         pub blinding_points: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct FetchInvoiceResult {
+        /// Handle for `payfetched`/`cancelfetched`.
+        ///
+        /// N.B: the fetched invoice must be paid within roughly one
+        /// minute, after that LDK garbage collects the pending payment
+        /// and the invoice must be fetched again.
+        pub payment_id: String,
+        pub payment_hash: String,
+        pub amount_msat: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct CancelFetchedResult {
+        pub payment_id: String,
     }
 
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
