@@ -8,10 +8,9 @@
 //! node with funds you can afford to lose.
 use std::sync::Arc;
 
-use lampo_common::ldk::persister::fs_store::v1::FilesystemStore;
-use lampo_common::persist::LampoPersistenceBackend;
+use lampo_common::persist::{FsPersistence, LampoPersistenceBackend};
 
 /// Build the persistence backend rooted at `root_path`.
 pub fn persistence_for(root_path: &str) -> Arc<dyn LampoPersistenceBackend> {
-    Arc::new(FilesystemStore::new(root_path.into()))
+    Arc::new(FsPersistence::new(root_path.into()))
 }

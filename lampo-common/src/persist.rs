@@ -1,22 +1,188 @@
 //! Persistence backend interface.
 //!
 //! Lampo talks to its store through this trait rather than a concrete type, the
-//! same way it talks to the chain through [`Backend`]. LDK's [`KVStoreSync`] is
-//! a supertrait, so anything implementing this is usable everywhere LDK wants a
-//! store, and lampo-specific concerns hang off the sub-trait.
+//! same way it talks to the chain through [`Backend`]. A backend has two faces:
+//!
+//! * LDK's [`KVStoreSync`], a supertrait, for state that is an opaque blob to
+//!   everyone but LDK: channel monitors, the channel manager, the graph, the
+//!   scorer, the BOLT 12 payer proofs. Key/value is the right shape there, and
+//!   it is what every Lightning implementation uses for this data.
+//! * [`PaymentStore`], for lampo's own records, which are *queried* rather than
+//!   fetched by key ("every payment last year"). Key/value is the wrong shape
+//!   for that, so SQL backends answer it with indexed columns, the way Core
+//!   Lightning keeps its wallet tables.
 //!
 //! Backends must not acknowledge a write before it is durable: LDK broadcasts
 //! the newest channel state it has persisted, so a write that is acked and then
 //! lost can make the node force-close with a stale commitment.
 //!
 //! [`Backend`]: crate::backend::Backend
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use crate::error;
+use crate::json;
+use crate::json::{Deserialize, Serialize};
 use crate::ldk::persister::fs_store::v1::FilesystemStore;
 use crate::ldk::util::persist::KVStoreSync;
+
+/// Namespace holding the payment records.
+pub const PAYMENTS_NAMESPACE: &str = "payments";
 
 /// Persistence backend kind supported by lampo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistenceKind {
     Filesystem,
+    Sqlite,
+    Postgres,
+}
+
+/// Which way the money went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaymentDirection {
+    Inbound,
+    Outbound,
+}
+
+/// Where a payment ended up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaymentStatus {
+    Pending,
+    Succeeded,
+    Failed,
+}
+
+impl PaymentDirection {
+    /// Stored form. SQL backends keep this in a column, so it has to survive a
+    /// round trip unchanged.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Inbound => "inbound",
+            Self::Outbound => "outbound",
+        }
+    }
+
+    pub fn from_str(raw: &str) -> error::Result<Self> {
+        match raw {
+            "inbound" => Ok(Self::Inbound),
+            "outbound" => Ok(Self::Outbound),
+            _ => error::bail!("unknown payment direction `{raw}`"),
+        }
+    }
+}
+
+impl PaymentStatus {
+    /// Stored form, see [`PaymentDirection::as_str`].
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn from_str(raw: &str) -> error::Result<Self> {
+        match raw {
+            "pending" => Ok(Self::Pending),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            _ => error::bail!("unknown payment status `{raw}`"),
+        }
+    }
+}
+
+/// A payment as lampo records it, flat so a SQL backend can keep one column per
+/// field and index the ones that get filtered on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaymentRecord {
+    /// Hex payment id for an outbound payment, hex payment hash for an inbound
+    /// one, which is what each side is addressed by.
+    pub id: String,
+    pub payment_hash: String,
+    pub direction: PaymentDirection,
+    pub amount_msat: u64,
+    /// Routing fee, known for outbound payments only.
+    pub fee_msat: Option<u64>,
+    pub status: PaymentStatus,
+    /// Seconds since the Unix epoch.
+    pub created_at: u64,
+    /// The BOLT 11 invoice or BOLT 12 offer this paid, when there was one.
+    pub invoice: Option<String>,
+}
+
+impl PaymentRecord {
+    /// Key for a key/value backend.
+    ///
+    /// The timestamp comes first and is zero padded, so a store that can only
+    /// list by prefix still answers "payments in this window" by scanning that
+    /// window rather than every payment ever made.
+    pub fn storage_key(&self) -> String {
+        format!("{:020}-{}", self.created_at, self.id)
+    }
+}
+
+/// Which payments to return. Every field unset means all of them.
+#[derive(Debug, Clone, Default)]
+pub struct PaymentFilter {
+    pub from_unix_secs: Option<u64>,
+    pub to_unix_secs: Option<u64>,
+    pub direction: Option<PaymentDirection>,
+    pub status: Option<PaymentStatus>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+impl PaymentFilter {
+    /// Does `record` pass the field filters, ignoring limit and offset?
+    ///
+    /// SQL backends translate the filter into a query instead; this is for
+    /// backends that have to walk the records themselves.
+    pub fn matches(&self, record: &PaymentRecord) -> bool {
+        if self
+            .from_unix_secs
+            .is_some_and(|from| record.created_at < from)
+        {
+            return false;
+        }
+        if self.to_unix_secs.is_some_and(|to| record.created_at > to) {
+            return false;
+        }
+        if self
+            .direction
+            .is_some_and(|direction| record.direction != direction)
+        {
+            return false;
+        }
+        if self.status.is_some_and(|status| record.status != status) {
+            return false;
+        }
+        true
+    }
+
+    /// Apply limit and offset to records already sorted oldest first.
+    pub fn paginate(&self, mut records: Vec<PaymentRecord>) -> Vec<PaymentRecord> {
+        let offset = self.offset.unwrap_or(0) as usize;
+        if offset >= records.len() {
+            return Vec::new();
+        }
+        records.drain(..offset);
+        if let Some(limit) = self.limit {
+            records.truncate(limit as usize);
+        }
+        records
+    }
+}
+
+/// Lampo's own records, queried rather than fetched by key.
+pub trait PaymentStore: Send + Sync {
+    /// Record a payment, replacing any earlier record with the same id.
+    fn upsert_payment(&self, payment: &PaymentRecord) -> error::Result<()>;
+
+    fn get_payment(&self, id: &str) -> error::Result<Option<PaymentRecord>>;
+
+    /// Payments matching `filter`, oldest first.
+    fn list_payments(&self, filter: &PaymentFilter) -> error::Result<Vec<PaymentRecord>>;
 }
 
 /// Persistence backend specification.
@@ -26,12 +192,145 @@ pub enum PersistenceKind {
 /// tell "no record" from "store broken" by that error kind alone.
 ///
 /// [`io::ErrorKind::NotFound`]: crate::ldk::io::ErrorKind::NotFound
-pub trait LampoPersistenceBackend: KVStoreSync + Send + Sync {
+pub trait LampoPersistenceBackend: KVStoreSync + PaymentStore + Send + Sync {
     /// Return the kind of backend.
     fn kind(&self) -> PersistenceKind;
 }
 
-impl LampoPersistenceBackend for FilesystemStore {
+/// The filesystem backend: LDK's store for the key/value half, and payments
+/// held in memory and written through to the `payments` namespace.
+///
+/// Keeping every payment in memory is what ldk-node does, and it is fine at the
+/// size a filesystem node reaches. It is also why the SQL backends exist: they
+/// answer a query from an index instead of from a map that has to be loaded in
+/// full at startup.
+pub struct FsPersistence {
+    inner: FilesystemStore,
+    payments: Mutex<HashMap<String, PaymentRecord>>,
+}
+
+impl FsPersistence {
+    /// Open the store under `data_dir`, seeding the payment map from disk.
+    ///
+    /// A record that fails to decode is skipped rather than fatal: it must not
+    /// keep a node with live channels from starting.
+    pub fn new(data_dir: PathBuf) -> Self {
+        let inner = FilesystemStore::new(data_dir);
+        let mut payments = HashMap::new();
+        match inner.list(PAYMENTS_NAMESPACE, "") {
+            Ok(keys) => {
+                for key in keys {
+                    match inner
+                        .read(PAYMENTS_NAMESPACE, "", &key)
+                        .map_err(error::Error::from)
+                        .and_then(|buf| Ok(json::from_slice::<PaymentRecord>(&buf)?))
+                    {
+                        Ok(record) => {
+                            payments.insert(record.id.clone(), record);
+                        }
+                        Err(err) => {
+                            log::error!(target: "lampo-persist", "skipping payment record `{key}`: {err}")
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                log::error!(target: "lampo-persist", "listing stored payments: {err}")
+            }
+        }
+        Self {
+            inner,
+            payments: Mutex::new(payments),
+        }
+    }
+}
+
+impl KVStoreSync for FsPersistence {
+    fn read(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+    ) -> Result<Vec<u8>, crate::ldk::io::Error> {
+        self.inner.read(primary_namespace, secondary_namespace, key)
+    }
+
+    fn write(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        buf: Vec<u8>,
+    ) -> Result<(), crate::ldk::io::Error> {
+        self.inner
+            .write(primary_namespace, secondary_namespace, key, buf)
+    }
+
+    fn remove(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        lazy: bool,
+    ) -> Result<(), crate::ldk::io::Error> {
+        self.inner
+            .remove(primary_namespace, secondary_namespace, key, lazy)
+    }
+
+    fn list(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+    ) -> Result<Vec<String>, crate::ldk::io::Error> {
+        self.inner.list(primary_namespace, secondary_namespace)
+    }
+}
+
+impl PaymentStore for FsPersistence {
+    fn upsert_payment(&self, payment: &PaymentRecord) -> error::Result<()> {
+        // Disk first: a record held only in memory would not survive a restart,
+        // and reporting success for it would be a lie.
+        self.inner.write(
+            PAYMENTS_NAMESPACE,
+            "",
+            &payment.storage_key(),
+            json::to_vec(payment)?,
+        )?;
+        self.payments
+            .lock()
+            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?
+            .insert(payment.id.clone(), payment.clone());
+        Ok(())
+    }
+
+    fn get_payment(&self, id: &str) -> error::Result<Option<PaymentRecord>> {
+        Ok(self
+            .payments
+            .lock()
+            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?
+            .get(id)
+            .cloned())
+    }
+
+    fn list_payments(&self, filter: &PaymentFilter) -> error::Result<Vec<PaymentRecord>> {
+        let mut matched: Vec<PaymentRecord> = self
+            .payments
+            .lock()
+            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?
+            .values()
+            .filter(|record| filter.matches(record))
+            .cloned()
+            .collect();
+        matched.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(filter.paginate(matched))
+    }
+}
+
+impl LampoPersistenceBackend for FsPersistence {
     fn kind(&self) -> PersistenceKind {
         PersistenceKind::Filesystem
     }
@@ -61,13 +360,26 @@ mod tests {
         }
 
         fn backend(&self) -> Arc<dyn LampoPersistenceBackend> {
-            Arc::new(FilesystemStore::new(self.0.clone()))
+            Arc::new(FsPersistence::new(self.0.clone()))
         }
     }
 
     impl Drop for ScratchDir {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn payment(id: &str, created_at: u64, status: PaymentStatus) -> PaymentRecord {
+        PaymentRecord {
+            id: id.to_owned(),
+            payment_hash: format!("hash-{id}"),
+            direction: PaymentDirection::Outbound,
+            amount_msat: 1_000,
+            fee_msat: Some(1),
+            status,
+            created_at,
+            invoice: None,
         }
     }
 
@@ -99,5 +411,98 @@ mod tests {
         let dir = ScratchDir::new("missing");
         let err = dir.backend().read("ns", "", "absent").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn payments_round_trip_and_upsert_replaces() {
+        let dir = ScratchDir::new("payments");
+        let store = dir.backend();
+
+        store
+            .upsert_payment(&payment("a", 100, PaymentStatus::Pending))
+            .unwrap();
+        assert_eq!(
+            store.get_payment("a").unwrap().unwrap().status,
+            PaymentStatus::Pending
+        );
+
+        store
+            .upsert_payment(&payment("a", 100, PaymentStatus::Succeeded))
+            .unwrap();
+        assert_eq!(
+            store.get_payment("a").unwrap().unwrap().status,
+            PaymentStatus::Succeeded
+        );
+        assert_eq!(
+            store
+                .list_payments(&PaymentFilter::default())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(store.get_payment("absent").unwrap().is_none());
+    }
+
+    /// The point of the typed store: ask for a window and get only that window.
+    #[test]
+    fn list_payments_filters_by_time_status_and_page() {
+        let dir = ScratchDir::new("filter");
+        let store = dir.backend();
+        for (id, at) in [("a", 100), ("b", 200), ("c", 300)] {
+            store
+                .upsert_payment(&payment(id, at, PaymentStatus::Succeeded))
+                .unwrap();
+        }
+        store
+            .upsert_payment(&payment("d", 250, PaymentStatus::Failed))
+            .unwrap();
+
+        let window = store
+            .list_payments(&PaymentFilter {
+                from_unix_secs: Some(150),
+                to_unix_secs: Some(300),
+                status: Some(PaymentStatus::Succeeded),
+                ..Default::default()
+            })
+            .unwrap();
+        let ids: Vec<&str> = window.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["b", "c"],
+            "failed and out-of-window records excluded"
+        );
+
+        let page = store
+            .list_payments(&PaymentFilter {
+                limit: Some(2),
+                offset: Some(1),
+                ..Default::default()
+            })
+            .unwrap();
+        let ids: Vec<&str> = page.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["b", "d"], "oldest first, one skipped");
+    }
+
+    /// Payments have to come back after a restart, not just live in the map.
+    #[test]
+    fn payments_survive_reopening_the_store() {
+        let dir = ScratchDir::new("reopen");
+        dir.backend()
+            .upsert_payment(&payment("a", 100, PaymentStatus::Succeeded))
+            .unwrap();
+
+        let reopened = dir.backend();
+        assert_eq!(
+            reopened.get_payment("a").unwrap().unwrap().status,
+            PaymentStatus::Succeeded
+        );
+    }
+
+    /// The key has to sort by time so a prefix-only store can scan a window.
+    #[test]
+    fn storage_key_sorts_by_creation_time() {
+        let early = payment("z", 100, PaymentStatus::Succeeded).storage_key();
+        let late = payment("a", 2_000, PaymentStatus::Succeeded).storage_key();
+        assert!(early < late, "{early} should sort before {late}");
     }
 }
