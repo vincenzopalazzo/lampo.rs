@@ -90,9 +90,10 @@ ok()  { say "OK  $1"; echo "$(date -Iseconds),$1,OK"   >> "$CSV"; }
 ko()  { say "FAIL $1: ${2:-}"; echo "$(date -Iseconds),$1,FAIL,${2:-}" >> "$CSV"
         collect_artifacts "$1"; [ "$KEEP_GOING" = 1 ] || exit 2; }
 
-check() { # check <id> <desc> <cmd...>
-  local id=$1 desc=$2; shift 2
-  if "$@"; then ok "$id $desc"; else ko "$id $desc" "cmd failed: $*"; fi
+check() { # check <id> <desc> <cmd-string>  (eval'd in THIS shell: lib.sh
+  # functions and ID[] stay visible; bash -c would hide them)
+  local id=$1 desc=$2 cmd=$3
+  if eval "$cmd"; then ok "$id $desc"; else ko "$id $desc" "eval failed"; fi
 }
 
 # ---- payment helpers ------------------------------------------------
@@ -153,30 +154,30 @@ fund_node lp2 50 || ko SETUP "fund lp2"
 wait_wallet_synced || ko SETUP "wallet sync"
 
 # I01 connect lampo -> ldk
-check I01 "lp1<->lk1 connect" bash -c '
-  r=$(rpc "$(API lp1)" connect "{\"node_id\":\"'"${ID[lk1]}"'\",\"addr\":\"127.0.0.1\",\"port\":$(ldk_p2p lk1)}")
+check I01 "lp1<->lk1 connect" '
+  r=$(rpc "$(API lp1)" connect "{\"node_id\":\"${ID[lk1]}\",\"addr\":\"127.0.0.1\",\"port\":$(ldk_p2p lk1)}")
   echo "$r" | jqf "d.get(\"error\",{}).get(\"message\",\"\")" | grep -q . && exit 1
   sleep 3
   [ "$(peers_of lp1)" -ge 1 ]'
 
 # I02 c1: lampo opens to ldk (public, push for ldk outbound liquidity)
-check I02 "open c1 lp1->lk1 (lampo, public)" bash -c '
-  open_channel lp1 lk1 "'"${ID[lk1]}"'" $CHANNEL_SAT 100000000
+check I02 "open c1 lp1->lk1 (lampo, public)" '
+  open_channel lp1 lk1 "${ID[lk1]}" $CHANNEL_SAT 100000000
   for i in $(seq 1 40); do [ "$(ready_channels lp1)" -ge 1 ] && break; sleep 5; done
   [ "$(ready_channels lp1)" -ge 1 ]'
 # I03 c2: ldk opens to ldk (announced)
-check I03 "open c2 lk1->lk2 (ldk, announced)" bash -c '
-  o=$(lcli lk1 connect-peer "'"${ID[lk2]}"'@127.0.0.1:$(ldk_p2p lk2)" 2>>"$LOG"); echo "$o" >> "$LOG"
-  o=$(lcli lk1 open-channel --node-id "'"${ID[lk2]}"'" --address "127.0.0.1:$(ldk_p2p lk2)" \
+check I03 "open c2 lk1->lk2 (ldk, announced)" '
+  o=$(lcli lk1 connect-peer "${ID[lk2]}@127.0.0.1:$(ldk_p2p lk2)" 2>>"$LOG"); echo "$o" >> "$LOG"
+  o=$(lcli lk1 open-channel --node-id "${ID[lk2]}" --address "127.0.0.1:$(ldk_p2p lk2)" \
         --channel-value-sats $CHANNEL_SAT --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
   sleep 5; mine 8; sleep 10
   for i in $(seq 1 40); do [ "$(ldk_channels_ready lk1)" -ge 2 ] && break; sleep 5; done
   [ "$(ldk_channels_ready lk1)" -ge 2 ]'
 
 # I04 c3: ldk opens to lampo (announced)
-check I04 "open c3 lk2->lp2 (ldk, announced)" bash -c '
-  o=$(lcli lk2 connect-peer "'"${ID[lp2]}"'@127.0.0.1:$(P2P lp2)" 2>>"$LOG"); echo "$o" >> "$LOG"
-  o=$(lcli lk2 open-channel --node-id "'"${ID[lp2]}"'" --address "127.0.0.1:$(P2P lp2)" \
+check I04 "open c3 lk2->lp2 (ldk, announced)" '
+  o=$(lcli lk2 connect-peer "${ID[lp2]}@127.0.0.1:$(P2P lp2)" 2>>"$LOG"); echo "$o" >> "$LOG"
+  o=$(lcli lk2 open-channel --node-id "${ID[lp2]}" --address "127.0.0.1:$(P2P lp2)" \
         --channel-value-sats $CHANNEL_SAT --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
   sleep 5; mine 8; sleep 10
   for i in $(seq 1 40); do [ "$(ready_channels lp2)" -ge 1 ] && break; sleep 5; done
