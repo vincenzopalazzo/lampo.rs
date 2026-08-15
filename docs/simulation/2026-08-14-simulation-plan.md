@@ -204,6 +204,10 @@ the sim cluster uses fresh data dirs and disjoint ports.
 | 19:07 | #565 shipped+rebuilt: `fee estimated 8 sats`, funding tx created, channel m1→m2 (30k sat) open → ready at 19:10; round 1 OK. #564 also verified organically: the channel **survived** the 19:15 harness-relaunch restart (`restored channel monitor` in m1's log) |
 | 19:28 | Harness fixes: health() getinfo retry + broken subshell return (0ffda9f), resume-if-ready-channel (e458f3b). Reserve lesson: 0-push 30k sat channel keeps all of m2's balance under the ~1% reserve → m2 spendable 0 forever → reverse payments RouteNotFound (expected LN behaviour; **issue #566** asks for fundchannel `push_msat`) |
 | 19:50 | Mutinet leg now a real payment soak: one-directional m1→m2, preimage-verified, endless. Both legs live on the patched binary (sim/main @ 818076c) |
+| 20:20 | **#567 part 1 (PR #568)**: keysend RPC now returns full PayResult (state/path/payment_hash/preimage) mirroring pay, bounded 120s. Harness updated to verify keysend preimages |
+| 20:33 | New harness immediately exposed: **every keysend "OK" in ALL prior runs was a false positive** — `/keysend` was never routed in lampo-httpd (404 + empty body read as success). Keysend had never actually been exercised |
+| 20:44 | #568 part 2: `rest_keysend` route added; shipped+rebuilt. NOTE: `~/soak-watchdog.sh` (cron */15, rotates seed when ≥5/10 rounds fail — installed earlier for #563 escapes) correctly rotated on the 404-FAILs: 4305. Canonical launcher is `~/launch-sim.sh` (watchdog sed's its SEED) — prefer it over ad-hoc go.sh |
+| 21:07 | **Keysend verified live**: rounds 5/7/10/15 OK with real preimages, 4–13s settlement, SEED=4305 on binary fa29546. Coverage now: invoice+offer+keysend all preimage-verified |
 
 Operational lessons encoded into the harness:
 - lampo wallet applies ~1 block/s in 2-min windows → poll `wallet_height` vs `blockheight` before opening channels
