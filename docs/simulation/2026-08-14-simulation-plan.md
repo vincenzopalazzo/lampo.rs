@@ -208,6 +208,10 @@ the sim cluster uses fresh data dirs and disjoint ports.
 | 20:33 | New harness immediately exposed: **every keysend "OK" in ALL prior runs was a false positive** — `/keysend` was never routed in lampo-httpd (404 + empty body read as success). Keysend had never actually been exercised |
 | 20:44 | #568 part 2: `rest_keysend` route added; shipped+rebuilt. NOTE: `~/soak-watchdog.sh` (cron */15, rotates seed when ≥5/10 rounds fail — installed earlier for #563 escapes) correctly rotated on the 404-FAILs: 4305. Canonical launcher is `~/launch-sim.sh` (watchdog sed's its SEED) — prefer it over ad-hoc go.sh |
 | 21:07 | **Keysend verified live**: rounds 5/7/10/15 OK with real preimages, 4–13s settlement, SEED=4305 on binary fa29546. Coverage now: invoice+offer+keysend all preimage-verified |
+| 21:15 | **Bug #6 (PR #569)**: `fundchannel` gains `push_msat` (closes #566) — 0-push small channels trap the payee under the ~1% reserve |
+| 21:26 | **Bug #7 (PR #570)**: `rest_close` had no request binding — HTTP close always failed `missing field node_id`; churn chaos never actually closed anything (channel counts grew). Validated live: coop close of the old one-way channel succeeded (`Coop Closed`, tx c60ea81a) |
+| 21:47 | Mutinet re-bootstrap on the new binary: coop-closed old channel, wiped nodes, re-funded m1 from bitcoind (tx ce244055), harness fixes (top-level `message` error check; line-merge typo). Lessons: harness zombies from partial kills corrupt the console (sparse writes) — always kill by PID list; launch via go-muti.sh with pattern-free cmdline |
+| 22:37 | **Two-way mutinet soak live**: 10k sat channel with 5k push (PR #569), alternating m1↔m2 payments all preimage-verified — m2 pays back for the first time. Watch-item: the 22:03 channel's funding tx apparently never confirmed (possible broadcast gap — investigate with m1/mh.log 02:03 window if it recurs); funds API may miss coop-close payouts |
 
 Operational lessons encoded into the harness:
 - lampo wallet applies ~1 block/s in 2-min windows → poll `wallet_height` vs `blockheight` before opening channels
