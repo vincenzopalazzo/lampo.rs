@@ -297,9 +297,13 @@ do_round() {
   pre=$(echo "$res" | jqf 'd.get("payment_preimage") or ""')
   if [ "$m" = keysend ]; then
     local err; err=$(echo "$res" | jqf 'd.get("error",{}).get("message","")')
-    if [ -z "$err" ]; then state=Success; pre=keysend-ok; else state="RpcError:$err"; pre=""; fi
+    # The keysend RPC returns {} without a payment hash and lampo has no
+    # payment-status RPC (issue #567), so settlement CANNOT be verified
+    # here. Mark as Sent, not Success: the round is only known to have
+    # been accepted by the payer node.
+    if [ -z "$err" ]; then state=Sent; pre=keysend-unverified; else state="RpcError:$err"; pre=""; fi
   fi
-  if [ "$state" = "Success" ] && [ -n "$pre" ]; then ok=OK; else ok=FAIL; fi
+  if { [ "$state" = "Success" ] || [ "$state" = "Sent" ]; } && [ -n "$pre" ]; then ok=OK; else ok=FAIL; fi
   local hops=" "
   if [ "$m" != keysend ]; then hops=$(echo "$res" | jqf 'len(d.get("path",[]))'); fi
   echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,$state,${pre:0:16},$dur,${hops:- }" >> "$CSV"
