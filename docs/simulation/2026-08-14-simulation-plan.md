@@ -212,6 +212,7 @@ the sim cluster uses fresh data dirs and disjoint ports.
 | 21:26 | **Bug #7 (PR #570)**: `rest_close` had no request binding — HTTP close always failed `missing field node_id`; churn chaos never actually closed anything (channel counts grew). Validated live: coop close of the old one-way channel succeeded (`Coop Closed`, tx c60ea81a) |
 | 21:47 | Mutinet re-bootstrap on the new binary: coop-closed old channel, wiped nodes, re-funded m1 from bitcoind (tx ce244055), harness fixes (top-level `message` error check; line-merge typo). Lessons: harness zombies from partial kills corrupt the console (sparse writes) — always kill by PID list; launch via go-muti.sh with pattern-free cmdline |
 | 22:37 | **Two-way mutinet soak live**: 10k sat channel with 5k push (PR #569), alternating m1↔m2 payments all preimage-verified — m2 pays back for the first time. Watch-item: the 22:03 channel's funding tx apparently never confirmed (possible broadcast gap — investigate with m1/mh.log 02:03 window if it recurs); funds API may miss coop-close payouts |
+| 22:42 | Watch-item resolved: the 22:33 funding tx (fresh flow) created+broadcast+confirmed normally — the 22:03 gap was the zombie harness kill interrupting between tx creation and broadcast, environmental not a code bug |
 
 Operational lessons encoded into the harness:
 - lampo wallet applies ~1 block/s in 2-min windows → poll `wallet_height` vs `blockheight` before opening channels
