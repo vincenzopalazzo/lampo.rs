@@ -6,7 +6,10 @@ use std::net::ToSocketAddrs;
 use std::{fmt::Display, sync::Arc};
 
 use actix::{web, HttpResponseWrapper, OpenApiExt};
-use actix_web::{App, HttpResponse, HttpServer, ResponseError};
+use actix_web::body::MessageBody;
+use actix_web::dev::{ServiceRequest, ServiceResponse};
+use actix_web::middleware::{from_fn, Next};
+use actix_web::{App, Error, HttpResponse, HttpServer, ResponseError};
 use paperclip::actix::{self, CreatedJson};
 
 use lampo_common::error;
@@ -100,6 +103,122 @@ impl AppState {
     }
 }
 
+/// DNS-rebinding guard configuration shared with the [`reject_rebinding`]
+/// middleware.
+#[derive(Clone)]
+struct HostGuard {
+    /// Host part of the address the API is bound to (no port).
+    bind_host: String,
+    /// Whether to enforce the `Host` header check. Empty bind hosts skip
+    /// it; wildcard binds still enforce, but allow IP-literal Host headers
+    /// rather than matching `0.0.0.0` / `::` (no client sends those).
+    enforce: bool,
+}
+
+impl HostGuard {
+    fn is_ip(host: &str) -> bool {
+        host.parse::<std::net::IpAddr>().is_ok()
+    }
+
+    fn is_wildcard(host: &str) -> bool {
+        host == "0.0.0.0" || host == "::"
+    }
+
+    fn is_loopback(host: &str) -> bool {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .map(|ip| ip.is_loopback())
+                .unwrap_or(false)
+    }
+
+    /// Strip an optional `:port` from a Host header value without mangling
+    /// bracketed IPv6 literals (`[::1]` / `[::1]:7979`).
+    fn host_without_port(header: &str) -> &str {
+        if let Some(rest) = header.strip_prefix('[') {
+            if let Some(end) = rest.find(']') {
+                return &rest[..end];
+            }
+        }
+        header.rsplit_once(':').map(|(h, _)| h).unwrap_or(header)
+    }
+
+    /// Compare Host names: IP literals via parsed equality (IPv6 hex is
+    /// case-insensitive), DNS names via ASCII case-insensitive equality.
+    fn hosts_equal(a: &str, b: &str) -> bool {
+        match (a.parse::<std::net::IpAddr>(), b.parse::<std::net::IpAddr>()) {
+            (Ok(ia), Ok(ib)) => ia == ib,
+            _ => a.eq_ignore_ascii_case(b),
+        }
+    }
+
+    /// Returns whether a request's `Host` header is allowed to reach the API.
+    fn allows(&self, req: &ServiceRequest) -> bool {
+        if !self.enforce {
+            return true;
+        }
+        let Some(header) = req
+            .headers()
+            .get(actix_web::http::header::HOST)
+            .and_then(|value| value.to_str().ok())
+        else {
+            // A missing/undecodable Host header on an enforced bind is not a
+            // legitimate client; reject it.
+            return false;
+        };
+        let host = Self::host_without_port(header);
+        if Self::hosts_equal(host, &self.bind_host) {
+            return true;
+        }
+        // Loopback bind (`127.0.0.1`, `::1`, or `localhost`): allow the
+        // other loopback aliases. Binding `localhost` must still accept
+        // `Host: 127.0.0.1` (and vice versa).
+        if Self::is_loopback(&self.bind_host) && Self::is_loopback(host) {
+            return true;
+        }
+        // Wildcard bind: a domain Host is the DNS-rebinding signature.
+        // Literal IPs (and localhost) are how a real client addresses an
+        // interface-wildcard socket, so they stay allowed.
+        if Self::is_wildcard(&self.bind_host) && (Self::is_ip(host) || Self::is_loopback(host)) {
+            return true;
+        }
+        false
+    }
+}
+
+/// Reject requests whose `Host` header does not match the bound address.
+///
+/// This is the server-side defence against DNS-rebinding: the loopback-only
+/// default bind is the API's *only* access control, and a rebinding attack
+/// turns any page the operator visits into a same-origin client of the
+/// unauthenticated control plane. actix routes purely on `(method, path)` and
+/// never inspects `Host`, so without this middleware `http://evil.tld:7979`
+/// re-resolved to `127.0.0.1` reaches every fund-moving endpoint. A rebound
+/// request still carries the attacker's `Host`, so matching it against the
+/// bind address blocks the attack while leaving genuine loopback clients
+/// (`127.0.0.1`, `localhost`) untouched.
+async fn reject_rebinding(
+    guard: web::Data<HostGuard>,
+    req: ServiceRequest,
+    next: Next<impl MessageBody + 'static>,
+) -> Result<ServiceResponse<impl MessageBody + 'static>, Error> {
+    if guard.allows(&req) {
+        Ok(next.call(req).await?.map_into_boxed_body())
+    } else {
+        let host = req
+            .headers()
+            .get(actix_web::http::header::HOST)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("<none>")
+            .to_owned();
+        log::warn!(
+            target: "httpd",
+            "rejecting request with disallowed Host header `{host}` (DNS-rebinding guard)"
+        );
+        Ok(req.into_response(HttpResponse::Forbidden().finish()))
+    }
+}
+
 pub async fn run<T: ToSocketAddrs + Display>(
     lampod: Arc<LampoDaemon>,
     host: T,
@@ -108,13 +227,31 @@ pub async fn run<T: ToSocketAddrs + Display>(
     let host_str = format!("{host}");
     log::info!("httpd api running on `{host_str}`");
 
+    // Host part of the bind address, used by the DNS-rebinding guard.
+    let bind_host = host_str
+        .rsplit_once(':')
+        .map(|(h, _)| h)
+        .unwrap_or(host_str.as_str())
+        .trim_matches(|c| c == '[' || c == ']')
+        .to_string();
+    // Enforce even on wildcard binds: skipping the check is how DNS
+    // rebinding reaches a LAN-exposed unauthenticated API. The matcher
+    // treats wildcards as "IP-literal Host only", not "allow anything".
+    let enforce_host = !bind_host.is_empty();
+
     let server = HttpServer::new(move || {
         let state = AppState::new(lampod.clone(), host_str.clone(), open_api_url.clone()).unwrap();
+        let host_guard = HostGuard {
+            bind_host: bind_host.clone(),
+            enforce: enforce_host,
+        };
         // FIXME: It is possible to avoid mapping the service in here?
         // it ispossible to init the app outside the callback and
         // use the macros to do add services?
         App::new()
             .app_data(web::Data::new(state))
+            .app_data(web::Data::new(host_guard))
+            .wrap(from_fn(reject_rebinding))
             .wrap_api()
             .service(swagger_api)
             .service(rest_getinfo)
@@ -232,4 +369,150 @@ macro_rules! post {
             }
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use actix_web::http::StatusCode;
+    use actix_web::middleware::from_fn;
+    use actix_web::{test, web, App, HttpResponse};
+
+    use super::{reject_rebinding, HostGuard};
+
+    async fn ok_handler() -> HttpResponse {
+        HttpResponse::Ok().finish()
+    }
+
+    async fn status_for(guard: HostGuard, host: Option<&str>) -> StatusCode {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(guard))
+                .wrap(from_fn(reject_rebinding))
+                .route("/getinfo", web::post().to(ok_handler)),
+        )
+        .await;
+
+        let mut req = test::TestRequest::post().uri("/getinfo");
+        if let Some(host) = host {
+            req = req.insert_header(("Host", host));
+        }
+        test::call_service(&app, req.to_request()).await.status()
+    }
+
+    fn loopback_guard() -> HostGuard {
+        HostGuard {
+            bind_host: "127.0.0.1".to_string(),
+            enforce: true,
+        }
+    }
+
+    // A rebound origin (`http://evil.tld:7979` re-resolved to 127.0.0.1) still
+    // carries the attacker's Host header, so it must be rejected.
+    #[actix_web::test]
+    async fn rejects_foreign_host() {
+        assert_eq!(
+            status_for(loopback_guard(), Some("evil.attacker.tld")).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status_for(loopback_guard(), Some("evil.attacker.tld:7979")).await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    // A missing Host header on an enforced bind is not a legitimate client.
+    #[actix_web::test]
+    async fn rejects_missing_host() {
+        assert_eq!(
+            status_for(loopback_guard(), None).await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    // Genuine loopback clients keep working (bind IP, `localhost`, `::1`).
+    #[actix_web::test]
+    async fn allows_loopback_hosts() {
+        for host in [
+            "127.0.0.1",
+            "127.0.0.1:7979",
+            "localhost:7979",
+            "[::1]",
+            "[::1]:7979",
+        ] {
+            assert_eq!(
+                status_for(loopback_guard(), Some(host)).await,
+                StatusCode::OK,
+                "host `{host}` should be allowed"
+            );
+        }
+    }
+
+    // DNS Host comparison is ASCII case-insensitive (RFC 4343).
+    #[actix_web::test]
+    async fn allows_case_insensitive_dns_hosts() {
+        let guard = HostGuard {
+            bind_host: "localhost".to_string(),
+            enforce: true,
+        };
+        for host in ["LOCALHOST", "LocalHost:7979", "localhost"] {
+            assert_eq!(
+                status_for(guard.clone(), Some(host)).await,
+                StatusCode::OK,
+                "host `{host}` should be allowed"
+            );
+        }
+        let named = HostGuard {
+            bind_host: "api.example".to_string(),
+            enforce: true,
+        };
+        assert_eq!(
+            status_for(named.clone(), Some("API.EXAMPLE:7979")).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_for(named, Some("evil.EXAMPLE")).await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    // Binding `localhost` must still accept loopback IP Host headers.
+    #[actix_web::test]
+    async fn localhost_bind_allows_loopback_ips() {
+        let guard = HostGuard {
+            bind_host: "localhost".to_string(),
+            enforce: true,
+        };
+        for host in ["localhost:7979", "127.0.0.1:7979", "[::1]:7979"] {
+            assert_eq!(
+                status_for(guard.clone(), Some(host)).await,
+                StatusCode::OK,
+                "host `{host}` should be allowed"
+            );
+        }
+        assert_eq!(
+            status_for(guard, Some("evil.attacker.tld")).await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    // Wildcard binds still reject domain Host headers (DNS rebinding)
+    // and only accept IP literals / localhost.
+    #[actix_web::test]
+    async fn wildcard_bind_rejects_domain_hosts() {
+        let guard = HostGuard {
+            bind_host: "0.0.0.0".to_string(),
+            enforce: true,
+        };
+        assert_eq!(
+            status_for(guard.clone(), Some("anything.tld")).await,
+            StatusCode::FORBIDDEN
+        );
+        for host in ["192.168.1.5:7979", "127.0.0.1:7979", "localhost:7979"] {
+            assert_eq!(
+                status_for(guard.clone(), Some(host)).await,
+                StatusCode::OK,
+                "host `{host}` should be allowed on a wildcard bind"
+            );
+        }
+    }
 }
