@@ -130,6 +130,9 @@ FUNDED=0
 # Channel size in sats. The old default (2M) is regtest-scale; on mutinynet
 # pick something the funding wallet can actually afford (e.g. 30000).
 CHANNEL_SAT=${CHANNEL_SAT:-2000000}
+# Liquidity pushed to the counterparty on open (PR #569). Default: half the
+# channel, so both directions can carry payments above the channel reserve.
+PUSH_MSAT=${PUSH_MSAT:-$((CHANNEL_SAT * 500))}
 # m1 may already be funded on-chain (e.g. manually from the bitcoind wallet,
 # or left over from a previous run) — skip the faucet entirely then.
 # The wallet syncs on a 2-min cadence, so retry the check for a few minutes.
@@ -193,8 +196,7 @@ fi
 if [ "$RESUME" != 1 ]; then
 for attempt in 1 2 3; do
   [ "$FUNDED" = 1 ] && break
-  addr=$(rpc "$(api 1)" new_addr | jqf 'd["address"]')
-  [ -n "$addr" ] || { say "no address from m1 (attempt $attempt)"; sleep 10; continue; }
+  addr=$(rpc "$(api 1)" new_addr | jqf 'd["address"]')  [ -n "$addr" ] || { say "no address from m1 (attempt $attempt)"; sleep 10; continue; }
   fund_via_faucet "$addr" || { sleep 30; continue; }
   # wait for the funds to appear (wallet syncs every 2 min)
   for _ in $(seq 1 20); do
@@ -222,7 +224,7 @@ say "m1 funded ($funds msat visible)"
 # --- open one channel m1 -> m2 ---
 say "connecting + opening channel m1->m2 (${CHANNEL_SAT} sat)"
 rpc "$(api 1)" connect "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2)}" >/dev/null
-resp=$(rpc "$(api 1)" fundchannel "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2),\"amount\":$CHANNEL_SAT,\"public\":true}")
+resp=$(rpc "$(api 1)" fundchannel "{\"node_id\":\"$ID2\",\"addr\":\"127.0.0.1\",\"port\":$(p2p 2),\"amount\":$CHANNEL_SAT,\"push_msat\":$PUSH_MSAT,\"public\":true}")
 case "$resp" in "{"*) : ;; *) fail "fundchannel non-JSON: $resp" ;; esac
 echo "$resp" | jqf 'd.get("error",{}).get("message","")' | grep -q . && fail "fundchannel error: $resp"
 
@@ -242,14 +244,20 @@ say "channel ready; starting payment soak"
 # --- endless alternating payments ---
 r=0
 PREV_AMT=0
+PREV_AMT=0
 while :; do
   r=$((r+1))
-  # One-directional (m1 -> m2): the channel is 0-push and lampo's
-  # fundchannel RPC has no push_msat yet, so m2's entire balance sits
-  # below the ~1% channel reserve and can never pay back (spendable 0).
-  # Follow-up: expose push_msat (issue) and restore alternating rounds.
-  src=1; dst=2
-  amt=$(( 5000 + (r % 7) * 2500 ))
+  # With a pushed channel (PR #569/#566) both sides hold spendable balance,
+  # so alternate directions: odd rounds m1 sends a fresh amount, even rounds
+  # m2 pays back EXACTLY what it just received (keeping the loop balanced
+  # without ever draining either side into the channel reserve).
+  if [ $(( r % 2 )) = 1 ]; then src=1; dst=2; else src=2; dst=1; fi
+  if [ $(( r % 2 )) = 1 ]; then
+    amt=$(( 5000 + (r % 7) * 2500 ))
+  else
+    amt=$PREV_AMT
+  fi
+  PREV_AMT=$amt
   inv=$(rpc "$(api "$dst")" invoice "{\"amount_msat\":$amt,\"description\":\"multinet round $r\"}" | jqf 'd.get("bolt11","")')
   [ -n "$inv" ] || { say "round $r: m$dst issued no invoice"; sleep 60; continue; }
   res=$(rpc "$(api "$src")" pay "{\"invoice_str\":\"$inv\"}")
