@@ -1822,6 +1822,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lampo-sqlite"
+version = "0.1.0"
+dependencies = [
+ "lampo-common",
+ "lampo-storage-common",
+ "log",
+ "rusqlite",
+]
+
+[[package]]
 name = "lampo-storage-common"
 version = "0.1.0"
 dependencies = [
