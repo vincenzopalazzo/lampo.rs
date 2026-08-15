@@ -26,13 +26,13 @@ use lampo_common::ldk::sign::{NodeSigner, SpendableOutputDescriptor};
 use lampo_common::ldk::util::wallet_utils::{Utxo, Wallet, WalletSource};
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
+use lampo_common::persist::LampoPersistenceBackend;
 use lampo_common::utils::logger::LampoLogger;
 
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
 
 use super::Handler;
@@ -87,7 +87,7 @@ pub struct LampoHandler {
     inventory_manager: Arc<LampoInventoryManager>,
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
-    persister: Arc<LampoPersistence>,
+    persister: Arc<dyn LampoPersistenceBackend>,
     bump_tx_event_handler: BumpHandler,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]

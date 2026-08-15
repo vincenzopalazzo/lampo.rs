@@ -37,6 +37,7 @@ use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::ldk::util::sweep::OutputSweeper;
 use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel, Channels};
+use lampo_common::persist::LampoPersistenceBackend;
 use lampo_common::types::LampoChannel;
 use lampo_common::types::LampoGraph;
 use lampo_common::types::LampoRouter;
@@ -47,7 +48,6 @@ use lampo_common::types::{ChannelId, LampoArcChannelManager, LampoChainMonitor};
 use crate::actions::handler::LampoHandler;
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
-use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
 /// How long `open_channel` waits for the funding transaction to be broadcast
@@ -70,7 +70,7 @@ enum FundingWaitState {
 pub struct LampoChannelManager {
     monitor: OnceLock<Arc<LampoChainMonitor>>,
     wallet_manager: Arc<dyn WalletManager>,
-    persister: Arc<LampoPersistence>,
+    persister: Arc<dyn LampoPersistenceBackend>,
     graph: OnceLock<Arc<LampoGraph>>,
     score: OnceLock<Arc<Mutex<LampoScorer>>>,
     handler: OnceLock<Arc<LampoHandler>>,
@@ -94,7 +94,7 @@ impl LampoChannelManager {
         logger: Arc<LampoLogger>,
         onchain: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
-        persister: Arc<LampoPersistence>,
+        persister: Arc<dyn LampoPersistenceBackend>,
     ) -> Self {
         LampoChannelManager {
             conf: conf.to_owned(),

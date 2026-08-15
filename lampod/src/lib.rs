@@ -32,6 +32,7 @@ use lampo_common::json;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
+use lampo_common::persist::LampoPersistenceBackend;
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
@@ -42,11 +43,94 @@ use crate::actions::Handler;
 use crate::chain::LampoChainManager;
 use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::persistence::LampoPersistence;
+use crate::persistence::persistence_for;
 use crate::utils::logger::LampoLogger;
 
 pub(crate) type P2PGossipSync =
     ldk::routing::gossip::P2PGossipSync<Arc<LampoGraph>, Arc<LampoChainManager>, Arc<LampoLogger>>;
+
+/// The persistence backend seen as LDK's async `KVStore`.
+///
+/// The backend trait is built on the sync `KVStoreSync`, which is what the
+/// chain monitor and the rest of lampo use. The background processor and the
+/// output sweeper want the async `KVStore` instead.
+///
+/// LDK ships `KVStoreSyncWrapper` for that, but it runs the sync call inline
+/// and only wraps the finished result in a ready future. Persisting the
+/// network graph or a channel manager update is a write plus an fsync, and a
+/// database backend makes it a network round-trip, so running it inline would
+/// block the runtime thread that also drives peer I/O. Offload it instead,
+/// which is what the filesystem store did on its own before lampo took the
+/// store behind a trait.
+///
+/// Offloading means two calls left in flight together could reach the store
+/// out of order. That is safe here because the background processor awaits
+/// every write before issuing the next one, so a caller that starts writing
+/// the same key twice concurrently would need its own ordering.
+struct LampoAsyncPersistence(Arc<dyn LampoPersistenceBackend>);
+
+impl ldk::util::persist::KVStore for LampoAsyncPersistence {
+    fn read(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, io::Error>> + 'static + Send {
+        let store = self.0.clone();
+        let (primary, secondary, key) = owned_key(primary_namespace, secondary_namespace, key);
+        offload(move || store.read(&primary, &secondary, &key))
+    }
+
+    fn write(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        buf: Vec<u8>,
+    ) -> impl std::future::Future<Output = Result<(), io::Error>> + 'static + Send {
+        let store = self.0.clone();
+        let (primary, secondary, key) = owned_key(primary_namespace, secondary_namespace, key);
+        offload(move || store.write(&primary, &secondary, &key, buf))
+    }
+
+    fn remove(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        lazy: bool,
+    ) -> impl std::future::Future<Output = Result<(), io::Error>> + 'static + Send {
+        let store = self.0.clone();
+        let (primary, secondary, key) = owned_key(primary_namespace, secondary_namespace, key);
+        offload(move || store.remove(&primary, &secondary, &key, lazy))
+    }
+
+    fn list(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, io::Error>> + 'static + Send {
+        let store = self.0.clone();
+        let (primary, secondary) = (primary_namespace.to_owned(), secondary_namespace.to_owned());
+        offload(move || store.list(&primary, &secondary))
+    }
+}
+
+/// The store is addressed by `&str`, but the call runs on another thread.
+fn owned_key(primary: &str, secondary: &str, key: &str) -> (String, String, String) {
+    (primary.to_owned(), secondary.to_owned(), key.to_owned())
+}
+
+/// Run a blocking store call on the blocking pool.
+fn offload<T: Send + 'static>(
+    call: impl FnOnce() -> Result<T, io::Error> + Send + 'static,
+) -> impl std::future::Future<Output = Result<T, io::Error>> + 'static + Send {
+    async move {
+        tokio::task::spawn_blocking(call)
+            .await
+            .unwrap_or_else(|err| Err(io::Error::new(io::ErrorKind::Other, err)))
+    }
+}
 
 /// LampoDaemon is the main data structure that uses the facade
 /// pattern to hide the complexity of the LDK library. You can interact
@@ -67,7 +151,7 @@ pub struct LampoDaemon {
     wallet_manager: Arc<dyn WalletManager>,
     offchain_manager: Option<Arc<OffchainManager>>,
     logger: Arc<LampoLogger>,
-    persister: Arc<LampoPersistence>,
+    persister: Arc<dyn LampoPersistenceBackend>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
     chain_sync: Arc<ChainSyncCoordinator>,
@@ -88,7 +172,7 @@ impl LampoDaemon {
         LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
-            persister: Arc::new(LampoPersistence::new(root_path.into())),
+            persister: persistence_for(&root_path),
             peer_manager: None,
             onchain_manager: None,
             channel_manager: None,
@@ -123,7 +207,7 @@ impl LampoDaemon {
         self.conf.clone()
     }
 
-    pub fn persister(&self) -> Arc<LampoPersistence> {
+    pub fn persister(&self) -> Arc<dyn LampoPersistenceBackend> {
         self.persister.clone()
     }
 
@@ -303,7 +387,7 @@ impl LampoDaemon {
 
         tokio::spawn(async move {
             process_events_async(
-                self.persister.clone(),
+                LampoAsyncPersistence(self.persister.clone()),
                 |env| self.handler_ldk_events(env),
                 self.channel_manager().chain_monitor(),
                 self.channel_manager().manager(),

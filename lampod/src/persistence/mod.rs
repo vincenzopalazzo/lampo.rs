@@ -1,12 +1,17 @@
-//! Persistence module implementation for lampo
+//! Persistence wiring for lampod.
 //!
-//! N.B: This is an experimental version of the persistence,
-//! please do not use it in production you can lost funds, or
-//! in others words you WILL lost funds, do not trush me!
-use lampo_common::ldk::persister::fs_store::v1::FilesystemStore;
+//! The daemon holds its store as [`LampoPersistenceBackend`], so the choice of
+//! backend lives here and nowhere else. Today the only backend is LDK's
+//! filesystem store; database backends plug in by extending [`persistence_for`].
+//!
+//! N.B: the persistence has not been hardened for production use yet. Run a
+//! node with funds you can afford to lose.
+use std::sync::Arc;
 
-/// Lampo Persistence implementation.
-// FIME: it is a simple wrapper around the ldk file persister
-// giving more time to understand how to make a custom one without
-// lost funds :-P
-pub type LampoPersistence = FilesystemStore;
+use lampo_common::ldk::persister::fs_store::v1::FilesystemStore;
+use lampo_common::persist::LampoPersistenceBackend;
+
+/// Build the persistence backend rooted at `root_path`.
+pub fn persistence_for(root_path: &str) -> Arc<dyn LampoPersistenceBackend> {
+    Arc::new(FilesystemStore::new(root_path.into()))
+}
