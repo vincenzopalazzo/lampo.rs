@@ -101,6 +101,15 @@ pub struct LampoChainSync {
 }
 
 impl LampoChainSync {
+    async fn broadcast_once(
+        &self,
+        tx: &lampo_common::bitcoin::Transaction,
+    ) -> Result<json::Value, lightning_block_sync::rpc::RpcClientError> {
+        self.rpc_client
+            .call_method::<json::Value>("sendrawtransaction", &[serialize_hex(tx).into()])
+            .await
+    }
+
     pub fn new(conf: Arc<LampoConf>) -> error::Result<Self> {
         let core_url = conf.core_url.as_ref().ok_or(error::anyhow!(
             "Core URL is missing from the configuration file"
@@ -203,10 +212,23 @@ impl Backend for LampoChainSync {
     }
 
     async fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
-        let resp = self
-            .rpc_client
-            .call_method::<json::Value>("sendrawtransaction", &[serialize_hex(tx).into()])
-            .await;
+        // Retry transient rejections. Observed live on regtest (issues #572
+        // and its follow-up): `sendrawtransaction` answers `-26 non-final`
+        // when the node's height views race bitcoind's chain state during
+        // mining bursts; a few seconds later the same tx broadcasts fine
+        // (LDK's monitor rebroadcast heals exactly this way). Retrying
+        // bounded turns the whole skew class into a non-event instead of a
+        // zombie-pending funding channel.
+        let mut resp = self.broadcast_once(tx).await;
+        for attempt in 1..=3 {
+            let transient = matches!(&resp, Err(e) if format!("{e:?}").contains("non-final"));
+            if !transient {
+                break;
+            }
+            log::warn!(target: "lampo-chain", "broadcast rejected as non-final, retry {attempt}/3 in 3s");
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            resp = self.broadcast_once(tx).await;
+        }
         log::info!("Broadcasting tx result: {:?}", resp);
         let Some(handler) = self.handler.get() else {
             return;
