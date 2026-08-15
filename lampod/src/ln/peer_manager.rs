@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
@@ -51,12 +52,30 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
 type InnerLampoPeerManager =
     SimpleArcPeerManager<LampoChainMonitor, LampoChainManager, LampoLogger>;
 
+/// Upper bound on the number of outbound dials the user-facing `connect`
+/// path keeps in flight at once. Each in-flight dial pins a task, two file
+/// descriptors and an LDK peer entry until the handshake reaper frees it, so
+/// an unauthenticated flood would otherwise exhaust the process fd table.
+const MAX_CONCURRENT_DIALS: usize = 32;
+
+/// How long a single user-facing dial may run before it is abandoned. Mirrors
+/// the reconnect loop's 5 s precedent, scaled to LDK's handshake-reaper bound
+/// (two ping-timer intervals), so a silent/black-holed peer cannot pin the
+/// request forever.
+const DIAL_TIMEOUT: Duration = Duration::from_secs(20);
+
 pub struct LampoPeerManager {
     peer_manager: Option<Arc<InnerLampoPeerManager>>,
     channel_manager: Option<Arc<LampoChannelManager>>,
     conf: LampoConf,
     logger: Arc<LampoLogger>,
     onion_messenger: Option<Arc<LampoArcOnionMessenger<LampoLogger>>>,
+    /// Caps concurrent outbound dials started through `connect` (see
+    /// [`MAX_CONCURRENT_DIALS`]).
+    dial_permits: Arc<tokio::sync::Semaphore>,
+    /// Serializes outbound dials per node id so a timed-out attempt's
+    /// cleanup cannot race another dial to the same peer.
+    outbound_dial_locks: Arc<Mutex<HashMap<NodeId, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 impl LampoPeerManager {
@@ -67,7 +86,13 @@ impl LampoPeerManager {
             logger,
             channel_manager: None,
             onion_messenger: None,
+            dial_permits: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_DIALS)),
+            outbound_dial_locks: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn outbound_dial_lock(&self, node_id: NodeId) -> OutboundDialLockGuard {
+        OutboundDialLockGuard::acquire(&self.outbound_dial_locks, node_id)
     }
 
     pub fn manager(&self) -> Arc<InnerLampoPeerManager> {
@@ -192,6 +217,7 @@ impl LampoPeerManager {
             let chan_manager = chan_manager.clone();
             let shutdown = shutdown.clone();
             let store_path = peer_store_path(&self.conf);
+            let dial_locks = Arc::clone(&self.outbound_dial_locks);
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(10));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -216,13 +242,21 @@ impl LampoPeerManager {
                             target: "lampo",
                             "reconnecting to channel peer `{peer}` at `{host}`"
                         );
-                        // Bound each attempt so one hung TCP cannot stall
-                        // the rest of the channel list.
-                        let _ = tokio::time::timeout(
+                        // Share the per-node dial lock with user `/connect` so
+                        // a reconnect timeout cannot node-wide-disconnect a
+                        // concurrent user dial.
+                        let node_lock = OutboundDialLockGuard::acquire(&dial_locks, peer);
+                        let _node_guard = node_lock.lock.lock().await;
+                        if tokio::time::timeout(
                             Duration::from_secs(5),
                             dial(peer_manager.clone(), peer, host),
                         )
-                        .await;
+                        .await
+                        .is_err()
+                            && peer_manager.peer_by_node_id(&peer).is_none()
+                        {
+                            peer_manager.disconnect_by_node_id(peer);
+                        }
                     }
                 }
             });
@@ -332,7 +366,52 @@ impl LampoPeerManager {
     }
 
     pub async fn connect(&self, node_id: NodeId, host: SocketAddr) -> error::Result<()> {
-        dial(self.manager(), node_id, host).await?;
+        // Bound the resources an unauthenticated `/connect` caller can pin.
+        // Without a cap, a request flood accumulates one task + two fds + one
+        // LDK peer entry per in-flight dial until the handshake reaper frees
+        // it, exhausting the fd table and taking down both the REST API and
+        // the LN listener. Fail fast once the budget is spent instead of
+        // queueing, and time each dial out near the reaper bound so a silent
+        // peer cannot hold the slot for the full ping interval.
+        // Take a global dial permit *before* waiting on the per-node lock so
+        // silent-peer contention cannot queue unbounded HTTP tasks outside the
+        // 32-slot cap. Serialize per node so overlapping dials cannot leave a
+        // timeout's `disconnect_by_node_id` tearing down a sibling attempt that
+        // already completed (or an inbound that landed for the same id).
+        let _permit = Arc::clone(&self.dial_permits)
+            .try_acquire_owned()
+            .map_err(|_| error::anyhow!("too many concurrent connection attempts"))?;
+        let node_lock = self.outbound_dial_lock(node_id);
+        let _node_guard = node_lock.lock.lock().await;
+        let result = match tokio::time::timeout(DIAL_TIMEOUT, dial(self.manager(), node_id, host))
+            .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                // `timeout` only drops the close-notification future from
+                // `connect_outbound`; the socket and I/O tasks stay registered
+                // with the peer manager until its handshake reaper runs. Tear
+                // them down before the semaphore permit is released so a flood
+                // of timed-out `/connect`s cannot accumulate more than
+                // `MAX_CONCURRENT_DIALS` live outbound connections.
+                // Skip cleanup when a live peer already exists for this id —
+                // an inbound (or a completed sibling dial) must not be killed
+                // with the timed-out socket. `disconnect_by_node_id` is not
+                // socket-scoped.
+                if self.manager().peer_by_node_id(&node_id).is_none() {
+                    self.manager().disconnect_by_node_id(node_id);
+                } else {
+                    log::debug!(
+                        target: "lampo",
+                        "dial to `{node_id}` timed out but peer is already connected; leaving it alone"
+                    );
+                }
+                Err(error::anyhow!("timed out connecting to peer `{node_id}`"))
+            }
+        };
+        drop(_node_guard);
+        drop(node_lock);
+        result?;
         // Remember where this peer lives. LDK does not redial anyone on
         // restart, and a peer that never announced an address -- the common
         // case for an unannounced node -- is unreachable through the network
@@ -350,6 +429,47 @@ impl LampoPeerManager {
 
         self.manager().disconnect_by_node_id(node_id);
         Ok(())
+    }
+}
+
+/// Holds a per-node dial lock entry and removes it from the map on drop when
+/// nothing else references it — including when the `/connect` future is
+/// cancelled before reaching an explicit prune call.
+struct OutboundDialLockGuard {
+    node_id: NodeId,
+    lock: Arc<tokio::sync::Mutex<()>>,
+    map: Arc<Mutex<HashMap<NodeId, Arc<tokio::sync::Mutex<()>>>>>,
+}
+
+impl OutboundDialLockGuard {
+    fn acquire(
+        map: &Arc<Mutex<HashMap<NodeId, Arc<tokio::sync::Mutex<()>>>>>,
+        node_id: NodeId,
+    ) -> Self {
+        let lock = {
+            let mut map = map.lock().expect("outbound dial lock map poisoned");
+            map.entry(node_id)
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+                .clone()
+        };
+        Self {
+            node_id,
+            lock,
+            map: Arc::clone(map),
+        }
+    }
+}
+
+impl Drop for OutboundDialLockGuard {
+    fn drop(&mut self) {
+        let Ok(mut map) = self.map.lock() else {
+            return;
+        };
+        if map.get(&self.node_id).is_some_and(|existing| {
+            Arc::ptr_eq(existing, &self.lock) && Arc::strong_count(&self.lock) == 2
+        }) {
+            map.remove(&self.node_id);
+        }
     }
 }
 
