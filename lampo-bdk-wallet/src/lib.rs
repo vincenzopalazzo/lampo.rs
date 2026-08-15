@@ -286,10 +286,8 @@ impl WalletManager for BDKWalletManager {
         // but keep one block of headroom here too: a locktime equal to the
         // tip can be rejected as `non-final` if the views skew again, and
         // one block older costs nothing for anti-sniping.
-        let locktime = LockTime::from_height(
-            best_block.to_consensus_u32().saturating_sub(1),
-        )
-        .unwrap_or(LockTime::ZERO);
+        let locktime = LockTime::from_height(best_block.to_consensus_u32().saturating_sub(1))
+            .unwrap_or(LockTime::ZERO);
 
         let mut tx = wallet.build_tx();
         tx.add_recipient(script, amount)
