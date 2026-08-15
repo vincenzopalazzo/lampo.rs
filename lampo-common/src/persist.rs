@@ -218,7 +218,12 @@ impl FsPersistence {
         let inner = FilesystemStore::new(data_dir);
         let mut payments = HashMap::new();
         match inner.list(PAYMENTS_NAMESPACE, "") {
-            Ok(keys) => {
+            Ok(mut keys) => {
+                // The key starts with the creation time, so sorting makes a
+                // store left holding two records for one id (written by an
+                // older lampo) resolve to the newer one, rather than to
+                // whichever the directory happened to list first.
+                keys.sort();
                 for key in keys {
                     match inner
                         .read(PAYMENTS_NAMESPACE, "", &key)
@@ -288,14 +293,27 @@ impl KVStoreSync for FsPersistence {
 
 impl PaymentStore for FsPersistence {
     fn upsert_payment(&self, payment: &PaymentRecord) -> error::Result<()> {
+        let key = payment.storage_key();
+        // The key carries the creation time, so a record whose time changed
+        // would otherwise be written beside its old copy rather than over it,
+        // leaving two records for one id and a restart picking between them by
+        // directory order.
+        let stale_key = self
+            .payments
+            .lock()
+            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?
+            .get(&payment.id)
+            .map(|previous| previous.storage_key())
+            .filter(|previous| previous != &key);
+
         // Disk first: a record held only in memory would not survive a restart,
         // and reporting success for it would be a lie.
-        self.inner.write(
-            PAYMENTS_NAMESPACE,
-            "",
-            &payment.storage_key(),
-            json::to_vec(payment)?,
-        )?;
+        self.inner
+            .write(PAYMENTS_NAMESPACE, "", &key, json::to_vec(payment)?)?;
+        if let Some(stale_key) = stale_key {
+            self.inner
+                .remove(PAYMENTS_NAMESPACE, "", &stale_key, false)?;
+        }
         self.payments
             .lock()
             .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?
@@ -496,6 +514,39 @@ mod tests {
             reopened.get_payment("a").unwrap().unwrap().status,
             PaymentStatus::Succeeded
         );
+    }
+
+    /// The key carries the creation time, so an upsert that moves it must
+    /// replace the record rather than leave a second one behind for the same id.
+    #[test]
+    fn upserting_a_record_with_a_new_time_leaves_one_copy() {
+        let dir = ScratchDir::new("retime");
+        let store = dir.backend();
+        store
+            .upsert_payment(&payment("a", 100, PaymentStatus::Pending))
+            .unwrap();
+        store
+            .upsert_payment(&payment("a", 200, PaymentStatus::Succeeded))
+            .unwrap();
+
+        assert_eq!(
+            store
+                .list_payments(&PaymentFilter::default())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store.list(PAYMENTS_NAMESPACE, "").unwrap().len(),
+            1,
+            "the record written under the old time should be gone"
+        );
+
+        // And the surviving one has to be the newer record after a restart.
+        let reopened = dir.backend();
+        let stored = reopened.get_payment("a").unwrap().unwrap();
+        assert_eq!(stored.status, PaymentStatus::Succeeded);
+        assert_eq!(stored.created_at, 200);
     }
 
     /// The key has to sort by time so a prefix-only store can scan a window.
