@@ -72,8 +72,8 @@ try: d=json.load(sys.stdin)
 except Exception: sys.exit(1)
 chs=d.get("channels") or d.get("list_channels") or []
 print(sum(1 for c in chs if c.get("is_ready", c.get("ready", True))))' 2>/dev/null; }
-ldk_bolt11() { # ldk_bolt11 <node> <amt_msat> -> invoice string
-  lcli "$1" bolt11-receive --amount "${2}msat" 2>>"$LOG" | python3 -c 'import json,sys
+ldk_bolt11() { # ldk_bolt11 <node> <amt_msat> -> invoice string (amount is POSITIONAL)
+  lcli "$1" bolt11-receive "${2}msat" -d interop 2>>"$LOG" | python3 -c 'import json,sys
 try: d=json.load(sys.stdin)
 except Exception: print(""); sys.exit(0)
 for k in ("invoice","bolt11","payment_request","description"):
