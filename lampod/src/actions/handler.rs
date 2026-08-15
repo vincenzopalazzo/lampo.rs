@@ -19,6 +19,7 @@ use lampo_common::handler::Handler as EventHandler;
 use lampo_common::json;
 use lampo_common::jsonrpc::Request;
 use lampo_common::ldk;
+use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, TransactionType};
 use lampo_common::ldk::sign::NodeSigner;
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
@@ -627,6 +628,56 @@ impl Handler for LampoHandler {
                     }
                     log::error!(target: "lampo::handler", "no reachable address for `{node_id}`; an onion message to it will not be delivered");
                 });
+                Ok(())
+            }
+            ldk::events::Event::BumpTransaction(
+                ldk::events::bump_transaction::BumpTransactionEvent::ChannelClose {
+                    channel_id,
+                    counterparty_node_id,
+                    commitment_tx,
+                    pending_htlcs,
+                    ..
+                },
+            ) => {
+                // For anchor channels -- lampo's default channel type -- LDK
+                // does NOT broadcast the force-close commitment through the
+                // `BroadcasterInterface`. It hands the fully-signed holder
+                // commitment to the host inside this event and makes the host
+                // the sole broadcaster. The old catch-all `_` arm dropped it in
+                // a log line, so the channel balance stayed frozen on an
+                // unspent funding output with no recovery path. Broadcast it
+                // now so the funds can be swept once it confirms. A CPFP anchor
+                // child to fee-bump the (near zero-fee) commitment is still
+                // TODO, but the commitment must at least reach the mempool.
+                log::warn!(
+                    target: "lampo::handler",
+                    "channel `{channel_id}` with `{counterparty_node_id}` force-closed: \
+                     broadcasting local commitment tx `{}` ({} pending HTLC(s))",
+                    commitment_tx.compute_txid(),
+                    pending_htlcs.len(),
+                );
+                self.chain_manager.broadcast_transactions(&[(
+                    &commitment_tx,
+                    TransactionType::UnilateralClose {
+                        counterparty_node_id,
+                        channel_id,
+                    },
+                )]);
+                Ok(())
+            }
+            ldk::events::Event::BumpTransaction(
+                ldk::events::bump_transaction::BumpTransactionEvent::HTLCResolution { .. },
+            ) => {
+                // Zero-fee HTLC claims of anchor channels are likewise
+                // event-delivered and host-broadcast. Full anchor-fee handling
+                // is not implemented yet, so surface this loudly rather than
+                // silently dropping it: unresolved in-flight HTLCs can lose
+                // value once their CLTV deadlines pass.
+                log::error!(
+                    target: "lampo::handler",
+                    "unhandled BumpTransaction::HTLCResolution: in-flight HTLC claims need \
+                     manual broadcast to enforce CLTV deadlines"
+                );
                 Ok(())
             }
             _ => {
