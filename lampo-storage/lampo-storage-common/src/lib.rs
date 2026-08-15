@@ -218,10 +218,16 @@ pub fn payment_read(dialect: Dialect) -> String {
 }
 
 /// A parameter bound to a rendered query, in the order it appears.
+///
+/// Nulls carry the column type they stand in for: Postgres binds a parameter by
+/// type, so an untyped null against a `BIGINT` column is rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryParam {
     Int(i64),
     Text(String),
+    Bytes(Vec<u8>),
+    NullInt,
+    NullText,
 }
 
 /// A rendered query and the parameters to bind to it.

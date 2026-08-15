@@ -188,6 +188,17 @@ fn to_column(value: u64, what: &str) -> error::Result<i64> {
         .map_err(|_| error::anyhow!("{what} {value} does not fit a 64-bit column"))
 }
 
+/// Bind a rendered parameter to the SQLite value that carries it.
+fn to_sqlite_value(param: sql::QueryParam) -> Value {
+    match param {
+        sql::QueryParam::Int(value) => Value::Integer(value),
+        sql::QueryParam::Text(value) => Value::Text(value),
+        sql::QueryParam::Bytes(value) => Value::Blob(value),
+        // SQLite is untyped enough not to care which null this was.
+        sql::QueryParam::NullInt | sql::QueryParam::NullText => Value::Null,
+    }
+}
+
 fn row_to_payment(row: &rusqlite::Row<'_>) -> rusqlite::Result<error::Result<PaymentRecord>> {
     let direction: String = row.get(2)?;
     let status: String = row.get(5)?;
@@ -248,10 +259,7 @@ impl PaymentStore for SqliteStore {
         let query = sql::list_payments(filter, sql::Dialect::Sqlite)?;
         let conn = self.lock()?;
         let mut stmt = conn.prepare(&query.sql)?;
-        let values = query.params.into_iter().map(|param| match param {
-            sql::QueryParam::Int(value) => Value::Integer(value),
-            sql::QueryParam::Text(value) => Value::Text(value),
-        });
+        let values = query.params.into_iter().map(to_sqlite_value);
         let rows = stmt
             .query_map(params_from_iter(values), |row| row_to_payment(row))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -412,10 +420,7 @@ mod tests {
         )
         .unwrap();
 
-        let values = query.params.into_iter().map(|param| match param {
-            sql::QueryParam::Int(value) => Value::Integer(value),
-            sql::QueryParam::Text(value) => Value::Text(value),
-        });
+        let values = query.params.into_iter().map(to_sqlite_value);
         let conn = store.lock().unwrap();
         let plan: String = conn
             .query_row(
