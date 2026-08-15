@@ -160,9 +160,16 @@ check I01 "lp1<->lk1 connect" '
   sleep 3
   [ "$(peers_of lp1)" -ge 1 ]'
 
-# I02 c1: lampo opens to ldk (public, push for ldk outbound liquidity)
+# I02 c1: lampo opens to ldk (public, push for ldk outbound liquidity).
+# NOTE: open_channel() computes P2P "$to" via lib.sh arithmetic, which only
+# knows lampo node names (IDX/n<k>); lk1 would hit `unbound variable` and
+# emit a broken port field -> do the fundchannel inline with ldk_p2p.
 check I02 "open c1 lp1->lk1 (lampo, public)" '
-  open_channel lp1 lk1 "${ID[lk1]}" $CHANNEL_SAT 100000000
+  resp=$(TMO=150 rpc "$(API lp1)" fundchannel "{\"node_id\":\"${ID[lk1]}\",\"addr\":\"127.0.0.1\",\"port\":$(ldk_p2p lk1),\"amount\":$CHANNEL_SAT,\"public\":true,\"push_msat\":100000000}")
+  case "$resp" in "{"*) : ;; *) echo "non-JSON: $resp" | head -c 200; exit 1 ;; esac
+  echo "$resp" | jqf "d.get(\"error\",{}).get(\"message\",\"\")" | grep -q . && { echo "$resp" | head -c 300; exit 1; }
+  for _ in $(seq 1 20); do sz=$(bcli getmempoolinfo | jqf "d[\"result\"][\"size\"]"); [ "${sz:-0}" -gt 0 ] 2>/dev/null && break; sleep 3; done
+  mine 8
   for i in $(seq 1 40); do [ "$(ready_channels lp1)" -ge 1 ] && break; sleep 5; done
   [ "$(ready_channels lp1)" -ge 1 ]'
 # I03 c2: ldk opens to ldk (announced)
