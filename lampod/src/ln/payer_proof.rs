@@ -16,11 +16,9 @@ use lampo_common::ldk::io::{Cursor, ErrorKind};
 use lampo_common::ldk::ln::channelmanager::PaymentId;
 use lampo_common::ldk::ln::inbound_payment::ExpandedKey;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
-use lampo_common::ldk::util::persist::KVStoreSync;
 use lampo_common::ldk::util::ser::{Readable, Writeable};
+use lampo_common::persist::LampoPersistenceBackend;
 use lampo_common::secp256k1::Secp256k1;
-
-use crate::persistence::LampoPersistence;
 
 /// Namespace holding the payer proof material, keyed by hex payment id.
 ///
@@ -103,13 +101,8 @@ fn key(payment_hash: &PaymentHash) -> String {
 }
 
 /// Persist the material for `payment_hash`, overwriting any earlier record.
-///
-/// This takes the concrete store on purpose. Lampo has one backend today, and
-/// designing a persistence interface around a single implementation is how you
-/// get the wrong interface; that work is happening separately, against a real
-/// second backend.
 pub fn store(
-    persister: &Arc<LampoPersistence>,
+    persister: &Arc<dyn LampoPersistenceBackend>,
     payment_hash: &PaymentHash,
     record: &PayerProofRecord,
 ) -> error::Result<()> {
@@ -124,7 +117,7 @@ pub fn store(
 
 /// Load the material for `payment_hash`, if any was stored.
 pub fn load(
-    persister: &Arc<LampoPersistence>,
+    persister: &Arc<dyn LampoPersistenceBackend>,
     payment_hash: &PaymentHash,
 ) -> error::Result<Option<PayerProofRecord>> {
     match persister.read(PAYER_PROOF_NAMESPACE, "", &key(payment_hash)) {
