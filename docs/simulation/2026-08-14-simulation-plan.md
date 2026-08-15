@@ -215,6 +215,7 @@ the sim cluster uses fresh data dirs and disjoint ports.
 | 22:42 | Watch-item resolved: the 22:33 funding tx (fresh flow) created+broadcast+confirmed normally — the 22:03 gap was the zombie harness kill interrupting between tx creation and broadcast, environmental not a code bug |
 | 22:45 | **#567 part 2 (PR #571)**: `listpayments` RPC — in-memory capped history fed by a bus subscriber (sent: terminal PaymentEvent + preimage from PaymentReceipt; received: new PaymentReceived event emitted from the PaymentClaimed handler, which carried the FIXME this implements) |
 | 23:29 | **listpayments verified live**: fresh binary, 12 rounds in, n1 returns 9 records; received record preimage `d482bd7a…` + amount 460135 match round 9's console output exactly. Issue #567 now fully addressed (#568 + #571). Soak relaunched on binary 29473fe (SEED=4305) |
+| 23:34 | Faucet RouteNotFound watch-item **resolved via `networkchannels` diagnosis**: gossip machinery is correct (nodes see own + direct-peer channels on both networks — n1: 4/4 sim channels, m1: own channel). All signet nodes hang off the same leaf peer (025d6aec) which relays only its own 2 channels → our island is topologically disconnected from the faucet's graph region. Fix = open a channel to a well-connected mutinynet hub (topology task, not code) |
 
 Operational lessons encoded into the harness:
 - lampo wallet applies ~1 block/s in 2-min windows → poll `wallet_height` vs `blockheight` before opening channels
