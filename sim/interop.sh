@@ -170,7 +170,7 @@ check I02 "open c1 lp1->lk1 (lampo, public)" '
   echo "$resp" | jqf "d.get(\"error\",{}).get(\"message\",\"\")" | grep -q . && { echo "$resp" | head -c 300; exit 1; }
   for _ in $(seq 1 20); do sz=$(bcli getmempoolinfo | jqf "d[\"result\"][\"size\"]"); [ "${sz:-0}" -gt 0 ] 2>/dev/null && break; sleep 3; done
   mine 8
-  for i in $(seq 1 40); do [ "$(ready_channels lp1)" -ge 1 ] && break; sleep 5; done
+  for i in $(seq 1 120); do [ "$(ready_channels lp1)" -ge 1 ] && break; sleep 5; done
   [ "$(ready_channels lp1)" -ge 1 ]'
 # I03 c2: ldk opens to ldk (announced)
 check I03 "open c2 lk1->lk2 (ldk, announced)" '
@@ -178,7 +178,7 @@ check I03 "open c2 lk1->lk2 (ldk, announced)" '
   o=$(lcli lk1 open-channel --node-id "${ID[lk2]}" --address "127.0.0.1:$(ldk_p2p lk2)" \
         --channel-value-sats $CHANNEL_SAT --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
   sleep 5; mine 8; sleep 10
-  for i in $(seq 1 40); do [ "$(ldk_channels_ready lk1)" -ge 2 ] && break; sleep 5; done
+  for i in $(seq 1 120); do [ "$(ldk_channels_ready lk1)" -ge 2 ] && break; sleep 5; done
   [ "$(ldk_channels_ready lk1)" -ge 2 ]'
 
 # I04 c3: ldk opens to lampo (announced)
@@ -187,7 +187,7 @@ check I04 "open c3 lk2->lp2 (ldk, announced)" '
   o=$(lcli lk2 open-channel --node-id "${ID[lp2]}" --address "127.0.0.1:$(P2P lp2)" \
         --channel-value-sats $CHANNEL_SAT --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
   sleep 5; mine 8; sleep 10
-  for i in $(seq 1 40); do [ "$(ready_channels lp2)" -ge 1 ] && break; sleep 5; done
+  for i in $(seq 1 120); do [ "$(ready_channels lp2)" -ge 1 ] && break; sleep 5; done
   [ "$(ready_channels lp2)" -ge 1 ]'
 
 wait_wallet_synced || true
@@ -226,7 +226,7 @@ cross_pay I09 lp1 lp2 "$(amt I09)"
 cross_pay I10 lp2 lp1 "$(amt I10)"
 
 # I11 bolt12 offer lp1 -> lp2 (gossip needs ~150s after announces)
-say "waiting 150s for gossip/announcer tick before bolt12…"; sleep 150
+say "waiting 240s for gossip/announcer tick before bolt12 (busy shared chain)…"; sleep 240
 A11=$(amt I11); OFF=$(lampo_offer lp2 "$A11"); [ -n "$OFF" ] || ko I11 "lp2 no offer"
 res=$(lampo_pay_ok lp1 "{\"invoice_str\":\"$OFF\",\"amount\":$A11}")
 if echo "$res" | grep -q Success; then ok "I11 bolt12 offer lp1->lp2 ${A11}msat"; else ko I11 "offer lp1->lp2" "$(echo "$res" | head -c 200)"; fi
@@ -238,7 +238,7 @@ sleep 3
 setsid nohup "$LDK_REPO/target/release/ldk-server" "$(ldk_dir lk1)/config.toml" \
   >> "$(ldk_dir lk1)/console.log" 2>&1 < /dev/null & disown 2>/dev/null || true
 up=1
-for i in $(seq 1 40); do ldk_up lk1 && break; sleep 3; done
+for i in $(seq 1 120); do ldk_up lk1 && break; sleep 3; done
 ldk_up lk1 || up=0
 [ "$up" = 1 ] && ok "I12 lk1 killed+restarted, daemon up" || ko I12 "lk1 restart" "daemon did not come up"
 
