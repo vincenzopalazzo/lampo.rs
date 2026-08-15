@@ -305,6 +305,7 @@ impl LampoTesting {
                     public: true,
                     port: None,
                     addr: None,
+                    push_msat: None,
                 },
             )
             .await

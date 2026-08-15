@@ -75,6 +75,7 @@ pub async fn fund_a_simple_channel_from_lampo_to_cln() -> error::Result<()> {
                 amount: 100000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         .await?;
@@ -292,6 +293,7 @@ pub fn decode_cln_offer_from_lampo() {
                 amount: 500_000_000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         // Wait a little bit that the open channel will finish!
@@ -399,6 +401,7 @@ pub fn decode_cln_offer_from_lampo_minimal_offer() {
                 amount: 500_000_000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         // Wait a little bit that the open channel will finish!
@@ -500,6 +503,7 @@ pub fn fetchinvoice_cln_offer_from_lampo() {
                 amount: 500_000_000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         // Wait a little bit that the open channel will finish!
@@ -707,6 +711,7 @@ pub fn pay_invoice_to_cln() {
                 amount: 500_000_000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         // Wait a little bit that the open channel will finish!
@@ -813,6 +818,7 @@ fn be_able_to_kesend_payments() {
                 amount: 1_500_000_000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         .unwrap();
@@ -866,6 +872,7 @@ fn be_able_to_kesend_payments() {
         request::KeySend {
             destination: info_cln.id.clone(),
             amount_msat: 100_00_000,
+            timeout: Default::default(),
         },
     );
     assert!(result.is_ok(), "{:?}", result);
@@ -907,6 +914,7 @@ fn test_closing_two_channels_without_channelid_fails() {
                 amount: 1_500_000_000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         .unwrap();
@@ -921,6 +929,7 @@ fn test_closing_two_channels_without_channelid_fails() {
                 amount: 1_000_000_000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         .unwrap();
@@ -1015,6 +1024,7 @@ fn test_lampo_to_cln_close_channel_with_channel_id_success() {
                 amount: 1_500_000_000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         .unwrap();
@@ -1117,6 +1127,7 @@ fn test_lampo_to_cln_close_channel_without_channel_id_success() {
                 amount: 1_500_000_000,
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
             },
         )
         .unwrap();

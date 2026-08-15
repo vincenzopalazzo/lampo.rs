@@ -71,6 +71,7 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
                 public: true,
                 port: None,
                 addr: None,
+                push_msat: None,
             },
         )
         .await
@@ -157,6 +158,7 @@ pub async fn fundchannel_honors_the_public_flag() -> error::Result<()> {
                     public: announce,
                     port: None,
                     addr: None,
+                    push_msat: None,
                 },
             )
             .await
@@ -274,6 +276,7 @@ pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
                 invoice_str: invoice.bolt11,
                 amount: None,
                 bolt12: None,
+                timeout: Default::default(),
             },
         )
         .await?;
@@ -322,6 +325,7 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
                 invoice_str: offer.bolt12,
                 amount: None,
                 bolt12: None,
+                timeout: Default::default(),
             },
         )
         .await?;
@@ -386,6 +390,7 @@ pub async fn pay_offer_minimal_offer() -> error::Result<()> {
                 invoice_str: offer.bolt12,
                 amount: Some(100_000),
                 bolt12: None,
+                timeout: Default::default(),
             },
         )
         .await?;
@@ -449,6 +454,7 @@ pub async fn decode_invoice() -> error::Result<()> {
                 invoice_str: invoice.bolt11,
                 amount: None,
                 bolt12: None,
+                timeout: Default::default(),
             },
         )
         .await?;
@@ -519,6 +525,7 @@ pub async fn decode_offer_hex() -> error::Result<()> {
                 invoice_str: offer.bolt12,
                 amount: None,
                 bolt12: None,
+                timeout: Default::default(),
             },
         )
         .await?;
