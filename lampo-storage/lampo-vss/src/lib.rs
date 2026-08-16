@@ -25,6 +25,7 @@
 //! is a different matter.
 //!
 //! [VSS]: https://github.com/lightningdevkit/vss-server
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -61,6 +62,13 @@ pub trait ShadowSink: Send + Sync {
     /// A key that is already absent is success: the desired end state is that
     /// the key is gone.
     fn delete(&self, key: &str) -> error::Result<()>;
+
+    /// List every key currently held in the shadow.
+    ///
+    /// Used when reseeding so remote entries that no longer exist in the
+    /// primary can be queued for deletion; without this, an archived monitor
+    /// left on the server would still be present after `lag()` reports zero.
+    fn list_keys(&self) -> error::Result<Vec<String>>;
 }
 
 /// How long to wait before retrying a failed mirror, and the ceiling that
@@ -117,6 +125,9 @@ impl VssShadow {
         // queue, so a partial seed is retried on the next start.
         queue::write_reconcile_required(shadow.primary.as_ref(), true)?;
         shadow.seed()?;
+        // Seed only queues keys that still exist. Keys removed while VSS was
+        // off would otherwise remain on the server after lag() reports zero.
+        shadow.prune_absent_shadow_keys(sink.as_ref())?;
         queue::write_dropped(shadow.primary.as_ref(), 0)?;
         shadow.dropped.store(0, Ordering::SeqCst);
         queue::write_reconcile_required(shadow.primary.as_ref(), false)?;
@@ -215,6 +226,44 @@ impl VssShadow {
             }
         }
         Ok(())
+    }
+
+    /// Queue deletions for shadow keys that are no longer in the primary.
+    fn prune_absent_shadow_keys(&self, sink: &dyn ShadowSink) -> error::Result<()> {
+        let desired = self.desired_shadow_keys()?;
+        for remote_key in sink.list_keys()? {
+            if desired.contains(&remote_key) {
+                continue;
+            }
+            let Some((primary_ns, secondary_ns, key)) = split_shadow_key(&remote_key) else {
+                log::warn!(
+                    target: "lampo-vss",
+                    "skipping unparseable shadow key during prune: {remote_key}"
+                );
+                continue;
+            };
+            if !self.mirror_remove(&primary_ns, &secondary_ns, &key) {
+                error::bail!("failed to queue deletion of {remote_key} while seeding");
+            }
+        }
+        Ok(())
+    }
+
+    /// Every shadow key the primary currently wants the remote to hold.
+    fn desired_shadow_keys(&self) -> error::Result<HashSet<String>> {
+        let mut desired = HashSet::new();
+        for (primary_ns, secondary_ns, key) in self.primary.list_all_keys()? {
+            if primary_ns == queue::QUEUE_NAMESPACE || primary_ns == queue::STATE_NAMESPACE {
+                continue;
+            }
+            desired.insert(format!("{primary_ns}/{secondary_ns}/{key}"));
+        }
+        if !matches!(self.primary.kind(), PersistenceKind::Filesystem) {
+            for payment in self.primary.list_payments(&PaymentFilter::default())? {
+                desired.insert(format!("{PAYMENTS_NAMESPACE}//{}", payment.storage_key()));
+            }
+        }
+        Ok(desired)
     }
 
     /// Mark the primary as requiring reconciliation before mutating it.
@@ -342,6 +391,16 @@ impl VssShadow {
 
 fn io_err(err: error::Error) -> io::Error {
     io::Error::new(io::ErrorKind::Other, err.to_string())
+}
+
+/// Split a flattened shadow key back into the primary/secondary/key triple.
+///
+/// The first two `/`-separated segments are the namespaces; the rest is the
+/// key, which may itself contain `/`.
+fn split_shadow_key(shadow_key: &str) -> Option<(String, String, String)> {
+    let (primary, rest) = shadow_key.split_once('/')?;
+    let (secondary, key) = rest.split_once('/')?;
+    Some((primary.to_owned(), secondary.to_owned(), key.to_owned()))
 }
 
 impl KVStoreSync for VssShadow {
@@ -523,6 +582,13 @@ mod tests {
             }
             self.stored.lock().unwrap().remove(key);
             Ok(())
+        }
+
+        fn list_keys(&self) -> error::Result<Vec<String>> {
+            // Listing is used at wrap time to prune orphans. A sink that is
+            // merely failing puts/deletes can still answer the inventory; a
+            // real unreachable VSS fails this and aborts wrap instead.
+            Ok(self.stored.lock().unwrap().keys().cloned().collect())
         }
     }
 
@@ -820,6 +886,36 @@ mod tests {
             shadow.lag().map(|lag| lag.pending == 0).unwrap_or(false)
                 && sink.stored().get("ns//key").map(Vec::as_slice)
                     == Some(b"current-value".as_slice())
+        });
+    }
+
+    /// Keys removed while VSS was disabled must leave the remote on reattach,
+    /// otherwise lag() can report a complete copy that still holds a stale
+    /// live monitor.
+    #[test]
+    fn reattaching_deletes_shadow_keys_absent_from_the_primary() {
+        let dir = ScratchDir::new("reseed-delete");
+        let primary = dir.primary();
+        primary
+            .write("monitors", "", "live", b"keep".to_vec())
+            .unwrap();
+        queue::write_reconcile_required(primary.as_ref(), false).unwrap();
+
+        let sink = Arc::new(FakeSink::default());
+        sink.stored
+            .lock()
+            .unwrap()
+            .insert("monitors//live".to_owned(), b"keep".to_vec());
+        sink.stored
+            .lock()
+            .unwrap()
+            .insert("monitors//archived".to_owned(), b"stale".to_vec());
+
+        let shadow = VssShadow::wrap(primary, sink.clone()).unwrap();
+        eventually("the stale monitor to leave the shadow", || {
+            shadow.lag().map(|lag| lag.pending == 0).unwrap_or(false)
+                && sink.stored().contains_key("monitors//live")
+                && !sink.stored().contains_key("monitors//archived")
         });
     }
 

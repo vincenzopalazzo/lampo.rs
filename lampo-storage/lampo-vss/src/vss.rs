@@ -9,7 +9,7 @@ use std::thread;
 use lampo_common::error;
 use vss_client::client::VssClient;
 use vss_client::error::VssError;
-use vss_client::types::{KeyValue, PutObjectRequest};
+use vss_client::types::{KeyValue, ListKeyVersionsRequest, PutObjectRequest};
 use vss_client::util::retry::{ExponentialBackoffRetryPolicy, RetryPolicy};
 
 use crate::ShadowSink;
@@ -24,6 +24,9 @@ enum Request {
     Delete {
         key: String,
         reply: std_mpsc::SyncSender<Result<(), String>>,
+    },
+    List {
+        reply: std_mpsc::SyncSender<Result<Vec<String>, String>>,
     },
 }
 
@@ -66,7 +69,7 @@ impl VssSink {
 
                 runtime.block_on(async move {
                     while let Ok(request) = rx.recv() {
-                        let (reply, result) = match request {
+                        match request {
                             Request::Put { key, value, reply } => {
                                 let request = PutObjectRequest {
                                     store_id: store_id.clone(),
@@ -81,14 +84,12 @@ impl VssSink {
                                     }],
                                     delete_items: vec![],
                                 };
-                                (
-                                    reply,
-                                    client
-                                        .put_object(&request)
-                                        .await
-                                        .map(|_| ())
-                                        .map_err(|err| format!("{err:?}")),
-                                )
+                                let result = client
+                                    .put_object(&request)
+                                    .await
+                                    .map(|_| ())
+                                    .map_err(|err| format!("{err:?}"));
+                                let _ = reply.send(result);
                             }
                             Request::Delete { key, reply } => {
                                 let request = PutObjectRequest {
@@ -109,16 +110,43 @@ impl VssSink {
                                     | Err(VssError::NoSuchKeyError(_)) => Ok(()),
                                     Err(err) => Err(format!("{err:?}")),
                                 };
-                                (reply, result)
+                                let _ = reply.send(result);
                             }
-                        };
-                        let _ = reply.send(result);
+                            Request::List { reply } => {
+                                let _ = reply.send(list_all_keys(&client, &store_id).await);
+                            }
+                        }
                     }
                 });
             })?;
 
         Ok(Self { requests })
     }
+}
+
+async fn list_all_keys<R>(client: &VssClient<R>, store_id: &str) -> Result<Vec<String>, String>
+where
+    R: RetryPolicy<E = VssError>,
+{
+    let mut keys = Vec::new();
+    let mut page_token = None;
+    loop {
+        let response = client
+            .list_key_versions(&ListKeyVersionsRequest {
+                store_id: store_id.to_owned(),
+                key_prefix: None,
+                page_size: None,
+                page_token,
+            })
+            .await
+            .map_err(|err| format!("{err:?}"))?;
+        keys.extend(response.key_versions.into_iter().map(|kv| kv.key));
+        match response.next_page_token {
+            Some(token) if !token.is_empty() => page_token = Some(token),
+            _ => break,
+        }
+    }
+    Ok(keys)
 }
 
 impl ShadowSink for VssSink {
@@ -144,6 +172,17 @@ impl ShadowSink for VssSink {
                 key: key.to_owned(),
                 reply,
             })
+            .map_err(|_| error::anyhow!("the VSS sink thread is gone"))?;
+        answer
+            .recv()
+            .map_err(|_| error::anyhow!("the VSS sink thread dropped the reply"))?
+            .map_err(|err| error::anyhow!("{err}"))
+    }
+
+    fn list_keys(&self) -> error::Result<Vec<String>> {
+        let (reply, answer) = std_mpsc::sync_channel(1);
+        self.requests
+            .send(Request::List { reply })
             .map_err(|_| error::anyhow!("the VSS sink thread is gone"))?;
         answer
             .recv()
