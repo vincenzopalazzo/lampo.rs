@@ -7,7 +7,6 @@ use tokio::sync::RwLock;
 
 use lampo_common::async_trait;
 use lampo_common::bitcoin::Amount;
-use lampo_common::bitcoin::FeeRate;
 use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::error::Ok;
@@ -24,7 +23,7 @@ use lampo_common::ldk::sign::NodeSigner;
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
 
-use crate::chain::{LampoChainManager, WalletManager};
+use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
@@ -297,26 +296,16 @@ impl Handler for LampoHandler {
                         );
                     }
                 };
-                // FIXME: estimate the fee rate with a callback
-                let fee = match self.chain_manager.backend.fee_rate_estimation(6).await {
-                    std::result::Result::Ok(fee) => fee,
-                    Err(err) => {
-                        let msg = format!("Channel Opening Error: {err}");
-                        // The `open_channel` waiter only wakes on a matching
-                        // `SendRawTransaction` or `FundingChannelFailed`; without
-                        // emitting the latter a fee-estimation failure leaves that
-                        // request task hanging forever (socket + event-bus
-                        // subscription leaked), which an unauthenticated caller
-                        // can exploit.
-                        abandon_temp_channel(self, &msg);
-                        self.emit(Event::Lightning(LightningEvent::ChannelEvent {
-                            state: "error".to_owned(),
-                            message: msg,
-                        }));
-                        return Err(err);
-                    }
-                };
-                log::info!("fee estimated {:?} sats", fee);
+                // Same as ldk-node: ChannelFunding is 12-block economical,
+                // read from the cache (never block the event loop on RPC).
+                let fee_rate = self
+                    .chain_manager
+                    .estimate_fee_rate(FeeTarget::ChannelFunding);
+                log::info!(
+                    target: "lampo",
+                    "funding fee rate {} sat/kW",
+                    fee_rate.to_sat_per_kwu()
+                );
 
                 let best_block = self.channel_manager.manager().current_best_block().height;
                 let transaction = match self
@@ -324,7 +313,7 @@ impl Handler for LampoHandler {
                     .create_transaction(
                         output_script,
                         Amount::from_sat(channel_value_satoshis),
-                        FeeRate::from_sat_per_vb_unchecked(fee as u64),
+                        fee_rate,
                         // FIXME: remove unwrap
                         Height::from_consensus(best_block).unwrap(),
                     )

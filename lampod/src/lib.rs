@@ -154,8 +154,15 @@ impl LampoDaemon {
 
     pub fn init_onchaind(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         log::debug!(target: "lampod", "init onchaind ..");
-        let onchain_manager = LampoChainManager::new(client, self.wallet_manager.clone());
-        self.onchain_manager = Some(Arc::new(onchain_manager));
+        let onchain_manager = Arc::new(LampoChainManager::new(
+            client,
+            self.wallet_manager.clone(),
+            self.conf.network,
+            self.shutdown.clone(),
+        ));
+        // Warm the fee cache during the rest of init; do not wait for listen().
+        onchain_manager.clone().spawn_fee_refresh();
+        self.onchain_manager = Some(onchain_manager);
         Ok(())
     }
 
