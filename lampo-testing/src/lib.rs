@@ -27,6 +27,7 @@ use lampo_common::json;
 use lampo_common::model::request;
 use lampo_common::model::response;
 use lampo_httpd::handler::HttpdHandler;
+use lampo_lnd::LndRestConfig;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -101,6 +102,29 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     Ok(())
 }
 
+pub async fn run_lnd_rest(lampod: Arc<LampoDaemon>, port: u16) -> error::Result<(u16, String)> {
+    let data = lampod.conf().path();
+    let tls_dir = format!("{data}/lnd-rest");
+    let macaroon_dir = format!("{data}/lnd-rest/macaroons");
+    let admin_path = format!("{macaroon_dir}/admin.macaroon");
+    let conf = LndRestConfig {
+        listen_host: "127.0.0.1".to_string(),
+        listen_port: port,
+        tls_dir: tls_dir.into(),
+        macaroon_dir: macaroon_dir.into(),
+    };
+    lampo_lnd::spawn(lampod, conf)?;
+
+    for _ in 0..100 {
+        if std::path::Path::new(&admin_path).exists() {
+            let bytes = tokio::fs::read(&admin_path).await?;
+            return Ok((port, hex::encode(bytes)));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    error::bail!("timed out waiting for LND REST admin.macaroon at {admin_path}")
+}
+
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     root_path: Arc<TempDir>,
@@ -109,6 +133,8 @@ pub struct LampoTesting {
     pub mnemonic: String,
     pub btc: Arc<BtcNode>,
     pub info: response::GetInfo,
+    pub lnd_rest_port: u16,
+    pub lnd_admin_macaroon_hex: String,
 }
 
 impl LampoTesting {
@@ -187,6 +213,10 @@ impl LampoTesting {
         run_httpd(lampo.clone()).await?;
         log::info!("httpd started");
 
+        let lnd_port = port::random_free_port().unwrap();
+        let (_, macaroon_hex) = run_lnd_rest(lampo.clone(), lnd_port).await?;
+        log::info!("lnd rest started on {lnd_port}");
+
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
         tokio::spawn(lampo.listen());
@@ -210,6 +240,8 @@ impl LampoTesting {
             btc,
             root_path: Arc::new(dir),
             info,
+            lnd_rest_port: lnd_port,
+            lnd_admin_macaroon_hex: macaroon_hex,
         };
         node.fund_wallet(102).await?;
         Ok(node)
