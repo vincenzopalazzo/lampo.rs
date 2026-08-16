@@ -247,6 +247,7 @@ pub async fn run_lnd_rest_api(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     let lnd_conf = LndRestConfig {
         listen_host: host.clone(),
         listen_port: port,
+        tls_extra_sans: conf.lnd_tls_sans.clone(),
         tls_dir: tls_dir.into(),
         macaroon_dir: macaroon_dir.clone().into(),
     };

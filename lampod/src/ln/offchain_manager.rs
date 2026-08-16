@@ -148,6 +148,7 @@ impl OffchainManager {
         invoice_str: &str,
         amount_msat: Option<u64>,
         max_fee_msat: Option<u64>,
+        retry_timeout_secs: Option<u64>,
     ) -> error::Result<PaymentId> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
@@ -167,7 +168,9 @@ impl OffchainManager {
                 payment_id,
                 amount_msat,
                 OptionalBolt11PaymentParams {
-                    retry_strategy: Retry::Attempts(10),
+                    retry_strategy: retry_timeout_secs
+                        .map(|seconds| Retry::Timeout(Duration::from_secs(seconds)))
+                        .unwrap_or(Retry::Attempts(10)),
                     route_params_config: ldk::routing::router::RouteParametersConfig {
                         max_total_routing_fee_msat: max_fee_msat,
                         ..Default::default()

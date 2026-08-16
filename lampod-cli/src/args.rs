@@ -70,6 +70,10 @@ pub struct LampoCliArgs {
     #[arg(long = "lnd")]
     pub lnd: bool,
 
+    /// Add a DNS name or IP address to the LND REST TLS certificate
+    #[arg(long = "lnd-tls-san", value_delimiter = ',')]
+    pub lnd_tls_sans: Vec<String>,
+
     /// Subcommand to run
     #[command(subcommand)]
     pub subcommand: Option<LampoCliSubcommand>,
@@ -125,6 +129,9 @@ impl TryInto<LampoConf> for LampoCliArgs {
         }
         if self.lnd {
             conf.lnd = Some(true);
+        }
+        if !self.lnd_tls_sans.is_empty() {
+            conf.lnd_tls_sans = self.lnd_tls_sans;
         }
         Ok(conf)
     }

@@ -35,7 +35,7 @@ pub mod request {
         /// How long the RPC waits for the terminal `PaymentEvent` (`fast` / `medium` / `large`).
         #[serde(default)]
         pub timeout: PayTimeout,
-        /// Exact payment wait timeout in seconds, when requested by a compatible API.
+        /// Retry deadline before an HTLC is launched, for compatible payment APIs.
         #[serde(default)]
         pub timeout_secs: Option<u64>,
     }

@@ -121,17 +121,28 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
             &request.invoice_str,
             request.amount,
             request.max_fee_msat,
+            request.timeout_secs,
         )?
     };
     // The event bus broadcasts to every subscriber, so a concurrent `pay` would
     // otherwise see this payment's result -- and now its preimage and payer
     // proof too. Only accept events carrying our own payment id.
     let payment_id = hex::encode(payment_id.0);
-    let timeout = request
-        .timeout_secs
-        .map(Duration::from_secs)
-        .unwrap_or_else(|| request.timeout.duration());
+    // LND-compatible callers use `timeout_secs` as the retry deadline before
+    // an HTLC is launched. Once the payment API accepts an initial route, wait
+    // for the real terminal event so an in-flight payment is never reported as
+    // failed merely because that deadline elapsed.
+    let timeout = terminal_wait_timeout(request.timeout_secs, request.timeout.duration());
     wait_for_payment_result(events, &payment_id, timeout).await
+}
+
+fn terminal_wait_timeout(
+    compatible_retry_timeout_secs: Option<u64>,
+    default_timeout: Duration,
+) -> Option<Duration> {
+    compatible_retry_timeout_secs
+        .is_none()
+        .then_some(default_timeout)
 }
 
 /// Hold the `PaymentReceipt` (preimage, payer proof) until the terminal
@@ -142,14 +153,12 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
 async fn wait_for_payment_result(
     mut events: lampo_common::chan::UnboundedReceiver<Event>,
     payment_id: &str,
-    timeout: Duration,
+    timeout: Option<Duration>,
 ) -> Result<json::Value, Error> {
-    // Single deadline for the whole RPC wait. The event bus is broadcast, so
-    // unrelated events must not reset the timer — only the terminal
-    // `PaymentEvent` for `payment_id` completes the call (success or failure).
-    // If that event never arrives, stop waiting after `timeout` instead of
-    // blocking forever; the payment itself may still be retried in the background.
-    let deadline = Instant::now() + timeout;
+    // Regular JSON-RPC calls retain a single deadline for the whole wait.
+    // LND-compatible calls have no terminal deadline because their timeout only
+    // limits the period before launching an HTLC.
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
 
     // The receipt lands on `PaymentReceipt` and the hop path on the terminal
     // `PaymentEvent`, so hold the receipt until the payment finishes.
@@ -157,25 +166,29 @@ async fn wait_for_payment_result(
 
     loop {
         log::warn!(target: "lampod::jsonrpc::offchain", "Waiting for payment event...");
-        let event = tokio::time::timeout_at(deadline, events.recv())
-            .await
-            .map_err(|_| {
-                Error::Rpc(RpcError {
-                    code: -1,
-                    message: format!(
-                        "payment `{}` did not complete within {}s (no terminal Payment event; \
-                         payment status unknown — it may still be retried in the background)",
-                        payment_id,
-                        timeout.as_secs()
-                    ),
-                    data: None,
-                })
-            })?
-            .ok_or(Error::Rpc(RpcError {
-                code: -1,
-                message: format!("No event received, communication channel dropped"),
-                data: None,
-            }))?;
+        let event = if let Some(deadline) = deadline {
+            tokio::time::timeout_at(deadline, events.recv())
+                .await
+                .map_err(|_| {
+                    Error::Rpc(RpcError {
+                        code: -1,
+                        message: format!(
+                            "payment `{}` did not complete within {}s (no terminal Payment event; \
+                             payment status unknown — it may still be retried in the background)",
+                            payment_id,
+                            timeout.map(|value| value.as_secs()).unwrap_or_default()
+                        ),
+                        data: None,
+                    })
+                })?
+        } else {
+            events.recv().await
+        }
+        .ok_or(Error::Rpc(RpcError {
+            code: -1,
+            message: format!("No event received, communication channel dropped"),
+            data: None,
+        }))?;
 
         match event {
             Event::Lightning(LightningEvent::PaymentReceipt {
@@ -220,5 +233,22 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     // Same id semantics as `pay`: the hex payment hash identifies the
     // payment on the event bus.
     let payment_id = hex::encode(payment_id.0);
-    wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
+    wait_for_payment_result(events, &payment_id, Some(request.timeout.duration())).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compatible_retry_deadline_does_not_end_terminal_wait() {
+        assert_eq!(
+            terminal_wait_timeout(Some(60), Duration::from_secs(120)),
+            None
+        );
+        assert_eq!(
+            terminal_wait_timeout(None, Duration::from_secs(120)),
+            Some(Duration::from_secs(120))
+        );
+    }
 }

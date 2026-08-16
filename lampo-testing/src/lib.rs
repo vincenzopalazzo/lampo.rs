@@ -110,6 +110,7 @@ pub async fn run_lnd_rest(lampod: Arc<LampoDaemon>, port: u16) -> error::Result<
     let conf = LndRestConfig {
         listen_host: "127.0.0.1".to_string(),
         listen_port: port,
+        tls_extra_sans: Vec::new(),
         tls_dir: tls_dir.into(),
         macaroon_dir: macaroon_dir.into(),
     };

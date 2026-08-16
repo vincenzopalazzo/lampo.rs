@@ -20,6 +20,7 @@ use crate::tls::TlsMaterial;
 pub struct LndRestConfig {
     pub listen_host: String,
     pub listen_port: u16,
+    pub tls_extra_sans: Vec<String>,
     pub tls_dir: PathBuf,
     pub macaroon_dir: PathBuf,
 }
@@ -92,11 +93,7 @@ fn build_server(
     } else {
         format!("{}:{}", conf.listen_host, conf.listen_port)
     };
-    let hosts = vec![
-        conf.listen_host.clone(),
-        "localhost".to_string(),
-        "127.0.0.1".to_string(),
-    ];
+    let hosts = certificate_hosts(&conf);
     let tls = TlsMaterial::load_or_create(&conf.tls_dir, &hosts)
         .map_err(|e| error::anyhow!("tls init failed: {e}"))?;
     let rustls_config = tls
@@ -183,4 +180,40 @@ fn build_server(
     .map_err(|e| error::anyhow!("failed to bind LND REST on {addr}: {e}"))?
     .run();
     Ok(server)
+}
+
+fn certificate_hosts(conf: &LndRestConfig) -> Vec<String> {
+    let mut hosts = vec![
+        conf.listen_host.clone(),
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+    ];
+    for host in &conf.tls_extra_sans {
+        if !host.is_empty() && !hosts.contains(host) {
+            hosts.push(host.clone());
+        }
+    }
+    hosts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn includes_remote_tls_names_with_wildcard_listener() {
+        let conf = LndRestConfig {
+            listen_host: "0.0.0.0".into(),
+            listen_port: 8080,
+            tls_extra_sans: vec!["node.local".into(), "192.168.1.10".into()],
+            tls_dir: PathBuf::new(),
+            macaroon_dir: PathBuf::new(),
+        };
+
+        let hosts = certificate_hosts(&conf);
+        assert!(hosts.contains(&"node.local".to_string()));
+        assert!(hosts.contains(&"192.168.1.10".to_string()));
+        assert!(hosts.contains(&"localhost".to_string()));
+    }
 }
