@@ -8,7 +8,8 @@ members = [
         "lampo-testing",
         "tests/tests",
         "lampo-chain",
-        "lampo-bdk-wallet"
+        "lampo-bdk-wallet",
+        "lampo-lsp",
 ]
 
 default-members = [
@@ -18,7 +19,8 @@ default-members = [
         "lampo-cli",
         "lampo-httpd",
         "lampo-chain",
-        "lampo-bdk-wallet"
+        "lampo-bdk-wallet",
+        "lampo-lsp",
 ]
 resolver = "2"
 
@@ -33,3 +35,4 @@ lightning-persister = { version = "0.3.0-beta1", features = ["tokio"] }
 lightning-background-processor = "0.3.0-beta1"
 lightning-net-tokio = "0.3.0-beta1"
 lightning-rapid-gossip-sync = "0.3.0-beta1"
+lightning-liquidity = "0.3.0-beta1"

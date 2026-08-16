@@ -19,6 +19,7 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
 use lampo_httpd::handler::HttpdHandler;
+use lampo_lsp::LampoLsp;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
 
@@ -191,6 +192,10 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         })?;
 
     let lampod = Arc::new(lampod);
+
+    // Attach the LSP plugin before HttpdHandler so `lsp-info` is answered
+    // in-process and does not recurse through HTTP.
+    LampoLsp::attach(&lampod).await?;
 
     run_httpd(lampod.clone()).await?;
 

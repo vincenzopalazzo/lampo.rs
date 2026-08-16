@@ -1822,6 +1822,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lampo-lsp"
+version = "0.1.0"
+dependencies = [
+ "lampo-common",
+ "lampod",
+ "lightning-liquidity",
+ "log",
+ "tokio",
+]
+
+[[package]]
 name = "lampo-testing"
 version = "0.1.0"
 dependencies = [
@@ -1831,6 +1842,7 @@ dependencies = [
  "lampo-chain",
  "lampo-common",
  "lampo-httpd",
+ "lampo-lsp",
  "lampod",
  "log",
  "port-selector",
@@ -1862,6 +1874,7 @@ dependencies = [
  "lampo-chain",
  "lampo-common",
  "lampo-httpd",
+ "lampo-lsp",
  "lampod",
  "log",
  "radicle-term",

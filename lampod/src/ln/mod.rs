@@ -1,6 +1,7 @@
 //! Lampo Channel Manager
 mod channel_manager;
 mod inventory_manager;
+mod msg_router;
 mod offchain_manager;
 mod peer_manager;
 

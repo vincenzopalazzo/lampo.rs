@@ -33,6 +33,7 @@ use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
+use lampo_common::msg::LampoMsgHandler;
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
@@ -279,6 +280,14 @@ impl LampoDaemon {
         };
         handler.add_external_handler(ext_handler).await?;
         Ok(())
+    }
+
+    /// Register a custom-message plugin on the peer manager's type-erased router.
+    ///
+    /// Must be called after [`Self::init`] and before peers connect so feature
+    /// bits and `peer_connected` hooks are visible.
+    pub fn add_custom_msg_handler(&self, handler: Arc<dyn LampoMsgHandler>) -> error::Result<()> {
+        self.peer_manager().add_custom_msg_handler(handler)
     }
 
     pub fn listen(self: Arc<Self>) -> JoinHandle<Result<(), io::Error>> {
