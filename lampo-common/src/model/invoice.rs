@@ -28,6 +28,9 @@ pub mod request {
     pub struct Pay {
         pub invoice_str: String,
         pub amount: Option<u64>,
+        /// Maximum routing fees allowed for this payment, in millisatoshis.
+        #[serde(default)]
+        pub max_fee_msat: Option<u64>,
         pub bolt12: Option<Bolt12Pay>,
         /// How long the RPC waits for the terminal `PaymentEvent` (`fast` / `medium` / `large`).
         #[serde(default)]
@@ -78,6 +81,7 @@ pub mod response {
     #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
     pub struct Bolt11InvoiceInfo {
         pub issuer_id: Option<String>,
+        pub payment_hash: String,
         pub expiry_time: Option<u64>,
         pub description: Option<String>,
         pub routes: Vec<String>,

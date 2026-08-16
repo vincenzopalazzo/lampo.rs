@@ -9,6 +9,7 @@ lampo-common = { path = "../lampo-common" }
 lampo-chain = { path = "../lampo-chain" }
 lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
+lampo-lnd = { path = "../lampo-lnd" }
 
 clightning-testing = { git = "https://github.com/laanwj/cln4rust.git"}
 log = "0.4.18"
@@ -16,3 +17,5 @@ tempfile = "3.21.0"
 port-selector = "0.1.6"
 anyhow = "1.0.102"
 tokio = { version = "1.50.0", features = ["process", "time", "fs", "rt-multi-thread"] }
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

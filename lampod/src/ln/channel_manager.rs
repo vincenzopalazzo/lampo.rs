@@ -512,9 +512,19 @@ impl LampoChannelManager {
         let channel_id = channel.channel_id()?;
         let node_id = channel.counterpart_node_id()?;
 
-        self.manager()
-            .close_channel(&channel_id, &node_id)
-            .map_err(|err| error::anyhow!("{:?}", err))?;
+        if channel.force {
+            self.manager()
+                .force_close_broadcasting_latest_txn(
+                    &channel_id,
+                    &node_id,
+                    "Force close requested by RPC client".into(),
+                )
+                .map_err(|err| error::anyhow!("{:?}", err))?;
+        } else {
+            self.manager()
+                .close_channel(&channel_id, &node_id)
+                .map_err(|err| error::anyhow!("{:?}", err))?;
+        }
         Ok(())
     }
 

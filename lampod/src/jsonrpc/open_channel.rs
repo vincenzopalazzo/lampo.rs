@@ -27,7 +27,7 @@ pub async fn json_fundchannel(
         log::trace!("we are not connected with the peer {}", request.node_id);
         let conn = request::Connect::try_from(request.clone())?;
         let conn = json::to_value(conn)?;
-        ctx.call("connect", conn).await?;
+        crate::jsonrpc::peer_control::json_connect(ctx, &conn).await?;
     }
 
     // FIXME: there are use case there need to be covered, like

@@ -66,6 +66,10 @@ pub struct LampoCliArgs {
     #[arg(long = "api-port")]
     pub api_port: Option<u64>,
 
+    /// Serve the LND-compatible API instead of lampo-httpd
+    #[arg(long = "lnd")]
+    pub lnd: bool,
+
     /// Subcommand to run
     #[command(subcommand)]
     pub subcommand: Option<LampoCliSubcommand>,
@@ -118,6 +122,9 @@ impl TryInto<LampoConf> for LampoCliArgs {
         }
         if let Some(api_port) = self.api_port {
             conf.api_port = api_port;
+        }
+        if self.lnd {
+            conf.lnd = Some(true);
         }
         Ok(conf)
     }

@@ -19,6 +19,7 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
 use lampo_httpd::handler::HttpdHandler;
+use lampo_lnd::{spawn as spawn_lnd_rest, LndRestConfig};
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
 
@@ -192,13 +193,16 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 
     let lampod = Arc::new(lampod);
 
-    run_httpd(lampod.clone()).await?;
-
-    let handler = Arc::new(HttpdHandler::new(format!(
-        "{}:{}",
-        lampo_conf.api_host, lampo_conf.api_port
-    ))?);
-    lampod.add_external_handler(handler).await?;
+    if lampo_conf.lnd.unwrap_or(false) {
+        run_lnd_rest_api(lampod.clone()).await?;
+    } else {
+        run_httpd(lampod.clone()).await?;
+        let handler = Arc::new(HttpdHandler::new(format!(
+            "{}:{}",
+            lampo_conf.api_host, lampo_conf.api_port
+        ))?);
+        lampod.add_external_handler(handler).await?;
+    }
 
     // Signal the daemon to shut down gracefully on Ctrl+C.
     // This causes the LDK event processor to persist all state
@@ -226,4 +230,55 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     log::info!("preparing httpd api on addr `{url}`");
     tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
     Ok(())
+}
+
+pub async fn run_lnd_rest_api(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+    let conf = lampod.conf();
+    let host = conf
+        .api_host
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .to_string();
+    let port = lnd_api_port(conf.api_port)?;
+    let data = conf.path();
+    let tls_dir = format!("{data}/lnd-rest");
+    let macaroon_dir = format!("{data}/lnd-rest/macaroons");
+
+    let lnd_conf = LndRestConfig {
+        listen_host: host.clone(),
+        listen_port: port,
+        tls_dir: tls_dir.into(),
+        macaroon_dir: macaroon_dir.clone().into(),
+    };
+
+    spawn_lnd_rest(lampod, lnd_conf)?;
+    log::info!(
+        target: "lampod-cli",
+        "LND API ready on https://{}:{} (macaroons under {})",
+        host,
+        port,
+        macaroon_dir
+    );
+    Ok(())
+}
+
+fn lnd_api_port(port: u64) -> error::Result<u16> {
+    let port =
+        u16::try_from(port).map_err(|_| error::anyhow!("api-port must be between 1 and 65535"))?;
+    if port == 0 {
+        error::bail!("api-port must be between 1 and 65535");
+    }
+    Ok(port)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lnd_api_port;
+
+    #[test]
+    fn lnd_api_port_rejects_zero_and_overflow() {
+        assert!(lnd_api_port(0).is_err());
+        assert!(lnd_api_port(u16::MAX as u64 + 1).is_err());
+        assert_eq!(lnd_api_port(8080).unwrap(), 8080);
+    }
 }

@@ -27,6 +27,7 @@ use lampo_common::json;
 use lampo_common::model::request;
 use lampo_common::model::response;
 use lampo_httpd::handler::HttpdHandler;
+use lampo_lnd::LndRestConfig;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -101,6 +102,29 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     Ok(())
 }
 
+pub async fn run_lnd_rest(lampod: Arc<LampoDaemon>, port: u16) -> error::Result<(u16, String)> {
+    let data = lampod.conf().path();
+    let tls_dir = format!("{data}/lnd-rest");
+    let macaroon_dir = format!("{data}/lnd-rest/macaroons");
+    let admin_path = format!("{macaroon_dir}/admin.macaroon");
+    let conf = LndRestConfig {
+        listen_host: "127.0.0.1".to_string(),
+        listen_port: port,
+        tls_dir: tls_dir.into(),
+        macaroon_dir: macaroon_dir.into(),
+    };
+    lampo_lnd::spawn(lampod, conf)?;
+
+    for _ in 0..100 {
+        if std::path::Path::new(&admin_path).exists() {
+            let bytes = tokio::fs::read(&admin_path).await?;
+            return Ok((port, hex::encode(bytes)));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    error::bail!("timed out waiting for LND REST admin.macaroon at {admin_path}")
+}
+
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     root_path: Arc<TempDir>,
@@ -109,6 +133,8 @@ pub struct LampoTesting {
     pub mnemonic: String,
     pub btc: Arc<BtcNode>,
     pub info: response::GetInfo,
+    pub lnd_rest_port: u16,
+    pub lnd_admin_macaroon_hex: String,
 }
 
 impl LampoTesting {
@@ -119,7 +145,25 @@ impl LampoTesting {
         Self::with_conf(conf).await
     }
 
+    /// Same as [`Self::tmp`], but also starts the LND-compatible REST API.
+    ///
+    /// Prefer this only from LND REST tests: every node otherwise pays the
+    /// cost of an extra Actix HTTPS thread that is never torn down.
+    pub async fn tmp_with_lnd_rest() -> error::Result<Self> {
+        let mut conf = Conf::default();
+        conf.wallet = None;
+        let conf = Arc::new(conf);
+        Self::with_conf_inner(conf, true).await
+    }
+
     pub async fn with_conf(conf: Arc<Conf<'static>>) -> error::Result<Self> {
+        Self::with_conf_inner(conf, false).await
+    }
+
+    async fn with_conf_inner(
+        conf: Arc<Conf<'static>>,
+        enable_lnd_rest: bool,
+    ) -> error::Result<Self> {
         let conf_clone = conf.clone();
         let btc = tokio::task::spawn_blocking(move || {
             if let Ok(exec_path) = btc::exe_path() {
@@ -131,10 +175,14 @@ impl LampoTesting {
         })
         .await??;
         let btc = Arc::new(btc);
-        Self::new(btc).await
+        Self::new_inner(btc, enable_lnd_rest).await
     }
 
     pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
+        Self::new_inner(btc, false).await
+    }
+
+    async fn new_inner(btc: Arc<BtcNode>, enable_lnd_rest: bool) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -187,17 +235,38 @@ impl LampoTesting {
         run_httpd(lampo.clone()).await?;
         log::info!("httpd started");
 
+        let (lnd_port, macaroon_hex) = if enable_lnd_rest {
+            let lnd_port = port::random_free_port().unwrap();
+            let (_, macaroon_hex) = run_lnd_rest(lampo.clone(), lnd_port).await?;
+            log::info!("lnd rest started on {lnd_port}");
+            (lnd_port, macaroon_hex)
+        } else {
+            (0, String::new())
+        };
+
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
         tokio::spawn(lampo.listen());
 
-        // wait that lampo starts
-        while let Err(err) = handler
-            .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
-            .await
-        {
-            log::error!("error: `{}`", err);
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // wait that lampo starts (bounded: an infinite wait hangs the whole CI job)
+        let mut ready = false;
+        for _ in 0..30 {
+            match handler
+                .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
+                .await
+            {
+                Ok(_) => {
+                    ready = true;
+                    break;
+                }
+                Err(err) => {
+                    log::error!("error: `{}`", err);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+        if !ready {
+            error::bail!("lampo failed to become ready via getinfo within 30s");
         }
 
         let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
@@ -210,6 +279,8 @@ impl LampoTesting {
             btc,
             root_path: Arc::new(dir),
             info,
+            lnd_rest_port: lnd_port,
+            lnd_admin_macaroon_hex: macaroon_hex,
         };
         node.fund_wallet(102).await?;
         Ok(node)
