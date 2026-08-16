@@ -33,13 +33,14 @@ use tokio::sync::mpsc;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, NoTls, Row};
 
-/// Advisory lock key held while migrating. Arbitrary, but it has to be the
-/// same in every lampo build or two versions would not exclude each other.
-const MIGRATION_LOCK: i64 = 0x6c_61_6d_70_6f_00; // "lampo"
-
 /// Work handed to the connection thread. Each carries the channel its answer
 /// goes back on.
 enum Command {
+    /// Run a multi-statement string through the simple-query protocol.
+    Batch {
+        sql: String,
+        reply: std_mpsc::SyncSender<Result<(), String>>,
+    },
     Execute {
         sql: String,
         params: Vec<sql::QueryParam>,
@@ -136,32 +137,26 @@ impl PostgresStore {
     /// held on this store's own session, which is the one running the
     /// migration.
     fn migrate(&self) -> error::Result<()> {
-        self.execute(
-            format!("SELECT pg_advisory_lock({MIGRATION_LOCK})"),
-            Vec::new(),
-        )?;
+        let lock = sql::MIGRATION_LOCK;
+        self.execute(format!("SELECT pg_advisory_lock({lock})"), Vec::new())?;
         let migrated = self.migrate_locked();
-        let unlocked = self.execute(
-            format!("SELECT pg_advisory_unlock({MIGRATION_LOCK})"),
-            Vec::new(),
-        );
+        let unlocked = self.execute(format!("SELECT pg_advisory_unlock({lock})"), Vec::new());
         // Report why the migration failed in preference to why the unlock did.
         migrated.and(unlocked)
     }
 
     fn migrate_locked(&self) -> error::Result<()> {
-        self.execute(sql::version_table(sql::Dialect::Postgres), Vec::new())?;
+        self.batch(sql::version_table(sql::Dialect::Postgres).to_owned())?;
         let applied = self.read_version()?;
 
         for migration in sql::migrations(sql::Dialect::Postgres) {
             if migration.version <= applied {
                 continue;
             }
-            for statement in migration.statements {
-                self.execute(statement, Vec::new())?;
-            }
+            // The migration file holds several statements; run it whole.
+            self.batch(migration.sql.to_owned())?;
             self.execute(
-                sql::write_version(sql::Dialect::Postgres),
+                sql::write_version(sql::Dialect::Postgres).to_owned(),
                 vec![sql::QueryParam::Int(migration.version)],
             )?;
             log::info!(target: "lampo-postgres", "applied schema migration {}", migration.version);
@@ -188,6 +183,10 @@ impl PostgresStore {
         self.send(|reply| Command::Execute { sql, params, reply })
     }
 
+    fn batch(&self, sql: String) -> error::Result<()> {
+        self.send(|reply| Command::Batch { sql, reply })
+    }
+
     fn read_version(&self) -> error::Result<i64> {
         self.send(|reply| Command::ReadVersion { reply })
     }
@@ -206,6 +205,10 @@ fn describe(err: tokio_postgres::Error) -> String {
 /// Run one command against the client and answer it.
 async fn serve(client: &Client, command: Command) {
     match command {
+        Command::Batch { sql, reply } => {
+            let result = client.batch_execute(&sql).await.map_err(describe);
+            let _ = reply.send(result);
+        }
         Command::Execute { sql, params, reply } => {
             let bound = bind(&params);
             let result = client
@@ -217,7 +220,7 @@ async fn serve(client: &Client, command: Command) {
         }
         Command::ReadVersion { reply } => {
             let result = client
-                .query_opt(&sql::read_version(), &[])
+                .query_opt(sql::read_version(), &[])
                 .await
                 .map(|row| row.map(|row| row.get::<_, i64>(0)).unwrap_or(0))
                 .map_err(describe);
@@ -350,7 +353,7 @@ impl KVStoreSync for PostgresStore {
             sql::QueryParam::Text(key.to_owned()),
             sql::QueryParam::Bytes(buf),
         ];
-        self.execute(sql::kv_write(sql::Dialect::Postgres), params)
+        self.execute(sql::kv_write(sql::Dialect::Postgres).to_owned(), params)
             .map_err(io_err)
     }
 
@@ -406,7 +409,10 @@ impl PaymentStore for PostgresStore {
                 None => sql::QueryParam::NullText,
             },
         ];
-        self.execute(sql::payment_write(sql::Dialect::Postgres), params)
+        self.execute(
+            sql::payment_write(sql::Dialect::Postgres).to_owned(),
+            params,
+        )
     }
 
     fn get_payment(&self, id: &str) -> error::Result<Option<PaymentRecord>> {

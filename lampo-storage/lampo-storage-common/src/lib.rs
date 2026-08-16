@@ -1,18 +1,25 @@
 //! SQL shared by lampo's database backends.
 //!
-//! SQLite and Postgres differ in type names and parameter syntax but not in
-//! what lampo stores, so the schema, the migrations and the payment queries are
-//! written once here and rendered per dialect. Keeping them in one crate is
-//! what stops the two backends from drifting into different databases.
+//! The statements live in `.sql` files under `sql/`, embedded at compile time:
+//! `sql/sqlite/` and `sql/postgres/` hold what genuinely differs between the
+//! dialects (types, upsert syntax), and `sql/common/` holds the queries that
+//! only differ in placeholder style, written in `$n` form and rendered to
+//! SQLite's `?n` on load. Keeping one home for the SQL is what stops the two
+//! backends from drifting into different databases.
+//!
+//! The one query still assembled in Rust is [`list_payments`], because the
+//! filter is dynamic.
 use lampo_common::error;
 use lampo_common::persist::PaymentFilter;
 
-/// Table holding the key/value half of a backend: LDK's blobs.
-pub const KV_TABLE: &str = "kv";
-/// Table holding lampo's payment records.
-pub const PAYMENTS_TABLE: &str = "payments";
-/// Single-row table tracking which migrations have been applied.
-pub const VERSION_TABLE: &str = "schema_version";
+/// Advisory lock key held while migrating a shared server (Postgres).
+/// Arbitrary, but it has to be the same in every lampo build and tool touching
+/// the same database, or they would not exclude each other.
+pub const MIGRATION_LOCK: i64 = 0x6c_61_6d_70_6f_00; // "lampo"
+
+/// Payment columns, in the order every backend reads and writes them.
+pub const PAYMENT_COLUMNS: &str =
+    "id, payment_hash, direction, amount_msat, fee_msat, status, created_at, invoice";
 
 /// Which SQL flavour to render.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,199 +29,109 @@ pub enum Dialect {
 }
 
 impl Dialect {
-    /// Type for an opaque byte string.
-    fn blob(&self) -> &'static str {
-        match self {
-            Self::Sqlite => "BLOB",
-            Self::Postgres => "BYTEA",
-        }
-    }
-
-    /// Type for a 64-bit integer. SQLite's INTEGER is already 64-bit.
-    fn int8(&self) -> &'static str {
-        match self {
-            Self::Sqlite => "INTEGER",
-            Self::Postgres => "BIGINT",
-        }
-    }
-
     /// Placeholder for the `n`th bound parameter, counting from one.
-    ///
-    /// SQLite takes positional `?`, Postgres numbered `$n`.
     pub fn placeholder(&self, n: usize) -> String {
         match self {
-            Self::Sqlite => "?".to_owned(),
+            Self::Sqlite => format!("?{n}"),
             Self::Postgres => format!("${n}"),
+        }
+    }
+
+    /// Render a `sql/common/` query (written in `$n` form) for this dialect.
+    ///
+    /// SQLite takes `?n`; none of the shared queries contain a literal `$`, so
+    /// the swap is mechanical.
+    fn render(&self, sql: &'static str) -> String {
+        match self {
+            Self::Sqlite => sql.replace('$', "?"),
+            Self::Postgres => sql.to_owned(),
         }
     }
 }
 
-/// A schema change, applied in one transaction and recorded by `version`.
+/// A schema change, applied in one transaction where the backend supports it
+/// and recorded by `version`.
 pub struct Migration {
     pub version: i64,
-    pub statements: Vec<String>,
+    /// The whole migration file; may hold several `;`-separated statements.
+    pub sql: &'static str,
 }
 
 /// Every migration, oldest first.
 ///
-/// Migrations are append-only: to change the schema add a new entry, never edit
-/// an existing one, or nodes that already ran it will disagree with new ones.
+/// Migrations are append-only: to change the schema add a new file and a new
+/// entry, never edit an existing one, or nodes that already ran it will
+/// disagree with new ones.
 pub fn migrations(dialect: Dialect) -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        statements: vec![
-            format!(
-                "CREATE TABLE IF NOT EXISTS {KV_TABLE} (
-                     primary_namespace   TEXT NOT NULL,
-                     secondary_namespace TEXT NOT NULL,
-                     key                 TEXT NOT NULL,
-                     value               {} NOT NULL,
-                     PRIMARY KEY (primary_namespace, secondary_namespace, key)
-                 )",
-                dialect.blob()
-            ),
-            format!(
-                "CREATE TABLE IF NOT EXISTS {PAYMENTS_TABLE} (
-                     id           TEXT PRIMARY KEY,
-                     payment_hash TEXT NOT NULL,
-                     direction    TEXT NOT NULL,
-                     amount_msat  {int} NOT NULL,
-                     fee_msat     {int},
-                     status       TEXT NOT NULL,
-                     created_at   {int} NOT NULL,
-                     invoice      TEXT
-                 )",
-                int = dialect.int8()
-            ),
-            // The whole reason payments are not in the key/value table: these
-            // turn "every payment in a window" into an index scan.
-            format!(
-                "CREATE INDEX IF NOT EXISTS payments_created_at
-                 ON {PAYMENTS_TABLE} (created_at)"
-            ),
-            format!(
-                "CREATE INDEX IF NOT EXISTS payments_status_created_at
-                 ON {PAYMENTS_TABLE} (status, created_at)"
-            ),
-        ],
-    }]
+    match dialect {
+        Dialect::Sqlite => vec![Migration {
+            version: 1,
+            sql: include_str!("../sql/sqlite/0001_init.sql"),
+        }],
+        Dialect::Postgres => vec![Migration {
+            version: 1,
+            sql: include_str!("../sql/postgres/0001_init.sql"),
+        }],
+    }
 }
 
 /// Statement creating the table that records the applied schema version.
-pub fn version_table(dialect: Dialect) -> String {
-    format!(
-        "CREATE TABLE IF NOT EXISTS {VERSION_TABLE} (
-             id      {int} PRIMARY KEY,
-             version {int} NOT NULL
-         )",
-        int = dialect.int8()
-    )
-}
-
-/// Read the applied schema version, zero when nothing has run yet.
-pub fn read_version() -> String {
-    format!("SELECT version FROM {VERSION_TABLE} WHERE id = 1")
-}
-
-/// Record `version` as applied.
-pub fn write_version(dialect: Dialect) -> String {
+pub fn version_table(dialect: Dialect) -> &'static str {
     match dialect {
-        Dialect::Sqlite => {
-            format!("INSERT OR REPLACE INTO {VERSION_TABLE} (id, version) VALUES (1, ?)")
-        }
-        Dialect::Postgres => format!(
-            "INSERT INTO {VERSION_TABLE} (id, version) VALUES (1, $1)
-             ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version"
-        ),
+        Dialect::Sqlite => include_str!("../sql/sqlite/version_table.sql"),
+        Dialect::Postgres => include_str!("../sql/postgres/version_table.sql"),
+    }
+}
+
+/// Read the applied schema version, no rows when nothing has run yet.
+pub fn read_version() -> &'static str {
+    include_str!("../sql/common/version_read.sql")
+}
+
+/// Record a version as applied.
+pub fn write_version(dialect: Dialect) -> &'static str {
+    match dialect {
+        Dialect::Sqlite => include_str!("../sql/sqlite/version_write.sql"),
+        Dialect::Postgres => include_str!("../sql/postgres/version_write.sql"),
     }
 }
 
 /// Upsert a key/value entry.
-pub fn kv_write(dialect: Dialect) -> String {
-    let (p1, p2, p3, p4) = (
-        dialect.placeholder(1),
-        dialect.placeholder(2),
-        dialect.placeholder(3),
-        dialect.placeholder(4),
-    );
+pub fn kv_write(dialect: Dialect) -> &'static str {
     match dialect {
-        Dialect::Sqlite => format!(
-            "INSERT OR REPLACE INTO {KV_TABLE}
-                 (primary_namespace, secondary_namespace, key, value)
-             VALUES ({p1}, {p2}, {p3}, {p4})"
-        ),
-        Dialect::Postgres => format!(
-            "INSERT INTO {KV_TABLE}
-                 (primary_namespace, secondary_namespace, key, value)
-             VALUES ({p1}, {p2}, {p3}, {p4})
-             ON CONFLICT (primary_namespace, secondary_namespace, key)
-             DO UPDATE SET value = EXCLUDED.value"
-        ),
+        Dialect::Sqlite => include_str!("../sql/sqlite/kv_write.sql"),
+        Dialect::Postgres => include_str!("../sql/postgres/kv_write.sql"),
     }
 }
 
 pub fn kv_read(dialect: Dialect) -> String {
-    format!(
-        "SELECT value FROM {KV_TABLE}
-         WHERE primary_namespace = {} AND secondary_namespace = {} AND key = {}",
-        dialect.placeholder(1),
-        dialect.placeholder(2),
-        dialect.placeholder(3),
-    )
+    dialect.render(include_str!("../sql/common/kv_read.sql"))
 }
 
 pub fn kv_remove(dialect: Dialect) -> String {
-    format!(
-        "DELETE FROM {KV_TABLE}
-         WHERE primary_namespace = {} AND secondary_namespace = {} AND key = {}",
-        dialect.placeholder(1),
-        dialect.placeholder(2),
-        dialect.placeholder(3),
-    )
+    dialect.render(include_str!("../sql/common/kv_remove.sql"))
 }
 
 pub fn kv_list(dialect: Dialect) -> String {
-    format!(
-        "SELECT key FROM {KV_TABLE}
-         WHERE primary_namespace = {} AND secondary_namespace = {}",
-        dialect.placeholder(1),
-        dialect.placeholder(2),
-    )
+    dialect.render(include_str!("../sql/common/kv_list.sql"))
 }
 
-/// Upsert a payment record. Columns are in [`PAYMENT_COLUMNS`] order.
-pub fn payment_write(dialect: Dialect) -> String {
-    let values = (1..=8)
-        .map(|n| dialect.placeholder(n))
-        .collect::<Vec<_>>()
-        .join(", ");
+/// Every `(primary_namespace, secondary_namespace, key)` in the store, for
+/// backends implementing `list_all_keys`.
+pub fn kv_list_all() -> &'static str {
+    include_str!("../sql/common/kv_list_all.sql")
+}
+
+/// Upsert a payment record, columns in [`PAYMENT_COLUMNS`] order.
+pub fn payment_write(dialect: Dialect) -> &'static str {
     match dialect {
-        Dialect::Sqlite => {
-            format!("INSERT OR REPLACE INTO {PAYMENTS_TABLE} ({PAYMENT_COLUMNS}) VALUES ({values})")
-        }
-        Dialect::Postgres => format!(
-            "INSERT INTO {PAYMENTS_TABLE} ({PAYMENT_COLUMNS}) VALUES ({values})
-             ON CONFLICT (id) DO UPDATE SET
-                 payment_hash = EXCLUDED.payment_hash,
-                 direction    = EXCLUDED.direction,
-                 amount_msat  = EXCLUDED.amount_msat,
-                 fee_msat     = EXCLUDED.fee_msat,
-                 status       = EXCLUDED.status,
-                 created_at   = EXCLUDED.created_at,
-                 invoice      = EXCLUDED.invoice"
-        ),
+        Dialect::Sqlite => include_str!("../sql/sqlite/payment_write.sql"),
+        Dialect::Postgres => include_str!("../sql/postgres/payment_write.sql"),
     }
 }
 
-/// Payment columns, in the order both backends read and write them.
-pub const PAYMENT_COLUMNS: &str =
-    "id, payment_hash, direction, amount_msat, fee_msat, status, created_at, invoice";
-
 pub fn payment_read(dialect: Dialect) -> String {
-    format!(
-        "SELECT {PAYMENT_COLUMNS} FROM {PAYMENTS_TABLE} WHERE id = {}",
-        dialect.placeholder(1)
-    )
+    dialect.render(include_str!("../sql/common/payment_read.sql"))
 }
 
 /// A parameter bound to a rendered query, in the order it appears.
@@ -277,7 +194,7 @@ pub fn list_payments(filter: &PaymentFilter, dialect: Dialect) -> error::Result<
         conditions.push(format!("status = {}", dialect.placeholder(params.len())));
     }
 
-    let mut sql = format!("SELECT {PAYMENT_COLUMNS} FROM {PAYMENTS_TABLE}");
+    let mut sql = format!("SELECT {PAYMENT_COLUMNS} FROM payments");
     if !conditions.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&conditions.join(" AND "));
@@ -310,8 +227,20 @@ mod tests {
 
     #[test]
     fn dialects_render_their_own_placeholders() {
-        assert_eq!(Dialect::Sqlite.placeholder(3), "?");
+        assert_eq!(Dialect::Sqlite.placeholder(3), "?3");
         assert_eq!(Dialect::Postgres.placeholder(3), "$3");
+    }
+
+    /// The shared queries are written in `$n` form; the SQLite rendering must
+    /// leave no `$` behind.
+    #[test]
+    fn shared_queries_render_for_both_dialects() {
+        for query in [kv_read, kv_remove, kv_list, payment_read] {
+            assert!(query(Dialect::Postgres).contains("$1"));
+            let sqlite = query(Dialect::Sqlite);
+            assert!(!sqlite.contains('$'), "{sqlite}");
+            assert!(sqlite.contains("?1"), "{sqlite}");
+        }
     }
 
     #[test]
@@ -319,15 +248,12 @@ mod tests {
         for dialect in [Dialect::Sqlite, Dialect::Postgres] {
             let sql = migrations(dialect)
                 .into_iter()
-                .flat_map(|migration| migration.statements)
+                .map(|migration| migration.sql)
                 .collect::<Vec<_>>()
                 .join(";");
+            assert!(sql.contains("kv"), "{dialect:?} is missing the kv table");
             assert!(
-                sql.contains(KV_TABLE),
-                "{dialect:?} is missing the kv table"
-            );
-            assert!(
-                sql.contains(PAYMENTS_TABLE),
+                sql.contains("payments"),
                 "{dialect:?} is missing the payments table"
             );
             assert!(
