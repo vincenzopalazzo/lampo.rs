@@ -15,6 +15,7 @@ use lampod::LampoDaemon;
 
 use commands::daemon::rest_stop;
 use commands::inventory::{rest_funds, rest_getinfo, rest_networkchannels};
+use commands::lsp::{rest_lsp_info, rest_lsps0_list_protocols};
 use commands::offchain::{rest_decode, rest_invoice, rest_keysend, rest_pay};
 use commands::onchain::rest_new_addr;
 use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel};
@@ -118,6 +119,8 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .wrap_api()
             .service(swagger_api)
             .service(rest_getinfo)
+            .service(rest_lsp_info)
+            .service(rest_lsps0_list_protocols)
             .service(rest_channels)
             .service(rest_connect)
             .service(rest_fundchannel)

@@ -40,6 +40,14 @@ pub struct LampoConf {
     /// instead of scanning from genesis. Defaults to `true` and only applies
     /// to a fresh wallet (no UTXOs to miss); set `false` to force a full scan.
     pub fast_sync: Option<bool>,
+    /// Enable the experimental LSP plugin (`lampo-lsp`). Disabled by default.
+    pub lsp_enable: bool,
+    /// LSP client role. Only used when `lsp_enable` is true. Default true.
+    pub lsp_client: bool,
+    /// LSP service role (sell liquidity). Experimental. Default false.
+    pub lsp_service: bool,
+    /// Advertise the LSPS feature bit. Default false.
+    pub lsp_advertise: bool,
 }
 
 impl Default for LampoConf {
@@ -75,6 +83,10 @@ impl Default for LampoConf {
             wallet_sync_parallel: None,
             sync_mode: None,
             fast_sync: None,
+            lsp_enable: false,
+            lsp_client: true,
+            lsp_service: false,
+            lsp_advertise: false,
         }
     }
 }
@@ -276,6 +288,10 @@ impl TryFrom<String> for LampoConf {
             .get_conf("fast-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+        let lsp_enable = parse_bool_flag(&conf, "lsp-enable").unwrap_or(false);
+        let lsp_client = parse_bool_flag(&conf, "lsp-client").unwrap_or(true);
+        let lsp_service = parse_bool_flag(&conf, "lsp-service").unwrap_or(false);
+        let lsp_advertise = parse_bool_flag(&conf, "lsp-advertise").unwrap_or(false);
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -299,8 +315,19 @@ impl TryFrom<String> for LampoConf {
             wallet_sync_parallel,
             sync_mode,
             fast_sync,
+            lsp_enable,
+            lsp_client,
+            lsp_service,
+            lsp_advertise,
         })
     }
+}
+
+fn parse_bool_flag(conf: &CLNConf, key: &str) -> Option<bool> {
+    conf.get_conf(key)
+        .ok()
+        .flatten()
+        .map(|s| s.to_lowercase() == "true" || s == "1")
 }
 
 impl LampoConf {

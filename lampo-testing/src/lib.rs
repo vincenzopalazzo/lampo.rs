@@ -27,6 +27,7 @@ use lampo_common::json;
 use lampo_common::model::request;
 use lampo_common::model::response;
 use lampo_httpd::handler::HttpdHandler;
+use lampo_lsp::LampoLsp;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -105,6 +106,7 @@ pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     root_path: Arc<TempDir>,
     pub port: u64,
+    pub api_url: String,
     pub wallet: Arc<dyn WalletManager>,
     pub mnemonic: String,
     pub btc: Arc<BtcNode>,
@@ -119,7 +121,19 @@ impl LampoTesting {
         Self::with_conf(conf).await
     }
 
+    /// Start a node with the experimental LSP plugin enabled as both client
+    /// and service (no LSPS1/2/5 handlers yet — LSPS0 transport only).
+    pub async fn tmp_with_lsp() -> error::Result<Self> {
+        let mut conf = Conf::default();
+        conf.wallet = None;
+        Self::with_conf_inner(Arc::new(conf), true).await
+    }
+
     pub async fn with_conf(conf: Arc<Conf<'static>>) -> error::Result<Self> {
+        Self::with_conf_inner(conf, false).await
+    }
+
+    async fn with_conf_inner(conf: Arc<Conf<'static>>, enable_lsp: bool) -> error::Result<Self> {
         let conf_clone = conf.clone();
         let btc = tokio::task::spawn_blocking(move || {
             if let Ok(exec_path) = btc::exe_path() {
@@ -130,11 +144,18 @@ impl LampoTesting {
             }
         })
         .await??;
-        let btc = Arc::new(btc);
-        Self::new(btc).await
+        Self::new_inner(Arc::new(btc), enable_lsp).await
     }
 
     pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
+        Self::new_inner(btc, false).await
+    }
+
+    pub async fn new_with_lsp(btc: Arc<BtcNode>) -> error::Result<Self> {
+        Self::new_inner(btc, true).await
+    }
+
+    async fn new_inner(btc: Arc<BtcNode>, enable_lsp: bool) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -161,6 +182,17 @@ impl LampoTesting {
             .ldk_conf
             .channel_handshake_limits
             .force_announced_channel_preference = false;
+        if enable_lsp {
+            lampo_conf.lsp_enable = true;
+            lampo_conf.lsp_client = true;
+            lampo_conf.lsp_service = true;
+            lampo_conf.lsp_advertise = true;
+        }
+        let api_url = if lampo_conf.api_host.starts_with("http") {
+            format!("{}:{}", lampo_conf.api_host, lampo_conf.api_port)
+        } else {
+            format!("http://{}:{}", lampo_conf.api_host, lampo_conf.api_port)
+        };
         log::info!("creating bitcoin core wallet");
 
         let lampo_conf = Arc::new(lampo_conf);
@@ -175,6 +207,9 @@ impl LampoTesting {
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
         lampo.init(node.clone()).await?;
         log::info!("bitcoin core added inside lampo");
+
+        // LSP plugin first so `lsp-info` does not recurse through HttpdHandler.
+        LampoLsp::attach(&lampo).await?;
 
         // run httpd and create the handler that will connect to it
         let handler = Arc::new(HttpdHandler::new(format!(
@@ -206,6 +241,7 @@ impl LampoTesting {
             inner: handler,
             mnemonic,
             port: port.into(),
+            api_url,
             wallet,
             btc,
             root_path: Arc::new(dir),
