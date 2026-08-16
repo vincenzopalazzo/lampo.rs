@@ -287,6 +287,29 @@ struct ConnectAddr {
     host: Option<String>,
 }
 
+fn parse_peer_host(host: String) -> Result<(String, u64), String> {
+    if let Ok(socket) = host.parse::<std::net::SocketAddr>() {
+        return Ok((socket.ip().to_string(), socket.port() as u64));
+    }
+    if host.starts_with('[') {
+        return Err("invalid bracketed peer address".into());
+    }
+    if host.matches(':').count() == 1 {
+        let (hostname, port) = host
+            .split_once(':')
+            .ok_or_else(|| "invalid peer address".to_string())?;
+        let port = port
+            .parse::<u16>()
+            .map_err(|_| "invalid peer port".to_string())?;
+        if hostname.is_empty() || port == 0 {
+            return Err("invalid peer address".into());
+        }
+        return Ok((hostname.to_string(), port as u64));
+    }
+    // A hostname/IPv4 address, or an unbracketed IPv6 address without a port.
+    Ok((host, 9735))
+}
+
 #[post("/v1/peers")]
 async fn connect_peer(
     req: HttpRequest,
@@ -307,11 +330,9 @@ async fn connect_peer(
         (Some(p), Some(h)) => (p, h),
         _ => return internal_error("addr.pubkey and addr.host are required"),
     };
-    // host may be "ip:port" or "ip"
-    let (ip, port) = if let Some((h, p)) = host.rsplit_once(':') {
-        (h.to_string(), p.parse::<u64>().unwrap_or(9735))
-    } else {
-        (host, 9735)
+    let (ip, port) = match parse_peer_host(host) {
+        Ok(addr) => addr,
+        Err(e) => return internal_error(e),
     };
     let request = request::Connect {
         node_id: pubkey,
@@ -548,10 +569,55 @@ struct SendPaymentBody {
     amt: i64,
     #[serde(default)]
     amt_msat: i64,
-    #[serde(default, alias = "fee_limit_sat")]
-    fee_limit_sat: i64,
-    #[serde(default, alias = "fee_limit_msat")]
-    fee_limit_msat: i64,
+    #[serde(
+        default,
+        alias = "fee_limit_sat",
+        deserialize_with = "deserialize_optional_i64"
+    )]
+    fee_limit_sat: Option<i64>,
+    #[serde(
+        default,
+        alias = "fee_limit_msat",
+        deserialize_with = "deserialize_optional_i64"
+    )]
+    fee_limit_msat: Option<i64>,
+    #[serde(default)]
+    fee_limit: Option<FeeLimitBody>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FeeLimitBody {
+    #[serde(default, deserialize_with = "deserialize_optional_i64")]
+    fixed: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_i64")]
+    fixed_msat: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_i64")]
+    percent: Option<i64>,
+}
+
+fn deserialize_optional_i64<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum I64Value {
+        Number(i64),
+        String(String),
+    }
+
+    match Option::<I64Value>::deserialize(deserializer)? {
+        Some(I64Value::Number(value)) => Ok(Some(value)),
+        Some(I64Value::String(value)) => value.parse().map(Some).map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PaymentEndpoint {
+    Sync,
+    Router,
 }
 
 struct PaymentOutcome {
@@ -560,19 +626,59 @@ struct PaymentOutcome {
     fee_msat: u64,
 }
 
-fn max_fee_msat(body: &SendPaymentBody) -> Result<u64, String> {
-    if body.fee_limit_sat < 0 || body.fee_limit_msat < 0 {
-        return Err("fee limits must not be negative".into());
+fn max_fee_msat(
+    body: &SendPaymentBody,
+    value_msat: u64,
+    endpoint: PaymentEndpoint,
+) -> Result<u64, String> {
+    if let Some(fee_limit) = &body.fee_limit {
+        if body.fee_limit_sat.is_some() || body.fee_limit_msat.is_some() {
+            return Err("flat and nested fee limits are mutually exclusive".into());
+        }
+        let limits = [
+            fee_limit.fixed.map(|value| (value, 1000_u64)),
+            fee_limit.fixed_msat.map(|value| (value, 1_u64)),
+            fee_limit.percent.map(|value| (value, 0_u64)),
+        ];
+        if limits.iter().filter(|limit| limit.is_some()).count() != 1 {
+            return Err("feeLimit must specify exactly one limit".into());
+        }
+        let (value, multiplier) = limits
+            .into_iter()
+            .flatten()
+            .next()
+            .ok_or_else(|| "feeLimit is empty".to_string())?;
+        if value < 0 {
+            return Err("fee limits must not be negative".into());
+        }
+        if multiplier == 0 {
+            return value_msat
+                .checked_mul(value as u64)
+                .map(|fee| fee / 100)
+                .ok_or_else(|| "feeLimit.percent is too large".to_string());
+        }
+        return (value as u64)
+            .checked_mul(multiplier)
+            .ok_or_else(|| "fixed fee limit is too large".to_string());
     }
-    if body.fee_limit_sat > 0 && body.fee_limit_msat > 0 {
+
+    if body.fee_limit_sat.is_some() && body.fee_limit_msat.is_some() {
         return Err("fee_limit_sat and fee_limit_msat are mutually exclusive".into());
     }
-    if body.fee_limit_msat > 0 {
-        Ok(body.fee_limit_msat as u64)
-    } else {
-        (body.fee_limit_sat as u64)
+    if let Some(value) = body.fee_limit_msat {
+        return u64::try_from(value).map_err(|_| "fee limits must not be negative".into());
+    }
+    if let Some(value) = body.fee_limit_sat {
+        return u64::try_from(value)
+            .map_err(|_| "fee limits must not be negative".to_string())?
             .checked_mul(1000)
-            .ok_or_else(|| "fee_limit_sat is too large".to_string())
+            .ok_or_else(|| "fee_limit_sat is too large".to_string());
+    }
+
+    match endpoint {
+        PaymentEndpoint::Router => Ok(0),
+        PaymentEndpoint::Sync if value_msat <= 1_000_000 => Ok(value_msat),
+        PaymentEndpoint::Sync => Ok(value_msat / 20),
     }
 }
 
@@ -596,7 +702,11 @@ fn route_value_and_fee(value: &JsonValue, fallback_value_msat: u64) -> (u64, u64
     )
 }
 
-async fn pay_invoice(state: &AppState, body: &SendPaymentBody) -> Result<PaymentOutcome, String> {
+async fn pay_invoice(
+    state: &AppState,
+    body: &SendPaymentBody,
+    endpoint: PaymentEndpoint,
+) -> Result<PaymentOutcome, String> {
     if body.payment_request.is_empty() {
         return Err("payment_request is required".into());
     }
@@ -607,7 +717,6 @@ async fn pay_invoice(state: &AppState, body: &SendPaymentBody) -> Result<Payment
     } else {
         None
     };
-    let max_fee_msat = max_fee_msat(body)?;
     let invoice_amount_msat = state
         .lampod
         .offchain_manager()
@@ -615,6 +724,7 @@ async fn pay_invoice(state: &AppState, body: &SendPaymentBody) -> Result<Payment
         .ok()
         .and_then(|invoice| invoice.amount_milli_satoshis());
     let value_msat = invoice_amount_msat.or(amount_msat).unwrap_or(0);
+    let max_fee_msat = max_fee_msat(body, value_msat, endpoint)?;
     let request = request::Pay {
         invoice_str: body.payment_request.clone(),
         amount: amount_msat,
@@ -677,7 +787,7 @@ async fn send_payment_sync(
     if let Err(e) = authorize(&req, &state.bakery, OFFCHAIN_WRITE) {
         return auth_error(e);
     }
-    match pay_invoice(&state, &body).await {
+    match pay_invoice(&state, &body, PaymentEndpoint::Sync).await {
         Ok(outcome) => proto_json(&outcome.response),
         Err(e) => proto_json(&lnrpc::SendResponse {
             payment_error: e,
@@ -696,7 +806,7 @@ async fn router_send(
     if let Err(e) = authorize(&req, &state.bakery, OFFCHAIN_WRITE) {
         return auth_error(e);
     }
-    match pay_invoice(&state, &body).await {
+    match pay_invoice(&state, &body, PaymentEndpoint::Router).await {
         Ok(outcome) => {
             use base64::Engine;
             let engine = base64::engine::general_purpose::STANDARD;
@@ -743,6 +853,25 @@ struct OpenChannelBody {
     private: bool,
 }
 
+fn open_channel_node_id(body: &OpenChannelBody) -> Result<String, String> {
+    if !body.node_pubkey_string.is_empty() {
+        return Ok(body.node_pubkey_string.clone());
+    }
+    if body.node_pubkey.is_empty() {
+        return Err("nodePubkey or nodePubkeyString is required".into());
+    }
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&body.node_pubkey)
+        .map_err(|_| "nodePubkey must be base64 encoded".to_string())?;
+    if bytes.len() != 33 {
+        return Err("nodePubkey must encode a 33-byte public key".into());
+    }
+    lampo_common::secp256k1::PublicKey::from_slice(&bytes)
+        .map(|public_key| public_key.to_string())
+        .map_err(|_| "nodePubkey is not a valid compressed public key".into())
+}
+
 #[post("/v1/channels")]
 async fn open_channel(
     req: HttpRequest,
@@ -752,13 +881,12 @@ async fn open_channel(
     if let Err(e) = authorize(&req, &state.bakery, OFFCHAIN_WRITE) {
         return auth_error(e);
     }
-    let node_id = if !body.node_pubkey_string.is_empty() {
-        body.node_pubkey_string.clone()
-    } else {
-        body.node_pubkey.clone()
+    let node_id = match open_channel_node_id(&body) {
+        Ok(node_id) => node_id,
+        Err(e) => return internal_error(e),
     };
-    if node_id.is_empty() || body.local_funding_amount <= 0 {
-        return internal_error("node_pubkey_string and local_funding_amount are required");
+    if body.local_funding_amount <= 0 {
+        return internal_error("local_funding_amount is required");
     }
     let request = request::OpenChannel {
         node_id,
@@ -871,14 +999,65 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(body.payment_request, "lnbc1...");
-        assert_eq!(max_fee_msat(&body).unwrap(), 1234);
+        assert_eq!(
+            max_fee_msat(&body, 100_000, PaymentEndpoint::Router).unwrap(),
+            1234
+        );
     }
 
     #[test]
-    fn zero_fee_limit_is_preserved() {
+    fn endpoint_fee_defaults_match_lnd() {
         let body: SendPaymentBody =
             serde_json::from_value(json::json!({ "paymentRequest": "lnbc1..." })).unwrap();
-        assert_eq!(max_fee_msat(&body).unwrap(), 0);
+        assert_eq!(
+            max_fee_msat(&body, 2_000_000, PaymentEndpoint::Router).unwrap(),
+            0
+        );
+        assert_eq!(
+            max_fee_msat(&body, 2_000_000, PaymentEndpoint::Sync).unwrap(),
+            100_000
+        );
+    }
+
+    #[test]
+    fn parses_nested_synchronous_fee_limit() {
+        let body: SendPaymentBody = serde_json::from_value(json::json!({
+            "paymentRequest": "lnbc1...",
+            "feeLimit": { "fixedMsat": "4321" }
+        }))
+        .unwrap();
+        assert_eq!(
+            max_fee_msat(&body, 100_000, PaymentEndpoint::Sync).unwrap(),
+            4321
+        );
+    }
+
+    #[test]
+    fn parses_peer_hostname_and_ipv6() {
+        assert_eq!(
+            parse_peer_host("node.example.com:19735".into()).unwrap(),
+            ("node.example.com".into(), 19735)
+        );
+        assert_eq!(
+            parse_peer_host("[::1]:9736".into()).unwrap(),
+            ("::1".into(), 9736)
+        );
+        assert_eq!(parse_peer_host("::1".into()).unwrap(), ("::1".into(), 9735));
+    }
+
+    #[test]
+    fn decodes_rest_node_pubkey() {
+        use base64::Engine;
+        use lampo_common::secp256k1::{PublicKey, Secp256k1, SecretKey};
+
+        let secret = SecretKey::from_slice(&[1; 32]).unwrap();
+        let public = PublicKey::from_secret_key(&Secp256k1::new(), &secret);
+        let body: OpenChannelBody = serde_json::from_value(json::json!({
+            "nodePubkey": base64::engine::general_purpose::STANDARD.encode(public.serialize()),
+            "localFundingAmount": 100_000
+        }))
+        .unwrap();
+        assert_eq!(open_channel_node_id(&body).unwrap(), public.to_string());
     }
 
     #[test]
