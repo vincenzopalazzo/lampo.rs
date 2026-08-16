@@ -33,7 +33,7 @@ async fn lnd_get(
 #[tokio_test_shutdown_timeout::test(10)]
 pub async fn lnd_rest_getinfo_requires_macaroon() -> error::Result<()> {
     init();
-    let node = LampoTesting::tmp().await?;
+    let node = LampoTesting::tmp_with_lnd_rest().await?;
 
     // Wait for the HTTPS listener to accept connections.
     for _ in 0..40 {
@@ -52,7 +52,7 @@ pub async fn lnd_rest_getinfo_requires_macaroon() -> error::Result<()> {
 #[tokio_test_shutdown_timeout::test(10)]
 pub async fn lnd_rest_getinfo_with_admin_macaroon() -> error::Result<()> {
     init();
-    let node = LampoTesting::tmp().await?;
+    let node = LampoTesting::tmp_with_lnd_rest().await?;
 
     let mut last = None;
     for _ in 0..40 {
@@ -88,7 +88,7 @@ pub async fn lnd_rest_getinfo_with_admin_macaroon() -> error::Result<()> {
 #[tokio_test_shutdown_timeout::test(10)]
 pub async fn lnd_rest_wallet_balance_smoke() -> error::Result<()> {
     init();
-    let node = LampoTesting::tmp().await?;
+    let node = LampoTesting::tmp_with_lnd_rest().await?;
 
     let mut ok = false;
     for _ in 0..40 {
