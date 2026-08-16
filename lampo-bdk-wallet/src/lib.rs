@@ -1,4 +1,6 @@
 //! Wallet Manager implementation with BDK
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 // The on-chain wallet + its sqlite handle are guarded by a std (blocking)
 // mutex, not a tokio one: their critical sections are short and fully
@@ -46,6 +48,11 @@ pub struct BDKWalletManager {
     pub conf: Arc<LampoConf>,
 
     guard: Mutex<bool>,
+    /// Whether this wallet originated from a mnemonic recovery.
+    ///
+    /// An ordinary reopen also loads the mnemonic through `restore`, so a
+    /// durable marker preserves this provenance across process restarts.
+    restored_seed: bool,
     /// Chain-sync coordinator, when wired in. Gates the Emitter scan on LDK
     /// listener sync and carries scan progress. `None` (e.g. in tests) leaves
     /// the wallet syncing immediately, exactly as before.
@@ -218,6 +225,10 @@ impl WalletManager for BDKWalletManager {
         let mnemonic_words = mnemonic.to_string();
         let (wallet, db, keymanager) = Self::build_wallet(conf.clone(), &mnemonic_words).await?;
         let client = Self::build_client(conf.clone())?;
+        let recovery_marker = PathBuf::from(format!("{}/wallet-recovery", conf.path()));
+        if recovery_marker.exists() {
+            fs::remove_file(recovery_marker)?;
+        }
         Ok((
             Self {
                 wallet: StdMutex::new(wallet),
@@ -226,6 +237,7 @@ impl WalletManager for BDKWalletManager {
                 network: conf.network,
                 rpc: Arc::new(client),
                 guard: Mutex::new(false),
+                restored_seed: false,
                 reindex_from: conf.reindex,
                 conf: conf.clone(),
                 coordinator: OnceLock::new(),
@@ -235,6 +247,20 @@ impl WalletManager for BDKWalletManager {
     }
 
     async fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self> {
+        // A normal second launch has both wallet.dat and bdk-wallet.db from
+        // `new`. An explicit mnemonic recovery in a fresh directory has no
+        // BDK database yet, even though both paths call this same method. Keep
+        // durable provenance so a restart cannot lose recovery intent and
+        // fast-sync past historical funds.
+        let database_exists = Path::new(&format!("{}/bdk-wallet.db", conf.path())).exists();
+        let recovery_marker = PathBuf::from(format!("{}/wallet-recovery", conf.path()));
+        let recovering_history = is_recovering_history(database_exists, recovery_marker.exists());
+        if recovering_history && !recovery_marker.exists() {
+            // Do not leave durable recovery provenance behind for invalid
+            // operator input.
+            Mnemonic::parse(mnemonic_words)?;
+            fs::write(&recovery_marker, [])?;
+        }
         let (wallet, db, keymanager) =
             BDKWalletManager::build_wallet(conf.clone(), mnemonic_words).await?;
         let client = BDKWalletManager::build_client(conf.clone())?;
@@ -245,6 +271,7 @@ impl WalletManager for BDKWalletManager {
             network: conf.network,
             rpc: Arc::new(client),
             guard: Mutex::new(false),
+            restored_seed: recovering_history,
             reindex_from: conf.reindex,
             conf: conf.clone(),
             coordinator: OnceLock::new(),
@@ -366,6 +393,8 @@ impl WalletManager for BDKWalletManager {
             Ok::<_, error::Error>(())
         });
 
+        // Count of blocks applied this round, used to rate-limit progress logs.
+        let mut applied_blocks: u64 = 0;
         while let Some(emission) = receiver.recv().await {
             // All wallet locking happens inside the synchronous helpers so no
             // `MutexGuard` is held across the `.await` above.
@@ -381,10 +410,16 @@ impl WalletManager for BDKWalletManager {
                     let start_apply_block = Instant::now();
                     self.apply_block_inner(&block_emission.block, height, connected_to)?;
                     let elapsed = start_apply_block.elapsed().as_secs_f32();
-                    log::info!(target: "lampo-wallet",
+                    applied_blocks += 1;
+                    log::trace!(target: "lampo-wallet",
                         "Applied block {} at height {} in {}s",
                         hash, height, elapsed
                     );
+                    if applied_blocks % 2016 == 0 {
+                        log::info!(target: "lampo-wallet",
+                            "Wallet sync in progress: applied {applied_blocks} blocks, at height {height}"
+                        );
+                    }
                 }
                 Emission::Mempool(mempool_emission) => {
                     log::warn!(target: "lampo-wallet", "Mempool emission: {mempool_emission:?}");
@@ -488,10 +523,17 @@ impl WalletManager for BDKWalletManager {
 
             // Fast-sync (default on) jumps an empty wallet's checkpoint to the
             // chain tip rather than scanning from genesis. Only ever applies to
-            // a fresh wallet (height 0), which has no UTXOs to miss.
+            // a fresh wallet (height 0), which has no UTXOs to miss. A restored
+            // wallet with a nonzero checkpoint must scan the offline gap.
             let fast_sync = self.conf.fast_sync.unwrap_or(true);
+            if self.restored_seed && start_height == 0 && fast_sync && self.reindex_from.is_none() {
+                log::warn!(
+                    target: "lampo-wallet",
+                    "Fast-sync is disabled for a restored wallet because jumping to the chain tip could miss historical funds; set reindex to a known wallet birthday to shorten the scan"
+                );
+            }
             let reindex_from = self.reindex_from.or_else(|| {
-                if start_height == 0 && fast_sync {
+                if jump_empty_wallet_to_tip(start_height, fast_sync, self.restored_seed) {
                     rpc_client.get_blockchain_info().ok().map(|info| {
                         Height::from_consensus(info.blocks as u32)
                             .expect("Failed to convert blockchain height to consensus height")
@@ -514,6 +556,14 @@ impl WalletManager for BDKWalletManager {
                         ..Default::default()
                     };
                     wallet.apply_update(update)?;
+                    // Persist the jump so it survives a restart before the
+                    // first tail block is applied.
+                    let mut wallet_db = self.wallet_db.lock().unwrap();
+                    wallet.persist(&mut wallet_db)?;
+                    if let Some(coordinator) = self.coordinator.get() {
+                        coordinator.set_wallet_scan_height(height);
+                    }
+                    log::info!(target: "lampo-wallet", "Fast-forwarded empty wallet checkpoint to height {height}");
                 }
             }
         }
@@ -564,5 +614,44 @@ impl WalletManager for BDKWalletManager {
 
         sched.start().await?;
         Ok(())
+    }
+}
+
+/// Recover history when opening a new database or when durable provenance says
+/// a previous recovery invocation created it.
+fn is_recovering_history(database_exists: bool, recovery_marker_exists: bool) -> bool {
+    recovery_marker_exists || !database_exists
+}
+
+/// Jump a newly generated genesis wallet to the chain tip. A mnemonic restore
+/// must scan history even when its local database also starts at genesis.
+fn jump_empty_wallet_to_tip(start_height: u32, fast_sync: bool, recovering_history: bool) -> bool {
+    start_height == 0 && fast_sync && !recovering_history
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_recovering_history, jump_empty_wallet_to_tip};
+
+    #[test]
+    fn fast_sync_jumps_only_a_genesis_checkpoint() {
+        assert!(jump_empty_wallet_to_tip(0, true, false));
+        assert!(!jump_empty_wallet_to_tip(0, false, false));
+        // Nonzero persisted checkpoint: even with fast_sync on, scan the gap.
+        assert!(!jump_empty_wallet_to_tip(21_021, true, false));
+        assert!(!jump_empty_wallet_to_tip(190_537, true, false));
+        // A restored mnemonic may own historical UTXOs even when its new local
+        // database starts at genesis, so it must scan unless reindex is set.
+        assert!(!jump_empty_wallet_to_tip(0, true, true));
+    }
+
+    #[test]
+    fn recovery_marker_preserves_intent_across_restart() {
+        // Ordinary reopen of a generated wallet.
+        assert!(!is_recovering_history(true, false));
+        // First mnemonic-recovery invocation has no BDK database yet.
+        assert!(is_recovering_history(false, false));
+        // After an early exit, both the new database and marker exist.
+        assert!(is_recovering_history(true, true));
     }
 }

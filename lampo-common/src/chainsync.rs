@@ -168,6 +168,23 @@ impl ChainSyncCoordinator {
     pub fn sync_in_progress(&self) -> bool {
         !matches!(self.state(), SyncState::Running)
     }
+
+    /// Wallet scan progress toward `chain_tip`, 0-100.
+    ///
+    /// `100` once the node is `Running` or the scan height has reached the
+    /// tip. Before the wallet reports live progress, `fallback_scan_height`
+    /// keeps this percentage consistent with the checkpoint shown by
+    /// `getinfo`.
+    pub fn progress_percent(&self, chain_tip: u32, fallback_scan_height: u32) -> u8 {
+        if self.initial_sync_complete() {
+            return 100;
+        }
+        let scan = self.wallet_scan_height().unwrap_or(fallback_scan_height);
+        if chain_tip == 0 || scan >= chain_tip {
+            return 100;
+        }
+        ((scan as u64 * 100) / chain_tip as u64) as u8
+    }
 }
 
 impl Default for ChainSyncCoordinator {
@@ -239,5 +256,18 @@ mod tests {
         assert_eq!(coord.wallet_scan_height(), None);
         coord.set_wallet_scan_height(307_000);
         assert_eq!(coord.wallet_scan_height(), Some(307_000));
+    }
+
+    #[test]
+    fn progress_percent_computes_and_clamps() {
+        let coord = ChainSyncCoordinator::new();
+        assert_eq!(coord.progress_percent(100, 25), 25);
+        coord.set_wallet_scan_height(50);
+        assert_eq!(coord.progress_percent(100, 25), 50);
+        coord.set_wallet_scan_height(150);
+        assert_eq!(coord.progress_percent(100, 25), 100);
+        coord.mark_listeners_synced();
+        coord.mark_running();
+        assert_eq!(coord.progress_percent(100, 25), 100);
     }
 }
