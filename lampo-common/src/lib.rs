@@ -7,6 +7,7 @@ pub mod jsonrpc;
 pub mod keys;
 pub mod logger;
 pub mod model;
+pub mod msg;
 pub mod types;
 pub mod utils;
 pub mod wallet;

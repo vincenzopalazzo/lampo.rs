@@ -16,11 +16,13 @@ use lampo_common::ldk::net;
 use lampo_common::ldk::net::SocketDescriptor;
 use lampo_common::ldk::onion_message::messenger::{DefaultMessageRouter, OnionMessenger};
 use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
+use lampo_common::msg::LampoMsgHandler;
 use lampo_common::types::NodeId;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph};
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
+use crate::ln::msg_router::LampoCustomMessageRouter;
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
@@ -42,7 +44,7 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, Arc<T>, Arc<L>>>,
     Arc<LampoArcOnionMessenger<L>>,
     Arc<L>,
-    IgnoringMessageHandler,
+    Arc<LampoCustomMessageRouter>,
     Arc<LampoKeysManager>,
     IgnoringMessageHandler,
 >;
@@ -56,6 +58,7 @@ pub struct LampoPeerManager {
     conf: LampoConf,
     logger: Arc<LampoLogger>,
     onion_messenger: Option<Arc<LampoArcOnionMessenger<LampoLogger>>>,
+    custom_msg_router: Option<Arc<LampoCustomMessageRouter>>,
 }
 
 impl LampoPeerManager {
@@ -66,6 +69,7 @@ impl LampoPeerManager {
             logger,
             channel_manager: None,
             onion_messenger: None,
+            custom_msg_router: None,
         }
     }
 
@@ -111,11 +115,12 @@ impl LampoPeerManager {
             self.logger.clone(),
         ));
 
+        let custom_msg_router = Arc::new(LampoCustomMessageRouter::new());
         let lightning_msg_handler = MessageHandler {
             chan_handler: channel_manager.manager(),
             onion_message_handler: onion_messenger.clone(),
             route_handler: gossip_sync,
-            custom_message_handler: IgnoringMessageHandler {},
+            custom_message_handler: custom_msg_router.clone(),
             send_only_message_handler: IgnoringMessageHandler {},
         };
 
@@ -129,6 +134,19 @@ impl LampoPeerManager {
         self.peer_manager = Some(Arc::new(peer_manager));
         self.channel_manager = Some(channel_manager.clone());
         self.onion_messenger = Some(onion_messenger);
+        self.custom_msg_router = Some(custom_msg_router);
+        Ok(())
+    }
+
+    /// Register a custom-message plugin. Must be called after [`Self::init`].
+    pub(crate) fn add_custom_msg_handler(
+        &self,
+        handler: Arc<dyn LampoMsgHandler>,
+    ) -> error::Result<()> {
+        let Some(ref router) = self.custom_msg_router else {
+            error::bail!("custom message router is None; call init first");
+        };
+        router.register(handler);
         Ok(())
     }
 
