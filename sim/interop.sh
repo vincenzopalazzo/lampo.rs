@@ -252,7 +252,7 @@ check I03 "open c2 lk1->lk2 (ldk, announced)" '
 # I04 c3: ldk opens to lampo (announced)
 check I04 "open c3 lk2->lp2 (ldk, announced)" '
   o=$(lcli lk2 connect-peer "${ID[lp2]}@127.0.0.1:$(P2P lp2)" 2>>"$LOG"); echo "$o" >> "$LOG"
-  o=$(lcli lk2 open-channel "${ID[lp2]}" "127.0.0.1:$(P2P lp2)" "${CHANNEL_SAT}sat" --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
+  o=$(lcli lk2 open-channel "${ID[lp2]}" "127.0.0.1:$(P2P lp2)" "${CHANNEL_SAT}sat" --push-to-counterparty 100000000msat --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
   case "$o" in *Error*|*error*) sleep 5; exit 1;; esac
   sleep 5; mine 8; sleep 10
   for i in $(seq 1 120); do { [ "$(ldk_channel_ready_with lk2 "${ID[lp2]}")" = 1 ] && [ "$(ready_channels lp2)" -ge 1 ]; } && break; sleep 5; done
