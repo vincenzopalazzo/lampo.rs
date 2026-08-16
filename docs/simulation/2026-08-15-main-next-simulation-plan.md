@@ -198,7 +198,26 @@ LDK-Server; lampo relays carry the traffic. Metrics from `sim-cli` CSV output
       ("Peer's feerate much too low. Actual: 253. lower limit: 256").
       Fix returns 253 for the two MinAllowed targets; **verified live**:
       I04 (ldk opens to lampo) passes on the patched build.
-- [ ] **F-5 (open, next): ldk-server paying a lampo bolt11 invoice fails**
+- [x] **F-5 RESOLVED — two stacked causes**:
+      1. F-4's fee-floor bug prevented announced/usable channels (fixed by
+         PR #588), and
+      2. lampo's `fundchannel` silently dropped `push_msat` (hardcoded 0) so
+         the ldk peer had `outbound_capacity_msat: 0` — **PR #569** fixes it
+         and was verified live (lk1 outbound 91.2M msat after push).
+      Plus a harness fix: ldk-server `bolt11-send`/`spontaneous-send` are
+      ASYNC (return `payment_id`) — poll `get-payment-details` for Success.
+- [x] **Interop suite I01–I09 GREEN** on `sim/interop-verify`
+      (main + #588 + #569): connect, channels opened by BOTH sides
+      (announced), bolt11 both directions, keysend/spontaneous both
+      directions, and **cross-impl multihop lp1→lp2 with hops=3 via both
+      ldk nodes (lampo→ldk→ldk→lampo routing works)**.
+- [ ] **F-7 (open, next): reverse multihop I10 (lp2→lp1) fails** —
+      `state=Failure` with an empty path. Note: the verification reruns
+      created duplicate parallel channels (one per run) on the persistent
+      ldk nodes; dedup or a fresh ldk slate first, then check lp2's route
+      view / PaymentEvent `reason` (cross_pay drops it — log it).
+      Artifacts: `interop/artifacts/20260815-213852-I10`.
+- [ ] Old: F-5 ldk-server paying a lampo bolt11 invoice fails
       ("Failed to send the given payment", case I06, direct hop over c1).
       Artifacts: `interop/artifacts/20260815-205851-I06`. Suspects: invoice
       routing hints/features from lampo, outbound liquidity view on the ldk
