@@ -103,6 +103,8 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
 
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
+    /// Kept so a test can signal the daemon to shut down, as `restart` does.
+    daemon: Arc<LampoDaemon>,
     root_path: Arc<TempDir>,
     pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
@@ -194,7 +196,7 @@ impl LampoTesting {
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
-        tokio::spawn(lampo.listen());
+        tokio::spawn(lampo.clone().listen());
 
         // wait that lampo starts
         while let Err(err) = handler
@@ -209,6 +211,7 @@ impl LampoTesting {
         log::info!("ready `{:#?}` for integration testing!", info);
         let node = Self {
             inner: handler,
+            daemon: lampo,
             mnemonic,
             port: port.into(),
             wallet,
@@ -218,6 +221,70 @@ impl LampoTesting {
         };
         node.fund_wallet(102).await?;
         Ok(node)
+    }
+
+    /// Bring the node back up over the same data directory, as a process
+    /// restart would. The old daemon is signalled to shut down; the new one
+    /// restores the wallet from the mnemonic and must find its channel state
+    /// in whichever storage backend the run selected.
+    pub async fn restart(self) -> error::Result<Self> {
+        self.daemon.shutdown();
+
+        let port = port::random_free_port().unwrap();
+        let mut lampo_conf = LampoConf::new(
+            Some(self.root_path.path().to_string_lossy().to_string()),
+            Some(lampo_common::bitcoin::Network::Regtest),
+            Some(port.into()),
+        )?;
+        lampo_conf.api_port = port::random_free_port().unwrap().into();
+        let values = self.btc.params.get_cookie_values().unwrap();
+        lampo_conf.core_url = Some(self.btc.rpc_url());
+        lampo_conf.core_user = values.as_ref().map(|v| v.user.to_owned());
+        lampo_conf.core_pass = values.map(|v| v.password);
+        lampo_conf.dev_sync = Some(true);
+        lampo_conf.storage = std::env::var("LAMPO_TEST_STORAGE").ok();
+        lampo_conf.storage_url = std::env::var("LAMPO_TEST_STORAGE_URL").ok();
+        lampo_conf
+            .ldk_conf
+            .channel_handshake_limits
+            .force_announced_channel_preference = false;
+
+        let lampo_conf = Arc::new(lampo_conf);
+        let wallet = Arc::new(BDKWalletManager::restore(lampo_conf.clone(), &self.mnemonic).await?);
+        let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone())?;
+        wallet.clone().listen().await?;
+        let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
+        lampo.init(node).await?;
+        // The RPC methods live behind this handler; without it every call
+        // comes back as "method not found".
+        lampo
+            .add_external_handler(Arc::new(HttpdHandler::new(format!(
+                "{}:{}",
+                lampo_conf.api_host, lampo_conf.api_port
+            ))?))
+            .await?;
+        let lampo = Arc::new(lampo);
+        run_httpd(lampo.clone()).await?;
+        let handler = lampo.handler();
+        tokio::spawn(lampo.clone().listen());
+        while let Err(err) = handler
+            .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
+            .await
+        {
+            log::debug!("waiting for the restarted node: `{}`", err);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
+        Ok(Self {
+            inner: handler,
+            daemon: lampo,
+            mnemonic: self.mnemonic,
+            port: port.into(),
+            wallet,
+            btc: self.btc,
+            root_path: self.root_path,
+            info,
+        })
     }
 
     async fn mine(&self, blocks: u64) -> error::Result<()> {

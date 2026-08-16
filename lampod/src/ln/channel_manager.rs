@@ -1,8 +1,5 @@
 //! Channel Manager Implementation
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
-use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
@@ -21,6 +18,7 @@ use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, FeeEstimato
 use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
 use lampo_common::ldk::chain::{BlockLocator, Watch};
+use lampo_common::ldk::io::Cursor;
 use lampo_common::ldk::ln::channelmanager::{ChainParameters, ChannelManagerReadArgs};
 use lampo_common::ldk::onion_message::messenger::DefaultMessageRouter;
 use lampo_common::ldk::routing::gossip::NetworkGraph;
@@ -30,8 +28,13 @@ use lampo_common::ldk::routing::scoring::{
 };
 use lampo_common::ldk::sign::{InMemorySigner, NodeSigner};
 use lampo_common::ldk::util::persist::{
-    read_channel_monitors, KVStoreSync, OUTPUT_SWEEPER_PERSISTENCE_KEY,
+    read_channel_monitors, KVStoreSync, CHANNEL_MANAGER_PERSISTENCE_KEY,
+    CHANNEL_MANAGER_PERSISTENCE_PRIMARY_NAMESPACE, CHANNEL_MANAGER_PERSISTENCE_SECONDARY_NAMESPACE,
+    NETWORK_GRAPH_PERSISTENCE_KEY, NETWORK_GRAPH_PERSISTENCE_PRIMARY_NAMESPACE,
+    NETWORK_GRAPH_PERSISTENCE_SECONDARY_NAMESPACE, OUTPUT_SWEEPER_PERSISTENCE_KEY,
     OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE, OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
+    SCORER_PERSISTENCE_KEY, SCORER_PERSISTENCE_PRIMARY_NAMESPACE,
+    SCORER_PERSISTENCE_SECONDARY_NAMESPACE,
 };
 use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::ldk::util::sweep::OutputSweeper;
@@ -370,13 +373,8 @@ impl LampoChannelManager {
     > {
         self.router
             .get_or_init(|| {
-                let network_graph_path = format!("{}/network_graph", self.conf.path());
-                let network_graph = self.read_network(Path::new(&network_graph_path));
-
-                let scorer_path = format!("{}/scorer", self.conf.path());
-                let scorer = Arc::new(Mutex::new(
-                    self.read_scorer(Path::new(&scorer_path), &network_graph),
-                ));
+                let network_graph = self.read_network();
+                let scorer = Arc::new(Mutex::new(self.read_scorer(&network_graph)));
 
                 self.graph
                     .set(network_graph.clone())
@@ -397,22 +395,29 @@ impl LampoChannelManager {
 
     pub(crate) fn read_scorer(
         &self,
-        path: &Path,
         graph: &Arc<LampoGraph>,
     ) -> ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>> {
         let params = ProbabilisticScoringDecayParameters::default();
-        if let Ok(file) = File::open(path) {
+        if let Ok(buf) = self.persister.read(
+            SCORER_PERSISTENCE_PRIMARY_NAMESPACE,
+            SCORER_PERSISTENCE_SECONDARY_NAMESPACE,
+            SCORER_PERSISTENCE_KEY,
+        ) {
             let args = (params, Arc::clone(graph), self.logger.clone());
-            if let Ok(scorer) = ProbabilisticScorer::read(&mut BufReader::new(file), args) {
+            if let Ok(scorer) = ProbabilisticScorer::read(&mut Cursor::new(buf), args) {
                 return scorer;
             }
         }
         ProbabilisticScorer::new(params, graph.clone(), self.logger.clone())
     }
 
-    pub(crate) fn read_network(&self, path: &Path) -> Arc<LampoGraph> {
-        if let Ok(file) = File::open(path) {
-            if let Ok(graph) = NetworkGraph::read(&mut BufReader::new(file), self.logger.clone()) {
+    pub(crate) fn read_network(&self) -> Arc<LampoGraph> {
+        if let Ok(buf) = self.persister.read(
+            NETWORK_GRAPH_PERSISTENCE_PRIMARY_NAMESPACE,
+            NETWORK_GRAPH_PERSISTENCE_SECONDARY_NAMESPACE,
+            NETWORK_GRAPH_PERSISTENCE_KEY,
+        ) {
+            if let Ok(graph) = NetworkGraph::read(&mut Cursor::new(buf), self.logger.clone()) {
                 return Arc::new(graph);
             }
         }
@@ -621,11 +626,19 @@ impl LampoChannelManager {
         Ok(())
     }
 
+    /// Whether persisted channel state exists to restore, whichever backend
+    /// holds it. A database-backed node checked a filesystem path here once,
+    /// and restarted as a brand-new node while its monitors sat in the store.
     pub fn is_restarting(&self) -> error::Result<bool> {
-        Ok(Path::exists(Path::new(&format!(
-            "{}/manager",
-            self.conf.path()
-        ))))
+        match self.persister.read(
+            CHANNEL_MANAGER_PERSISTENCE_PRIMARY_NAMESPACE,
+            CHANNEL_MANAGER_PERSISTENCE_SECONDARY_NAMESPACE,
+            CHANNEL_MANAGER_PERSISTENCE_KEY,
+        ) {
+            Ok(_) => Ok(true),
+            Err(err) if err.kind() == lampo_common::ldk::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(err.into()),
+        }
     }
 
     pub fn restart(&self) -> error::Result<()> {
@@ -655,9 +668,13 @@ impl LampoChannelManager {
             self.conf.ldk_conf.clone(),
             monitors.iter().collect(),
         );
-        let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
+        let manager_bytes = self.persister.read(
+            CHANNEL_MANAGER_PERSISTENCE_PRIMARY_NAMESPACE,
+            CHANNEL_MANAGER_PERSISTENCE_SECONDARY_NAMESPACE,
+            CHANNEL_MANAGER_PERSISTENCE_KEY,
+        )?;
         let (_, channel_manager) =
-            <(BlockLocator, LampoChannel)>::read(&mut channel_manager_file, read_args)
+            <(BlockLocator, LampoChannel)>::read(&mut Cursor::new(manager_bytes), read_args)
                 .map_err(|err| error::anyhow!("{err}"))?;
 
         // Move the persisted channel monitors into the `ChainMonitor`, as
