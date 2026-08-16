@@ -614,6 +614,13 @@ where
     }
 }
 
+fn deserialize_i64<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_optional_i64(deserializer).map(Option::unwrap_or_default)
+}
+
 #[derive(Clone, Copy)]
 enum PaymentEndpoint {
     Sync,
@@ -847,8 +854,18 @@ struct OpenChannelBody {
     node_pubkey_string: String,
     #[serde(default, alias = "node_pubkey")]
     node_pubkey: String,
-    #[serde(default, alias = "local_funding_amount")]
+    #[serde(
+        default,
+        alias = "local_funding_amount",
+        deserialize_with = "deserialize_i64"
+    )]
     local_funding_amount: i64,
+    #[serde(
+        default,
+        alias = "push_sat",
+        deserialize_with = "deserialize_optional_i64"
+    )]
+    push_sat: Option<i64>,
     #[serde(default)]
     private: bool,
 }
@@ -872,6 +889,20 @@ fn open_channel_node_id(body: &OpenChannelBody) -> Result<String, String> {
         .map_err(|_| "nodePubkey is not a valid compressed public key".into())
 }
 
+fn open_channel_push_msat(body: &OpenChannelBody) -> Result<Option<u64>, String> {
+    let Some(push_sat) = body.push_sat else {
+        return Ok(None);
+    };
+    if push_sat < 0 || push_sat > body.local_funding_amount {
+        return Err("pushSat must be between zero and localFundingAmount".into());
+    }
+    u64::try_from(push_sat)
+        .map_err(|_| "pushSat must not be negative".to_string())?
+        .checked_mul(1000)
+        .map(Some)
+        .ok_or_else(|| "pushSat is too large".to_string())
+}
+
 #[post("/v1/channels")]
 async fn open_channel(
     req: HttpRequest,
@@ -888,13 +919,18 @@ async fn open_channel(
     if body.local_funding_amount <= 0 {
         return internal_error("local_funding_amount is required");
     }
+    let push_msat = match open_channel_push_msat(&body) {
+        Ok(push_msat) => push_msat,
+        Err(e) => return internal_error(e),
+    };
+    let expected_node_id = node_id.clone();
     let request = request::OpenChannel {
         node_id,
         amount: body.local_funding_amount as u64,
         public: !body.private,
         port: None,
         addr: None,
-        push_msat: None,
+        push_msat,
     };
     match lampod::jsonrpc::open_channel::json_fundchannel(
         &state.lampod,
@@ -908,13 +944,32 @@ async fn open_channel(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            let output_index = state
+                .lampod
+                .channel_manager()
+                .manager()
+                .list_channels()
+                .into_iter()
+                .filter(|channel| channel.counterparty.node_id.to_string() == expected_node_id)
+                .filter_map(|channel| channel.funding_txo)
+                .find(|outpoint| outpoint.txid.to_string() == txid)
+                .map(|outpoint| outpoint.index as u32);
+            let Some(output_index) = output_index else {
+                return internal_error("funding output index is not available");
+            };
             proto_json(&lnrpc::ChannelPoint {
                 funding_txid: Some(lnrpc::channel_point::FundingTxid::FundingTxidStr(txid)),
-                output_index: 0,
+                output_index,
             })
         }
         Err(e) => internal_error(e),
     }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CloseChannelQuery {
+    #[serde(default)]
+    force: bool,
 }
 
 #[delete("/v1/channels/{funding_txid}/{output_index}")]
@@ -922,6 +977,7 @@ async fn close_channel(
     req: HttpRequest,
     state: web::Data<AppState>,
     path: web::Path<(String, u32)>,
+    query: web::Query<CloseChannelQuery>,
 ) -> HttpResponse {
     if let Err(e) = authorize(&req, &state.bakery, OFFCHAIN_WRITE) {
         return auth_error(e);
@@ -944,6 +1000,7 @@ async fn close_channel(
     let request = request::CloseChannel {
         node_id: channel.counterparty.node_id.to_string(),
         channel_id: Some(channel.channel_id.to_string()),
+        force: query.force,
     };
     match lampod::jsonrpc::channels::json_close(
         &state.lampod,
@@ -1058,6 +1115,28 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(open_channel_node_id(&body).unwrap(), public.to_string());
+    }
+
+    #[test]
+    fn preserves_channel_push_amount_and_force_close_query() {
+        let body: OpenChannelBody = serde_json::from_value(json::json!({
+            "nodePubkeyString": "02",
+            "localFundingAmount": "100000",
+            "pushSat": "25000"
+        }))
+        .unwrap();
+        assert_eq!(open_channel_push_msat(&body).unwrap(), Some(25_000_000));
+
+        let excessive: OpenChannelBody = serde_json::from_value(json::json!({
+            "nodePubkeyString": "02",
+            "localFundingAmount": 100000,
+            "pushSat": 100001
+        }))
+        .unwrap();
+        assert!(open_channel_push_msat(&excessive).is_err());
+
+        let query = web::Query::<CloseChannelQuery>::from_query("force=true").unwrap();
+        assert!(query.force);
     }
 
     #[test]
