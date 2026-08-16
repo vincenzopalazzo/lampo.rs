@@ -106,6 +106,7 @@ impl OffchainManager {
         offer_str: &str,
         amount_msat: Option<u64>,
         payer_note: Option<String>,
+        max_fee_msat: Option<u64>,
     ) -> error::Result<PaymentId> {
         // check if it is an invoice or an offer
         let offer_hash = Sha256::hash(offer_str.as_bytes());
@@ -131,6 +132,10 @@ impl OffchainManager {
                 OptionalOfferPaymentParams {
                     payer_note,
                     retry_strategy: Retry::Timeout(std::time::Duration::from_secs(1)),
+                    route_params_config: ldk::routing::router::RouteParametersConfig {
+                        max_total_routing_fee_msat: max_fee_msat,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
             )
@@ -142,6 +147,7 @@ impl OffchainManager {
         &self,
         invoice_str: &str,
         amount_msat: Option<u64>,
+        max_fee_msat: Option<u64>,
     ) -> error::Result<PaymentId> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
@@ -162,6 +168,10 @@ impl OffchainManager {
                 amount_msat,
                 OptionalBolt11PaymentParams {
                     retry_strategy: Retry::Attempts(10),
+                    route_params_config: ldk::routing::router::RouteParametersConfig {
+                        max_total_routing_fee_msat: max_fee_msat,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
             )

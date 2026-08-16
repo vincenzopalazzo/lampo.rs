@@ -1,6 +1,6 @@
 //! Actix HTTPS server for the LND-compatible REST API.
-use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -24,54 +24,74 @@ pub struct LndRestConfig {
     pub macaroon_dir: PathBuf,
 }
 
-impl LndRestConfig {
-    pub fn socket_addr(&self) -> error::Result<SocketAddr> {
-        let raw = format!("{}:{}", self.listen_host, self.listen_port);
-        raw.parse()
-            .map_err(|e| error::anyhow!("invalid lnd rest listen address `{raw}`: {e}"))
-    }
-}
-
 /// Spawn the LND REST listener on a dedicated Actix system thread.
 ///
 /// Actix's `HttpServer::run` future is `!Send`, so it cannot live on the
 /// multi-thread tokio runtime used by `lampod-cli`.
 pub fn spawn(lampod: Arc<LampoDaemon>, conf: LndRestConfig) -> error::Result<()> {
-    let admin_path = conf.macaroon_dir.join("admin.macaroon");
-    let addr = conf.socket_addr()?;
+    let (ready_tx, ready_rx) = mpsc::sync_channel(1);
     thread::Builder::new()
         .name("lampo-lnd-rest".into())
         .spawn(move || {
             let system = actix_web::rt::System::new();
-            if let Err(err) = system.block_on(run(lampod, conf)) {
+            if let Err(err) = system.block_on(run_with_ready(lampod, conf, Some(ready_tx))) {
                 log::error!(target: "lampo-lnd", "LND REST server failed: {err}");
             }
         })
         .map_err(|e| error::anyhow!("failed to spawn LND REST thread: {e}"))?;
 
-    // Wait until bakery material exists and the listener accepts TCP.
-    for _ in 0..100 {
-        if admin_path.exists() {
-            if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(50)).is_ok() {
-                return Ok(());
-            }
+    match ready_rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(error::anyhow!(err)),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            error::bail!("timed out waiting for LND REST listener startup")
         }
-        thread::sleep(Duration::from_millis(50));
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            error::bail!("LND REST server exited before reporting startup")
+        }
     }
-    error::bail!(
-        "timed out waiting for LND REST listener on {} (macaroon {})",
-        addr,
-        admin_path.display()
-    )
 }
 
 /// Bind and run the LND REST listener. Returns once the server stops.
 pub async fn run(lampod: Arc<LampoDaemon>, conf: LndRestConfig) -> error::Result<()> {
+    run_with_ready(lampod, conf, None).await
+}
+
+async fn run_with_ready(
+    lampod: Arc<LampoDaemon>,
+    conf: LndRestConfig,
+    ready: Option<mpsc::SyncSender<Result<(), String>>>,
+) -> error::Result<()> {
+    let server = match build_server(lampod, conf) {
+        Ok(server) => server,
+        Err(err) => {
+            if let Some(ready) = ready {
+                let _ = ready.send(Err(err.to_string()));
+            }
+            return Err(err);
+        }
+    };
+    if let Some(ready) = ready {
+        let _ = ready.send(Ok(()));
+    }
+    server
+        .await
+        .map_err(|e| error::anyhow!("LND REST server error: {e}"))
+}
+
+fn build_server(
+    lampod: Arc<LampoDaemon>,
+    conf: LndRestConfig,
+) -> error::Result<actix_web::dev::Server> {
     // rustls 0.23 requires an explicit process-level CryptoProvider when
     // multiple backends could be linked. Prefer ring for portability.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let addr = conf.socket_addr()?;
+    let addr = if conf.listen_host.contains(':') {
+        format!("[{}]:{}", conf.listen_host, conf.listen_port)
+    } else {
+        format!("{}:{}", conf.listen_host, conf.listen_port)
+    };
     let hosts = vec![
         conf.listen_host.clone(),
         "localhost".to_string(),
@@ -150,18 +170,17 @@ pub async fn run(lampod: Arc<LampoDaemon>, conf: LndRestConfig) -> error::Result
         });
     }
 
-    HttpServer::new(move || {
+    let listen_host = conf.listen_host.clone();
+    let listen_port = conf.listen_port;
+    let server = HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
             .app_data(web::JsonConfig::default().limit(1024 * 1024))
             .wrap(RequireMacaroon)
             .configure(routes::configure)
     })
-    .bind_rustls_0_23(addr, rustls_config)
+    .bind_rustls_0_23((listen_host.as_str(), listen_port), rustls_config)
     .map_err(|e| error::anyhow!("failed to bind LND REST on {addr}: {e}"))?
-    .run()
-    .await
-    .map_err(|e| error::anyhow!("LND REST server error: {e}"))?;
-
-    Ok(())
+    .run();
+    Ok(server)
 }

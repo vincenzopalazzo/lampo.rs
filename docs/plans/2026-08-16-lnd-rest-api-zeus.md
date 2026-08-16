@@ -8,8 +8,8 @@
 
 - `lampo-lnd/` (new) — crate: protos, auth, tls, routes, convert, server
 - `Cargo.toml` — workspace member
-- `lampo-common/src/conf.rs` — `lnd-rest-*` config knobs
-- `lampod-cli/src/{args,main}.rs` — spawn LND REST listener
+- `lampo-common/src/conf.rs` — `lnd` API-mode switch
+- `lampod-cli/src/{args,main}.rs` — select and spawn the LND REST listener
 - `lampo.example.conf` — document new keys
 - `tests/tests/src/` — auth + REST smoke integration
 - `tools/lnd-rest-smoke.sh` — curl-based LND REST smoke (not `lncli`)
@@ -51,7 +51,8 @@
 
 ## Edge cases / security (from review)
 
-- Legacy `lampo-httpd` stays loopback-only by default; LND REST is the remote surface.
+- `lnd=true` selects LND REST instead of legacy `lampo-httpd`; both use
+  `api-host`/`api-port`, so the unauthenticated API is never exposed alongside it.
 - Never log macaroons, full bodies, invoices, or preimages.
 - Fail startup if LND REST bind/TLS/macaroon init fails (do not detach-and-ignore).
 - Bound body/header sizes; auth before large body work.

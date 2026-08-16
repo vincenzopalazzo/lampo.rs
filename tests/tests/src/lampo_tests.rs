@@ -275,6 +275,7 @@ pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
             request::Pay {
                 invoice_str: invoice.bolt11,
                 amount: None,
+                max_fee_msat: None,
                 bolt12: None,
                 timeout: Default::default(),
             },
@@ -324,6 +325,7 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
             request::Pay {
                 invoice_str: offer.bolt12,
                 amount: None,
+                max_fee_msat: None,
                 bolt12: None,
                 timeout: Default::default(),
             },
@@ -389,6 +391,7 @@ pub async fn pay_offer_minimal_offer() -> error::Result<()> {
             request::Pay {
                 invoice_str: offer.bolt12,
                 amount: Some(100_000),
+                max_fee_msat: None,
                 bolt12: None,
                 timeout: Default::default(),
             },
@@ -444,6 +447,8 @@ pub async fn decode_invoice() -> error::Result<()> {
     };
 
     assert_eq!(decode.issuer_id.clone(), Some(node2.info.node_id.clone()));
+    assert_eq!(decode.payment_hash.len(), 64);
+    assert_eq!(decode.expiry_time, Some(10_000));
     log::info!(target: &node2.info.node_id, "decode offer `{:?}`", decode);
 
     let pay: response::PayResult = node1
@@ -453,6 +458,7 @@ pub async fn decode_invoice() -> error::Result<()> {
             request::Pay {
                 invoice_str: invoice.bolt11,
                 amount: None,
+                max_fee_msat: None,
                 bolt12: None,
                 timeout: Default::default(),
             },
@@ -524,6 +530,7 @@ pub async fn decode_offer_hex() -> error::Result<()> {
             request::Pay {
                 invoice_str: offer.bolt12,
                 amount: None,
+                max_fee_msat: None,
                 bolt12: None,
                 timeout: Default::default(),
             },

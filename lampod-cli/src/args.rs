@@ -66,17 +66,9 @@ pub struct LampoCliArgs {
     #[arg(long = "api-port")]
     pub api_port: Option<u64>,
 
-    /// Enable the LND-compatible REST API (for Zeus)
-    #[arg(long = "lnd-rest")]
-    pub lnd_rest: bool,
-
-    /// LND REST listen host
-    #[arg(long = "lnd-rest-host")]
-    pub lnd_rest_host: Option<String>,
-
-    /// LND REST listen port (default 8080)
-    #[arg(long = "lnd-rest-port")]
-    pub lnd_rest_port: Option<u64>,
+    /// Serve the LND-compatible API instead of lampo-httpd
+    #[arg(long = "lnd")]
+    pub lnd: bool,
 
     /// Subcommand to run
     #[command(subcommand)]
@@ -131,14 +123,8 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if let Some(api_port) = self.api_port {
             conf.api_port = api_port;
         }
-        if self.lnd_rest {
-            conf.lnd_rest = Some(true);
-        }
-        if let Some(host) = self.lnd_rest_host {
-            conf.lnd_rest_host = Some(host);
-        }
-        if let Some(port) = self.lnd_rest_port {
-            conf.lnd_rest_port = Some(port);
+        if self.lnd {
+            conf.lnd = Some(true);
         }
         Ok(conf)
     }
