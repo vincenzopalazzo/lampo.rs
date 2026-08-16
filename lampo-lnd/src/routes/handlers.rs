@@ -552,6 +552,7 @@ async fn pay_invoice(
         invoice_str: body.payment_request.clone(),
         amount: amount_msat,
         bolt12: None,
+        timeout: Default::default(),
     };
     let value = lampod::jsonrpc::offchain::json_pay(
         &state.lampod,
@@ -683,6 +684,7 @@ async fn open_channel(
         public: !body.private,
         port: None,
         addr: None,
+        push_msat: None,
     };
     match lampod::jsonrpc::open_channel::json_fundchannel(
         &state.lampod,
