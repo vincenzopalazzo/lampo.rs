@@ -97,7 +97,10 @@ pub fn destination_id(url: &str) -> error::Result<String> {
         .join(",");
     let dbname = config.get_dbname().unwrap_or("");
     let user = config.get_user().unwrap_or("");
-    Ok(format!("{user}@{hosts}:{ports}/{dbname}"))
+    // `options` can change the effective schema (search_path), so two URLs that
+    // share host/db but differ here are different destinations for channel state.
+    let options = config.get_options().unwrap_or("");
+    Ok(format!("{user}@{hosts}:{ports}/{dbname}?options={options}"))
 }
 
 impl PostgresStore {
@@ -274,8 +277,9 @@ fn parse_config(url: &str) -> error::Result<Config> {
 
 /// Build a connector once per database session.
 ///
-/// This reuses the same Rustls and Mozilla root versions already present for
-/// VSS rather than linking a second TLS stack.
+/// Trust Mozilla's web roots plus the host trust store, so enterprise/private
+/// CAs installed on the machine work without a separate config knob. `SSL_CERT_FILE`
+/// from the environment is honored by the native-certs loader.
 fn tls_connector() -> MakeRustlsConnect {
     let mut roots = rustls::RootCertStore::empty();
     roots.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|anchor| {
@@ -285,6 +289,18 @@ fn tls_connector() -> MakeRustlsConnect {
             anchor.name_constraints,
         )
     }));
+    match rustls_native_certs::load_native_certs() {
+        Ok(certs) => {
+            for cert in certs {
+                if let Err(err) = roots.add(&rustls::Certificate(cert.0)) {
+                    log::debug!(target: "lampo-postgres", "skipping native CA: {err:?}");
+                }
+            }
+        }
+        Err(err) => {
+            log::warn!(target: "lampo-postgres", "loading native CA certificates: {err}");
+        }
+    }
     let config = rustls::ClientConfig::builder()
         .with_safe_defaults()
         .with_root_certificates(roots)
@@ -714,5 +730,22 @@ mod tests {
         };
         store.upsert_payment(&bare).unwrap();
         assert_eq!(store.get_payment("bare").unwrap().unwrap(), bare);
+    }
+
+    #[test]
+    fn destination_id_includes_session_options() {
+        let base = "postgres://lampo@127.0.0.1:5432/lampo?sslmode=require";
+        let plain = destination_id(base).unwrap();
+        let scoped = destination_id(&format!("{base}&options=-csearch_path%3Dother")).unwrap();
+        assert!(
+            plain != scoped,
+            "search_path must change the destination fingerprint"
+        );
+        assert!(
+            scoped.contains("options=-csearch_path=other")
+                || scoped.contains("options=-csearch_path%3Dother")
+                || scoped.contains("search_path"),
+            "fingerprint should carry the options: {scoped}"
+        );
     }
 }

@@ -121,9 +121,10 @@ fn storage_selection(conf: &LampoConf, kind: &str) -> error::Result<String> {
                 Some(url) => url.to_owned(),
                 None => format!("{}/lampo.db", conf.path()),
             };
-            let canonical =
-                fs::canonicalize(Path::new(&path)).unwrap_or_else(|_| PathBuf::from(&path));
-            Ok(format!("sqlite:{}", canonical.display()))
+            Ok(format!(
+                "sqlite:{}",
+                sqlite_destination_path(&path).display()
+            ))
         }
         "postgres" => {
             let url = conf.storage_url.as_deref().ok_or_else(|| {
@@ -132,6 +133,34 @@ fn storage_selection(conf: &LampoConf, kind: &str) -> error::Result<String> {
             Ok(format!("postgres:{}", postgres_destination_id(url)?))
         }
         other => error::bail!("unknown storage backend `{other}`, expected fs, sqlite or postgres"),
+    }
+}
+
+/// Resolve a SQLite path the same way before and after the file exists.
+///
+/// `canonicalize` fails for a missing file, so a relative `storage-url` would
+/// otherwise be recorded raw on first start and rewritten to an absolute path
+/// on the next start, looking like a destination change. Canonicalizing the
+/// parent when the file is absent keeps macOS `/var` → `/private/var` stable too.
+fn sqlite_destination_path(path: &str) -> PathBuf {
+    let path = Path::new(path);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(path),
+            Err(_) => path.to_path_buf(),
+        }
+    };
+    if let Ok(canonical) = fs::canonicalize(&absolute) {
+        return canonical;
+    }
+    match (absolute.parent(), absolute.file_name()) {
+        (Some(parent), Some(name)) => match fs::canonicalize(parent) {
+            Ok(parent) => parent.join(name),
+            Err(_) => absolute,
+        },
+        _ => absolute,
     }
 }
 
@@ -256,5 +285,27 @@ mod tests {
         conf.storage_url = Some(format!("{}/b.db", conf.path()));
         let second = storage_selection(&conf, "sqlite").unwrap();
         assert!(validate_storage_selection(&conf, &second).is_err());
+    }
+
+    #[test]
+    fn relative_sqlite_path_stays_stable_after_file_appears() {
+        let dir = ScratchDir::new("sqlite-relative");
+        let cwd = std::env::current_dir().unwrap();
+        let absolute = dir.0.join("relative.db");
+        let relative = absolute
+            .strip_prefix(&cwd)
+            .map(|rel| rel.display().to_string())
+            .unwrap_or_else(|_| absolute.display().to_string());
+        let before = sqlite_destination_path(&relative);
+        fs::write(&absolute, b"").unwrap();
+        let after = sqlite_destination_path(&relative);
+        assert_eq!(
+            before, after,
+            "creating the database must not change the recorded destination"
+        );
+        assert!(
+            before.is_absolute(),
+            "relative storage-url must be recorded as an absolute path"
+        );
     }
 }

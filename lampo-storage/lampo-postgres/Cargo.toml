@@ -12,4 +12,5 @@ tokio = { version = "1", features = ["rt", "net", "time"] }
 log = { version = "0.4", features = ["std"] }
 tokio-postgres-rustls = "0.10.0"
 rustls = "0.21.12"
+rustls-native-certs = "0.6"
 webpki-roots = "0.25.4"
