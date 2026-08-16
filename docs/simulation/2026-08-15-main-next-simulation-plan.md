@@ -211,7 +211,18 @@ LDK-Server; lampo relays carry the traffic. Metrics from `sim-cli` CSV output
       (announced), bolt11 both directions, keysend/spontaneous both
       directions, and **cross-impl multihop lp1→lp2 with hops=3 via both
       ldk nodes (lampo→ldk→ldk→lampo routing works)**.
-- [ ] **F-7 (open, next): reverse multihop I10 (lp2→lp1) fails** —
+- [x] **F-7 CLOSED (harness topology, not a lampo bug)**: reverse multihop
+      failed because lk2 had no outbound on c2 (no push) and stale duplicate
+      channels from verification reruns poisoned routing. Fix: push on BOTH
+      relay channels + fresh ldk slate between runs.
+- [x] **FULL INTEROP PASS: I01–I14, 14 OK / 0 FAIL** on `sim/interop-verify`
+      (main + #588 + #569): connect; channels opened by both sides
+      (announced); bolt11 BOTH directions; keysend/spontaneous BOTH
+      directions; cross-impl multihop BOTH directions (hops=3, via both ldk
+      nodes); **bolt12 offer across implementations**; **ldk SIGKILL+restart
+      chaos with a payment succeeding through the recovered mixed cluster**;
+      lampo logs clean. The alternative-implementation tier is fully green.
+- [ ] Old: F-7 reverse multihop I10 fails —
       `state=Failure` with an empty path. Note: the verification reruns
       created duplicate parallel channels (one per run) on the persistent
       ldk nodes; dedup or a fresh ldk slate first, then check lp2's route
