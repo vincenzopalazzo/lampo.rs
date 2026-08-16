@@ -181,6 +181,12 @@ pub mod response {
         pub path: Vec<PaymentHop>,
         pub payment_hash: Option<String>,
         pub state: PaymentState,
+        /// Total value delivered across all successful MPP paths.
+        pub value_msat: u64,
+        /// Total routing fees paid across all successful MPP paths.
+        pub fee_msat: u64,
+        /// Terminal failure detail, when the payment failed.
+        pub reason: Option<String>,
         /// Hex encoded preimage, the receipt of the payment.
         pub payment_preimage: Option<String>,
         /// Bech32 encoded BOLT 12 payer proof, proving to a third party that
