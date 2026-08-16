@@ -383,12 +383,19 @@ async fn new_address(
 struct AddInvoiceBody {
     #[serde(default)]
     memo: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_i64")]
     value: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_i64")]
     value_msat: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_i64")]
     expiry: i64,
+}
+
+fn invoice_expiry(expiry: i64) -> Result<u32, String> {
+    if expiry <= 0 {
+        return Ok(86_400);
+    }
+    u32::try_from(expiry).map_err(|_| "invoice expiry is too large".into())
 }
 
 #[post("/v1/invoices")]
@@ -407,10 +414,9 @@ async fn add_invoice(
     } else {
         None
     };
-    let expiry = if body.expiry > 0 {
-        body.expiry as u32
-    } else {
-        3600
+    let expiry = match invoice_expiry(body.expiry) {
+        Ok(expiry) => expiry,
+        Err(e) => return internal_error(e),
     };
     let description = if body.memo.is_empty() {
         "lampo invoice".to_string()
@@ -539,11 +545,12 @@ async fn decode_payreq(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            let timestamp = value.get("timestamp").and_then(|v| v.as_u64()).unwrap_or(0);
             proto_json(&lnrpc::PayReq {
                 destination,
                 payment_hash,
                 num_satoshis: (amount_msat / 1000) as i64,
-                timestamp: 0,
+                timestamp: timestamp as i64,
                 expiry: expiry as i64,
                 description,
                 description_hash: String::new(),
@@ -565,10 +572,16 @@ async fn decode_payreq(
 struct SendPaymentBody {
     #[serde(default, alias = "payment_request")]
     payment_request: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_i64")]
     amt: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_i64")]
     amt_msat: i64,
+    #[serde(
+        default,
+        alias = "timeout_seconds",
+        deserialize_with = "deserialize_optional_i64"
+    )]
+    timeout_seconds: Option<i64>,
     #[serde(
         default,
         alias = "fee_limit_sat",
@@ -689,6 +702,22 @@ fn max_fee_msat(
     }
 }
 
+fn payment_timeout_secs(
+    body: &SendPaymentBody,
+    endpoint: PaymentEndpoint,
+) -> Result<Option<u64>, String> {
+    match body.timeout_seconds {
+        Some(timeout) if timeout < 0 => Err("timeoutSeconds must not be negative".into()),
+        Some(0) if matches!(endpoint, PaymentEndpoint::Router) => Ok(Some(60)),
+        Some(0) => Ok(None),
+        Some(timeout) => u64::try_from(timeout)
+            .map(Some)
+            .map_err(|_| "timeoutSeconds must not be negative".into()),
+        None if matches!(endpoint, PaymentEndpoint::Router) => Ok(Some(60)),
+        None => Ok(None),
+    }
+}
+
 fn route_value_and_fee(value: &JsonValue, fallback_value_msat: u64) -> (u64, u64) {
     let path_hop_fees = value
         .get("path")
@@ -738,6 +767,7 @@ async fn pay_invoice(
         max_fee_msat: Some(max_fee_msat),
         bolt12: None,
         timeout: Default::default(),
+        timeout_secs: payment_timeout_secs(body, endpoint)?,
     };
     let value = lampod::jsonrpc::offchain::json_pay(
         &state.lampod,
@@ -866,6 +896,12 @@ struct OpenChannelBody {
         deserialize_with = "deserialize_optional_i64"
     )]
     push_sat: Option<i64>,
+    #[serde(
+        default,
+        alias = "sat_per_vbyte",
+        deserialize_with = "deserialize_optional_i64"
+    )]
+    sat_per_vbyte: Option<i64>,
     #[serde(default)]
     private: bool,
 }
@@ -903,6 +939,16 @@ fn open_channel_push_msat(body: &OpenChannelBody) -> Result<Option<u64>, String>
         .ok_or_else(|| "pushSat is too large".to_string())
 }
 
+fn open_channel_fee_rate(body: &OpenChannelBody) -> Result<Option<u64>, String> {
+    match body.sat_per_vbyte {
+        Some(rate) if rate < 0 => Err("satPerVbyte must not be negative".into()),
+        Some(0) | None => Ok(None),
+        Some(rate) => u64::try_from(rate)
+            .map(Some)
+            .map_err(|_| "satPerVbyte is too large".into()),
+    }
+}
+
 #[post("/v1/channels")]
 async fn open_channel(
     req: HttpRequest,
@@ -923,6 +969,10 @@ async fn open_channel(
         Ok(push_msat) => push_msat,
         Err(e) => return internal_error(e),
     };
+    let sat_per_vbyte = match open_channel_fee_rate(&body) {
+        Ok(sat_per_vbyte) => sat_per_vbyte,
+        Err(e) => return internal_error(e),
+    };
     let expected_node_id = node_id.clone();
     let request = request::OpenChannel {
         node_id,
@@ -931,6 +981,7 @@ async fn open_channel(
         port: None,
         addr: None,
         push_msat,
+        sat_per_vbyte,
     };
     match lampod::jsonrpc::open_channel::json_fundchannel(
         &state.lampod,
@@ -1052,13 +1103,18 @@ mod tests {
     fn parses_zeus_fee_limit_and_payment_request() {
         let body: SendPaymentBody = serde_json::from_value(json::json!({
             "paymentRequest": "lnbc1...",
-            "feeLimitMsat": 1234
+            "feeLimitMsat": 1234,
+            "timeoutSeconds": "17"
         }))
         .unwrap();
         assert_eq!(body.payment_request, "lnbc1...");
         assert_eq!(
             max_fee_msat(&body, 100_000, PaymentEndpoint::Router).unwrap(),
             1234
+        );
+        assert_eq!(
+            payment_timeout_secs(&body, PaymentEndpoint::Router).unwrap(),
+            Some(17)
         );
     }
 
@@ -1074,6 +1130,23 @@ mod tests {
             max_fee_msat(&body, 2_000_000, PaymentEndpoint::Sync).unwrap(),
             100_000
         );
+        assert_eq!(
+            payment_timeout_secs(&body, PaymentEndpoint::Router).unwrap(),
+            Some(60)
+        );
+        assert_eq!(
+            payment_timeout_secs(&body, PaymentEndpoint::Sync).unwrap(),
+            None
+        );
+        assert_eq!(invoice_expiry(0).unwrap(), 86_400);
+
+        let invoice: AddInvoiceBody = serde_json::from_value(json::json!({
+            "value": "1000",
+            "expiry": "0"
+        }))
+        .unwrap();
+        assert_eq!(invoice.value, 1000);
+        assert_eq!(invoice_expiry(invoice.expiry).unwrap(), 86_400);
     }
 
     #[test]
@@ -1122,10 +1195,12 @@ mod tests {
         let body: OpenChannelBody = serde_json::from_value(json::json!({
             "nodePubkeyString": "02",
             "localFundingAmount": "100000",
-            "pushSat": "25000"
+            "pushSat": "25000",
+            "satPerVbyte": "12"
         }))
         .unwrap();
         assert_eq!(open_channel_push_msat(&body).unwrap(), Some(25_000_000));
+        assert_eq!(open_channel_fee_rate(&body).unwrap(), Some(12));
 
         let excessive: OpenChannelBody = serde_json::from_value(json::json!({
             "nodePubkeyString": "02",

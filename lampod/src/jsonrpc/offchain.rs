@@ -70,6 +70,7 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
         let bolt11_invoice = Bolt11InvoiceInfo {
             issuer_id: invoice.payee_pub_key().map(|id| id.to_string()),
             payment_hash: hex::encode(invoice.payment_hash().0),
+            timestamp: invoice.duration_since_epoch().as_secs(),
             amount_msat: invoice.amount_milli_satoshis(),
             network: invoice.network().to_string(),
             description: match invoice.description() {
@@ -126,7 +127,11 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     // otherwise see this payment's result -- and now its preimage and payer
     // proof too. Only accept events carrying our own payment id.
     let payment_id = hex::encode(payment_id.0);
-    wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
+    let timeout = request
+        .timeout_secs
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| request.timeout.duration());
+    wait_for_payment_result(events, &payment_id, timeout).await
 }
 
 /// Hold the `PaymentReceipt` (preimage, payer proof) until the terminal
