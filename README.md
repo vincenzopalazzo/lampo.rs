@@ -59,6 +59,12 @@ following command to use the example config file:
 cp lampo.example.conf ~/.lampo/signet/lampo.conf
 ```
 
+A newly generated wallet jumps its checkpoint to the chain tip (fast-sync, on
+by default) so it does not scan from genesis. A mnemonic restore never takes
+that automatic jump, even when its local database is new, because the seed may
+own historical funds. Use `reindex=<height>` in `lampo.conf` for a known
+birthday.
+
 Then you can query the node with the following command:
 
 ``` 

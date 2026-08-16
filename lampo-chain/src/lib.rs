@@ -89,6 +89,17 @@ impl chain::Listen for WalletChainListener {
     }
 }
 
+fn mark_initial_sync_complete(
+    coordinator: &ChainSyncCoordinator,
+    wallet_included: bool,
+    wallet_failed: bool,
+) {
+    coordinator.mark_listeners_synced();
+    if wallet_included && !wallet_failed {
+        coordinator.mark_running();
+    }
+}
+
 /// Welcome in another Facede pattern implementation
 pub struct LampoChainSync {
     config: Arc<LampoConf>,
@@ -383,7 +394,9 @@ impl Backend for LampoChainSync {
         // permanently gate the on-chain wallet). Each attempt rebuilds the
         // listener set from the current best blocks, resuming where it left off.
         let mut retry_delay = std::time::Duration::from_secs(5);
+        let mut wallet_included;
         let (cache, synced_chain_tip) = loop {
+            wallet_included = false;
             if let Some(listener) = wallet_listener.as_ref() {
                 listener.reset();
             }
@@ -413,6 +426,7 @@ impl Backend for LampoChainSync {
                             chain::BlockLocator::new(best.hash, best.height),
                             listener as &(dyn chain::Listen + Send + Sync),
                         ));
+                        wallet_included = true;
                     }
                     Err(err) => {
                         log::error!(target: "lampo-chain", "skipping on-chain wallet in chain sync: {err}")
@@ -468,7 +482,11 @@ impl Backend for LampoChainSync {
         // on-chain wallet) can proceed over the now-free RPC. No-op when no
         // coordinator was injected.
         if let Some(coordinator) = self.coordinator.get() {
-            coordinator.mark_listeners_synced();
+            mark_initial_sync_complete(
+                coordinator,
+                wallet_included,
+                wallet_listener.as_ref().is_some_and(|l| l.had_failure()),
+            );
         }
 
         let chain_listener = (chain_monitor, channel_manager);
@@ -495,6 +513,7 @@ mod tests {
     use lampo_common::bitcoin::hashes::Hash;
     use lampo_common::bitcoin::pow::CompactTarget;
     use lampo_common::bitcoin::{Amount, Block, BlockHash, FeeRate, ScriptBuf, Transaction};
+    use lampo_common::chainsync::{ChainSyncCoordinator, SyncState};
     use lampo_common::conf::LampoConf;
     use lampo_common::error;
     use lampo_common::keys::LampoKeys;
@@ -502,7 +521,7 @@ mod tests {
     use lampo_common::model::response::{NewAddress, Utxo};
     use lampo_common::wallet::{BlockRef, WalletManager};
 
-    use super::WalletChainListener;
+    use super::{mark_initial_sync_complete, WalletChainListener};
 
     struct MockWallet {
         heights: Mutex<Vec<u32>>,
@@ -623,5 +642,21 @@ mod tests {
 
         assert!(listener.had_failure());
         assert_eq!(wallet.heights.lock().unwrap().as_slice(), &[42]);
+    }
+
+    #[test]
+    fn unified_wallet_sync_marks_initial_sync_complete() {
+        let coordinator = ChainSyncCoordinator::new();
+        mark_initial_sync_complete(&coordinator, true, false);
+        assert_eq!(coordinator.state(), SyncState::Running);
+    }
+
+    #[test]
+    fn incomplete_wallet_sync_stays_at_listeners_synced() {
+        for (included, failed) in [(false, false), (true, true)] {
+            let coordinator = ChainSyncCoordinator::new();
+            mark_initial_sync_complete(&coordinator, included, failed);
+            assert_eq!(coordinator.state(), SyncState::ListenersSynced);
+        }
     }
 }

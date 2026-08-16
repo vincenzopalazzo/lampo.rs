@@ -65,6 +65,9 @@ impl LampoInventoryManager {
             address: address_vec,
             block_hash: block_hash.to_string(),
             wallet_height: wallet_tips.to_consensus_u32() as u64,
+            wallet_scan_height: wallet_tips.to_consensus_u32() as u64,
+            sync_in_progress: false,
+            sync_progress_percent: 100,
         };
         Ok(getinfo)
     }
