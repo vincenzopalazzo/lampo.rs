@@ -1,14 +1,16 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::bitcoin::absolute::Height;
-use crate::bitcoin::{Amount, FeeRate};
+use crate::bitcoin::{Address, Amount, FeeRate, Network};
 use crate::bitcoin::{Block, BlockHash, ScriptBuf, Transaction};
 use crate::chainsync::ChainSyncCoordinator;
 use crate::conf::LampoConf;
 use crate::error;
 use crate::keys::LampoKeys;
+use crate::ldk::sign::ChangeDestinationSource;
 use crate::model::response::{NewAddress, Utxo};
 
 /// A lightweight reference to a block (height + hash). Pure `bitcoin` types,
@@ -89,4 +91,48 @@ pub trait WalletManager: Send + Sync {
     /// Run a task for wallet sync operation, this usually need to
     /// be run in a `tokio::spawn(wallet.listen())`.
     async fn listen(self: Arc<Self>) -> error::Result<()>;
+}
+
+/// [`ChangeDestinationSource`] backed by the node's on-chain wallet: swept
+/// channel outputs land on a fresh wallet address. Static outputs of a closed
+/// channel pay to scripts derived from the LDK keys manager, which this wallet
+/// does not track; only the sweeper can claim them back.
+pub struct LampoChangeDestination {
+    wallet: Arc<dyn WalletManager>,
+    network: Network,
+}
+
+impl LampoChangeDestination {
+    pub fn new(wallet: Arc<dyn WalletManager>, network: Network) -> Self {
+        Self { wallet, network }
+    }
+}
+
+impl ChangeDestinationSource for LampoChangeDestination {
+    async fn get_change_destination_script(&self) -> Result<ScriptBuf, ()> {
+        let addr = self.wallet.get_onchain_address().await.map_err(|err| {
+            log::error!(
+                target: "lampo-wallet",
+                "failed to get a change destination for the sweeper: {err}"
+            );
+        })?;
+        Address::from_str(&addr.address)
+            .map_err(|err| {
+                log::error!(
+                    target: "lampo-wallet",
+                    "sweeper change address `{}` is not a valid bitcoin address: {err}",
+                    addr.address
+                );
+            })?
+            .require_network(self.network)
+            .map_err(|err| {
+                log::error!(
+                    target: "lampo-wallet",
+                    "sweeper change address `{}` is not valid on {}: {err}",
+                    addr.address,
+                    self.network
+                );
+            })
+            .map(|addr| addr.script_pubkey())
+    }
 }

@@ -444,6 +444,29 @@ impl Handler for LampoHandler {
                 // FIXME: make peristent these information
                 Ok(())
             }
+            ldk::events::Event::SpendableOutputs {
+                outputs,
+                channel_id,
+                counterparty_node_id,
+            } => {
+                log::info!(
+                    target: "lampo::handler",
+                    "tracking {} spendable output(s) from channel `{channel_id:?}` for sweeping",
+                    outputs.len(),
+                );
+                // `exclude_static_outputs` must stay `false`: static outputs
+                // pay to scripts derived from the LDK keys manager, which the
+                // BDK on-chain wallet does not track. Only the sweeper can
+                // claim them.
+                self.channel_manager
+                    .sweeper()
+                    .track_spendable_outputs(outputs, channel_id, counterparty_node_id, false, None)
+                    .await
+                    .map_err(|_| {
+                        error::anyhow!("failed to persist spendable outputs in the sweeper")
+                    })?;
+                Ok(())
+            }
             ldk::events::Event::PaymentSent {
                 payment_id,
                 payment_preimage,
