@@ -20,15 +20,15 @@ pub async fn json_close(ctx: &LampoDaemon, request: &json::Value) -> Result<json
     let mut request: request::CloseChannel = json::from_value(request.clone())?;
     let mut events = ctx.handler().events();
     // This gives all the channels with associated peer
-    let channels: response::Channels = ctx
-        .handler()
-        .call(
-            "channels",
-            json::json!({
-                "peer_id": request.node_id,
-            }),
-        )
-        .await?;
+    let channels = response::Channels {
+        channels: ctx
+            .channel_manager()
+            .list_channels()
+            .channels
+            .into_iter()
+            .filter(|channel| channel.peer_id == request.node_id)
+            .collect(),
+    };
 
     let res = if channels.channels.len() > 1 {
         // check the channel_id if it is not none, if it is return an error

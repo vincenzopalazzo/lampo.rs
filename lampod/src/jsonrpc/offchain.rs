@@ -69,6 +69,7 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
     {
         let bolt11_invoice = Bolt11InvoiceInfo {
             issuer_id: invoice.payee_pub_key().map(|id| id.to_string()),
+            payment_hash: hex::encode(invoice.payment_hash().0),
             amount_msat: invoice.amount_milli_satoshis(),
             network: invoice.network().to_string(),
             description: match invoice.description() {
@@ -79,7 +80,7 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
             },
             routes: Vec::new(),
             hints: Vec::new(),
-            expiry_time: Some(invoice.expiry_time().as_millis() as u64),
+            expiry_time: Some(invoice.expiry_time().as_secs()),
         };
 
         return Ok(json::to_value(&Decode::from(bolt11_invoice))?);
@@ -104,15 +105,22 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     let payment_id = if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
         log::debug!("Paying offer with bolt12 invoice: {}", request.invoice_str);
         let payer_note = request.bolt12.and_then(|x| x.payer_note);
-        ctx.offchain_manager()
-            .pay_offer(&request.invoice_str, request.amount, payer_note)?
+        ctx.offchain_manager().pay_offer(
+            &request.invoice_str,
+            request.amount,
+            payer_note,
+            request.max_fee_msat,
+        )?
     } else {
         log::debug!(
             "Paying invoice with bolt11 invoice: {}",
             request.invoice_str
         );
-        ctx.offchain_manager()
-            .pay_invoice(&request.invoice_str, request.amount)?
+        ctx.offchain_manager().pay_invoice(
+            &request.invoice_str,
+            request.amount,
+            request.max_fee_msat,
+        )?
     };
     // The event bus broadcasts to every subscriber, so a concurrent `pay` would
     // otherwise see this payment's result -- and now its preimage and payer

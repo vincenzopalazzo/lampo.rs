@@ -9,12 +9,12 @@
 #   ./tools/lnd-rest-smoke.sh [host] [port] [macaroon_path]
 #
 # Defaults:
-#   host=127.0.0.1 port=8080
+#   host=127.0.0.1 port=7979
 #   macaroon_path=$LAMPO_DIR/<network>/lnd-rest/macaroons/admin.macaroon
 set -euo pipefail
 
 HOST="${1:-127.0.0.1}"
-PORT="${2:-8080}"
+PORT="${2:-7979}"
 MACAROON_PATH="${3:-}"
 
 if [[ -z "${MACAROON_PATH}" ]]; then

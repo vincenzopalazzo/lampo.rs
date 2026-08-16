@@ -11,7 +11,7 @@ use actix_web::web::Data;
 use actix_web::Error;
 use futures_util::future::LocalBoxFuture;
 
-use crate::auth::{AuthError, INFO_READ};
+use crate::auth::AuthError;
 use crate::routes::AppState;
 
 pub struct RequireMacaroon;
@@ -64,9 +64,11 @@ where
                 return Ok(req.into_response(resp).map_into_right_body());
             };
 
-            // All default macaroons include info:read. Verifying it here
-            // rejects missing/tampered credentials before JSON body parsing.
-            if let Err(err) = crate::routes::authorize(req.request(), &bakery, INFO_READ) {
+            // Authenticate before body parsing. Authorization remains
+            // route-specific so least-privilege macaroons are usable.
+            let result = crate::routes::extract_macaroon_hex(req.request())
+                .and_then(|macaroon| bakery.verify_hex_signature(&macaroon));
+            if let Err(err) = result {
                 let (status, message) = match err {
                     AuthError::Missing
                     | AuthError::Malformed

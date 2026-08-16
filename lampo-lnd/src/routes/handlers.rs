@@ -90,6 +90,17 @@ async fn get_info(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse 
         .to_string();
     let alias = lampod.conf().alias.clone().unwrap_or_default();
     let network = convert::chain_network(&lampod.conf().network.to_string());
+    let channels = lampod.channel_manager().manager().list_channels();
+    let num_pending_channels = channels.iter().filter(|c| !c.is_channel_ready).count() as u32;
+    let num_active_channels = channels.iter().filter(|c| c.is_usable).count() as u32;
+    let num_inactive_channels = channels
+        .iter()
+        .filter(|c| c.is_channel_ready && !c.is_usable)
+        .count() as u32;
+    let synced_to_chain = match (height, lampod.wallet_manager().wallet_tips().await) {
+        (Some(best_height), Ok(wallet_height)) => wallet_height.to_consensus_u32() >= best_height,
+        _ => false,
+    };
     let mut uris = Vec::new();
     if let Some(addr) = lampod.conf().announce_addr.clone() {
         uris.push(format!("{}@{}:{}", node_id, addr, lampod.conf().port));
@@ -101,14 +112,14 @@ async fn get_info(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse 
         identity_pubkey: node_id,
         alias,
         color: "#3399ff".to_string(),
-        num_pending_channels: 0,
-        num_active_channels: lampod.channel_manager().list_channels().channels.len() as u32,
-        num_inactive_channels: 0,
+        num_pending_channels,
+        num_active_channels,
+        num_inactive_channels,
         num_peers: lampod.peer_manager().manager().list_peers().len() as u32,
         block_height: height.unwrap_or_default(),
         block_hash: block_hash.to_string(),
         best_header_timestamp: 0,
-        synced_to_chain: true,
+        synced_to_chain,
         synced_to_graph: true,
         chains: vec![lnrpc::Chain {
             network,
@@ -195,7 +206,7 @@ async fn list_channels(req: HttpRequest, state: web::Data<AppState>) -> HttpResp
                 .map(|o| format!("{}:{}", o.txid, o.index))
                 .unwrap_or_default();
             lnrpc::Channel {
-                active: c.is_channel_ready,
+                active: c.is_usable,
                 remote_pubkey: c.counterparty.node_id.to_string(),
                 channel_point,
                 chan_id: c.short_channel_id.unwrap_or_default(),
@@ -502,9 +513,14 @@ async fn decode_payreq(
                 .get("expiry_time")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
+            let payment_hash = value
+                .get("payment_hash")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             proto_json(&lnrpc::PayReq {
                 destination,
-                payment_hash: String::new(),
+                payment_hash,
                 num_satoshis: (amount_msat / 1000) as i64,
                 timestamp: 0,
                 expiry: expiry as i64,
@@ -532,12 +548,55 @@ struct SendPaymentBody {
     amt: i64,
     #[serde(default)]
     amt_msat: i64,
+    #[serde(default, alias = "fee_limit_sat")]
+    fee_limit_sat: i64,
+    #[serde(default, alias = "fee_limit_msat")]
+    fee_limit_msat: i64,
 }
 
-async fn pay_invoice(
-    state: &AppState,
-    body: &SendPaymentBody,
-) -> Result<lnrpc::SendResponse, String> {
+struct PaymentOutcome {
+    response: lnrpc::SendResponse,
+    value_msat: u64,
+    fee_msat: u64,
+}
+
+fn max_fee_msat(body: &SendPaymentBody) -> Result<u64, String> {
+    if body.fee_limit_sat < 0 || body.fee_limit_msat < 0 {
+        return Err("fee limits must not be negative".into());
+    }
+    if body.fee_limit_sat > 0 && body.fee_limit_msat > 0 {
+        return Err("fee_limit_sat and fee_limit_msat are mutually exclusive".into());
+    }
+    if body.fee_limit_msat > 0 {
+        Ok(body.fee_limit_msat as u64)
+    } else {
+        (body.fee_limit_sat as u64)
+            .checked_mul(1000)
+            .ok_or_else(|| "fee_limit_sat is too large".to_string())
+    }
+}
+
+fn route_value_and_fee(value: &JsonValue, fallback_value_msat: u64) -> (u64, u64) {
+    let path_hop_fees = value
+        .get("path")
+        .and_then(|v| v.as_array())
+        .map(|path| {
+            path.iter()
+                .filter_map(|hop| hop.get("hop_fee_msat").and_then(|fee| fee.as_u64()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    // LDK stores the delivered value in the final non-blinded RouteHop's
+    // `fee_msat`; preceding hops contain routing fees.
+    let routed_value_msat = path_hop_fees.last().copied();
+    let total_hop_msat: u64 = path_hop_fees.iter().sum();
+    (
+        routed_value_msat.unwrap_or(fallback_value_msat),
+        total_hop_msat.saturating_sub(routed_value_msat.unwrap_or(0)),
+    )
+}
+
+async fn pay_invoice(state: &AppState, body: &SendPaymentBody) -> Result<PaymentOutcome, String> {
     if body.payment_request.is_empty() {
         return Err("payment_request is required".into());
     }
@@ -548,9 +607,18 @@ async fn pay_invoice(
     } else {
         None
     };
+    let max_fee_msat = max_fee_msat(body)?;
+    let invoice_amount_msat = state
+        .lampod
+        .offchain_manager()
+        .decode_invoice(&body.payment_request)
+        .ok()
+        .and_then(|invoice| invoice.amount_milli_satoshis());
+    let value_msat = invoice_amount_msat.or(amount_msat).unwrap_or(0);
     let request = request::Pay {
         invoice_str: body.payment_request.clone(),
         amount: amount_msat,
+        max_fee_msat: Some(max_fee_msat),
         bolt12: None,
         timeout: Default::default(),
     };
@@ -575,17 +643,28 @@ async fn pay_invoice(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let (value_msat, fee_msat) = route_value_and_fee(&value, value_msat);
 
     if state_str != "Success" {
         return Err(format!("payment failed with state {state_str}"));
     }
 
-    Ok(lnrpc::SendResponse {
-        payment_error: String::new(),
-        payment_preimage: Bytes::from(hex::decode(payment_preimage).unwrap_or_default()),
-        payment_hash: Bytes::from(hex::decode(payment_hash).unwrap_or_default()),
-        payment_route: None,
-        ..Default::default()
+    Ok(PaymentOutcome {
+        response: lnrpc::SendResponse {
+            payment_error: String::new(),
+            payment_preimage: Bytes::from(hex::decode(payment_preimage).unwrap_or_default()),
+            payment_hash: Bytes::from(hex::decode(payment_hash).unwrap_or_default()),
+            payment_route: Some(lnrpc::Route {
+                total_fees: (fee_msat / 1000) as i64,
+                total_amt: (value_msat.saturating_add(fee_msat) / 1000) as i64,
+                total_fees_msat: fee_msat as i64,
+                total_amt_msat: value_msat.saturating_add(fee_msat) as i64,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        value_msat,
+        fee_msat,
     })
 }
 
@@ -599,8 +678,11 @@ async fn send_payment_sync(
         return auth_error(e);
     }
     match pay_invoice(&state, &body).await {
-        Ok(resp) => proto_json(&resp),
-        Err(e) => internal_error(e),
+        Ok(outcome) => proto_json(&outcome.response),
+        Err(e) => proto_json(&lnrpc::SendResponse {
+            payment_error: e,
+            ..Default::default()
+        }),
     }
 }
 
@@ -615,16 +697,16 @@ async fn router_send(
         return auth_error(e);
     }
     match pay_invoice(&state, &body).await {
-        Ok(resp) => {
+        Ok(outcome) => {
             use base64::Engine;
             let engine = base64::engine::general_purpose::STANDARD;
             let status = json::json!({
                 "result": {
                     "status": "SUCCEEDED",
-                    "paymentHash": engine.encode(&resp.payment_hash),
-                    "paymentPreimage": engine.encode(&resp.payment_preimage),
-                    "feeMsat": "0",
-                    "valueMsat": "0"
+                    "paymentHash": engine.encode(&outcome.response.payment_hash),
+                    "paymentPreimage": engine.encode(&outcome.response.payment_preimage),
+                    "feeMsat": outcome.fee_msat.to_string(),
+                    "valueMsat": outcome.value_msat.to_string()
                 }
             });
             let line = format!("{}\n", status);
@@ -694,7 +776,7 @@ async fn open_channel(
     {
         Ok(value) => {
             let txid = value
-                .get("tx")
+                .get("txid")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
@@ -741,7 +823,22 @@ async fn close_channel(
     )
     .await
     {
-        Ok(_) => HttpResponse::Ok().json(json::json!({})),
+        Ok(_) => {
+            let update = lnrpc::CloseStatusUpdate {
+                update: Some(lnrpc::close_status_update::Update::ChanClose(
+                    lnrpc::ChannelCloseUpdate {
+                        success: true,
+                        ..Default::default()
+                    },
+                )),
+            };
+            match serde_json::to_value(update) {
+                Ok(update) => HttpResponse::Ok()
+                    .content_type("application/json")
+                    .body(format!("{}\n", json::json!({ "result": update }))),
+                Err(e) => internal_error(e),
+            }
+        }
         Err(e) => internal_error(e),
     }
 }
@@ -760,4 +857,38 @@ async fn list_transactions(req: HttpRequest, state: web::Data<AppState>) -> Http
         return auth_error(e);
     }
     proto_json(&lnrpc::TransactionDetails::default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_zeus_fee_limit_and_payment_request() {
+        let body: SendPaymentBody = serde_json::from_value(json::json!({
+            "paymentRequest": "lnbc1...",
+            "feeLimitMsat": 1234
+        }))
+        .unwrap();
+        assert_eq!(body.payment_request, "lnbc1...");
+        assert_eq!(max_fee_msat(&body).unwrap(), 1234);
+    }
+
+    #[test]
+    fn zero_fee_limit_is_preserved() {
+        let body: SendPaymentBody =
+            serde_json::from_value(json::json!({ "paymentRequest": "lnbc1..." })).unwrap();
+        assert_eq!(max_fee_msat(&body).unwrap(), 0);
+    }
+
+    #[test]
+    fn derives_value_and_fee_from_ldk_route_hops() {
+        let result = json::json!({
+            "path": [
+                { "hop_fee_msat": 1250 },
+                { "hop_fee_msat": 100_000 }
+            ]
+        });
+        assert_eq!(route_value_and_fee(&result, 0), (100_000, 1250));
+    }
 }

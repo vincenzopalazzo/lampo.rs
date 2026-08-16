@@ -185,14 +185,42 @@ impl MacaroonBakery {
     }
 
     pub fn verify_hex(&self, hex_macaroon: &str, required: Permission) -> Result<(), AuthError> {
+        let granted = self.permissions_from_hex(hex_macaroon)?;
+        if granted.contains(&(required.entity.to_string(), required.action.to_string())) {
+            Ok(())
+        } else {
+            Err(AuthError::PermissionDenied)
+        }
+    }
+
+    /// Verify the macaroon's signature and caveat encoding without requiring
+    /// a particular permission. Route handlers perform the authorization
+    /// decision after middleware has rejected malformed credentials.
+    pub fn verify_hex_signature(&self, hex_macaroon: &str) -> Result<(), AuthError> {
+        self.permissions_from_hex(hex_macaroon).map(|_| ())
+    }
+
+    fn permissions_from_hex(
+        &self,
+        hex_macaroon: &str,
+    ) -> Result<HashSet<(String, String)>, AuthError> {
         if hex_macaroon.len() > MAX_MACAROON_BYTES * 2 {
             return Err(AuthError::TooLarge);
         }
         let bytes = hex::decode(hex_macaroon.trim()).map_err(|_| AuthError::Malformed)?;
-        self.verify(&bytes, required)
+        self.permissions(&bytes)
     }
 
     pub fn verify(&self, macaroon: &[u8], required: Permission) -> Result<(), AuthError> {
+        let granted = self.permissions(macaroon)?;
+        if granted.contains(&(required.entity.to_string(), required.action.to_string())) {
+            Ok(())
+        } else {
+            Err(AuthError::PermissionDenied)
+        }
+    }
+
+    fn permissions(&self, macaroon: &[u8]) -> Result<HashSet<(String, String)>, AuthError> {
         if macaroon.len() > MAX_MACAROON_BYTES {
             return Err(AuthError::TooLarge);
         }
@@ -226,11 +254,7 @@ impl MacaroonBakery {
             granted.insert((entity, action));
         }
 
-        if granted.contains(&(required.entity.to_string(), required.action.to_string())) {
-            Ok(())
-        } else {
-            Err(AuthError::PermissionDenied)
-        }
+        Ok(granted)
     }
 
     pub fn admin_macaroon_hex(&self) -> Result<String, AuthError> {
@@ -317,6 +341,14 @@ mod tests {
             bakery.verify_hex(&hex, OFFCHAIN_WRITE),
             Err(AuthError::PermissionDenied)
         ));
+    }
+
+    #[test]
+    fn signature_check_accepts_least_privilege_macaroon() {
+        let dir = tempdir().unwrap();
+        let bakery = MacaroonBakery::load_or_create(dir.path()).unwrap();
+        let bytes = bakery.bake("payments-only", &[OFFCHAIN_WRITE]).unwrap();
+        bakery.verify_hex_signature(&hex::encode(bytes)).unwrap();
     }
 
     #[test]
