@@ -145,7 +145,25 @@ impl LampoTesting {
         Self::with_conf(conf).await
     }
 
+    /// Same as [`Self::tmp`], but also starts the LND-compatible REST API.
+    ///
+    /// Prefer this only from LND REST tests: every node otherwise pays the
+    /// cost of an extra Actix HTTPS thread that is never torn down.
+    pub async fn tmp_with_lnd_rest() -> error::Result<Self> {
+        let mut conf = Conf::default();
+        conf.wallet = None;
+        let conf = Arc::new(conf);
+        Self::with_conf_inner(conf, true).await
+    }
+
     pub async fn with_conf(conf: Arc<Conf<'static>>) -> error::Result<Self> {
+        Self::with_conf_inner(conf, false).await
+    }
+
+    async fn with_conf_inner(
+        conf: Arc<Conf<'static>>,
+        enable_lnd_rest: bool,
+    ) -> error::Result<Self> {
         let conf_clone = conf.clone();
         let btc = tokio::task::spawn_blocking(move || {
             if let Ok(exec_path) = btc::exe_path() {
@@ -157,10 +175,14 @@ impl LampoTesting {
         })
         .await??;
         let btc = Arc::new(btc);
-        Self::new(btc).await
+        Self::new_inner(btc, enable_lnd_rest).await
     }
 
     pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
+        Self::new_inner(btc, false).await
+    }
+
+    async fn new_inner(btc: Arc<BtcNode>, enable_lnd_rest: bool) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -213,21 +235,38 @@ impl LampoTesting {
         run_httpd(lampo.clone()).await?;
         log::info!("httpd started");
 
-        let lnd_port = port::random_free_port().unwrap();
-        let (_, macaroon_hex) = run_lnd_rest(lampo.clone(), lnd_port).await?;
-        log::info!("lnd rest started on {lnd_port}");
+        let (lnd_port, macaroon_hex) = if enable_lnd_rest {
+            let lnd_port = port::random_free_port().unwrap();
+            let (_, macaroon_hex) = run_lnd_rest(lampo.clone(), lnd_port).await?;
+            log::info!("lnd rest started on {lnd_port}");
+            (lnd_port, macaroon_hex)
+        } else {
+            (0, String::new())
+        };
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
         tokio::spawn(lampo.listen());
 
-        // wait that lampo starts
-        while let Err(err) = handler
-            .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
-            .await
-        {
-            log::error!("error: `{}`", err);
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // wait that lampo starts (bounded: an infinite wait hangs the whole CI job)
+        let mut ready = false;
+        for _ in 0..30 {
+            match handler
+                .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
+                .await
+            {
+                Ok(_) => {
+                    ready = true;
+                    break;
+                }
+                Err(err) => {
+                    log::error!("error: `{}`", err);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+        if !ready {
+            error::bail!("lampo failed to become ready via getinfo within 30s");
         }
 
         let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
