@@ -4,6 +4,8 @@ pub mod request {
     use paperclip::actix::Apiv2Schema;
     use serde::{Deserialize, Serialize};
 
+    use crate::model::pay_timeout::PayTimeout;
+
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct GenerateInvoice {
         pub amount_msat: Option<u64>,
@@ -27,6 +29,9 @@ pub mod request {
         pub invoice_str: String,
         pub amount: Option<u64>,
         pub bolt12: Option<Bolt12Pay>,
+        /// How long the RPC waits for the terminal `PaymentEvent` (`fast` / `medium` / `large`).
+        #[serde(default)]
+        pub timeout: PayTimeout,
     }
 
     #[derive(Serialize, Deserialize, Apiv2Schema)]

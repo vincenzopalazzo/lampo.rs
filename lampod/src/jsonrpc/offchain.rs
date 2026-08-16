@@ -17,6 +17,7 @@ use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
 use lampo_common::{json, model::request::DecodeInvoice};
+use tokio::time::Instant;
 
 use crate::LampoDaemon;
 
@@ -117,7 +118,7 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     // otherwise see this payment's result -- and now its preimage and payer
     // proof too. Only accept events carrying our own payment id.
     let payment_id = hex::encode(payment_id.0);
-    wait_for_payment_result(events, &payment_id).await
+    wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
 }
 
 /// Hold the `PaymentReceipt` (preimage, payer proof) until the terminal
@@ -128,36 +129,31 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
 async fn wait_for_payment_result(
     mut events: lampo_common::chan::UnboundedReceiver<Event>,
     payment_id: &str,
+    timeout: Duration,
 ) -> Result<json::Value, Error> {
-    // Upper bound for how long a caller waits for the terminal
-    // PaymentEvent (`pay` and `keysend` alike). Without it the handler
-    // waits forever whenever the event is never generated — observed
-    // live after an unclean node restart, where LDK logs `Failed to
-    // update channel monitor: no such monitor registered`, the payment
-    // stalls and no failure event fires. The payment itself may still
-    // be retried in the background; the RPC simply stops blocking.
-    const PAY_EVENT_TIMEOUT: Duration = Duration::from_secs(120);
+    // Single deadline for the whole RPC wait. The event bus is broadcast, so
+    // unrelated events must not reset the timer — only the terminal
+    // `PaymentEvent` for `payment_id` completes the call (success or failure).
+    // If that event never arrives, stop waiting after `timeout` instead of
+    // blocking forever; the payment itself may still be retried in the background.
+    let deadline = Instant::now() + timeout;
 
     // The receipt lands on `PaymentReceipt` and the hop path on the terminal
     // `PaymentEvent`, so hold the receipt until the payment finishes.
     let mut receipt: Option<(String, Option<String>)> = None;
 
-    // FIXME: this will loop when the Payment event is not generated
-    // If the terminal PaymentEvent is never generated (e.g. the payment
-    // stalls after an unclean restart), stop waiting after
-    // PAY_EVENT_TIMEOUT instead of blocking the caller forever.
     loop {
-        log::warn!("Waiting for payment event...");
-        let event = tokio::time::timeout(PAY_EVENT_TIMEOUT, events.recv())
+        log::warn!(target: "lampod::jsonrpc::offchain", "Waiting for payment event...");
+        let event = tokio::time::timeout_at(deadline, events.recv())
             .await
             .map_err(|_| {
                 Error::Rpc(RpcError {
                     code: -1,
                     message: format!(
-                        "payment `{}` did not complete within {}s (no Payment event; \
-                     the payment may still be retried in the background)",
+                        "payment `{}` did not complete within {}s (no terminal Payment event; \
+                         payment status unknown — it may still be retried in the background)",
                         payment_id,
-                        PAY_EVENT_TIMEOUT.as_secs()
+                        timeout.as_secs()
                     ),
                     data: None,
                 })
@@ -211,5 +207,5 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     // Same id semantics as `pay`: the hex payment hash identifies the
     // payment on the event bus.
     let payment_id = hex::encode(payment_id.0);
-    wait_for_payment_result(events, &payment_id).await
+    wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
 }
