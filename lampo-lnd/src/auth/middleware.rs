@@ -8,7 +8,7 @@ use std::rc::Rc;
 use actix_web::body::EitherBody;
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform};
 use actix_web::web::Data;
-use actix_web::{Error, HttpResponse};
+use actix_web::Error;
 use futures_util::future::LocalBoxFuture;
 
 use crate::auth::{AuthError, INFO_READ};
