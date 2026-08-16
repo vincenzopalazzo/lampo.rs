@@ -81,6 +81,10 @@ impl LampoDaemon {
         // embedders) gets consistent sync-progress reporting with no per-caller
         // setup. The backend is wired separately in `init`.
         wallet_manager.set_coordinator(chain_sync.clone());
+        wallet_manager
+            .ldk_keys()
+            .keys_manager
+            .set_wallet(wallet_manager.clone());
         LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
@@ -208,6 +212,10 @@ impl LampoDaemon {
 
     pub fn wallet_manager(&self) -> Arc<dyn WalletManager> {
         self.wallet_manager.clone()
+    }
+
+    pub fn logger(&self) -> Arc<LampoLogger> {
+        self.logger.clone()
     }
 
     pub fn init_event_handler(&mut self) -> error::Result<()> {

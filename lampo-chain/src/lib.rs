@@ -498,14 +498,18 @@ impl Backend for LampoChainSync {
                     }
                 }
             }
-            if let Some((best_block, ref sweeper)) = sweeper_listener {
+            if let Some((_, ref sweeper)) = sweeper_listener {
+                // Re-read the sweeper's own checkpoint each attempt: a timed-out
+                // `synchronize_listeners` may already have advanced and persisted
+                // it, and replaying from the pre-loop locator would be out of order.
+                let best_block = sweeper.current_best_block();
                 log::info!(
                     target: "lampo-chain",
                     "Including output sweeper in chain sync from height {}",
                     best_block.height
                 );
                 chain_listeners.push((
-                    best_block.clone(),
+                    best_block,
                     sweeper.as_ref() as &(dyn chain::Listen + Send + Sync),
                 ));
             }
