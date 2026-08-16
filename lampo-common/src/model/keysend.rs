@@ -8,10 +8,14 @@ pub mod request {
 
     use crate::bitcoin::secp256k1::PublicKey;
     use crate::error;
+    use crate::model::pay_timeout::PayTimeout;
     #[derive(Serialize, Deserialize, Apiv2Schema)]
     pub struct KeySend {
         pub destination: String,
         pub amount_msat: u64,
+        /// How long the RPC waits for the terminal `PaymentEvent` (`fast` / `medium` / `large`).
+        #[serde(default)]
+        pub timeout: PayTimeout,
     }
 
     impl KeySend {
