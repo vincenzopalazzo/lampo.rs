@@ -269,6 +269,15 @@ impl LampoPersistenceBackend for SqliteStore {
     fn kind(&self) -> PersistenceKind {
         PersistenceKind::Sqlite
     }
+
+    fn list_all_keys(&self) -> error::Result<Vec<(String, String, String)>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(sql::kv_list_all())?;
+        let keys = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(keys)
+    }
 }
 
 #[cfg(test)]
