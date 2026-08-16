@@ -255,7 +255,15 @@ impl VssShadow {
     /// Retry inventory until VSS answers, then clear the reconcile marker.
     ///
     /// Returns whether the inventory still needs another attempt.
+    ///
+    /// Holds [`Self::write_order`] across prune and clearing the marker so a
+    /// concurrent primary write cannot clear-then-lose its queue entry while
+    /// this path clears `reconcile_required`.
     fn try_startup_prune(&self, sink: &dyn ShadowSink) -> bool {
+        let _ordered = match self.write_order.lock() {
+            Ok(guard) => guard,
+            Err(_) => return true,
+        };
         match self.prune_absent_shadow_keys(sink) {
             Ok(()) => {
                 if let Err(err) = queue::write_reconcile_required(self.primary.as_ref(), false) {

@@ -224,21 +224,27 @@ impl LampoTesting {
     }
 
     /// Bring the node back up over the same data directory, as a process
-    /// restart would. The old daemon is signalled to shut down; the new one
-    /// restores the wallet from the mnemonic and must find its channel state
-    /// in whichever storage backend the run selected.
+    /// restart would. The old daemon is signalled to shut down and dropped
+    /// before the replacement opens the store, so SQLite/Postgres writer locks
+    /// are released first.
     pub async fn restart(self) -> error::Result<Self> {
         self.daemon.shutdown();
+        let mnemonic = self.mnemonic.clone();
+        let btc = self.btc.clone();
+        let root_path = Arc::clone(&self.root_path);
+        // Drop the old daemon graph (and its persistence Arc) before opening a
+        // replacement store against the same destination.
+        drop(self);
 
         let port = port::random_free_port().unwrap();
         let mut lampo_conf = LampoConf::new(
-            Some(self.root_path.path().to_string_lossy().to_string()),
+            Some(root_path.path().to_string_lossy().to_string()),
             Some(lampo_common::bitcoin::Network::Regtest),
             Some(port.into()),
         )?;
         lampo_conf.api_port = port::random_free_port().unwrap().into();
-        let values = self.btc.params.get_cookie_values().unwrap();
-        lampo_conf.core_url = Some(self.btc.rpc_url());
+        let values = btc.params.get_cookie_values().unwrap();
+        lampo_conf.core_url = Some(btc.rpc_url());
         lampo_conf.core_user = values.as_ref().map(|v| v.user.to_owned());
         lampo_conf.core_pass = values.map(|v| v.password);
         lampo_conf.dev_sync = Some(true);
@@ -250,7 +256,7 @@ impl LampoTesting {
             .force_announced_channel_preference = false;
 
         let lampo_conf = Arc::new(lampo_conf);
-        let wallet = Arc::new(BDKWalletManager::restore(lampo_conf.clone(), &self.mnemonic).await?);
+        let wallet = Arc::new(BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?);
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone())?;
         wallet.clone().listen().await?;
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
@@ -278,11 +284,11 @@ impl LampoTesting {
         Ok(Self {
             inner: handler,
             daemon: lampo,
-            mnemonic: self.mnemonic,
+            mnemonic,
             port: port.into(),
             wallet,
-            btc: self.btc,
-            root_path: self.root_path,
+            btc,
+            root_path,
             info,
         })
     }

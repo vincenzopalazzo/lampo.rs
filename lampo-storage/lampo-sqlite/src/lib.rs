@@ -110,7 +110,8 @@ fn io_err(err: rusqlite::Error) -> io::Error {
 /// WAL serialises statements but not Lightning writers: two nodes on one file
 /// can still interleave channel-manager updates. Fail the second opener.
 fn acquire_writer_lock(path: &str) -> error::Result<File> {
-    let lock_path = Path::new(path).with_extension("writerlock");
+    let resolved = resolve_db_path(path);
+    let lock_path = resolved.with_extension("writerlock");
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -142,6 +143,29 @@ fn acquire_writer_lock(path: &str) -> error::Result<File> {
         );
     }
     Ok(file)
+}
+
+/// Resolve aliases (relative paths, symlinks) to one lock target per inode.
+fn resolve_db_path(path: &str) -> std::path::PathBuf {
+    let path = Path::new(path);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(path),
+            Err(_) => path.to_path_buf(),
+        }
+    };
+    if let Ok(canonical) = std::fs::canonicalize(&absolute) {
+        return canonical;
+    }
+    match (absolute.parent(), absolute.file_name()) {
+        (Some(parent), Some(name)) => match std::fs::canonicalize(parent) {
+            Ok(parent) => parent.join(name),
+            Err(_) => absolute,
+        },
+        _ => absolute,
+    }
 }
 
 #[cfg(unix)]

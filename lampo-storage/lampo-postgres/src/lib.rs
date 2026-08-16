@@ -299,9 +299,31 @@ fn writer_lock_key(url: &str) -> error::Result<i64> {
         .collect::<Vec<_>>()
         .join(",");
     let dbname = config.get_dbname().unwrap_or("");
-    let options = config.get_options().unwrap_or("");
-    let identity = format!("{hosts}:{ports}/{dbname}?options={options}");
+    // Only schema-affecting options belong in the lock key. Timeouts and
+    // application_name must not let two writers onto the same tables.
+    let search_path = effective_search_path(config.get_options().unwrap_or(""));
+    let identity = format!("{hosts}:{ports}/{dbname}?search_path={search_path}");
     Ok(hash_lock_key(&identity))
+}
+
+/// `search_path` from a libpq `options` string, defaulting to `public`.
+fn effective_search_path(options: &str) -> String {
+    let mut tokens = options.split_whitespace().peekable();
+    while let Some(tok) = tokens.next() {
+        let setting = if let Some(rest) = tok.strip_prefix("-c") {
+            if rest.is_empty() {
+                tokens.next().unwrap_or("")
+            } else {
+                rest
+            }
+        } else {
+            continue;
+        };
+        if let Some(path) = setting.strip_prefix("search_path=") {
+            return path.to_owned();
+        }
+    }
+    "public".to_owned()
 }
 
 fn hash_lock_key(identity: &str) -> i64 {
@@ -805,6 +827,12 @@ mod tests {
             writer_lock_key(base).unwrap(),
             writer_lock_key(other_user).unwrap(),
             "login role must not change the writer lock for the same schema"
+        );
+        let timeout = format!("{base}&options=-cstatement_timeout%3D1000");
+        assert_eq!(
+            writer_lock_key(base).unwrap(),
+            writer_lock_key(&timeout).unwrap(),
+            "non-schema options must not change the writer lock"
         );
     }
 }
