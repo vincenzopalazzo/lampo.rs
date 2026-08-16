@@ -161,17 +161,37 @@ lampo_keysend_ok() { # <src> <dst-id> <amt_msat>
   echo "$res"
   [ "$(echo "$res" | jqf 'd.get("state","")')" = Success ] && [ -n "$(echo "$res" | jqf 'd.get("payment_preimage") or ""')" ]
 }
-ldk_pay_bolt11() { # <node> <invoice> -> 0 iff paid
-  local out; out=$(lcli "$1" bolt11-send "$2" 2>>"$LOG")
-  echo "$out" >> "$LOG"
+ldk_wait_payment() { # <node> <payment-id> -> 0 iff Success within ~100s
+  local d i
+  for i in $(seq 1 20); do
+    d=$(lcli "$1" get-payment-details "$2" 2>/dev/null)
+    echo "$d" >> "$LOG"
+    echo "$d" | grep -qiE '"succe|succeeded|fulfilled|preimage' && return 0
+    echo "$d" | grep -qiE '"fail' && return 1
+    sleep 5
+  done
+  return 1
+}
+ldk_pay_bolt11() { # <node> <invoice> -> 0 iff paid (bolt11-send is ASYNC:
+  # it returns a payment_id immediately; poll get-payment-details)
+  local out pid
+  out=$(lcli "$1" bolt11-send "$2" 2>>"$LOG"); echo "$out" >> "$LOG"
+  pid=$(echo "$out" | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+print(d.get("payment_id","") if isinstance(d,dict) else "")' 2>/dev/null)
+  [ -n "$pid" ] && { ldk_wait_payment "$1" "$pid"; return; }
   echo "$out" | grep -qiE 'succe|paid|preimage|complete' && return 0
-  sleep 5
-  lcli "$1" list-payments 2>/dev/null | grep -q "$2" && return 0   # rough fallback
   return 1
 }
 ldk_spontaneous() { # <node> <node-id> <amt_msat> -> 0 iff paid
-  local out; out=$(lcli "$1" spontaneous-send "$2" "${3}msat" 2>>"$LOG")
-  echo "$out" >> "$LOG"
+  local out pid
+  out=$(lcli "$1" spontaneous-send "$2" "${3}msat" 2>>"$LOG"); echo "$out" >> "$LOG"
+  pid=$(echo "$out" | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+print(d.get("payment_id","") if isinstance(d,dict) else "")' 2>/dev/null)
+  [ -n "$pid" ] && { ldk_wait_payment "$1" "$pid"; return; }
   echo "$out" | grep -qiE 'succe|paid|preimage|pending' && return 0
   return 1
 }
