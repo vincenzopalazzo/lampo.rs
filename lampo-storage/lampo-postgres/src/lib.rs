@@ -107,10 +107,9 @@ impl PostgresStore {
     /// Connect to `url` (a `postgres://` connection string) and migrate.
     pub fn new(url: &str) -> error::Result<Self> {
         let config = parse_config(url)?;
-        // Lock identity follows the destination fingerprint so two schemas on
-        // one cluster do not share a writer lock, and test setup connections
-        // on the bare URL do not block schema-scoped stores.
-        let writer_lock = writer_lock_key(&destination_id(url)?);
+        // Lock identity follows the database/schema, not the login role: two
+        // users sharing public (or the same search_path) must still collide.
+        let writer_lock = writer_lock_key(url)?;
         let (commands, mut rx) = mpsc::unbounded_channel::<Command>();
         let (ready_tx, ready_rx) = std_mpsc::sync_channel::<Result<(), String>>(1);
 
@@ -278,13 +277,36 @@ fn parse_config(url: &str) -> error::Result<Config> {
     Ok(config)
 }
 
-/// Stable advisory-lock key for a destination fingerprint.
+/// Stable advisory-lock key for the tables a connection will write.
 ///
-/// Two nodes on the same database/schema must still collide; two test schemas
-/// on one cluster must not.
-fn writer_lock_key(destination: &str) -> i64 {
+/// Host/port/database/options matter; the login role does not, because two
+/// roles can still share `public` (or the same `search_path`).
+fn writer_lock_key(url: &str) -> error::Result<i64> {
+    let config = parse_config(url)?;
+    let hosts = config
+        .get_hosts()
+        .iter()
+        .map(|host| match host {
+            Host::Tcp(name) => name.clone(),
+            Host::Unix(path) => path.display().to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let ports = config
+        .get_ports()
+        .iter()
+        .map(|port| port.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let dbname = config.get_dbname().unwrap_or("");
+    let options = config.get_options().unwrap_or("");
+    let identity = format!("{hosts}:{ports}/{dbname}?options={options}");
+    Ok(hash_lock_key(&identity))
+}
+
+fn hash_lock_key(identity: &str) -> i64 {
     let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in destination.as_bytes() {
+    for byte in identity.as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
@@ -774,9 +796,15 @@ mod tests {
             "fingerprint should carry the options: {scoped}"
         );
         assert_ne!(
-            writer_lock_key(&plain),
-            writer_lock_key(&scoped),
+            writer_lock_key(base).unwrap(),
+            writer_lock_key(&format!("{base}&options=-csearch_path%3Dother")).unwrap(),
             "different schemas must not share the writer lock"
+        );
+        let other_user = "postgres://other@127.0.0.1:5432/lampo?sslmode=require";
+        assert_eq!(
+            writer_lock_key(base).unwrap(),
+            writer_lock_key(other_user).unwrap(),
+            "login role must not change the writer lock for the same schema"
         );
     }
 }

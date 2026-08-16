@@ -26,8 +26,8 @@
 //!
 //! [VSS]: https://github.com/lightningdevkit/vss-server
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
 use std::time::Duration;
 
@@ -98,6 +98,9 @@ pub struct VssShadow {
     /// Set when there is work to do, so the mirror thread sleeps rather than
     /// polling.
     wakeup: Arc<(Mutex<bool>, Condvar)>,
+    /// Cleared when the last `Arc` to this shadow is dropped, so the worker
+    /// exits instead of pinning the primary (and its writer lock) forever.
+    stop: Arc<AtomicBool>,
 }
 
 impl VssShadow {
@@ -115,6 +118,7 @@ impl VssShadow {
             primary,
             write_order: Mutex::new(()),
             wakeup: Arc::new((Mutex::new(false), Condvar::new())),
+            stop: Arc::new(AtomicBool::new(false)),
         });
 
         // Always queue the complete current state when attaching a shadow.
@@ -129,10 +133,12 @@ impl VssShadow {
         queue::write_dropped(shadow.primary.as_ref(), 0)?;
         shadow.dropped.store(0, Ordering::SeqCst);
 
-        let worker = Arc::clone(&shadow);
+        let weak = Arc::downgrade(&shadow);
+        let wakeup = Arc::clone(&shadow.wakeup);
+        let stop = Arc::clone(&shadow.stop);
         thread::Builder::new()
             .name("lampo-vss-shadow".to_owned())
-            .spawn(move || worker.mirror_loop(sink))?;
+            .spawn(move || Self::mirror_loop(weak, sink, wakeup, stop))?;
 
         // Anything queued before the last shutdown is still waiting.
         shadow.nudge();
@@ -326,15 +332,31 @@ impl VssShadow {
     /// Startup inventory runs here too: listing remote keys needs VSS, and an
     /// unreachable shadow must not block node startup. Until prune succeeds the
     /// reconcile marker keeps `lag()` from reporting a complete copy.
-    fn mirror_loop(self: Arc<Self>, sink: Arc<dyn ShadowSink>) {
+    ///
+    /// The worker holds only a [`Weak`] so dropping the last `Arc<VssShadow>`
+    /// can release the primary (and its writer lock) without waiting for the
+    /// process to exit.
+    fn mirror_loop(
+        weak: Weak<Self>,
+        sink: Arc<dyn ShadowSink>,
+        wakeup: Arc<(Mutex<bool>, Condvar)>,
+        stop: Arc<AtomicBool>,
+    ) {
         let mut backoff = RETRY_BACKOFF;
         let mut needs_prune = true;
         loop {
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
+            let Some(this) = weak.upgrade() else {
+                return;
+            };
+
             if needs_prune {
-                needs_prune = self.try_startup_prune(sink.as_ref());
+                needs_prune = this.try_startup_prune(sink.as_ref());
             }
 
-            let jobs = match queue::pending_batch(self.primary.as_ref(), DRAIN_BATCH) {
+            let jobs = match queue::pending_batch(this.primary.as_ref(), DRAIN_BATCH) {
                 Ok(jobs) => jobs,
                 Err(err) => {
                     log::error!(target: "lampo-vss", "reading the shadow queue: {err}");
@@ -347,7 +369,8 @@ impl VssShadow {
                 if needs_prune {
                     backoff = (backoff * 2).min(MAX_BACKOFF);
                 }
-                self.wait_for_work(wait);
+                drop(this);
+                Self::wait_on(&wakeup, wait);
                 continue;
             }
 
@@ -361,7 +384,7 @@ impl VssShadow {
                 match result {
                     Ok(()) => {
                         backoff = RETRY_BACKOFF;
-                        if let Err(err) = queue::dequeue(self.primary.as_ref(), job.seq) {
+                        if let Err(err) = queue::dequeue(this.primary.as_ref(), job.seq) {
                             // The job is still queued, so carrying on would put
                             // it again immediately, forever, and would replay it
                             // over a newer value for the same key. Back off
@@ -370,7 +393,7 @@ impl VssShadow {
                             stalled = true;
                             break;
                         }
-                        if let Err(err) = queue::write_high_water(self.primary.as_ref(), job.seq) {
+                        if let Err(err) = queue::write_high_water(this.primary.as_ref(), job.seq) {
                             log::error!(target: "lampo-vss", "recording shadow progress: {err}");
                         }
                     }
@@ -391,15 +414,16 @@ impl VssShadow {
             }
 
             if stalled {
-                self.wait_for_work(backoff);
+                drop(this);
+                Self::wait_on(&wakeup, backoff);
                 backoff = (backoff * 2).min(MAX_BACKOFF);
             }
         }
     }
 
     /// Sleep until there is work or `timeout` passes.
-    fn wait_for_work(&self, timeout: Duration) {
-        let (lock, condvar) = &*self.wakeup;
+    fn wait_on(wakeup: &(Mutex<bool>, Condvar), timeout: Duration) {
+        let (lock, condvar) = wakeup;
         let Ok(mut ready) = lock.lock() else {
             thread::sleep(timeout);
             return;
@@ -415,6 +439,13 @@ impl VssShadow {
         if let Ok((mut ready, _)) = condvar.wait_timeout(ready, timeout) {
             *ready = false;
         }
+    }
+}
+
+impl Drop for VssShadow {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        self.nudge();
     }
 }
 
@@ -723,6 +754,22 @@ mod tests {
             created_at: 100,
             invoice: None,
         }
+    }
+
+    #[test]
+    fn dropping_the_shadow_stops_the_worker() {
+        let dir = ScratchDir::new("drop-worker");
+        let sink = Arc::new(FakeSink::default());
+        let shadow = VssShadow::wrap(dir.primary(), sink.clone()).unwrap();
+        let stop = Arc::clone(&shadow.stop);
+        drop(shadow);
+        eventually("the worker to observe shutdown", || {
+            stop.load(Ordering::SeqCst)
+        });
+        // A second wrap must be able to take over the same primary.
+        let again = VssShadow::wrap(dir.primary(), sink).unwrap();
+        again.write("ns", "", "key", b"value".to_vec()).unwrap();
+        assert_eq!(again.read("ns", "", "key").unwrap(), b"value");
     }
 
     #[test]
