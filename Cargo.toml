@@ -5,6 +5,7 @@ members = [
         "lampod-cli",
         "lampo-cli",
         "lampo-httpd",
+        "lampo-lnd",
         "lampo-testing",
         "tests/tests",
         "lampo-chain",
@@ -17,6 +18,7 @@ default-members = [
         "lampod-cli",
         "lampo-cli",
         "lampo-httpd",
+        "lampo-lnd",
         "lampo-chain",
         "lampo-bdk-wallet"
 ]

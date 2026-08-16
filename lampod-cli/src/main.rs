@@ -19,6 +19,7 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
 use lampo_httpd::handler::HttpdHandler;
+use lampo_lnd::{spawn as spawn_lnd_rest, LndRestConfig};
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
 
@@ -193,6 +194,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let lampod = Arc::new(lampod);
 
     run_httpd(lampod.clone()).await?;
+    run_lnd_rest_api(lampod.clone()).await?;
 
     let handler = Arc::new(HttpdHandler::new(format!(
         "{}:{}",
@@ -225,5 +227,54 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     }
     log::info!("preparing httpd api on addr `{url}`");
     tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
+    Ok(())
+}
+
+pub async fn run_lnd_rest_api(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+    let conf = lampod.conf();
+    if !conf.lnd_rest.unwrap_or(false) {
+        log::info!(target: "lampod-cli", "LND REST API disabled (set lnd-rest=true to enable)");
+        return Ok(());
+    }
+
+    // Legacy lampo-httpd has no auth. Keep it loopback-only when exposing
+    // the Zeus/LND REST surface remotely.
+    let api_host = conf
+        .api_host
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    if api_host != "127.0.0.1" && api_host != "localhost" && api_host != "::1" {
+        log::warn!(
+            target: "lampod-cli",
+            "lnd-rest is enabled but api-host=`{}` is not loopback; \
+             lampo-httpd remains unauthenticated — bind it to 127.0.0.1",
+            conf.api_host
+        );
+    }
+
+    let host = conf
+        .lnd_rest_host
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let port = conf.lnd_rest_port.unwrap_or(8080) as u16;
+    let data = conf.path();
+    let tls_dir = format!("{data}/lnd-rest");
+    let macaroon_dir = format!("{data}/lnd-rest/macaroons");
+
+    let lnd_conf = LndRestConfig {
+        listen_host: host.clone(),
+        listen_port: port,
+        tls_dir: tls_dir.into(),
+        macaroon_dir: macaroon_dir.clone().into(),
+    };
+
+    spawn_lnd_rest(lampod, lnd_conf)?;
+    log::info!(
+        target: "lampod-cli",
+        "LND REST ready on https://{}:{} (macaroons under {})",
+        host,
+        port,
+        macaroon_dir
+    );
     Ok(())
 }

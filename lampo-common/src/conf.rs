@@ -26,6 +26,10 @@ pub struct LampoConf {
     pub announce_addr: Option<String>,
     pub api_host: String,
     pub api_port: u64,
+    /// Enable the LND-compatible REST listener (Zeus remote node).
+    pub lnd_rest: Option<bool>,
+    pub lnd_rest_host: Option<String>,
+    pub lnd_rest_port: Option<u64>,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
     /// Allow the on-chain wallet to scan in parallel with the LDK chain
@@ -70,6 +74,9 @@ impl Default for LampoConf {
             announce_addr: None,
             api_host: "127.0.0.1".to_owned(),
             api_port: 7878,
+            lnd_rest: None,
+            lnd_rest_host: None,
+            lnd_rest_port: None,
             reindex: None,
             dev_sync: None,
             wallet_sync_parallel: None,
@@ -259,6 +266,17 @@ impl TryFrom<String> for LampoConf {
         let api_host = api_host.unwrap_or("http://127.0.0.1".to_owned());
         let api_port: u64 = api_port.unwrap_or("7979".to_owned()).parse()?;
 
+        let lnd_rest = conf
+            .get_conf("lnd-rest")
+            .unwrap_or(None)
+            .map(|s| s.to_lowercase() == "true" || s == "1");
+        let lnd_rest_host = conf.get_conf("lnd-rest-host").unwrap_or(None);
+        let lnd_rest_port = conf
+            .get_conf("lnd-rest-port")
+            .unwrap_or(None)
+            .map(|s| s.parse::<u64>())
+            .transpose()?;
+
         // Parse dev_sync field - defaults to None (false)
         let dev_sync = conf
             .get_conf("dev-sync")
@@ -294,6 +312,9 @@ impl TryFrom<String> for LampoConf {
             announce_addr,
             api_host,
             api_port,
+            lnd_rest,
+            lnd_rest_host,
+            lnd_rest_port,
             reindex,
             dev_sync,
             wallet_sync_parallel,
