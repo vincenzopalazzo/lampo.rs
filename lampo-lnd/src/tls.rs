@@ -34,6 +34,8 @@ impl TlsMaterial {
         ensure_secure_dir(dir)?;
         let cert_path = dir.join("tls.cert");
         let key_path = dir.join("tls.key");
+        let sans_path = dir.join("tls.sans");
+        let expected_sans = normalized_sans(hostnames);
 
         if cert_path.exists() || key_path.exists() {
             if !(cert_path.exists() && key_path.exists()) {
@@ -43,6 +45,26 @@ impl TlsMaterial {
             }
             reject_symlink(&cert_path)?;
             reject_symlink(&key_path)?;
+            if !sans_path.exists() {
+                return Err(TlsError::Other(format!(
+                    "existing TLS material has no SAN manifest; remove {}, {}, and {} \
+                     to regenerate it with the configured lnd-tls-san values",
+                    cert_path.display(),
+                    key_path.display(),
+                    sans_path.display()
+                )));
+            }
+            reject_symlink(&sans_path)?;
+            let actual_sans = fs::read_to_string(&sans_path)?;
+            if actual_sans != expected_sans {
+                return Err(TlsError::Other(format!(
+                    "configured TLS SANs changed; remove {}, {}, and {} to generate a new \
+                     certificate identity, then trust the new certificate in remote clients",
+                    cert_path.display(),
+                    key_path.display(),
+                    sans_path.display()
+                )));
+            }
             return Ok(Self {
                 cert_path,
                 key_path,
@@ -88,6 +110,7 @@ impl TlsMaterial {
 
         write_secret_file(&cert_path, cert.pem().as_bytes())?;
         write_secret_file(&key_path, key_pair.serialize_pem().as_bytes())?;
+        write_secret_file(&sans_path, expected_sans.as_bytes())?;
 
         Ok(Self {
             cert_path,
@@ -126,6 +149,17 @@ impl TlsMaterial {
     pub fn server_config_arc(&self) -> Result<Arc<ServerConfig>, TlsError> {
         Ok(Arc::new(self.server_config()?))
     }
+}
+
+fn normalized_sans(hostnames: &[String]) -> String {
+    let mut hostnames = hostnames
+        .iter()
+        .filter(|hostname| !hostname.is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    hostnames.sort();
+    hostnames.dedup();
+    hostnames.join("\n")
 }
 
 fn ensure_secure_dir(path: &Path) -> Result<(), TlsError> {
@@ -173,5 +207,16 @@ mod tests {
         let second = TlsMaterial::load_or_create(dir.path(), &["127.0.0.1".into()]).unwrap();
         let cert2 = fs::read(&second.cert_path).unwrap();
         assert_eq!(cert1, cert2);
+    }
+
+    #[test]
+    fn rejects_stale_certificate_sans() {
+        let dir = tempdir().unwrap();
+        TlsMaterial::load_or_create(dir.path(), &["127.0.0.1".into()]).unwrap();
+
+        let err =
+            TlsMaterial::load_or_create(dir.path(), &["127.0.0.1".into(), "node.local".into()])
+                .unwrap_err();
+        assert!(err.to_string().contains("configured TLS SANs changed"));
     }
 }

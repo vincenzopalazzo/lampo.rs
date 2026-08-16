@@ -19,6 +19,7 @@ use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
 use lampo_httpd::handler::HttpdHandler;
+#[cfg(feature = "lnd")]
 use lampo_lnd::{spawn as spawn_lnd_rest, LndRestConfig};
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -194,7 +195,13 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let lampod = Arc::new(lampod);
 
     if lampo_conf.lnd.unwrap_or(false) {
+        #[cfg(feature = "lnd")]
         run_lnd_rest_api(lampod.clone()).await?;
+        #[cfg(not(feature = "lnd"))]
+        error::bail!(
+            "LND compatibility was requested but lampod-cli was built without it; \
+             rebuild with `--features lnd`"
+        );
     } else {
         run_httpd(lampod.clone()).await?;
         let handler = Arc::new(HttpdHandler::new(format!(
@@ -232,6 +239,7 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "lnd")]
 pub async fn run_lnd_rest_api(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     let conf = lampod.conf();
     let host = conf
@@ -263,6 +271,7 @@ pub async fn run_lnd_rest_api(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "lnd")]
 fn lnd_api_port(port: u64) -> error::Result<u16> {
     let port =
         u16::try_from(port).map_err(|_| error::anyhow!("api-port must be between 1 and 65535"))?;
@@ -272,7 +281,7 @@ fn lnd_api_port(port: u64) -> error::Result<u16> {
     Ok(port)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lnd"))]
 mod tests {
     use super::lnd_api_port;
 

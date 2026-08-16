@@ -646,6 +646,39 @@ struct PaymentOutcome {
     fee_msat: u64,
 }
 
+struct PaymentFailure {
+    message: String,
+    reason: &'static str,
+}
+
+impl From<String> for PaymentFailure {
+    fn from(message: String) -> Self {
+        let reason = classify_payment_failure(&message);
+        Self { message, reason }
+    }
+}
+
+fn classify_payment_failure(message: &str) -> &'static str {
+    let message = message.to_ascii_lowercase();
+    if message.contains("insufficient") {
+        "FAILURE_REASON_INSUFFICIENT_BALANCE"
+    } else if message.contains("abandon") || message.contains("cancel") {
+        "FAILURE_REASON_CANCELED"
+    } else if (message.contains("recipient") && message.contains("reject"))
+        || message.contains("invalid amount")
+        || message.contains("incorrect")
+        || message.contains("expired")
+    {
+        "FAILURE_REASON_INCORRECT_PAYMENT_DETAILS"
+    } else if message.contains("timeout") || message.contains("timed out") {
+        "FAILURE_REASON_TIMEOUT"
+    } else if message.contains("route") || message.contains("retries") {
+        "FAILURE_REASON_NO_ROUTE"
+    } else {
+        "FAILURE_REASON_ERROR"
+    }
+}
+
 fn max_fee_msat(
     body: &SendPaymentBody,
     value_msat: u64,
@@ -719,6 +752,12 @@ fn payment_timeout_secs(
 }
 
 fn route_value_and_fee(value: &JsonValue, fallback_value_msat: u64) -> (u64, u64) {
+    if let (Some(value_msat), Some(fee_msat)) = (
+        value.get("value_msat").and_then(JsonValue::as_u64),
+        value.get("fee_msat").and_then(JsonValue::as_u64),
+    ) {
+        return (value_msat, fee_msat);
+    }
     let path_hop_fees = value
         .get("path")
         .and_then(|v| v.as_array())
@@ -742,9 +781,11 @@ async fn pay_invoice(
     state: &AppState,
     body: &SendPaymentBody,
     endpoint: PaymentEndpoint,
-) -> Result<PaymentOutcome, String> {
+) -> Result<PaymentOutcome, PaymentFailure> {
     if body.payment_request.is_empty() {
-        return Err("payment_request is required".into());
+        return Err(PaymentFailure::from(
+            "payment_request is required".to_string(),
+        ));
     }
     let amount_msat = if body.amt_msat > 0 {
         Some(body.amt_msat as u64)
@@ -774,7 +815,7 @@ async fn pay_invoice(
         &json::to_value(request).map_err(|e| e.to_string())?,
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| PaymentFailure::from(e.to_string()))?;
 
     let state_str = value
         .get("state")
@@ -793,7 +834,11 @@ async fn pay_invoice(
     let (value_msat, fee_msat) = route_value_and_fee(&value, value_msat);
 
     if state_str != "Success" {
-        return Err(format!("payment failed with state {state_str}"));
+        let reason = value
+            .get("reason")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("payment failed without a reason");
+        return Err(PaymentFailure::from(reason.to_string()));
     }
 
     Ok(PaymentOutcome {
@@ -827,7 +872,7 @@ async fn send_payment_sync(
     match pay_invoice(&state, &body, PaymentEndpoint::Sync).await {
         Ok(outcome) => proto_json(&outcome.response),
         Err(e) => proto_json(&lnrpc::SendResponse {
-            payment_error: e,
+            payment_error: e.message,
             ..Default::default()
         }),
     }
@@ -865,8 +910,8 @@ async fn router_send(
             let status = json::json!({
                 "result": {
                     "status": "FAILED",
-                    "failureReason": "FAILURE_REASON_NO_ROUTE",
-                    "paymentError": e
+                    "failureReason": e.reason,
+                    "paymentError": e.message
                 }
             });
             let line = format!("{}\n", status);
@@ -1223,5 +1268,35 @@ mod tests {
             ]
         });
         assert_eq!(route_value_and_fee(&result, 0), (100_000, 1250));
+    }
+
+    #[test]
+    fn uses_aggregated_mpp_totals() {
+        let result = json::json!({
+            "value_msat": 1_000_000,
+            "fee_msat": 2_500,
+            "path": [{ "hop_fee_msat": 400_000 }]
+        });
+        assert_eq!(route_value_and_fee(&result, 0), (1_000_000, 2_500));
+    }
+
+    #[test]
+    fn classifies_router_payment_failures() {
+        assert_eq!(
+            classify_payment_failure("insufficient local balance"),
+            "FAILURE_REASON_INSUFFICIENT_BALANCE"
+        );
+        assert_eq!(
+            classify_payment_failure("payment expired before completion"),
+            "FAILURE_REASON_INCORRECT_PAYMENT_DETAILS"
+        );
+        assert_eq!(
+            classify_payment_failure("payment was abandoned by the user"),
+            "FAILURE_REASON_CANCELED"
+        );
+        assert_eq!(
+            classify_payment_failure("no route found"),
+            "FAILURE_REASON_NO_ROUTE"
+        );
     }
 }
