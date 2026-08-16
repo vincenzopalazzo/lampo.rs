@@ -19,16 +19,20 @@
 //! [`Backend`]: crate::backend::Backend
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::error;
 use crate::json;
 use crate::json::{Deserialize, Serialize};
+use crate::ldk::io;
 use crate::ldk::persister::fs_store::v1::FilesystemStore;
 use crate::ldk::util::persist::KVStoreSync;
 
 /// Namespace holding the payment records.
 pub const PAYMENTS_NAMESPACE: &str = "payments";
+/// Daemon-owned backend selection marker stored beside the filesystem backend,
+/// but not part of its key/value state.
+pub const STORAGE_SELECTION_FILE: &str = ".lampo-storage-backend";
 
 /// Persistence backend kind supported by lampo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,6 +208,80 @@ pub trait LampoPersistenceBackend: KVStoreSync + PaymentStore + Send + Sync {
     fn list_all_keys(&self) -> error::Result<Vec<(String, String, String)>>;
 }
 
+/// Adapts lampo's synchronous backend interface to LDK's async [`KVStore`].
+///
+/// Database calls and filesystem fsyncs run on Tokio's blocking pool instead
+/// of blocking the runtime thread that drives peer I/O.
+#[derive(Clone)]
+pub struct LampoAsyncPersistence(Arc<dyn LampoPersistenceBackend>);
+
+impl LampoAsyncPersistence {
+    pub fn new(store: Arc<dyn LampoPersistenceBackend>) -> Self {
+        Self(store)
+    }
+}
+
+impl crate::ldk::util::persist::KVStore for LampoAsyncPersistence {
+    fn read(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, io::Error>> + 'static + Send {
+        let store = self.0.clone();
+        let (primary, secondary, key) = owned_key(primary_namespace, secondary_namespace, key);
+        offload(move || store.read(&primary, &secondary, &key))
+    }
+
+    fn write(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        buf: Vec<u8>,
+    ) -> impl std::future::Future<Output = Result<(), io::Error>> + 'static + Send {
+        let store = self.0.clone();
+        let (primary, secondary, key) = owned_key(primary_namespace, secondary_namespace, key);
+        offload(move || store.write(&primary, &secondary, &key, buf))
+    }
+
+    fn remove(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        lazy: bool,
+    ) -> impl std::future::Future<Output = Result<(), io::Error>> + 'static + Send {
+        let store = self.0.clone();
+        let (primary, secondary, key) = owned_key(primary_namespace, secondary_namespace, key);
+        offload(move || store.remove(&primary, &secondary, &key, lazy))
+    }
+
+    fn list(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, io::Error>> + 'static + Send {
+        let store = self.0.clone();
+        let (primary, secondary) = (primary_namespace.to_owned(), secondary_namespace.to_owned());
+        offload(move || store.list(&primary, &secondary))
+    }
+}
+
+fn owned_key(primary: &str, secondary: &str, key: &str) -> (String, String, String) {
+    (primary.to_owned(), secondary.to_owned(), key.to_owned())
+}
+
+fn offload<T: Send + 'static>(
+    call: impl FnOnce() -> Result<T, io::Error> + Send + 'static,
+) -> impl std::future::Future<Output = Result<T, io::Error>> + 'static + Send {
+    async move {
+        tokio::task::spawn_blocking(call)
+            .await
+            .unwrap_or_else(|err| Err(io::Error::new(io::ErrorKind::Other, err)))
+    }
+}
+
 /// The filesystem backend: LDK's store for the key/value half, and payments
 /// held in memory and written through to the `payments` namespace.
 ///
@@ -224,7 +302,7 @@ impl FsPersistence {
     pub fn new(data_dir: PathBuf) -> Self {
         let inner = FilesystemStore::new(data_dir);
         let mut payments = HashMap::new();
-        match inner.list(PAYMENTS_NAMESPACE, "") {
+        match KVStoreSync::list(&inner, PAYMENTS_NAMESPACE, "") {
             Ok(mut keys) => {
                 // The key starts with the creation time, so sorting makes a
                 // store left holding two records for one id (written by an
@@ -232,8 +310,7 @@ impl FsPersistence {
                 // whichever the directory happened to list first.
                 keys.sort();
                 for key in keys {
-                    match inner
-                        .read(PAYMENTS_NAMESPACE, "", &key)
+                    match KVStoreSync::read(&inner, PAYMENTS_NAMESPACE, "", &key)
                         .map_err(error::Error::from)
                         .and_then(|buf| Ok(json::from_slice::<PaymentRecord>(&buf)?))
                     {
@@ -264,7 +341,7 @@ impl KVStoreSync for FsPersistence {
         secondary_namespace: &str,
         key: &str,
     ) -> Result<Vec<u8>, crate::ldk::io::Error> {
-        self.inner.read(primary_namespace, secondary_namespace, key)
+        KVStoreSync::read(&self.inner, primary_namespace, secondary_namespace, key)
     }
 
     fn write(
@@ -274,8 +351,13 @@ impl KVStoreSync for FsPersistence {
         key: &str,
         buf: Vec<u8>,
     ) -> Result<(), crate::ldk::io::Error> {
-        self.inner
-            .write(primary_namespace, secondary_namespace, key, buf)
+        KVStoreSync::write(
+            &self.inner,
+            primary_namespace,
+            secondary_namespace,
+            key,
+            buf,
+        )
     }
 
     fn remove(
@@ -285,8 +367,13 @@ impl KVStoreSync for FsPersistence {
         key: &str,
         lazy: bool,
     ) -> Result<(), crate::ldk::io::Error> {
-        self.inner
-            .remove(primary_namespace, secondary_namespace, key, lazy)
+        KVStoreSync::remove(
+            &self.inner,
+            primary_namespace,
+            secondary_namespace,
+            key,
+            lazy,
+        )
     }
 
     fn list(
@@ -294,37 +381,38 @@ impl KVStoreSync for FsPersistence {
         primary_namespace: &str,
         secondary_namespace: &str,
     ) -> Result<Vec<String>, crate::ldk::io::Error> {
-        self.inner.list(primary_namespace, secondary_namespace)
+        KVStoreSync::list(&self.inner, primary_namespace, secondary_namespace)
     }
 }
 
 impl PaymentStore for FsPersistence {
     fn upsert_payment(&self, payment: &PaymentRecord) -> error::Result<()> {
         let key = payment.storage_key();
-        // The key carries the creation time, so a record whose time changed
-        // would otherwise be written beside its old copy rather than over it,
-        // leaving two records for one id and a restart picking between them by
-        // directory order.
-        let stale_key = self
+        // Hold the map across disk mutation so concurrent upserts for one id
+        // cannot leave memory and disk disagreeing, or retain two timestamped
+        // files for the same payment.
+        let mut payments = self
             .payments
             .lock()
-            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?
+            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?;
+        let stale_key = payments
             .get(&payment.id)
             .map(|previous| previous.storage_key())
             .filter(|previous| previous != &key);
 
         // Disk first: a record held only in memory would not survive a restart,
         // and reporting success for it would be a lie.
-        self.inner
-            .write(PAYMENTS_NAMESPACE, "", &key, json::to_vec(payment)?)?;
+        KVStoreSync::write(
+            &self.inner,
+            PAYMENTS_NAMESPACE,
+            "",
+            &key,
+            json::to_vec(payment)?,
+        )?;
         if let Some(stale_key) = stale_key {
-            self.inner
-                .remove(PAYMENTS_NAMESPACE, "", &stale_key, false)?;
+            KVStoreSync::remove(&self.inner, PAYMENTS_NAMESPACE, "", &stale_key, false)?;
         }
-        self.payments
-            .lock()
-            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?
-            .insert(payment.id.clone(), payment.clone());
+        payments.insert(payment.id.clone(), payment.clone());
         Ok(())
     }
 
@@ -362,7 +450,14 @@ impl LampoPersistenceBackend for FsPersistence {
 
     fn list_all_keys(&self) -> error::Result<Vec<(String, String, String)>> {
         use crate::ldk::util::persist::MigratableKVStoreSync;
-        Ok(self.inner.list_all_keys()?)
+        Ok(self
+            .inner
+            .list_all_keys()?
+            .into_iter()
+            .filter(|(primary, secondary, key)| {
+                !(primary.is_empty() && secondary.is_empty() && key == STORAGE_SELECTION_FILE)
+            })
+            .collect())
     }
 }
 

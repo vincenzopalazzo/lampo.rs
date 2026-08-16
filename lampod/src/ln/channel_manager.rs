@@ -40,7 +40,7 @@ use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::ldk::util::sweep::OutputSweeper;
 use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel, Channels};
-use lampo_common::persist::LampoPersistenceBackend;
+use lampo_common::persist::{LampoAsyncPersistence, LampoPersistenceBackend};
 use lampo_common::types::LampoChannel;
 use lampo_common::types::LampoGraph;
 use lampo_common::types::LampoRouter;
@@ -226,7 +226,7 @@ impl LampoChannelManager {
                 None,
                 keys_manager.clone(),
                 keys_manager,
-                self.persister.clone(),
+                LampoAsyncPersistence::new(self.persister.clone()),
                 self.logger.clone(),
             ),
         )
@@ -253,7 +253,7 @@ impl LampoChannelManager {
                     None,
                     keys_manager.clone(),
                     keys_manager,
-                    self.persister.clone(),
+                    LampoAsyncPersistence::new(self.persister.clone()),
                     self.logger.clone(),
                 );
                 (best_block, sweeper)

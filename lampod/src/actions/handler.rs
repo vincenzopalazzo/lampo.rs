@@ -1,6 +1,7 @@
 //! Handler module implementation that
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::hashes::Hash;
@@ -26,7 +27,9 @@ use lampo_common::ldk::sign::{NodeSigner, SpendableOutputDescriptor};
 use lampo_common::ldk::util::wallet_utils::{Utxo, Wallet, WalletSource};
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
-use lampo_common::persist::LampoPersistenceBackend;
+use lampo_common::persist::{
+    LampoPersistenceBackend, PaymentDirection, PaymentRecord, PaymentStatus,
+};
 use lampo_common::utils::logger::LampoLogger;
 
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
@@ -89,6 +92,7 @@ pub struct LampoHandler {
     chain_manager: Arc<LampoChainManager>,
     persister: Arc<dyn LampoPersistenceBackend>,
     bump_tx_event_handler: BumpHandler,
+    payment_updates: Mutex<()>,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
@@ -117,6 +121,7 @@ impl LampoHandler {
             chain_manager: lampod.onchain_manager(),
             persister: lampod.persister(),
             bump_tx_event_handler,
+            payment_updates: Mutex::new(()),
             external_handlers: RwLock::new(Vec::new()),
             emitter,
             subscriber,
@@ -150,6 +155,75 @@ impl LampoHandler {
         log::info!("received {:?}", command);
         let result = self.react(command).await?;
         Ok(json::from_value::<R>(result)?)
+    }
+
+    /// Record a payment so it can be listed later.
+    ///
+    /// Never fails the caller: persistence bookkeeping must not take the node
+    /// down after LDK accepted or completed a payment. A storage failure is
+    /// logged and the history is short by one row.
+    pub(crate) fn record_payment(
+        &self,
+        id: String,
+        payment_hash: String,
+        direction: PaymentDirection,
+        amount_msat: u64,
+        fee_msat: Option<u64>,
+        status: PaymentStatus,
+        invoice: Option<String>,
+    ) {
+        let _update = self
+            .payment_updates
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let created_at = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|since| since.as_secs())
+            .unwrap_or_default();
+        let previous = match self.persister.get_payment(&id) {
+            std::result::Result::Ok(previous) => previous,
+            Err(err) => {
+                log::error!(target: "lampo::handler", "reading payment {id} before update: {err}");
+                None
+            }
+        };
+        let record = PaymentRecord {
+            id,
+            payment_hash: if payment_hash.is_empty() {
+                previous
+                    .as_ref()
+                    .map(|record| record.payment_hash.clone())
+                    .unwrap_or_default()
+            } else {
+                payment_hash
+            },
+            direction,
+            amount_msat: if amount_msat == 0 {
+                previous
+                    .as_ref()
+                    .map(|record| record.amount_msat)
+                    .unwrap_or_default()
+            } else {
+                amount_msat
+            },
+            fee_msat: fee_msat.or_else(|| previous.as_ref().and_then(|record| record.fee_msat)),
+            // The terminal event can race the RPC thread recording acceptance.
+            // Never let a late pending write downgrade a completed attempt, and
+            // never let a rare late PaymentFailed overwrite PaymentSent.
+            status: match previous.as_ref().map(|record| record.status) {
+                Some(PaymentStatus::Succeeded) => PaymentStatus::Succeeded,
+                Some(previous_status) if status == PaymentStatus::Pending => previous_status,
+                _ => status,
+            },
+            created_at: previous
+                .as_ref()
+                .map(|record| record.created_at)
+                .unwrap_or(created_at),
+            invoice: invoice.or_else(|| previous.and_then(|record| record.invoice)),
+        };
+        if let Err(err) = self.persister.upsert_payment(&record) {
+            log::error!(target: "lampo::handler", "recording payment {}: {err}", record.id);
+        }
     }
 }
 
@@ -501,8 +575,17 @@ impl Handler for LampoHandler {
                         (Some(preimage), None)
                     }
                 };
-                log::warn!("please note the payments are not make persistent for the moment");
-                // FIXME: make peristent these information
+                // Inbound payments are keyed by hash: there is no payment id on
+                // this side.
+                self.record_payment(
+                    payment_hash.to_string(),
+                    payment_hash.to_string(),
+                    PaymentDirection::Inbound,
+                    amount_msat,
+                    None,
+                    PaymentStatus::Succeeded,
+                    None,
+                );
                 Ok(())
             }
             ldk::events::Event::SpendableOutputs {
@@ -549,6 +632,8 @@ impl Handler for LampoHandler {
                 payment_preimage,
                 payment_hash,
                 bolt12_invoice,
+                amount_msat,
+                fee_paid_msat,
                 ..
             } => {
                 log::info!(
@@ -595,6 +680,16 @@ impl Handler for LampoHandler {
                         log::error!(target: "lampo::handler", "storing payer proof material: {err}");
                     }
                 }
+
+                self.record_payment(
+                    lampo_common::hex::encode(payment_id.0),
+                    payment_hash.to_string(),
+                    PaymentDirection::Outbound,
+                    amount_msat.unwrap_or_default(),
+                    fee_paid_msat,
+                    PaymentStatus::Succeeded,
+                    None,
+                );
                 Ok(())
             }
             ldk::events::Event::PaymentPathSuccessful {
@@ -672,6 +767,20 @@ impl Handler for LampoHandler {
                     reason: Some(detailed_reason),
                 };
                 self.emit(Event::Lightning(hop));
+
+                // A failed payment is worth keeping: "why did this not go
+                // through" is the question the history gets asked.
+                self.record_payment(
+                    lampo_common::hex::encode(payment_id.0),
+                    payment_hash
+                        .map(|hash| hash.to_string())
+                        .unwrap_or_default(),
+                    PaymentDirection::Outbound,
+                    0,
+                    None,
+                    PaymentStatus::Failed,
+                    None,
+                );
                 Ok(())
             }
             ldk::events::Event::ConnectionNeeded { node_id, addresses } => {

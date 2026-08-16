@@ -107,9 +107,9 @@ impl OffchainManager {
         amount_msat: Option<u64>,
         payer_note: Option<String>,
     ) -> error::Result<PaymentId> {
-        // check if it is an invoice or an offer
-        let offer_hash = Sha256::hash(offer_str.as_bytes());
-        let payment_id = PaymentId(*offer_hash.as_ref());
+        // An offer is reusable, so its hash is not a payment-attempt id. A
+        // fresh id keeps simultaneous and historical attempts distinct.
+        let payment_id = PaymentId(self.keys_manager.get_secure_random_bytes());
         let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
 
         let amount = match offer.amount() {
@@ -145,7 +145,9 @@ impl OffchainManager {
     ) -> error::Result<PaymentId> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
-        let payment_id = PaymentId(invoice.payment_hash().0);
+        // Keep the payment hash from the invoice, but give each attempt its own
+        // id so a retry does not overwrite earlier failed history.
+        let payment_id = PaymentId(self.keys_manager.get_secure_random_bytes());
         // Only forward a caller-supplied amount for zero-amount invoices. For a
         // fixed-amount invoice LDK treats `amount_msat` as an overpayment, so
         // drop it (matching the pre-0.3 `payment_parameters_from_invoice`).
