@@ -241,20 +241,33 @@ impl Backend for LampoChainSync {
         }
     }
 
-    async fn fee_rate_estimation(&self, blocks: u64) -> lampo_common::error::Result<u32> {
+    async fn fee_rate_estimation_with_mode(
+        &self,
+        blocks: u64,
+        mode: lampo_common::backend::FeeEstimateMode,
+    ) -> lampo_common::error::Result<u32> {
         #[derive(Deserialize)]
         pub struct FeeRate {
             feerate: Option<f64>,
             errors: Option<Vec<String>>,
         }
 
+        // ldk-node falls back to 1 sat/vB (250 sat/kW) on regtest/signet
+        // when bitcoind has no estimate. Returning 256 sat/vB here made
+        // MinAllowedNonAnchor 64000 sat/kW and rejected a 253 funder (I04).
         if self.config.network == lampo_common::bitcoin::Network::Regtest {
-            return Ok(256);
+            return Ok(250);
         }
 
         let resp = self
             .rpc_client
-            .call_method::<json::Value>("estimatesmartfee", &[blocks.into()])
+            .call_method::<json::Value>(
+                "estimatesmartfee",
+                &[
+                    blocks.into(),
+                    json::Value::String(mode.as_core_str().to_owned()),
+                ],
+            )
             .await?;
         let resp: FeeRate = json::from_value(resp)?;
         if let Some(errs) = resp.errors {
@@ -263,14 +276,10 @@ impl Backend for LampoChainSync {
         let Some(feerate) = resp.feerate else {
             return Err(error::anyhow!("No fee rate estimation available").into());
         };
-        // bitcoind returns BTC/kvB. The callers expect sat/vB (see
-        // `FeeRate::from_sat_per_vb_unchecked` in the channel funding path),
-        // so convert: BTC/kvB * 1e8 sat/BTC / 1000 vB/kvB = * 1e5 sat/vB.
-        // Returning sat/kvB here (a plain * 1e8) inflated fees by 1000x and
-        // made small wallets fail every channel open with "Insufficient
-        // funds" (found on the mutinynet leg: 7 sat/vB used as 7092 sat/vB).
-        let sats_per_vb = feerate * 100_000.0;
-        Ok(sats_per_vb.ceil() as u32)
+        // bitcoind returns BTC/kvB. Convert straight to sat/kW (ldk-node:
+        // `* 25_000_000`). Rounding through integer sat/vB first would turn
+        // 1.001 sat/vB into 500 sat/kW and reject a 253-floor funder.
+        lampo_common::backend::btc_per_kvb_to_sat_per_kw(feerate)
     }
 
     async fn get_transaction(
@@ -296,22 +305,25 @@ impl Backend for LampoChainSync {
         unimplemented!()
     }
 
-    // TODO: specify what kind of format the result should be!
     async fn minimum_mempool_fee(&self) -> lampo_common::error::Result<u32> {
         #[derive(Debug, Deserialize)]
         struct MempoolInfo {
             loaded: bool,
             mempoolminfee: f64,
-        };
+        }
         let mempool_info = self
             .rpc_client
             .call_method::<json::Value>("getmempoolinfo", &[])
             .await?;
         let mempool_info: MempoolInfo = json::from_value(mempool_info)?;
-        if mempool_info.loaded {
-            log::warn!("mempool is still loading, so the fee may be not accurate!");
+        if !mempool_info.loaded {
+            log::warn!(
+                target: "lampo-chain",
+                "mempool is still loading, so the fee may be not accurate"
+            );
         }
-        Ok((mempool_info.mempoolminfee * (100_000_000 as f64)) as u32)
+        // bitcoind returns BTC/kvB. Convert straight to sat/kW.
+        lampo_common::backend::btc_per_kvb_to_sat_per_kw(mempool_info.mempoolminfee)
     }
 
     fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {
