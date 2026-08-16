@@ -546,3 +546,72 @@ pub async fn decode_offer_hex() -> error::Result<()> {
     log::info!(target: &node1.info.node_id, "Payment completed successfully: {:?}", pay);
     Ok(())
 }
+
+/// After a channel closes, the funds return to a script derived from the
+/// LDK keys manager, which the on-chain BDK wallet does not track. The
+/// only way the node ever sees that money again is the output sweeper
+/// picking up `Event::SpendableOutputs` and sweeping it back into the
+/// wallet. Without the sweeper this test times out with the wallet
+/// balance stuck at its post-funding value: the closed channel's funds
+/// are lost. GHSA-pw22-mxxj-rvgh.
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let btc = node1.btc.clone();
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
+
+    const CHANNEL_SAT: u64 = 1_000_000;
+    node1.fund_channel_with(node2.clone(), CHANNEL_SAT).await?;
+
+    // The sweep lands as a fresh wallet UTXO worth the channel balance
+    // minus close and sweep fees, i.e. somewhere in (CHANNEL_SAT / 2,
+    // CHANNEL_SAT). Nothing else in this test produces an output in that
+    // range: coinbases are ~50 BTC and the funding change is far larger.
+    let in_sweep_range = |utxo: &response::Utxo| {
+        let sat = utxo.amount_msat / 1000;
+        sat > CHANNEL_SAT / 2 && sat < CHANNEL_SAT
+    };
+    let funds: response::Utxos = node1.lampod().call("funds", json::json!({})).await?;
+    assert!(
+        !funds.transactions.iter().any(in_sweep_range),
+        "no sweep-sized utxo should exist before the close: {funds:?}"
+    );
+
+    let close: response::CloseChannel = node1
+        .lampod()
+        .call(
+            "close",
+            request::CloseChannel {
+                node_id: node2.info.node_id.clone(),
+                channel_id: None,
+            },
+        )
+        .await?;
+    log::info!(target: &node1.info.node_id, "channel closed: {close:?}");
+
+    // The closing transaction needs to confirm (plus LDK's anti-reorg
+    // delay of 6 blocks) before SpendableOutputs fires; the sweeper then
+    // broadcasts on the background processor's 30s timer and the sweep
+    // itself needs a confirmation. Keep mining and give it time.
+    async_wait!(
+        async {
+            node1.fund_wallet(2).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            let funds: response::Utxos =
+                node1.lampod().call("funds", json::json!({})).await.unwrap();
+            log::info!(
+                target: &node1.info.node_id,
+                "waiting for the sweep to land: {} utxos",
+                funds.transactions.len()
+            );
+            if funds.transactions.iter().any(in_sweep_range) {
+                Ok(())
+            } else {
+                Err(())
+            }
+        },
+        10
+    );
+    Ok(())
+}

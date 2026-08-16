@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use crate::chainsync::ChainSyncCoordinator;
 use crate::error;
 use crate::handler::Handler;
-use crate::types::{LampoChainMonitor, LampoChannel};
+use crate::ldk::chain::BlockLocator;
+use crate::types::{LampoChainMonitor, LampoChannel, LampoSweeper};
 use crate::wallet::WalletManager;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -130,6 +131,12 @@ pub trait Backend: Send + Sync {
     fn set_channel_manager(&self, _: Arc<LampoChannel>) {}
 
     fn set_chain_monitor(&self, _: Arc<LampoChainMonitor>) {}
+
+    /// Register the output sweeper as a chain listener, together with the
+    /// best block its persisted state was last synced to. Without this the
+    /// sweeper never learns that a sweep confirmed, and tracked outputs
+    /// stay pending across restarts.
+    fn set_sweeper(&self, _: BlockLocator, _: Arc<LampoSweeper>) {}
 
     /// Inject the backend-agnostic chain-sync coordinator so the backend can
     /// publish listener-sync progress. Default no-op.

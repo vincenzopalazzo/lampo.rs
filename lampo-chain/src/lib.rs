@@ -18,7 +18,7 @@ use lampo_common::error;
 use lampo_common::json;
 use lampo_common::ldk::chain;
 use lampo_common::serde::Deserialize;
-use lampo_common::types::{LampoChainMonitor, LampoChannel};
+use lampo_common::types::{LampoChainMonitor, LampoChannel, LampoSweeper};
 use lampo_common::wallet::WalletManager;
 
 /// Adapts the on-chain wallet to LDK's [`chain::Listen`] so it can ride the
@@ -100,6 +100,41 @@ fn mark_initial_sync_complete(
     }
 }
 
+/// The set of ongoing chain listeners fed by the SPV client after the
+/// initial synchronization. The sweeper has to stay on this path: without
+/// block notifications it never sees a sweep confirm and tracked outputs
+/// stay pending forever.
+struct ChainListeners {
+    chain_monitor: Arc<LampoChainMonitor>,
+    channel_manager: Arc<LampoChannel>,
+    sweeper: Option<Arc<LampoSweeper>>,
+}
+
+impl chain::Listen for ChainListeners {
+    fn filtered_block_connected(
+        &self,
+        header: &lampo_common::bitcoin::block::Header,
+        txdata: &chain::transaction::TransactionData,
+        height: u32,
+    ) {
+        self.chain_monitor
+            .filtered_block_connected(header, txdata, height);
+        self.channel_manager
+            .filtered_block_connected(header, txdata, height);
+        if let Some(ref sweeper) = self.sweeper {
+            sweeper.filtered_block_connected(header, txdata, height);
+        }
+    }
+
+    fn blocks_disconnected(&self, fork_point: chain::BlockLocator) {
+        self.chain_monitor.blocks_disconnected(fork_point.clone());
+        self.channel_manager.blocks_disconnected(fork_point.clone());
+        if let Some(ref sweeper) = self.sweeper {
+            sweeper.blocks_disconnected(fork_point);
+        }
+    }
+}
+
 /// Welcome in another Facede pattern implementation
 pub struct LampoChainSync {
     config: Arc<LampoConf>,
@@ -109,6 +144,9 @@ pub struct LampoChainSync {
     handler: OnceLock<Arc<dyn lampo_common::handler::Handler>>,
     coordinator: OnceLock<Arc<ChainSyncCoordinator>>,
     wallet: OnceLock<Arc<dyn WalletManager>>,
+    /// The output sweeper, registered as an ongoing chain listener with the
+    /// best block its persisted state was last synced to.
+    sweeper: OnceLock<(chain::BlockLocator, Arc<LampoSweeper>)>,
 }
 
 impl LampoChainSync {
@@ -145,6 +183,7 @@ impl LampoChainSync {
             handler: OnceLock::new(),
             coordinator: OnceLock::new(),
             wallet: OnceLock::new(),
+            sweeper: OnceLock::new(),
         })
     }
 
@@ -176,6 +215,10 @@ impl LampoChainSync {
 
     fn wallet(&self) -> Option<Arc<dyn WalletManager>> {
         self.wallet.get().cloned()
+    }
+
+    fn sweeper(&self) -> Option<(chain::BlockLocator, Arc<LampoSweeper>)> {
+        self.sweeper.get().cloned()
     }
 }
 
@@ -358,9 +401,19 @@ impl Backend for LampoChainSync {
         }
     }
 
+    fn set_sweeper(&self, best_block: chain::BlockLocator, sweeper: Arc<LampoSweeper>) {
+        if self.sweeper.set((best_block, sweeper)).is_err() {
+            log::debug!(
+                target: "lampo-chain",
+                "output sweeper already set; keeping existing"
+            );
+        }
+    }
+
     async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
         let channel_manager = self.channel_manager();
         let chain_monitor = self.chain_monitor();
+        let sweeper_listener = self.sweeper();
 
         // Synchronize the channel manager and chain monitor from their
         // persisted best block up to the current chain tip. This is critical
@@ -445,6 +498,17 @@ impl Backend for LampoChainSync {
                     }
                 }
             }
+            if let Some((best_block, ref sweeper)) = sweeper_listener {
+                log::info!(
+                    target: "lampo-chain",
+                    "Including output sweeper in chain sync from height {}",
+                    best_block.height
+                );
+                chain_listeners.push((
+                    best_block.clone(),
+                    sweeper.as_ref() as &(dyn chain::Listen + Send + Sync),
+                ));
+            }
 
             // Bound each pass: a hung backend (the lightning-block-sync
             // `RpcClient` has no read timeout) must not stall the listener
@@ -501,7 +565,11 @@ impl Backend for LampoChainSync {
             );
         }
 
-        let chain_listener = (chain_monitor, channel_manager);
+        let chain_listener = ChainListeners {
+            chain_monitor,
+            channel_manager,
+            sweeper: sweeper_listener.map(|(_, sweeper)| sweeper),
+        };
         let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
         let mut spv_client = SpvClient::new(synced_chain_tip, chain_poller, cache, &chain_listener);
         log::info!(target: "lampo-chain", "Start Backend ...");

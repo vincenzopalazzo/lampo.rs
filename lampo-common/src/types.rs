@@ -15,7 +15,9 @@ use crate::ldk::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeP
 use crate::ldk::sign::InMemorySigner;
 
 use crate::keys::LampoKeysManager;
+use crate::ldk::util::sweep::OutputSweeper;
 use crate::utils::logger::LampoLogger;
+use crate::wallet::LampoChangeDestination;
 
 pub type NodeId = PublicKey;
 pub type ChannelId = crate::ldk::ln::types::ChannelId;
@@ -43,6 +45,19 @@ pub type LampoArcChannelManager<M, L> = ChannelManager<
 >;
 
 pub type LampoChannel = LampoArcChannelManager<LampoChainMonitor, LampoLogger>;
+
+/// Tracks and sweeps spendable outputs of closed channels back into the
+/// on-chain wallet. Fed by `Event::SpendableOutputs`, driven by the
+/// background processor, and notified of blocks by the chain backend.
+pub type LampoSweeper = OutputSweeper<
+    Arc<dyn BroadcasterInterface + Send + Sync>,
+    Arc<LampoChangeDestination>,
+    Arc<dyn FeeEstimator + Send + Sync>,
+    Arc<dyn Filter + Send + Sync>,
+    Arc<FilesystemStore>,
+    Arc<LampoLogger>,
+    Arc<LampoKeysManager>,
+>;
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
 pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
