@@ -547,13 +547,10 @@ pub async fn decode_offer_hex() -> error::Result<()> {
     Ok(())
 }
 
-/// After a channel closes, the funds return to a script derived from the
-/// LDK keys manager, which the on-chain BDK wallet does not track. The
-/// only way the node ever sees that money again is the output sweeper
-/// picking up `Event::SpendableOutputs` and sweeping it back into the
-/// wallet. Without the sweeper this test times out with the wallet
-/// balance stuck at its post-funding value: the closed channel's funds
-/// are lost. GHSA-pw22-mxxj-rvgh.
+/// After a channel closes, funds return to a wallet-owned destination
+/// script (and delayed outputs through the sweeper). Without that wiring
+/// this test times out with the wallet stuck at its post-funding value.
+/// GHSA-pw22-mxxj-rvgh.
 #[tokio_test_shutdown_timeout::test(10)]
 pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
     init();

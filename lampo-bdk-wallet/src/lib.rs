@@ -27,8 +27,11 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::bip32::Xpriv;
 use lampo_common::bitcoin::blockdata::locktime::absolute::LockTime;
+use lampo_common::bitcoin::psbt::Psbt;
 use lampo_common::bitcoin::PrivateKey;
-use lampo_common::bitcoin::{Amount, Block, FeeRate, ScriptBuf, Transaction};
+use lampo_common::bitcoin::{
+    Amount, Block, FeeRate, OutPoint, ScriptBuf, Transaction, TxOut, Txid,
+};
 use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::keys::LampoKeys;
@@ -137,7 +140,8 @@ impl BDKWalletManager {
             None => LampoKeys::new(xprv.inner.secret_bytes()),
         };
 
-        let mut db = Connection::open_in_memory()?;
+        let path_db = format!("{}/bdk-wallet.db", conf.path());
+        let mut db = Connection::open(path_db)?;
 
         let xpriv = Xpriv::new_master(conf.network, &xprv.inner.secret_bytes())?;
 
@@ -283,13 +287,53 @@ impl WalletManager for BDKWalletManager {
     }
 
     async fn get_onchain_address(&self) -> error::Result<NewAddress> {
+        let script = self.next_wallet_script()?;
+        Ok(NewAddress {
+            address: lampo_common::bitcoin::Address::from_script(&script, self.network)?
+                .to_string(),
+        })
+    }
+
+    fn next_wallet_script(&self) -> error::Result<ScriptBuf> {
         let mut wallet = self.wallet.lock().unwrap();
         let mut wallet_db = self.wallet_db.lock().unwrap();
         let address = wallet.reveal_next_address(KeychainKind::External);
         wallet.persist(&mut wallet_db)?;
-        Ok(NewAddress {
-            address: address.address.to_string(),
-        })
+        Ok(address.address.script_pubkey())
+    }
+
+    fn is_mine(&self, script: &ScriptBuf) -> bool {
+        self.wallet.lock().unwrap().is_mine(script.clone())
+    }
+
+    fn confirmed_utxos(&self) -> error::Result<Vec<(OutPoint, TxOut)>> {
+        let wallet = self.wallet.lock().unwrap();
+        Ok(wallet
+            .list_unspent()
+            .filter(|utxo| utxo.chain_position.is_confirmed())
+            .map(|utxo| (utxo.outpoint, utxo.txout))
+            .collect())
+    }
+
+    fn get_transaction(&self, txid: Txid) -> error::Result<Option<Transaction>> {
+        Ok(self
+            .wallet
+            .lock()
+            .unwrap()
+            .tx_details(txid)
+            .map(|details| details.tx.as_ref().clone()))
+    }
+
+    fn sign_psbt(&self, mut psbt: Psbt) -> error::Result<Transaction> {
+        let wallet = self.wallet.lock().unwrap();
+        let mut sign_options = SignOptions::default();
+        sign_options.trust_witness_utxo = true;
+        wallet.sign(&mut psbt, sign_options)?;
+        match psbt.extract_tx() {
+            Ok(tx) => Ok(tx),
+            Err(lampo_common::bitcoin::psbt::ExtractTxError::MissingInputValue { tx }) => Ok(tx),
+            Err(err) => error::bail!("failed to extract signed bump transaction: {err}"),
+        }
     }
 
     // Return in satoshis

@@ -3,10 +3,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use lampo_common::bitcoin::absolute::Height;
+use lampo_common::bitcoin::hashes::Hash;
+use lampo_common::bitcoin::{Amount, OutPoint, Transaction, WPubkeyHash};
 use tokio::sync::RwLock;
 
 use lampo_common::async_trait;
-use lampo_common::bitcoin::Amount;
 use lampo_common::chan;
 use lampo_common::error;
 use lampo_common::error::Ok;
@@ -17,11 +18,15 @@ use lampo_common::handler::ExternalHandler;
 use lampo_common::handler::Handler as EventHandler;
 use lampo_common::json;
 use lampo_common::jsonrpc::Request;
+use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
-use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, TransactionType};
-use lampo_common::ldk::sign::NodeSigner;
+use lampo_common::ldk::chain::chaininterface::BroadcasterInterface;
+use lampo_common::ldk::events::bump_transaction::BumpTransactionEventHandler;
+use lampo_common::ldk::sign::{NodeSigner, SpendableOutputDescriptor};
+use lampo_common::ldk::util::wallet_utils::{Utxo, Wallet, WalletSource};
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
+use lampo_common::utils::logger::LampoLogger;
 
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
@@ -32,6 +37,50 @@ use crate::LampoDaemon;
 
 use super::Handler;
 
+/// Confirmed P2WPKH coins for LDK's bump handler (ldk-node `WalletSource`).
+struct BumpWallet(Arc<dyn WalletManager>);
+
+impl WalletSource for BumpWallet {
+    async fn list_confirmed_utxos(&self) -> Result<Vec<Utxo>, ()> {
+        let utxos = self.0.confirmed_utxos().map_err(|_| ())?;
+        std::result::Result::Ok(
+            utxos
+                .into_iter()
+                .filter_map(|(outpoint, output)| {
+                    if !output.script_pubkey.is_p2wpkh() {
+                        return None;
+                    }
+                    let wpkh =
+                        WPubkeyHash::from_slice(&output.script_pubkey.as_bytes()[2..]).ok()?;
+                    Some(Utxo::new_v0_p2wpkh(outpoint, output.value, &wpkh))
+                })
+                .collect(),
+        )
+    }
+
+    async fn get_prevtx(&self, outpoint: OutPoint) -> Result<Transaction, ()> {
+        self.0
+            .get_transaction(outpoint.txid)
+            .map_err(|_| ())?
+            .ok_or(())
+    }
+
+    async fn get_change_script(&self) -> Result<lampo_common::bitcoin::ScriptBuf, ()> {
+        self.0.next_wallet_script().map_err(|_| ())
+    }
+
+    async fn sign_psbt(&self, psbt: lampo_common::bitcoin::psbt::Psbt) -> Result<Transaction, ()> {
+        self.0.sign_psbt(psbt).map_err(|_| ())
+    }
+}
+
+type BumpHandler = BumpTransactionEventHandler<
+    Arc<dyn BroadcasterInterface + Send + Sync>,
+    Arc<Wallet<Arc<BumpWallet>, Arc<LampoLogger>>>,
+    Arc<LampoKeysManager>,
+    Arc<LampoLogger>,
+>;
+
 pub struct LampoHandler {
     channel_manager: Arc<LampoChannelManager>,
     peer_manager: Arc<LampoPeerManager>,
@@ -39,6 +88,7 @@ pub struct LampoHandler {
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
     persister: Arc<LampoPersistence>,
+    bump_tx_event_handler: BumpHandler,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
@@ -49,6 +99,16 @@ impl LampoHandler {
     pub(crate) fn new(lampod: &LampoDaemon) -> Self {
         let emitter = Emitter::default();
         let subscriber = emitter.subscriber();
+        let logger = lampod.logger();
+        let bump_tx_event_handler = BumpTransactionEventHandler::new(
+            lampod.onchain_manager().clone() as Arc<dyn BroadcasterInterface + Send + Sync>,
+            Arc::new(Wallet::new(
+                Arc::new(BumpWallet(lampod.wallet_manager())),
+                logger.clone(),
+            )),
+            lampod.wallet_manager().ldk_keys().keys_manager.clone(),
+            logger,
+        );
         Self {
             channel_manager: lampod.channel_manager(),
             peer_manager: lampod.peer_manager(),
@@ -56,6 +116,7 @@ impl LampoHandler {
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
             persister: lampod.persister(),
+            bump_tx_event_handler,
             external_handlers: RwLock::new(Vec::new()),
             emitter,
             subscriber,
@@ -454,13 +515,29 @@ impl Handler for LampoHandler {
                     "tracking {} spendable output(s) from channel `{channel_id:?}` for sweeping",
                     outputs.len(),
                 );
-                // `exclude_static_outputs` must stay `false`: static outputs
-                // pay to scripts derived from the LDK keys manager, which the
-                // BDK on-chain wallet does not track. Only the sweeper can
-                // claim them.
+                // Skip static outputs the wallet already owns; keep delayed
+                // outputs and any leftover keys-manager statics for the sweeper.
+                let to_track = outputs
+                    .into_iter()
+                    .filter(|descriptor| match descriptor {
+                        SpendableOutputDescriptor::StaticOutput { output, .. } => {
+                            !self.wallet_manager.is_mine(&output.script_pubkey)
+                        }
+                        _ => true,
+                    })
+                    .collect::<Vec<_>>();
+                if to_track.is_empty() {
+                    return Ok(());
+                }
                 self.channel_manager
                     .sweeper()
-                    .track_spendable_outputs(outputs, channel_id, counterparty_node_id, false, None)
+                    .track_spendable_outputs(
+                        to_track,
+                        channel_id,
+                        counterparty_node_id,
+                        false,
+                        None,
+                    )
                     .await
                     .map_err(|_| {
                         error::anyhow!("failed to persist spendable outputs in the sweeper")
@@ -642,54 +719,8 @@ impl Handler for LampoHandler {
                 });
                 Ok(())
             }
-            ldk::events::Event::BumpTransaction(
-                ldk::events::bump_transaction::BumpTransactionEvent::ChannelClose {
-                    channel_id,
-                    counterparty_node_id,
-                    commitment_tx,
-                    pending_htlcs,
-                    ..
-                },
-            ) => {
-                // For anchor channels -- lampo's default channel type -- LDK
-                // does NOT broadcast the force-close commitment through the
-                // `BroadcasterInterface`. It hands the fully-signed holder
-                // commitment to the host inside this event and makes the host
-                // the sole broadcaster. The old catch-all `_` arm dropped it in
-                // a log line, so the channel balance stayed frozen on an
-                // unspent funding output with no recovery path. Broadcast it
-                // now so the funds can be swept once it confirms. A CPFP anchor
-                // child to fee-bump the (near zero-fee) commitment is still
-                // TODO, but the commitment must at least reach the mempool.
-                log::warn!(
-                    target: "lampo::handler",
-                    "channel `{channel_id}` with `{counterparty_node_id}` force-closed: \
-                     broadcasting local commitment tx `{}` ({} pending HTLC(s))",
-                    commitment_tx.compute_txid(),
-                    pending_htlcs.len(),
-                );
-                self.chain_manager.broadcast_transactions(&[(
-                    &commitment_tx,
-                    TransactionType::UnilateralClose {
-                        counterparty_node_id,
-                        channel_id,
-                    },
-                )]);
-                Ok(())
-            }
-            ldk::events::Event::BumpTransaction(
-                ldk::events::bump_transaction::BumpTransactionEvent::HTLCResolution { .. },
-            ) => {
-                // Zero-fee HTLC claims of anchor channels are likewise
-                // event-delivered and host-broadcast. Full anchor-fee handling
-                // is not implemented yet, so surface this loudly rather than
-                // silently dropping it: unresolved in-flight HTLCs can lose
-                // value once their CLTV deadlines pass.
-                log::error!(
-                    target: "lampo::handler",
-                    "unhandled BumpTransaction::HTLCResolution: in-flight HTLC claims need \
-                     manual broadcast to enforce CLTV deadlines"
-                );
+            ldk::events::Event::BumpTransaction(event) => {
+                self.bump_tx_event_handler.handle_event(&event).await;
                 Ok(())
             }
             _ => {

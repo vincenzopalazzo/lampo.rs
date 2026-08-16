@@ -17,7 +17,6 @@ use crate::ldk::sign::InMemorySigner;
 use crate::keys::LampoKeysManager;
 use crate::ldk::util::sweep::OutputSweeper;
 use crate::utils::logger::LampoLogger;
-use crate::wallet::LampoChangeDestination;
 
 pub type NodeId = PublicKey;
 pub type ChannelId = crate::ldk::ln::types::ChannelId;
@@ -51,7 +50,7 @@ pub type LampoChannel = LampoArcChannelManager<LampoChainMonitor, LampoLogger>;
 /// background processor, and notified of blocks by the chain backend.
 pub type LampoSweeper = OutputSweeper<
     Arc<dyn BroadcasterInterface + Send + Sync>,
-    Arc<LampoChangeDestination>,
+    Arc<LampoKeysManager>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<dyn Filter + Send + Sync>,
     Arc<FilesystemStore>,

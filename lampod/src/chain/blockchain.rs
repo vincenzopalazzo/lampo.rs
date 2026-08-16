@@ -368,4 +368,12 @@ impl Backend for LampoChainManager {
     fn set_wallet_manager(&self, wallet: Arc<dyn WalletManager>) {
         self.backend.set_wallet_manager(wallet);
     }
+
+    fn set_sweeper(
+        &self,
+        best_block: lampo_common::ldk::chain::BlockLocator,
+        sweeper: Arc<lampo_common::types::LampoSweeper>,
+    ) {
+        self.backend.set_sweeper(best_block, sweeper);
+    }
 }

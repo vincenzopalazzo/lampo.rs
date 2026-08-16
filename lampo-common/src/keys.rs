@@ -1,11 +1,17 @@
-use std::{sync::Arc, time::SystemTime};
+use std::sync::{Arc, OnceLock, Weak};
+use std::time::SystemTime;
 
 #[cfg(feature = "unsafe_channel_keys")]
 use bitcoin::secp256k1::SecretKey;
 use lightning::bolt11_invoice;
-use lightning::sign::{InMemorySigner, NodeSigner, OutputSpender, SignerProvider};
+use lightning::ln::script::ShutdownScript;
+use lightning::sign::{
+    ChangeDestinationSource, EntropySource, InMemorySigner, NodeSigner, OutputSpender,
+    SignerProvider,
+};
 
-use crate::ldk::sign::{EntropySource, KeysManager};
+use crate::ldk::sign::KeysManager;
+use crate::wallet::WalletManager;
 
 /// Lampo keys implementations
 pub struct LampoKeys {
@@ -59,6 +65,8 @@ impl LampoKeys {
 
 pub struct LampoKeysManager {
     pub(crate) inner: KeysManager,
+    /// Weak so the wallet can own this keys manager without a cycle.
+    wallet: OnceLock<Weak<dyn WalletManager>>,
 
     #[cfg(feature = "unsafe_channel_keys")]
     funding_key: Option<SecretKey>,
@@ -81,6 +89,7 @@ impl LampoKeysManager {
         let inner = KeysManager::new(seed, starting_time_secs, starting_time_nanos, false);
         Self {
             inner,
+            wallet: OnceLock::new(),
             #[cfg(feature = "unsafe_channel_keys")]
             funding_key: None,
             #[cfg(feature = "unsafe_channel_keys")]
@@ -115,6 +124,26 @@ impl LampoKeysManager {
             Some(SecretKey::from_str(&delayed_payment_base_secret).unwrap());
         self.htlc_base_secret = Some(SecretKey::from_str(&htlc_base_secret).unwrap());
         self.shachain_seed = Some(self.inner.get_secure_random_bytes())
+    }
+
+    pub fn set_wallet(&self, wallet: Arc<dyn WalletManager>) {
+        let _ = self.wallet.set(Arc::downgrade(&wallet));
+    }
+
+    fn wallet_script(&self) -> Result<bitcoin::ScriptBuf, ()> {
+        self.wallet
+            .get()
+            .and_then(|wallet| wallet.upgrade())
+            .ok_or(())?
+            .next_wallet_script()
+            .map_err(|err| {
+                log::error!(target: "lampo-keys", "wallet script: {err}");
+            })
+    }
+
+    fn destination_script(&self, channel_keys_id: [u8; 32]) -> Result<bitcoin::ScriptBuf, ()> {
+        self.wallet_script()
+            .or_else(|_| self.inner.get_destination_script(channel_keys_id))
     }
 }
 
@@ -237,10 +266,21 @@ impl SignerProvider for LampoKeysManager {
     }
 
     fn get_destination_script(&self, channel_keys_id: [u8; 32]) -> Result<bitcoin::ScriptBuf, ()> {
-        self.inner.get_destination_script(channel_keys_id)
+        self.destination_script(channel_keys_id)
     }
 
-    fn get_shutdown_scriptpubkey(&self) -> Result<lightning::ln::script::ShutdownScript, ()> {
-        self.inner.get_shutdown_scriptpubkey()
+    fn get_shutdown_scriptpubkey(&self) -> Result<ShutdownScript, ()> {
+        match self.wallet_script() {
+            Ok(script) => {
+                ShutdownScript::try_from(script).or_else(|_| self.inner.get_shutdown_scriptpubkey())
+            }
+            Err(()) => self.inner.get_shutdown_scriptpubkey(),
+        }
+    }
+}
+
+impl ChangeDestinationSource for LampoKeysManager {
+    async fn get_change_destination_script(&self) -> Result<bitcoin::ScriptBuf, ()> {
+        self.destination_script([0; 32])
     }
 }

@@ -43,7 +43,6 @@ use lampo_common::types::LampoRouter;
 use lampo_common::types::LampoScorer;
 use lampo_common::types::LampoSweeper;
 use lampo_common::types::{ChannelId, LampoArcChannelManager, LampoChainMonitor};
-use lampo_common::wallet::LampoChangeDestination;
 
 use crate::actions::handler::LampoHandler;
 use crate::async_run;
@@ -188,37 +187,60 @@ impl LampoChannelManager {
         Ok(())
     }
 
-    /// Build the [`LampoSweeper`], restoring its persisted state (tracked
-    /// spendable outputs and best block) when present.
-    fn init_sweeper(&self) -> error::Result<()> {
-        let broadcaster = self.onchain.clone() as Arc<dyn BroadcasterInterface + Send + Sync>;
-        let fee_estimator = self.onchain.clone() as Arc<dyn FeeEstimator + Send + Sync>;
-        let change_destination = Arc::new(LampoChangeDestination::new(
-            self.wallet_manager.clone(),
-            self.conf.network,
-        ));
-        let spender = self.wallet_manager.ldk_keys().keys_manager.clone();
+    /// Broadcaster, fee estimator, and keys manager shared by restore and
+    /// first-time sweeper construction. Spender and change destination are
+    /// the same keys manager, as in ldk-node.
+    fn sweeper_deps(
+        &self,
+    ) -> (
+        Arc<dyn BroadcasterInterface + Send + Sync>,
+        Arc<dyn FeeEstimator + Send + Sync>,
+        Arc<LampoKeysManager>,
+    ) {
+        (
+            self.onchain.clone(),
+            self.onchain.clone(),
+            self.wallet_manager.ldk_keys().keys_manager.clone(),
+        )
+    }
 
-        let state = KVStoreSync::read(
+    /// Restore a previously persisted [`LampoSweeper`], including its tracked
+    /// outputs and last synced block.
+    fn restore_sweeper(
+        &self,
+        bytes: Vec<u8>,
+        broadcaster: Arc<dyn BroadcasterInterface + Send + Sync>,
+        fee_estimator: Arc<dyn FeeEstimator + Send + Sync>,
+        keys_manager: Arc<LampoKeysManager>,
+    ) -> error::Result<(BlockLocator, LampoSweeper)> {
+        // ReadableArgs order: broadcaster, fee estimator, filter, spender,
+        // change destination, kv store, logger.
+        <(BlockLocator, LampoSweeper)>::read(
+            &mut std::io::Cursor::new(bytes),
+            (
+                broadcaster,
+                fee_estimator,
+                None,
+                keys_manager.clone(),
+                keys_manager,
+                self.persister.clone(),
+                self.logger.clone(),
+            ),
+        )
+        .map_err(|err| error::anyhow!("failed to read the sweeper state: {err}"))
+    }
+
+    /// Build the [`LampoSweeper`], restoring its persisted state when present.
+    fn init_sweeper(&self) -> error::Result<()> {
+        let (broadcaster, fee_estimator, keys_manager) = self.sweeper_deps();
+        let persisted = KVStoreSync::read(
             &*self.persister,
             OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE,
             OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
             OUTPUT_SWEEPER_PERSISTENCE_KEY,
         );
-        let (best_block, sweeper) = match state {
-            Ok(bytes) => <(BlockLocator, LampoSweeper)>::read(
-                &mut std::io::Cursor::new(bytes),
-                (
-                    broadcaster,
-                    fee_estimator,
-                    None,
-                    spender,
-                    change_destination,
-                    self.persister.clone(),
-                    self.logger.clone(),
-                ),
-            )
-            .map_err(|err| error::anyhow!("failed to read the sweeper state: {err}"))?,
+        let (best_block, sweeper) = match persisted {
+            Ok(bytes) => self.restore_sweeper(bytes, broadcaster, fee_estimator, keys_manager)?,
             Err(err) if err.kind() == lampo_common::ldk::io::ErrorKind::NotFound => {
                 let best_block = self.manager().current_best_block();
                 let sweeper = OutputSweeper::new(
@@ -226,8 +248,8 @@ impl LampoChannelManager {
                     broadcaster,
                     fee_estimator,
                     None,
-                    spender,
-                    change_destination,
+                    keys_manager.clone(),
+                    keys_manager,
                     self.persister.clone(),
                     self.logger.clone(),
                 );
