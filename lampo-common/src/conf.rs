@@ -47,8 +47,9 @@ pub struct LampoConf {
     /// Connection string for the chosen backend: a file path for SQLite, a
     /// `postgres://` URL for Postgres. Ignored by the filesystem backend.
     pub storage_url: Option<String>,
-    /// Base URL of a VSS server to keep a shadow copy of the node state on, for
-    /// recovery. Unset means no shadow copy.
+    /// Base URL of a VSS server to keep an experimental write-only shadow of
+    /// the node state on. Unset means no shadow. Lampo does not yet ship a
+    /// restore/import path from this copy.
     pub vss_url: Option<String>,
 }
 
