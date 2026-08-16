@@ -55,9 +55,9 @@ impl SqliteStore {
     /// Apply any migration the database has not seen yet.
     fn migrate(&self) -> error::Result<()> {
         let mut conn = self.lock()?;
-        conn.execute_batch(&sql::version_table(sql::Dialect::Sqlite))?;
+        conn.execute_batch(sql::version_table(sql::Dialect::Sqlite))?;
         let applied: i64 = conn
-            .query_row(&sql::read_version(), [], |row| row.get(0))
+            .query_row(sql::read_version(), [], |row| row.get(0))
             .optional()?
             .unwrap_or(0);
 
@@ -67,11 +67,9 @@ impl SqliteStore {
             }
             // Schema change and version bump land together or not at all.
             let tx = conn.transaction()?;
-            for statement in &migration.statements {
-                tx.execute_batch(statement)?;
-            }
+            tx.execute_batch(migration.sql)?;
             tx.execute(
-                &sql::write_version(sql::Dialect::Sqlite),
+                sql::write_version(sql::Dialect::Sqlite),
                 [migration.version],
             )?;
             tx.commit()?;
@@ -135,7 +133,7 @@ impl KVStoreSync for SqliteStore {
     ) -> Result<(), io::Error> {
         let conn = self.lock_io()?;
         conn.execute(
-            &sql::kv_write(sql::Dialect::Sqlite),
+            sql::kv_write(sql::Dialect::Sqlite),
             rusqlite::params![primary_namespace, secondary_namespace, key, buf],
         )
         .map_err(io_err)?;
@@ -227,7 +225,7 @@ impl PaymentStore for SqliteStore {
     fn upsert_payment(&self, payment: &PaymentRecord) -> error::Result<()> {
         let conn = self.lock()?;
         conn.execute(
-            &sql::payment_write(sql::Dialect::Sqlite),
+            sql::payment_write(sql::Dialect::Sqlite),
             rusqlite::params![
                 payment.id,
                 payment.payment_hash,
