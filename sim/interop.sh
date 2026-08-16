@@ -81,6 +81,43 @@ peer=sys.argv[1]
 print(1 if any(c.get("counterparty_node_id")==peer and c.get("is_channel_ready") for c in chs) else 0)' "$2" 2>/dev/null
 }
 
+
+ldk_fund() { # ldk_fund <node> <btc> — on-chain fund an ldk node, wait spendable
+  local addr i
+  addr=$(lcli "$1" onchain-receive 2>/dev/null | python3 -c '
+import json,sys
+def find(o):
+    if isinstance(o,dict):
+        for k,v in o.items():
+            if k=="address" and isinstance(v,str) and v.startswith("bcrt"): return v
+        for v in o.values():
+            r=find(v)
+            if r: return r
+    if isinstance(o,list):
+        for v in o:
+            r=find(v)
+            if r: return r
+print(find(json.load(sys.stdin)) or "")' 2>/dev/null)
+  [ -n "$addr" ] || { say "ldk_fund $1: no address"; return 1; }
+  bcres sendtoaddress "[\"$addr\", $2]" >/dev/null 2>&1 || { say "ldk_fund $1: sendtoaddress failed"; return 1; }
+  mine 6
+  for i in $(seq 1 24); do
+    lcli "$1" get-balances 2>/dev/null | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+def walk(o):
+    if isinstance(o,dict):
+        for k,v in o.items():
+            if "spendable" in k and isinstance(v,(int,float)) and v>100000000: return True
+        return any(walk(v) for v in o.values())
+    if isinstance(o,list): return any(walk(v) for v in o)
+sys.exit(0 if walk(d) else 1)' && { say "ldk_fund $1: spendable"; return 0; }
+    sleep 5
+  done
+  return 1
+}
+
 ldk_bolt11() { # ldk_bolt11 <node> <amt_msat> -> invoice string (amount is POSITIONAL)
   lcli "$1" bolt11-receive "${2}msat" -d interop 2>>"$LOG" | python3 -c 'import json,sys
 try: d=json.load(sys.stdin)
@@ -169,6 +206,15 @@ for _n in lp1 lp2; do
   done
   [ "$_ok" = 1 ] || ko SETUP "fund $_n"
 done
+for _n in lk1 lk2; do
+  _ok=0
+  for _try in 1 2 3; do
+    if ldk_fund "$_n" 20; then _ok=1; break; fi
+    say "ldk_fund $_n failed (try $_try) — backing off 30s"
+    sleep 30
+  done
+  [ "$_ok" = 1 ] || ko SETUP "ldk_fund $_n"
+done
 for _try in 1 2 3; do
   wait_wallet_synced 420 && break
   say "wallet sync failed (try $_try)"
@@ -198,6 +244,7 @@ check I02 "open c1 lp1->lk1 (lampo, public)" '
 check I03 "open c2 lk1->lk2 (ldk, announced)" '
   o=$(lcli lk1 connect-peer "${ID[lk2]}@127.0.0.1:$(ldk_p2p lk2)" 2>>"$LOG"); echo "$o" >> "$LOG"
   o=$(lcli lk1 open-channel "${ID[lk2]}" "127.0.0.1:$(ldk_p2p lk2)" "${CHANNEL_SAT}sat" --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
+  case "$o" in *Error*|*error*) sleep 5; exit 1;; esac
   sleep 5; mine 8; sleep 10
   for i in $(seq 1 120); do [ "$(ldk_channel_ready_with lk1 "${ID[lk2]}")" = 1 ] && break; sleep 5; done
   [ "$(ldk_channel_ready_with lk1 "${ID[lk2]}")" = 1 ]'
@@ -206,6 +253,7 @@ check I03 "open c2 lk1->lk2 (ldk, announced)" '
 check I04 "open c3 lk2->lp2 (ldk, announced)" '
   o=$(lcli lk2 connect-peer "${ID[lp2]}@127.0.0.1:$(P2P lp2)" 2>>"$LOG"); echo "$o" >> "$LOG"
   o=$(lcli lk2 open-channel "${ID[lp2]}" "127.0.0.1:$(P2P lp2)" "${CHANNEL_SAT}sat" --announce-channel 2>>"$LOG"); echo "$o" >> "$LOG"
+  case "$o" in *Error*|*error*) sleep 5; exit 1;; esac
   sleep 5; mine 8; sleep 10
   for i in $(seq 1 120); do { [ "$(ldk_channel_ready_with lk2 "${ID[lp2]}")" = 1 ] && [ "$(ready_channels lp2)" -ge 1 ]; } && break; sleep 5; done
   [ "$(ldk_channel_ready_with lk2 "${ID[lp2]}")" = 1 ] && [ "$(ready_channels lp2)" -ge 1 ]'
