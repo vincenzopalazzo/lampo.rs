@@ -92,9 +92,7 @@ impl PayerProofRecord {
 
 /// Records are keyed by payment hash, not payment id.
 ///
-/// `pay_offer` derives the payment id from the offer string alone, so every
-/// payment of a reusable offer shares one id and would overwrite the previous
-/// record. The payment hash is unique per payment, and it is also what a caller
+/// Both values are unique per attempt, but the payment hash is what a caller
 /// already holds from the `pay` response.
 fn key(payment_hash: &PaymentHash) -> String {
     lampo_common::hex::encode(payment_hash.0)

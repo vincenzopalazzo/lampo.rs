@@ -19,6 +19,13 @@ pub const HIGH_WATER_KEY: &str = "high_water";
 /// it into the queue. Persisted, because a restart must not launder a hole in
 /// the copy.
 pub const DROPPED_KEY: &str = "dropped";
+/// Key under [`STATE_NAMESPACE`] recording that the primary may contain a
+/// value which has not been queued yet.
+///
+/// It is set before mutating the primary and cleared only after the matching
+/// queue entry is durable. A process killed between those operations leaves it
+/// set, forcing a full reconciliation on the next start.
+pub const RECONCILE_KEY: &str = "reconcile_required";
 
 /// One value waiting to be mirrored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +36,12 @@ pub struct MirrorJob {
     pub secondary_namespace: String,
     pub key: String,
     pub value: Vec<u8>,
+    /// When true, the shadow should delete `key` rather than store `value`.
+    ///
+    /// Defaults to false so queue entries written before deletion mirroring
+    /// still deserialize.
+    #[serde(default)]
+    pub delete: bool,
 }
 
 impl MirrorJob {
@@ -96,26 +109,21 @@ pub fn pending_keys(primary: &dyn LampoPersistenceBackend) -> error::Result<Vec<
 /// so reading all of them to make progress on the first would mean holding the
 /// whole backlog in memory.
 ///
-/// A job that cannot be decoded is dropped rather than blocking the queue
-/// forever; it is logged, and the value it carried will be re-mirrored the next
-/// time that key is written.
+/// An unreadable job stays queued. A transient primary-store error may clear on
+/// retry; corrupt data may require operator repair, but neither case may be
+/// discarded and then reported as a complete shadow.
 pub fn pending_batch(
     primary: &dyn LampoPersistenceBackend,
     limit: usize,
 ) -> error::Result<Vec<MirrorJob>> {
     let mut jobs = Vec::new();
     for key in pending_keys(primary)?.into_iter().take(limit) {
-        match primary
+        let job = primary
             .read(QUEUE_NAMESPACE, "", &key)
             .map_err(error::Error::from)
             .and_then(|buf| Ok(json::from_slice::<MirrorJob>(&buf)?))
-        {
-            Ok(job) => jobs.push(job),
-            Err(err) => {
-                log::error!(target: "lampo-vss", "dropping unreadable shadow job `{key}`: {err}");
-                let _ = primary.remove(QUEUE_NAMESPACE, "", &key, false);
-            }
-        }
+            .map_err(|err| error::anyhow!("reading shadow job `{key}`: {err}"))?;
+        jobs.push(job);
     }
     Ok(jobs)
 }
@@ -127,10 +135,14 @@ pub fn pending_batch(
 /// make asking the question expensive. `dropped` is held by the caller, which
 /// is the only place that knows about writes that never reached the queue.
 pub fn read_lag(primary: &dyn LampoPersistenceBackend, dropped: u64) -> error::Result<ShadowLag> {
+    // Treat an interrupted write or seed as a hole. This can briefly be true
+    // while a live write is between its primary commit and queue commit, which
+    // is exactly when recovery must not consider the shadow complete.
+    let incomplete = u64::from(read_reconcile_required(primary)?);
     Ok(ShadowLag {
         mirrored_seq: read_high_water(primary)?,
         pending: pending_keys(primary)?.len() as u64,
-        dropped,
+        dropped: dropped.max(incomplete),
     })
 }
 
@@ -147,6 +159,28 @@ pub fn read_dropped(primary: &dyn LampoPersistenceBackend) -> error::Result<u64>
 /// Record that another write never made it into the queue.
 pub fn write_dropped(primary: &dyn LampoPersistenceBackend, dropped: u64) -> error::Result<()> {
     primary.write(STATE_NAMESPACE, "", DROPPED_KEY, json::to_vec(&dropped)?)?;
+    Ok(())
+}
+
+/// Whether startup must queue the complete primary state before the shadow can
+/// be considered usable.
+///
+/// Missing means true so nodes upgrading from a version without this marker
+/// reconcile once rather than trusting an unverifiable old shadow.
+pub fn read_reconcile_required(primary: &dyn LampoPersistenceBackend) -> error::Result<bool> {
+    match primary.read(STATE_NAMESPACE, "", RECONCILE_KEY) {
+        Ok(buf) => Ok(json::from_slice::<bool>(&buf)?),
+        Err(err) if err.kind() == lampo_common::ldk::io::ErrorKind::NotFound => Ok(true),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Persist whether startup reconciliation is required.
+pub fn write_reconcile_required(
+    primary: &dyn LampoPersistenceBackend,
+    required: bool,
+) -> error::Result<()> {
+    primary.write(STATE_NAMESPACE, "", RECONCILE_KEY, json::to_vec(&required)?)?;
     Ok(())
 }
 

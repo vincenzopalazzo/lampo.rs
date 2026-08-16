@@ -14,11 +14,12 @@ use lampo_common::model::request::GenerateAsyncInvoicePaths;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
-use lampo_common::model::request::Pay;
+use lampo_common::model::request::{self, Pay};
 use lampo_common::model::request::SetAsyncInvoicePaths;
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
+use lampo_common::persist::{PaymentDirection, PaymentStatus};
 use lampo_common::types::NodeId;
 use lampo_common::{json, model::request::DecodeInvoice};
 use tokio::time::Instant;
@@ -232,6 +233,15 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     // otherwise see this payment's result -- and now its preimage and payer
     // proof too. Only accept events carrying our own payment id.
     let payment_id = hex::encode(payment_id.0);
+    ctx.handler().record_payment(
+        payment_id.clone(),
+        payment_id.clone(),
+        PaymentDirection::Outbound,
+        expected_value_msat.unwrap_or_default(),
+        None,
+        PaymentStatus::Pending,
+        Some(request.invoice_str),
+    );
     // LND-compatible callers use `timeout_secs` as the retry deadline before
     // an HTLC is launched. Once the payment API accepts an initial route, wait
     // for the real terminal event so an in-flight payment is never reported as
@@ -387,6 +397,15 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     // Same id semantics as `pay`: the hex payment hash identifies the
     // payment on the event bus.
     let payment_id = hex::encode(payment_id.0);
+    ctx.handler().record_payment(
+        payment_id.clone(),
+        payment_id.clone(),
+        PaymentDirection::Outbound,
+        request.amount_msat,
+        None,
+        PaymentStatus::Pending,
+        None,
+    );
     wait_for_payment_result(
         events,
         &payment_id,
@@ -433,4 +452,35 @@ mod tests {
         assert_eq!(path_value_and_fee(&[hop(20), hop(400)]), (400, 20));
         assert_eq!(path_value_and_fee(&[hop(30), hop(600)]), (600, 30));
     }
+}
+}
+
+/// `listpayments`: the node's payment history, straight out of the store.
+///
+/// The filtering happens in the store rather than here, so a database backend
+/// answers a time window from an index instead of walking every payment.
+pub async fn json_listpayments(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `listpayments` with request `{:?}`", request);
+    let request: request::ListPayments = json::from_value(request.clone())?;
+    let filter = request.to_filter().map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("{err}"),
+            data: None,
+        })
+    })?;
+    let payments = ctx.persister().list_payments(&filter).map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("{err}"),
+            data: None,
+        })
+    })?;
+    let response = response::ListPayments {
+        payments: payments.into_iter().map(response::Payment::from).collect(),
+    };
+    Ok(json::to_value(response)?)
 }

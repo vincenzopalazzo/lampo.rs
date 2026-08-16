@@ -19,7 +19,7 @@ use lampod::LampoDaemon;
 use commands::daemon::rest_stop;
 use commands::inventory::{rest_funds, rest_getinfo, rest_networkchannels};
 use commands::offchain::{
-    rest_asyncinvoicepaths, rest_decode, rest_invoice, rest_keysend, rest_pay,
+    rest_asyncinvoicepaths, rest_decode, rest_invoice, rest_keysend, rest_listpayments, rest_pay,
     rest_setasyncinvoicepaths,
 };
 use commands::onchain::rest_new_addr;
@@ -270,6 +270,7 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_offer)
             .service(rest_decode)
             .service(rest_pay)
+            .service(rest_listpayments)
             .service(rest_keysend)
             .service(rest_asyncinvoicepaths)
             .service(rest_setasyncinvoicepaths)

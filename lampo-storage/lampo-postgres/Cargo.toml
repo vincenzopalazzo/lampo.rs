@@ -10,3 +10,6 @@ lampo-storage-common = { path = "../lampo-storage-common" }
 tokio-postgres = "0.7"
 tokio = { version = "1", features = ["rt", "net", "time"] }
 log = { version = "0.4", features = ["std"] }
+tokio-postgres-rustls = "0.10.0"
+rustls = "0.21.12"
+webpki-roots = "0.25.4"

@@ -16,6 +16,11 @@ use lampo_common::persist::PaymentFilter;
 /// Arbitrary, but it has to be the same in every lampo build and tool touching
 /// the same database, or they would not exclude each other.
 pub const MIGRATION_LOCK: i64 = 0x6c_61_6d_70_6f_00; // "lampo"
+/// Session lock held for the lifetime of a Postgres writer.
+///
+/// Distinct from [`MIGRATION_LOCK`] so a migrating node and a live writer do
+/// not share the same key while still preventing two live writers.
+pub const WRITER_LOCK: i64 = 0x6c_61_6d_70_6f_01; // "lampo" + 1
 
 /// Payment columns, in the order every backend reads and writes them.
 pub const PAYMENT_COLUMNS: &str =

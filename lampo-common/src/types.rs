@@ -15,7 +15,7 @@ use crate::ldk::sign::InMemorySigner;
 
 use crate::keys::LampoKeysManager;
 use crate::ldk::util::sweep::OutputSweeper;
-use crate::persist::LampoPersistenceBackend;
+use crate::persist::{LampoAsyncPersistence, LampoPersistenceBackend};
 use crate::utils::logger::LampoLogger;
 
 pub type NodeId = PublicKey;
@@ -53,7 +53,7 @@ pub type LampoSweeper = OutputSweeper<
     Arc<LampoKeysManager>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<dyn Filter + Send + Sync>,
-    Arc<dyn LampoPersistenceBackend>,
+    LampoAsyncPersistence,
     Arc<LampoLogger>,
     Arc<LampoKeysManager>,
 >;

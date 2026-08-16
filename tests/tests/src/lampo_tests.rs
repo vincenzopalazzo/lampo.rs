@@ -489,7 +489,7 @@ pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
     Ok(())
 }
 
-#[tokio_test_shutdown_timeout::test(5)]
+#[tokio_test_shutdown_timeout::test(10)]
 pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
     init();
     let node1 = LampoTesting::tmp().await?;
@@ -517,7 +517,7 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
         .call(
             "pay",
             request::Pay {
-                invoice_str: offer.bolt12,
+                invoice_str: offer.bolt12.clone(),
                 amount: None,
                 max_fee_msat: None,
                 bolt12: None,
@@ -546,7 +546,9 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
 
     assert_eq!(
         proof.payment_hash().to_string(),
-        pay.payment_hash.unwrap(),
+        pay.payment_hash
+            .as_deref()
+            .expect("a settled offer payment must expose its hash"),
         "the proof must commit to the hash of the payment we made"
     );
     assert_eq!(
@@ -554,6 +556,48 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
         preimage,
         "the proof must carry the same preimage the RPC returned"
     );
+
+    // Offers are reusable. A second payment must get its own payment id and
+    // history row rather than replacing the first attempt.
+    let second: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: None,
+                bolt12: None,
+                timeout: Default::default(),
+            },
+        )
+        .await?;
+    assert_ne!(
+        pay.payment_hash, second.payment_hash,
+        "each offer payment must have a unique hash"
+    );
+
+    async_wait!(async {
+        let payments: response::ListPayments = node1
+            .lampod()
+            .call(
+                "listpayments",
+                json::json!({"direction": "outbound", "status": "succeeded"}),
+            )
+            .await
+            .unwrap();
+        if payments.payments.len() == 2
+            && payments.payments[0].id != payments.payments[1].id
+            && payments.payments[0].payment_hash != payments.payments[1].payment_hash
+            && payments
+                .payments
+                .iter()
+                .all(|payment| payment.amount_msat == 100_000)
+        {
+            Ok(())
+        } else {
+            Err(())
+        }
+    });
     Ok(())
 }
 

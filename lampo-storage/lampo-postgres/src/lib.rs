@@ -30,8 +30,10 @@ use lampo_common::persist::{
 };
 use lampo_storage_common as sql;
 use tokio::sync::mpsc;
+use tokio_postgres::config::{Host, SslMode};
 use tokio_postgres::types::ToSql;
-use tokio_postgres::{Client, NoTls, Row};
+use tokio_postgres::{Client, Config, Row};
+use tokio_postgres_rustls::MakeRustlsConnect;
 
 /// Work handed to the connection thread. Each carries the channel its answer
 /// goes back on.
@@ -74,12 +76,36 @@ pub struct PostgresStore {
     commands: mpsc::UnboundedSender<Command>,
 }
 
+/// Password-free identity of a Postgres destination, used to refuse silent
+/// `storage-url` switches that would open an empty database.
+pub fn destination_id(url: &str) -> error::Result<String> {
+    let config = parse_config(url)?;
+    let hosts = config
+        .get_hosts()
+        .iter()
+        .map(|host| match host {
+            Host::Tcp(name) => name.clone(),
+            Host::Unix(path) => path.display().to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let ports = config
+        .get_ports()
+        .iter()
+        .map(|port| port.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let dbname = config.get_dbname().unwrap_or("");
+    let user = config.get_user().unwrap_or("");
+    Ok(format!("{user}@{hosts}:{ports}/{dbname}"))
+}
+
 impl PostgresStore {
     /// Connect to `url` (a `postgres://` connection string) and migrate.
     pub fn new(url: &str) -> error::Result<Self> {
+        let config = parse_config(url)?;
         let (commands, mut rx) = mpsc::unbounded_channel::<Command>();
         let (ready_tx, ready_rx) = std_mpsc::sync_channel::<Result<(), String>>(1);
-        let url = url.to_owned();
 
         thread::Builder::new()
             .name("lampo-postgres".to_owned())
@@ -96,7 +122,8 @@ impl PostgresStore {
                 };
 
                 runtime.block_on(async move {
-                    let (client, connection) = match tokio_postgres::connect(&url, NoTls).await {
+                    let tls = tls_connector();
+                    let (client, connection) = match config.connect(tls).await {
                         Ok(pair) => pair,
                         Err(err) => {
                             let _ = ready_tx.send(Err(describe(err)));
@@ -110,6 +137,29 @@ impl PostgresStore {
                             log::error!(target: "lampo-postgres", "connection lost: {err}");
                         }
                     });
+
+                    // One writer only: channel monitors cannot survive two
+                    // nodes advancing the same keys independently. Hold the
+                    // session lock until this connection dies.
+                    let writer_lock = sql::WRITER_LOCK;
+                    match client
+                        .query_one(&format!("SELECT pg_try_advisory_lock({writer_lock})"), &[])
+                        .await
+                    {
+                        Ok(row) if row.get::<_, bool>(0) => {}
+                        Ok(_) => {
+                            let _ = ready_tx.send(Err(
+                                "another lampo process already holds the postgres writer lock"
+                                    .to_owned(),
+                            ));
+                            return;
+                        }
+                        Err(err) => {
+                            let _ = ready_tx.send(Err(describe(err)));
+                            return;
+                        }
+                    }
+
                     let _ = ready_tx.send(Ok(()));
 
                     // Awaiting here (rather than blocking) is what lets the
@@ -193,6 +243,53 @@ impl PostgresStore {
     fn read_version(&self) -> error::Result<i64> {
         self.send(|reply| Command::ReadVersion { reply })
     }
+}
+
+/// Parse `url` and refuse weak TLS settings for TCP destinations.
+fn parse_config(url: &str) -> error::Result<Config> {
+    let mut config: Config = url
+        .parse()
+        .map_err(|err| error::anyhow!("invalid postgres storage-url: {err}"))?;
+    let has_tcp = config
+        .get_hosts()
+        .iter()
+        .any(|host| matches!(host, Host::Tcp(_)));
+    if has_tcp {
+        match config.get_ssl_mode() {
+            SslMode::Require => {}
+            SslMode::Disable => error::bail!(
+                "postgres storage-url must not use sslmode=disable over TCP; \
+                 set sslmode=require"
+            ),
+            // The library default is Prefer, which can silently fall back to
+            // plaintext. Force Require for Lightning state over the network.
+            // Also cover future SslMode variants the same way.
+            _ => {
+                config.ssl_mode(SslMode::Require);
+            }
+        }
+    }
+    Ok(config)
+}
+
+/// Build a connector once per database session.
+///
+/// This reuses the same Rustls and Mozilla root versions already present for
+/// VSS rather than linking a second TLS stack.
+fn tls_connector() -> MakeRustlsConnect {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|anchor| {
+        rustls::OwnedTrustAnchor::from_subject_spki_name_constraints(
+            anchor.subject,
+            anchor.spki,
+            anchor.name_constraints,
+        )
+    }));
+    let config = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    MakeRustlsConnect::new(config)
 }
 
 /// Postgres errors display as a bare "db error"; the statement that failed and
