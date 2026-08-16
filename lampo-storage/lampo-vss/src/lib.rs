@@ -121,16 +121,13 @@ impl VssShadow {
         // The primary may have run without VSS since the previous attachment,
         // or this may be a different, empty VSS destination; neither case can
         // be inferred from a completion marker stored only in the primary.
-        // The marker is cleared only after every value is durable in the
-        // queue, so a partial seed is retried on the next start.
+        // Inventory/prune talks to VSS and retries in the mirror thread so an
+        // unreachable shadow cannot keep the node from starting; the reconcile
+        // marker stays set until that prune succeeds.
         queue::write_reconcile_required(shadow.primary.as_ref(), true)?;
         shadow.seed()?;
-        // Seed only queues keys that still exist. Keys removed while VSS was
-        // off would otherwise remain on the server after lag() reports zero.
-        shadow.prune_absent_shadow_keys(sink.as_ref())?;
         queue::write_dropped(shadow.primary.as_ref(), 0)?;
         shadow.dropped.store(0, Ordering::SeqCst);
-        queue::write_reconcile_required(shadow.primary.as_ref(), false)?;
 
         let worker = Arc::clone(&shadow);
         thread::Builder::new()
@@ -249,6 +246,25 @@ impl VssShadow {
         Ok(())
     }
 
+    /// Retry inventory until VSS answers, then clear the reconcile marker.
+    ///
+    /// Returns whether the inventory still needs another attempt.
+    fn try_startup_prune(&self, sink: &dyn ShadowSink) -> bool {
+        match self.prune_absent_shadow_keys(sink) {
+            Ok(()) => {
+                if let Err(err) = queue::write_reconcile_required(self.primary.as_ref(), false) {
+                    log::error!(target: "lampo-vss", "clearing the reconciliation marker after prune: {err}");
+                    return true;
+                }
+                false
+            }
+            Err(err) => {
+                log::warn!(target: "lampo-vss", "shadow inventory failed, will retry: {err}");
+                true
+            }
+        }
+    }
+
     /// Every shadow key the primary currently wants the remote to hold.
     fn desired_shadow_keys(&self) -> error::Result<HashSet<String>> {
         let mut desired = HashSet::new();
@@ -306,9 +322,18 @@ impl VssShadow {
     }
 
     /// Drain the queue, forever, backing off while the sink is unhappy.
+    ///
+    /// Startup inventory runs here too: listing remote keys needs VSS, and an
+    /// unreachable shadow must not block node startup. Until prune succeeds the
+    /// reconcile marker keeps `lag()` from reporting a complete copy.
     fn mirror_loop(self: Arc<Self>, sink: Arc<dyn ShadowSink>) {
         let mut backoff = RETRY_BACKOFF;
+        let mut needs_prune = true;
         loop {
+            if needs_prune {
+                needs_prune = self.try_startup_prune(sink.as_ref());
+            }
+
             let jobs = match queue::pending_batch(self.primary.as_ref(), DRAIN_BATCH) {
                 Ok(jobs) => jobs,
                 Err(err) => {
@@ -318,7 +343,11 @@ impl VssShadow {
             };
 
             if jobs.is_empty() {
-                self.wait_for_work(RETRY_BACKOFF);
+                let wait = if needs_prune { backoff } else { RETRY_BACKOFF };
+                if needs_prune {
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                }
+                self.wait_for_work(wait);
                 continue;
             }
 
@@ -585,9 +614,9 @@ mod tests {
         }
 
         fn list_keys(&self) -> error::Result<Vec<String>> {
-            // Listing is used at wrap time to prune orphans. A sink that is
-            // merely failing puts/deletes can still answer the inventory; a
-            // real unreachable VSS fails this and aborts wrap instead.
+            if self.failing.load(Ordering::SeqCst) {
+                error::bail!("sink is down");
+            }
             Ok(self.stored.lock().unwrap().keys().cloned().collect())
         }
     }
@@ -739,6 +768,10 @@ mod tests {
 
         // Once the sink recovers the backlog drains on its own.
         sink.failing.store(false, Ordering::SeqCst);
+        // Recovering the sink does not wake the mirror thread by itself; a
+        // subsequent write does, and matches an operator retrying a payment
+        // after VSS comes back.
+        shadow.write("ns", "", "probe", b"wake".to_vec()).unwrap();
         eventually("the backlog to drain", || {
             shadow.lag().map(|lag| lag.pending == 0).unwrap_or(false)
         });
@@ -768,6 +801,7 @@ mod tests {
         let shadow = VssShadow::wrap(dir.primary(), up.clone()).unwrap();
         eventually("the leftover job to be mirrored", || {
             up.stored().contains_key("ns//key")
+                && shadow.lag().map(|lag| lag.pending == 0).unwrap_or(false)
         });
         assert_eq!(shadow.lag().unwrap().pending, 0);
     }

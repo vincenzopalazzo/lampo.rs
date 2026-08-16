@@ -107,6 +107,10 @@ impl PostgresStore {
     /// Connect to `url` (a `postgres://` connection string) and migrate.
     pub fn new(url: &str) -> error::Result<Self> {
         let config = parse_config(url)?;
+        // Lock identity follows the destination fingerprint so two schemas on
+        // one cluster do not share a writer lock, and test setup connections
+        // on the bare URL do not block schema-scoped stores.
+        let writer_lock = writer_lock_key(&destination_id(url)?);
         let (commands, mut rx) = mpsc::unbounded_channel::<Command>();
         let (ready_tx, ready_rx) = std_mpsc::sync_channel::<Result<(), String>>(1);
 
@@ -144,7 +148,6 @@ impl PostgresStore {
                     // One writer only: channel monitors cannot survive two
                     // nodes advancing the same keys independently. Hold the
                     // session lock until this connection dies.
-                    let writer_lock = sql::WRITER_LOCK;
                     match client
                         .query_one(&format!("SELECT pg_try_advisory_lock({writer_lock})"), &[])
                         .await
@@ -273,6 +276,24 @@ fn parse_config(url: &str) -> error::Result<Config> {
         }
     }
     Ok(config)
+}
+
+/// Stable advisory-lock key for a destination fingerprint.
+///
+/// Two nodes on the same database/schema must still collide; two test schemas
+/// on one cluster must not.
+fn writer_lock_key(destination: &str) -> i64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in destination.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let key = (hash as i64) ^ sql::WRITER_LOCK;
+    if key == 0 || key == sql::MIGRATION_LOCK {
+        sql::WRITER_LOCK
+    } else {
+        key
+    }
 }
 
 /// Build a connector once per database session.
@@ -598,16 +619,21 @@ mod tests {
             NONCE.fetch_add(1, Ordering::Relaxed)
         );
 
-        let setup = PostgresStore::new(&url).expect("connecting to the test server");
-        setup
-            .execute(
-                format!("DROP SCHEMA IF EXISTS {schema} CASCADE"),
-                Vec::new(),
-            )
-            .unwrap();
-        setup
-            .execute(format!("CREATE SCHEMA {schema}"), Vec::new())
-            .unwrap();
+        // Drop the setup connection before opening the scoped store so its
+        // writer lock is released. The scoped URL includes search_path, so it
+        // takes a different destination lock either way.
+        {
+            let setup = PostgresStore::new(&url).expect("connecting to the test server");
+            setup
+                .execute(
+                    format!("DROP SCHEMA IF EXISTS {schema} CASCADE"),
+                    Vec::new(),
+                )
+                .unwrap();
+            setup
+                .execute(format!("CREATE SCHEMA {schema}"), Vec::new())
+                .unwrap();
+        }
 
         // `options` puts every statement of this connection in that schema, so
         // the migrations build the tables there.
@@ -746,6 +772,11 @@ mod tests {
                 || scoped.contains("options=-csearch_path%3Dother")
                 || scoped.contains("search_path"),
             "fingerprint should carry the options: {scoped}"
+        );
+        assert_ne!(
+            writer_lock_key(&plain),
+            writer_lock_key(&scoped),
+            "different schemas must not share the writer lock"
         );
     }
 }
