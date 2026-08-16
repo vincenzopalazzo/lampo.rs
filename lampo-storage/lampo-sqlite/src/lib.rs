@@ -7,6 +7,8 @@
 //! Every call goes through one connection behind a mutex. SQLite serialises
 //! writers anyway, and lampo's write path is small blobs, so a pool would buy
 //! nothing.
+use std::fs::{File, OpenOptions};
+use std::path::Path;
 use std::sync::Mutex;
 
 use lampo_common::error;
@@ -23,21 +25,25 @@ use rusqlite::{params_from_iter, Connection, OptionalExtension};
 /// SQLite-backed store.
 pub struct SqliteStore {
     conn: Mutex<Connection>,
+    /// Process-lifetime exclusive lock; kept open so a second lampo process
+    /// cannot share the same database file.
+    _writer_lock: Option<File>,
 }
 
 impl SqliteStore {
     /// Open (creating if needed) the database at `path` and migrate it.
     pub fn new(path: &str) -> error::Result<Self> {
+        let writer_lock = acquire_writer_lock(path)?;
         let conn = Connection::open(path)?;
-        Self::from_connection(conn)
+        Self::from_connection(conn, Some(writer_lock))
     }
 
     /// Open an in-memory database, for tests.
     pub fn in_memory() -> error::Result<Self> {
-        Self::from_connection(Connection::open_in_memory()?)
+        Self::from_connection(Connection::open_in_memory()?, None)
     }
 
-    fn from_connection(conn: Connection) -> error::Result<Self> {
+    fn from_connection(conn: Connection, writer_lock: Option<File>) -> error::Result<Self> {
         // A channel monitor that is acknowledged and then lost can make the
         // node broadcast a stale commitment, so the write has to reach the
         // disk, not just the operating system's cache.
@@ -47,6 +53,7 @@ impl SqliteStore {
 
         let store = Self {
             conn: Mutex::new(conn),
+            _writer_lock: writer_lock,
         };
         store.migrate()?;
         Ok(store)
@@ -96,6 +103,53 @@ impl SqliteStore {
 /// SQL failures reach LDK as `io::Error`, which is all its store trait speaks.
 fn io_err(err: rusqlite::Error) -> io::Error {
     io::Error::new(io::ErrorKind::Other, err.to_string())
+}
+
+/// Exclusive process-lifetime lock beside the database file.
+///
+/// WAL serialises statements but not Lightning writers: two nodes on one file
+/// can still interleave channel-manager updates. Fail the second opener.
+fn acquire_writer_lock(path: &str) -> error::Result<File> {
+    let lock_path = Path::new(path).with_extension("writerlock");
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        // LOCK_EX | LOCK_NB — exclusive, non-blocking.
+        let rc = unsafe { libc_flock(file.as_raw_fd(), 2 | 4) };
+        if rc != 0 {
+            error::bail!(
+                "another lampo process already holds the sqlite writer lock at {}",
+                lock_path.display()
+            );
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = &file;
+        log::warn!(
+            target: "lampo-sqlite",
+            "sqlite writer lock is best-effort on this platform; refuse running two nodes on {}",
+            path
+        );
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
+unsafe fn libc_flock(fd: std::os::unix::io::RawFd, op: i32) -> i32 {
+    extern "C" {
+        fn flock(fd: i32, op: i32) -> i32;
+    }
+    flock(fd, op)
 }
 
 impl KVStoreSync for SqliteStore {
@@ -306,6 +360,33 @@ mod tests {
     #[test]
     fn reports_its_kind() {
         assert_eq!(store().kind(), PersistenceKind::Sqlite);
+    }
+
+    #[test]
+    fn a_second_opener_is_rejected() {
+        let path = std::env::temp_dir().join(format!(
+            "lampo-sqlite-lock-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = path.to_str().unwrap();
+        let first = SqliteStore::new(path).unwrap();
+        let err = match SqliteStore::new(path) {
+            Ok(_) => panic!("second opener must fail"),
+            Err(err) => err.to_string(),
+        };
+        assert!(
+            err.contains("sqlite writer lock"),
+            "second opener must fail: {err}"
+        );
+        drop(first);
+        // Lock released; reopening must succeed.
+        let _second = SqliteStore::new(path).unwrap();
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(Path::new(path).with_extension("writerlock"));
     }
 
     #[test]
