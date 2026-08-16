@@ -195,6 +195,13 @@ pub trait PaymentStore: Send + Sync {
 pub trait LampoPersistenceBackend: KVStoreSync + PaymentStore + Send + Sync {
     /// Return the kind of backend.
     fn kind(&self) -> PersistenceKind;
+
+    /// Every `(primary_namespace, secondary_namespace, key)` in the store.
+    ///
+    /// The VSS shadow uses this to copy a node's existing state when it is
+    /// enabled after the fact; a shadow that only mirrors future writes would
+    /// silently miss any value that never changes again.
+    fn list_all_keys(&self) -> error::Result<Vec<(String, String, String)>>;
 }
 
 /// The filesystem backend: LDK's store for the key/value half, and payments
@@ -351,6 +358,11 @@ impl PaymentStore for FsPersistence {
 impl LampoPersistenceBackend for FsPersistence {
     fn kind(&self) -> PersistenceKind {
         PersistenceKind::Filesystem
+    }
+
+    fn list_all_keys(&self) -> error::Result<Vec<(String, String, String)>> {
+        use crate::ldk::util::persist::MigratableKVStoreSync;
+        Ok(self.inner.list_all_keys()?)
     }
 }
 

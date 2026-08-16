@@ -59,6 +59,9 @@ enum Command {
         params: Vec<sql::QueryParam>,
         reply: std_mpsc::SyncSender<Result<Vec<String>, String>>,
     },
+    KvListAll {
+        reply: std_mpsc::SyncSender<Result<Vec<(String, String, String)>, String>>,
+    },
     Payments {
         sql: String,
         params: Vec<sql::QueryParam>,
@@ -241,6 +244,18 @@ async fn serve(client: &Client, command: Command) {
                 .query(&sql, &slice(&bound))
                 .await
                 .map(|rows| rows.iter().map(|row| row.get::<_, String>(0)).collect())
+                .map_err(describe);
+            let _ = reply.send(result);
+        }
+        Command::KvListAll { reply } => {
+            let result = client
+                .query(sql::kv_list_all(), &[])
+                .await
+                .map(|rows| {
+                    rows.iter()
+                        .map(|row| (row.get(0), row.get(1), row.get(2)))
+                        .collect()
+                })
                 .map_err(describe);
             let _ = reply.send(result);
         }
@@ -438,6 +453,10 @@ impl PaymentStore for PostgresStore {
 impl LampoPersistenceBackend for PostgresStore {
     fn kind(&self) -> PersistenceKind {
         PersistenceKind::Postgres
+    }
+
+    fn list_all_keys(&self) -> error::Result<Vec<(String, String, String)>> {
+        self.send(|reply| Command::KvListAll { reply })
     }
 }
 

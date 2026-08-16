@@ -89,13 +89,21 @@ impl VssShadow {
         primary: Arc<dyn LampoPersistenceBackend>,
         sink: Arc<dyn ShadowSink>,
     ) -> error::Result<Arc<Self>> {
+        let never_ran = queue::next_seq(primary.as_ref())? == 1;
         let shadow = Arc::new(Self {
             next_seq: AtomicU64::new(queue::next_seq(primary.as_ref())?),
+            dropped: AtomicU64::new(queue::read_dropped(primary.as_ref())?),
             primary,
             write_order: Mutex::new(()),
-            dropped: AtomicU64::new(0),
             wakeup: Arc::new((Mutex::new(false), Condvar::new())),
         });
+
+        // A shadow enabled on a node with existing state has to copy that
+        // state: a value that never changes again -- an idle channel's monitor
+        // -- would otherwise never reach the server, while lag() reads clean.
+        if never_ran {
+            shadow.seed()?;
+        }
 
         let worker = Arc::clone(&shadow);
         thread::Builder::new()
@@ -135,11 +143,42 @@ impl VssShadow {
             // The shadow will never learn about this write, and draining the
             // queue will not fix it, so say so rather than letting lag() report
             // a copy that looks complete.
-            self.dropped.fetch_add(1, Ordering::SeqCst);
+            self.record_dropped();
             log::error!(target: "lampo-vss", "not queued for the shadow, {}: {err}", job.shadow_key());
             return;
         }
         self.nudge();
+    }
+
+    /// Queue everything already in the primary, so the copy starts from the
+    /// node's full state rather than from whatever changes next.
+    fn seed(&self) -> error::Result<()> {
+        let _ordered = self.write_order.lock();
+        for (primary_ns, secondary_ns, key) in self.primary.list_all_keys()? {
+            if primary_ns == queue::QUEUE_NAMESPACE || primary_ns == queue::STATE_NAMESPACE {
+                continue;
+            }
+            let value = self.primary.read(&primary_ns, &secondary_ns, &key)?;
+            self.mirror(&primary_ns, &secondary_ns, &key, &value);
+        }
+        // SQL backends keep payments in a table rather than under a key, so
+        // they are seeded through the typed store.
+        if !matches!(self.primary.kind(), PersistenceKind::Filesystem) {
+            for payment in self.primary.list_payments(&PaymentFilter::default())? {
+                let encoded = json::to_vec(&payment)?;
+                self.mirror(PAYMENTS_NAMESPACE, "", &payment.storage_key(), &encoded);
+            }
+        }
+        Ok(())
+    }
+
+    /// Record a write the shadow will never learn about; see [`ShadowLag::dropped`].
+    fn record_dropped(&self) {
+        let dropped = self.dropped.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Err(err) = queue::write_dropped(self.primary.as_ref(), dropped) {
+            // The in-memory count still reports it for this run.
+            log::error!(target: "lampo-vss", "persisting the dropped count: {err}");
+        }
     }
 
     /// Wake the mirror thread.
@@ -298,7 +337,7 @@ impl PaymentStore for VssShadow {
         match json::to_vec(payment) {
             Ok(encoded) => self.mirror(PAYMENTS_NAMESPACE, "", &payment.storage_key(), &encoded),
             Err(err) => {
-                self.dropped.fetch_add(1, Ordering::SeqCst);
+                self.record_dropped();
                 log::error!(target: "lampo-vss", "not queued for the shadow, payment {}: {err}", payment.id)
             }
         }
@@ -318,6 +357,10 @@ impl LampoPersistenceBackend for VssShadow {
     /// The shadow is transparent: callers see the primary's kind.
     fn kind(&self) -> PersistenceKind {
         self.primary.kind()
+    }
+
+    fn list_all_keys(&self) -> error::Result<Vec<(String, String, String)>> {
+        self.primary.list_all_keys()
     }
 }
 
@@ -527,6 +570,31 @@ mod tests {
             sink.stored().get("ns//key"),
             Some(&winner),
             "the shadow kept a different value than the primary"
+        );
+    }
+
+    /// Enabling the shadow on a node with existing state must copy that state,
+    /// not just what changes afterwards.
+    #[test]
+    fn wrapping_an_existing_store_seeds_the_shadow() {
+        let dir = ScratchDir::new("seed");
+        let primary = dir.primary();
+        primary
+            .write("ns", "", "old-key", b"old-value".to_vec())
+            .unwrap();
+        primary.upsert_payment(&payment("old-payment")).unwrap();
+
+        let sink = Arc::new(FakeSink::default());
+        let shadow = VssShadow::wrap(primary, sink.clone()).unwrap();
+        eventually("the existing state to reach the shadow", || {
+            shadow.lag().map(|lag| lag.pending == 0).unwrap_or(false)
+                && sink.stored().contains_key("ns//old-key")
+        });
+        assert!(
+            sink.stored()
+                .keys()
+                .any(|key| key.starts_with(PAYMENTS_NAMESPACE)),
+            "the pre-existing payment was not seeded"
         );
     }
 

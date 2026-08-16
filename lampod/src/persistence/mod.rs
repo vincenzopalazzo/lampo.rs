@@ -19,7 +19,10 @@ use lampo_vss::{VssShadow, VssSink};
 /// Unset, or `fs`, keeps LDK's filesystem store under the node directory. The
 /// database backends need `storage-url`. Setting `vss-url` additionally keeps a
 /// shadow copy of whatever was chosen, for recovery.
-pub fn persistence_for(conf: &LampoConf) -> error::Result<Arc<dyn LampoPersistenceBackend>> {
+pub fn persistence_for(
+    conf: &LampoConf,
+    node_id: &str,
+) -> error::Result<Arc<dyn LampoPersistenceBackend>> {
     let kind = conf.storage.as_deref().unwrap_or("fs");
     let primary: Arc<dyn LampoPersistenceBackend> = match kind {
         "fs" => Arc::new(FsPersistence::new(conf.path().into())),
@@ -46,8 +49,10 @@ pub fn persistence_for(conf: &LampoConf) -> error::Result<Arc<dyn LampoPersisten
     let Some(vss_url) = conf.vss_url.as_deref() else {
         return Ok(primary);
     };
-    // The store id keeps one server able to hold several nodes apart.
-    let store_id = format!("lampo-{}", conf.network);
+    // The store id has to keep nodes apart, not just networks: two nodes on
+    // one server sharing an id would overwrite each other's copy, and neither
+    // would be safe to restore.
+    let store_id = format!("lampo-{}-{}", conf.network, node_id);
     log::info!(target: "lampod", "mirroring state to the VSS server at {vss_url}");
     Ok(VssShadow::wrap(
         primary,

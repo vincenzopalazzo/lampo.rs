@@ -15,6 +15,10 @@ pub const QUEUE_NAMESPACE: &str = "vss_shadow_queue";
 pub const STATE_NAMESPACE: &str = "vss_shadow_state";
 /// Key under [`STATE_NAMESPACE`] holding the high-water mark.
 pub const HIGH_WATER_KEY: &str = "high_water";
+/// Key under [`STATE_NAMESPACE`] holding the count of writes that never made
+/// it into the queue. Persisted, because a restart must not launder a hole in
+/// the copy.
+pub const DROPPED_KEY: &str = "dropped";
 
 /// One value waiting to be mirrored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,7 +136,22 @@ pub fn read_lag(primary: &dyn LampoPersistenceBackend, dropped: u64) -> error::R
 
 /// The newest sequence number known to have reached the shadow.
 pub fn read_high_water(primary: &dyn LampoPersistenceBackend) -> error::Result<u64> {
-    match primary.read(STATE_NAMESPACE, "", HIGH_WATER_KEY) {
+    read_counter(primary, HIGH_WATER_KEY)
+}
+
+/// Writes the shadow will never learn about, surviving restarts.
+pub fn read_dropped(primary: &dyn LampoPersistenceBackend) -> error::Result<u64> {
+    read_counter(primary, DROPPED_KEY)
+}
+
+/// Record that another write never made it into the queue.
+pub fn write_dropped(primary: &dyn LampoPersistenceBackend, dropped: u64) -> error::Result<()> {
+    primary.write(STATE_NAMESPACE, "", DROPPED_KEY, json::to_vec(&dropped)?)?;
+    Ok(())
+}
+
+fn read_counter(primary: &dyn LampoPersistenceBackend, key: &str) -> error::Result<u64> {
+    match primary.read(STATE_NAMESPACE, "", key) {
         Ok(buf) => Ok(json::from_slice::<u64>(&buf)?),
         Err(err) if err.kind() == lampo_common::ldk::io::ErrorKind::NotFound => Ok(0),
         Err(err) => Err(err.into()),
