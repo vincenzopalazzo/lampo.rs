@@ -180,7 +180,34 @@ LDK-Server; lampo relays carry the traffic. Metrics from `sim-cli` CSV output
       functions → checks now `eval` in the harness shell)
 - [ ] `interop.sh` full pass on server — **I01 green** (lampo↔ldk peering OK);
       **I02 blocked by interop finding F-3** (see below)
-- [ ] **F-3 (open, lampo side): channel to LDK-Server peer never flips
+- [x] **F-3 CLOSED (environment, not lampo)**: channel to an LDK-Server peer
+      took ~8.5 min to flip ready because the shared regtest bitcoind's
+      rpcworkqueue (503s) starved the ldk confirmation polling. Fixed ops-side:
+      `rpcthreads=16 rpcworkqueue=256` in `~/spark-stack/docker/bitcoin.conf`;
+      payment over the channel verified Success once ready. Related incident
+      recovery: the bitcoind restart corrupted/unloaded the `default` wallet —
+      quarantined, salvaged via `bitcoin-wallet dump|createfromdump`
+      (`default-recovered`, full-chain rescan ~25 min), drained 14.4k BTC back
+      into a fresh `default` (regtest subsidy is 0 at height 20k+, mining
+      cannot re-fund). NOTE: createwallet 2nd positional arg is
+      disable_private_keys — load_on_startup is a named arg.
+- [x] **F-4 FOUND & FIXED (lampo, PR #588)**: `FeeEstimator` stub returned a
+      hardcoded 256 for ALL ConfirmationTargets — including the
+      `MinAllowed*RemoteFee` acceptance floors, which must be 253 s/kW — so
+      lampo rejected channel opens from any standard-floored funder
+      ("Peer's feerate much too low. Actual: 253. lower limit: 256").
+      Fix returns 253 for the two MinAllowed targets; **verified live**:
+      I04 (ldk opens to lampo) passes on the patched build.
+- [ ] **F-5 (open, next): ldk-server paying a lampo bolt11 invoice fails**
+      ("Failed to send the given payment", case I06, direct hop over c1).
+      Artifacts: `interop/artifacts/20260815-205851-I06`. Suspects: invoice
+      routing hints/features from lampo, outbound liquidity view on the ldk
+      side of c1, CLTV/feature mismatch.
+- [x] Interop suite on the patched build: **I01..I05 green** (connect, c1
+      lampo->ldk, c2 ldk->ldk announced, c3 ldk->lampo announced, bolt11
+      payment lampo->ldk 1.25M msat Success) — first full cross-impl
+      topology + payment in lampo history.
+- [ ] Old text: F-3 (open, lampo side): channel to LDK-Server peer never flips
       `ready:true`** — funding confirmed (short_channel_id assigned, balances
       populated), lk1 received `channel_ready`, but lampo reports
       `ready:false` and payments fail with `RouteNotFound` (verified manually:
