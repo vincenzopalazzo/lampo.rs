@@ -16,6 +16,8 @@ pub mod request {
         pub amount: u64,
         #[serde(default)]
         pub push_msat: Option<u64>,
+        #[serde(default)]
+        pub sat_per_vbyte: Option<u64>,
         pub public: bool,
     }
 

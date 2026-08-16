@@ -1,4 +1,5 @@
 //! Channel Manager Implementation
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -35,7 +36,7 @@ use lampo_common::types::LampoChannel;
 use lampo_common::types::LampoGraph;
 use lampo_common::types::LampoRouter;
 use lampo_common::types::LampoScorer;
-use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
+use lampo_common::types::{ChannelId, LampoArcChannelManager, LampoChainMonitor};
 
 use crate::actions::handler::LampoHandler;
 use crate::async_run;
@@ -51,6 +52,7 @@ pub struct LampoChannelManager {
     score: OnceLock<Arc<Mutex<LampoScorer>>>,
     handler: OnceLock<Arc<LampoHandler>>,
     router: OnceLock<Arc<LampoRouter>>,
+    funding_fee_rates: Mutex<HashMap<ChannelId, u64>>,
 
     pub(crate) onchain: Arc<LampoChainManager>,
     pub(crate) conf: LampoConf,
@@ -78,6 +80,7 @@ impl LampoChannelManager {
             graph: OnceLock::new(),
             score: OnceLock::new(),
             router: OnceLock::new(),
+            funding_fee_rates: Mutex::new(HashMap::new()),
         }
     }
 
@@ -253,7 +256,8 @@ impl LampoChannelManager {
         let mut config = self.conf.ldk_conf.clone();
         config.channel_handshake_config.announce_for_forwarding = open_channel.public;
         let push_msat = open_channel.push_msat.unwrap_or(0);
-        self.manager()
+        let temporary_channel_id = self
+            .manager()
             .create_channel(
                 open_channel.node_id()?,
                 open_channel.amount,
@@ -263,6 +267,12 @@ impl LampoChannelManager {
                 Some(config),
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
+        if let Some(sat_per_vbyte) = open_channel.sat_per_vbyte {
+            self.funding_fee_rates
+                .lock()
+                .map_err(|_| error::anyhow!("funding fee-rate lock is poisoned"))?
+                .insert(temporary_channel_id, sat_per_vbyte);
+        }
 
         // Wait for SendRawTransaction or FundingChannelFailed to be received
         let mut events = self.handler().events();
@@ -314,6 +324,17 @@ impl LampoChannelManager {
                 .map_err(|err| error::anyhow!("{:?}", err))?;
         }
         Ok(())
+    }
+
+    pub fn take_funding_fee_rate(
+        &self,
+        temporary_channel_id: &ChannelId,
+    ) -> error::Result<Option<u64>> {
+        Ok(self
+            .funding_fee_rates
+            .lock()
+            .map_err(|_| error::anyhow!("funding fee-rate lock is poisoned"))?
+            .remove(temporary_channel_id))
     }
 
     pub fn is_restarting(&self) -> error::Result<bool> {

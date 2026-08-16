@@ -377,6 +377,7 @@ impl LampoTesting {
                     port: None,
                     addr: None,
                     push_msat: None,
+                    sat_per_vbyte: None,
                 },
             )
             .await

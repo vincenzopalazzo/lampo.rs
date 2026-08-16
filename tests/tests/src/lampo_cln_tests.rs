@@ -76,6 +76,7 @@ pub async fn fund_a_simple_channel_from_lampo_to_cln() -> error::Result<()> {
                 public: true,
                 addr: Some("127.0.0.1".to_owned()),
                 push_msat: None,
+                sat_per_vbyte: None,
             },
         )
         .await?;

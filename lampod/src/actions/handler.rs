@@ -271,20 +271,25 @@ impl Handler for LampoHandler {
                 }));
 
                 log::info!("propagate funding transaction for open a channel with `{counterparty_node_id}`");
-                // FIXME: estimate the fee rate with a callback
-                let fee = self
-                    .chain_manager
-                    .backend
-                    .fee_rate_estimation(6)
-                    .await
-                    .map_err(|err| {
-                        let msg = format!("Channel Opening Error: {err}");
-                        self.emit(Event::Lightning(LightningEvent::ChannelEvent {
-                            state: "error".to_owned(),
-                            message: msg,
-                        }));
-                        err
-                    })?;
+                let fee = match self
+                    .channel_manager
+                    .take_funding_fee_rate(&temporary_channel_id)?
+                {
+                    Some(sat_per_vbyte) => sat_per_vbyte,
+                    None => self
+                        .chain_manager
+                        .backend
+                        .fee_rate_estimation(6)
+                        .await
+                        .map_err(|err| {
+                            let msg = format!("Channel Opening Error: {err}");
+                            self.emit(Event::Lightning(LightningEvent::ChannelEvent {
+                                state: "error".to_owned(),
+                                message: msg,
+                            }));
+                            err
+                        })? as u64,
+                };
                 log::info!("fee estimated {:?} sats", fee);
 
                 let best_block = self.channel_manager.manager().current_best_block().height;
@@ -293,7 +298,7 @@ impl Handler for LampoHandler {
                     .create_transaction(
                         output_script,
                         Amount::from_sat(channel_value_satoshis),
-                        FeeRate::from_sat_per_vb_unchecked(fee as u64),
+                        FeeRate::from_sat_per_vb_unchecked(fee),
                         // FIXME: remove unwrap
                         Height::from_consensus(best_block).unwrap(),
                     )
