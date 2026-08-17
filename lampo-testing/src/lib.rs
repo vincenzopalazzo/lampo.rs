@@ -88,7 +88,7 @@ macro_rules! mine {
     };
 }
 
-pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<lampo_httpd::RunningHttpServer> {
     let url = format!("{}:{}", lampod.conf().api_host, lampod.conf().api_port);
     let mut http_hosting = url.clone();
     if let Some(clean_url) = url.strip_prefix("http://") {
@@ -97,14 +97,14 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
         http_hosting = clean_url.to_string();
     }
     log::info!("preparing httpd api on addr `{url}`");
-    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
-    Ok(())
+    lampo_httpd::spawn(lampod, http_hosting, url)
 }
 
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     /// Kept so a test can signal the daemon to shut down, as `restart` does.
     daemon: Arc<LampoDaemon>,
+    httpd: Option<lampo_httpd::RunningHttpServer>,
     root_path: Arc<TempDir>,
     pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
@@ -191,7 +191,7 @@ impl LampoTesting {
         lampo.add_external_handler(handler.clone()).await?;
         log::info!("Handler added to lampo");
         let lampo = Arc::new(lampo);
-        run_httpd(lampo.clone()).await?;
+        let httpd = run_httpd(lampo.clone()).await?;
         log::info!("httpd started");
 
         // run lampo and take the handler over to run commands
@@ -212,6 +212,7 @@ impl LampoTesting {
         let node = Self {
             inner: handler,
             daemon: lampo,
+            httpd: Some(httpd),
             mnemonic,
             port: port.into(),
             wallet,
@@ -227,7 +228,10 @@ impl LampoTesting {
     /// restart would. The old daemon is signalled to shut down and dropped
     /// before the replacement opens the store, so SQLite/Postgres writer locks
     /// are released first.
-    pub async fn restart(self) -> error::Result<Self> {
+    pub async fn restart(mut self) -> error::Result<Self> {
+        if let Some(httpd) = self.httpd.take() {
+            httpd.stop().await?;
+        }
         self.daemon.shutdown();
         let mnemonic = self.mnemonic.clone();
         let btc = self.btc.clone();
@@ -270,7 +274,7 @@ impl LampoTesting {
             ))?))
             .await?;
         let lampo = Arc::new(lampo);
-        run_httpd(lampo.clone()).await?;
+        let httpd = run_httpd(lampo.clone()).await?;
         let handler = lampo.handler();
         tokio::spawn(lampo.clone().listen());
         while let Err(err) = handler
@@ -284,6 +288,7 @@ impl LampoTesting {
         Ok(Self {
             inner: handler,
             daemon: lampo,
+            httpd: Some(httpd),
             mnemonic,
             port: port.into(),
             wallet,

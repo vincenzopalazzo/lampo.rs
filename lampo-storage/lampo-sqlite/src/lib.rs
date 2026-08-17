@@ -7,9 +7,12 @@
 //! Every call goes through one connection behind a mutex. SQLite serialises
 //! writers anyway, and lampo's write path is small blobs, so a pool would buy
 //! nothing.
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::path::Path;
 use std::sync::Mutex;
+
+#[cfg(unix)]
+use std::fs::OpenOptions;
 
 use lampo_common::error;
 use lampo_common::ldk::io;
@@ -105,81 +108,57 @@ fn io_err(err: rusqlite::Error) -> io::Error {
     io::Error::new(io::ErrorKind::Other, err.to_string())
 }
 
-/// Exclusive process-lifetime lock beside the database file.
+/// Exclusive process-lifetime lock keyed by the database inode.
 ///
 /// WAL serialises statements but not Lightning writers: two nodes on one file
-/// can still interleave channel-manager updates. Fail the second opener.
+/// can still interleave channel-manager updates. An inode-keyed sidecar makes
+/// symlinks and hard links converge without interfering with SQLite's locks.
 fn acquire_writer_lock(path: &str) -> error::Result<File> {
-    let lock_path = writer_lock_path(path)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
+    #[cfg(not(unix))]
+    {
+        error::bail!("sqlite persistence requires an exclusive writer lock unavailable here");
     }
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&lock_path)?;
+
     #[cfg(unix)]
     {
+        let path = Path::new(path);
+        if std::fs::symlink_metadata(path)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+            && std::fs::canonicalize(path).is_err()
+        {
+            error::bail!(
+                "sqlite database path `{}` is a dangling symlink; create its target or use the target path",
+                path.display()
+            );
+        }
+        let database = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)?;
+        use std::os::unix::fs::MetadataExt;
+        let metadata = database.metadata()?;
+        let lock_dir = std::env::temp_dir().join("lampo-sqlite-locks");
+        std::fs::create_dir_all(&lock_dir)?;
+        let lock_path = lock_dir.join(format!("{}-{}.writerlock", metadata.dev(), metadata.ino()));
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)?;
         use std::os::unix::io::AsRawFd;
         // LOCK_EX | LOCK_NB — exclusive, non-blocking.
         let rc = unsafe { libc_flock(file.as_raw_fd(), 2 | 4) };
         if rc != 0 {
             error::bail!(
-                "another lampo process already holds the sqlite writer lock at {}",
-                lock_path.display()
+                "another lampo process already holds the sqlite writer lock on {}",
+                path.display()
             );
         }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = &file;
-        log::warn!(
-            target: "lampo-sqlite",
-            "sqlite writer lock is best-effort on this platform; refuse running two nodes on {}",
-            path
-        );
-    }
-    Ok(file)
-}
-
-fn writer_lock_path(path: &str) -> error::Result<std::path::PathBuf> {
-    let resolved = resolve_db_path(path)?;
-    let mut lock_name = resolved.as_os_str().to_os_string();
-    lock_name.push(".writerlock");
-    Ok(std::path::PathBuf::from(lock_name))
-}
-
-/// Resolve aliases (relative paths, symlinks) to one lock target per inode.
-fn resolve_db_path(path: &str) -> error::Result<std::path::PathBuf> {
-    let path = Path::new(path);
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        match std::env::current_dir() {
-            Ok(cwd) => cwd.join(path),
-            Err(_) => path.to_path_buf(),
-        }
-    };
-    if let Ok(canonical) = std::fs::canonicalize(&absolute) {
-        return Ok(canonical);
-    }
-    if std::fs::symlink_metadata(&absolute)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        error::bail!(
-            "sqlite database path `{}` is a dangling symlink; create its target or use the target path",
-            absolute.display()
-        );
-    }
-    match (absolute.parent(), absolute.file_name()) {
-        (Some(parent), Some(name)) => match std::fs::canonicalize(parent) {
-            Ok(parent) => Ok(parent.join(name)),
-            Err(_) => Ok(absolute),
-        },
-        _ => Ok(absolute),
+        Ok(file)
     }
 }
 
@@ -425,22 +404,23 @@ mod tests {
         // Lock released; reopening must succeed.
         let _second = SqliteStore::new(path).unwrap();
         let _ = std::fs::remove_file(path);
-        let _ = std::fs::remove_file(writer_lock_path(path).unwrap());
     }
 
+    #[cfg(unix)]
     #[test]
-    fn lock_name_keeps_the_complete_database_filename() {
-        let dir = std::env::temp_dir();
+    fn hard_links_share_the_writer_lock() {
+        let dir =
+            std::env::temp_dir().join(format!("lampo-sqlite-hardlink-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
         let db = dir.join("node.db");
-        let sqlite = dir.join("node.sqlite");
-        assert_ne!(
-            writer_lock_path(db.to_str().unwrap()).unwrap(),
-            writer_lock_path(sqlite.to_str().unwrap()).unwrap()
-        );
-        assert!(writer_lock_path(db.to_str().unwrap())
-            .unwrap()
-            .to_string_lossy()
-            .ends_with("node.db.writerlock"));
+        let alias = dir.join("alias.db");
+        let first = SqliteStore::new(db.to_str().unwrap()).unwrap();
+        std::fs::hard_link(&db, &alias).unwrap();
+
+        assert!(SqliteStore::new(alias.to_str().unwrap()).is_err());
+        drop(first);
+        assert!(SqliteStore::new(alias.to_str().unwrap()).is_ok());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]
