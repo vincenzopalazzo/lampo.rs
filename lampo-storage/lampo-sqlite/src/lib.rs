@@ -36,11 +36,8 @@ pub struct SqliteStore {
 impl SqliteStore {
     /// Open (creating if needed) the database at `path` and migrate it.
     pub fn new(path: &str) -> error::Result<Self> {
-        if path == ":memory:"
-            || path.starts_with("file::memory:")
-            || (path.starts_with("file:") && path.contains("mode=memory"))
-        {
-            error::bail!("in-memory SQLite is not a durable persistence backend");
+        if path == ":memory:" || path.starts_with("file:") {
+            error::bail!("SQLite URI and in-memory storage URLs are not supported");
         }
         let writer_lock = acquire_writer_lock(path)?;
         let conn = Connection::open(path)?;
@@ -446,11 +443,12 @@ mod tests {
     }
 
     #[test]
-    fn production_store_rejects_memory_databases() {
+    fn production_store_rejects_memory_and_uri_databases() {
         for path in [
             ":memory:",
             "file::memory:?cache=shared",
             "file:node?mode=memory",
+            "file:node.db",
         ] {
             assert!(SqliteStore::new(path).is_err(), "{path} must be rejected");
         }

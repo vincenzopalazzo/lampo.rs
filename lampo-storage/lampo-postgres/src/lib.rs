@@ -250,12 +250,18 @@ impl PostgresStore {
             if migration.version <= applied {
                 continue;
             }
-            // The migration file holds several statements; run it whole.
-            self.batch(migration.sql.to_owned())?;
-            self.execute(
-                sql::write_version(sql::Dialect::Postgres).to_owned(),
-                vec![sql::QueryParam::Int(migration.version)],
-            )?;
+            self.batch("BEGIN".to_owned())?;
+            let migrated = self.batch(migration.sql.to_owned()).and_then(|()| {
+                self.execute(
+                    sql::write_version(sql::Dialect::Postgres).to_owned(),
+                    vec![sql::QueryParam::Int(migration.version)],
+                )
+            });
+            if let Err(err) = migrated {
+                let _ = self.batch("ROLLBACK".to_owned());
+                return Err(err);
+            }
+            self.batch("COMMIT".to_owned())?;
             log::info!(target: "lampo-postgres", "applied schema migration {}", migration.version);
         }
         Ok(())
