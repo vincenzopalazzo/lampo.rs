@@ -21,22 +21,16 @@ use lampo_common::ldk::util::persist::{
 use lampo_common::persist::{FsPersistence, LampoPersistenceBackend, STORAGE_SELECTION_FILE};
 use lampo_postgres::{destination_id as postgres_destination_id, PostgresStore};
 use lampo_sqlite::SqliteStore;
-use lampo_vss::{VssShadow, VssSink};
 
 /// Build the persistence backend described by `conf`.
 ///
 /// Unset, or `fs`, keeps LDK's filesystem store under the node directory. The
-/// database backends need `storage-url`. Setting `vss-url` additionally keeps
-/// an experimental write-only shadow of whatever was chosen; Lampo does not
-/// yet ship the command needed to restore that copy into a fresh primary.
-pub fn persistence_for(
-    conf: &LampoConf,
-    node_id: &str,
-) -> error::Result<Arc<dyn LampoPersistenceBackend>> {
+/// database backends need `storage-url`.
+pub fn persistence_for(conf: &LampoConf) -> error::Result<Arc<dyn LampoPersistenceBackend>> {
     let kind = conf.storage.as_deref().unwrap_or("fs");
     let selection = storage_selection(conf, kind)?;
     let record_selection = validate_storage_selection(conf, &selection)?;
-    let primary: Arc<dyn LampoPersistenceBackend> = match kind {
+    let persistence: Arc<dyn LampoPersistenceBackend> = match kind {
         "fs" => Arc::new(FsPersistence::new(conf.path().into())),
         "sqlite" => {
             // Default to a file inside the node directory, so `storage=sqlite`
@@ -60,19 +54,7 @@ pub fn persistence_for(
     if record_selection {
         record_storage_selection(conf, &selection)?;
     }
-
-    let Some(vss_url) = conf.vss_url.as_deref() else {
-        return Ok(primary);
-    };
-    // The store id has to keep nodes apart, not just networks: two nodes on
-    // one server sharing an id would overwrite each other's copy, and neither
-    // would be safe to restore.
-    let store_id = format!("lampo-{}-{}", conf.network, node_id);
-    log::info!(target: "lampod", "mirroring state to the VSS server at {vss_url}");
-    Ok(VssShadow::wrap(
-        primary,
-        Arc::new(VssSink::new(vss_url, &store_id)?),
-    )?)
+    Ok(persistence)
 }
 
 /// Keep backend choice and destination outside the backend itself so selecting

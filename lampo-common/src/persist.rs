@@ -165,16 +165,10 @@ impl PaymentFilter {
     }
 
     /// Apply limit and offset to records already sorted oldest first.
-    pub fn paginate(&self, mut records: Vec<PaymentRecord>) -> Vec<PaymentRecord> {
+    pub fn paginate(&self, records: Vec<PaymentRecord>) -> Vec<PaymentRecord> {
         let offset = self.offset.unwrap_or(0) as usize;
-        if offset >= records.len() {
-            return Vec::new();
-        }
-        records.drain(..offset);
-        if let Some(limit) = self.limit {
-            records.truncate(limit as usize);
-        }
-        records
+        let limit = self.limit.map_or(usize::MAX, |limit| limit as usize);
+        records.into_iter().skip(offset).take(limit).collect()
     }
 }
 
