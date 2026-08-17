@@ -107,9 +107,6 @@ impl PostgresStore {
     /// Connect to `url` (a `postgres://` connection string) and migrate.
     pub fn new(url: &str) -> error::Result<Self> {
         let config = parse_config(url)?;
-        // Lock identity follows the database/schema, not the login role: two
-        // users sharing public (or the same search_path) must still collide.
-        let writer_lock = writer_lock_key(url)?;
         let (commands, mut rx) = mpsc::unbounded_channel::<Command>();
         let (ready_tx, ready_rx) = std_mpsc::sync_channel::<Result<(), String>>(1);
 
@@ -144,11 +141,23 @@ impl PostgresStore {
                         }
                     });
 
-                    // One writer only: channel monitors cannot survive two
-                    // nodes advancing the same keys independently. Hold the
-                    // session lock until this connection dies.
+                    // Advisory locks are already scoped to the connected
+                    // database. Derive the key from PostgreSQL's effective
+                    // schemas, not the configured host/user text, so aliases
+                    // and roles reaching the same tables still collide.
+                    let schema_identity = match client
+                        .query_one("SELECT current_schemas(false)::text", &[])
+                        .await
+                    {
+                        Ok(row) => row.get::<_, String>(0),
+                        Err(err) => {
+                            let _ = ready_tx.send(Err(describe(err)));
+                            return;
+                        }
+                    };
+                    let writer_lock = writer_lock_key(&schema_identity);
                     match client
-                        .query_one(&format!("SELECT pg_try_advisory_lock({writer_lock})"), &[])
+                        .query_one("SELECT pg_try_advisory_lock($1)", &[&writer_lock])
                         .await
                     {
                         Ok(row) if row.get::<_, bool>(0) => {}
@@ -277,58 +286,10 @@ fn parse_config(url: &str) -> error::Result<Config> {
     Ok(config)
 }
 
-/// Stable advisory-lock key for the tables a connection will write.
-///
-/// Host/port/database/options matter; the login role does not, because two
-/// roles can still share `public` (or the same `search_path`).
-fn writer_lock_key(url: &str) -> error::Result<i64> {
-    let config = parse_config(url)?;
-    let hosts = config
-        .get_hosts()
-        .iter()
-        .map(|host| match host {
-            Host::Tcp(name) => name.clone(),
-            Host::Unix(path) => path.display().to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let ports = config
-        .get_ports()
-        .iter()
-        .map(|port| port.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let dbname = config.get_dbname().unwrap_or("");
-    // Only schema-affecting options belong in the lock key. Timeouts and
-    // application_name must not let two writers onto the same tables.
-    let search_path = effective_search_path(config.get_options().unwrap_or(""));
-    let identity = format!("{hosts}:{ports}/{dbname}?search_path={search_path}");
-    Ok(hash_lock_key(&identity))
-}
-
-/// `search_path` from a libpq `options` string, defaulting to `public`.
-fn effective_search_path(options: &str) -> String {
-    let mut tokens = options.split_whitespace().peekable();
-    while let Some(tok) = tokens.next() {
-        let setting = if let Some(rest) = tok.strip_prefix("-c") {
-            if rest.is_empty() {
-                tokens.next().unwrap_or("")
-            } else {
-                rest
-            }
-        } else {
-            continue;
-        };
-        if let Some(path) = setting.strip_prefix("search_path=") {
-            return path.to_owned();
-        }
-    }
-    "public".to_owned()
-}
-
-fn hash_lock_key(identity: &str) -> i64 {
+/// Stable advisory-lock key for PostgreSQL's server-reported schema identity.
+fn writer_lock_key(schema_identity: &str) -> i64 {
     let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in identity.as_bytes() {
+    for byte in schema_identity.as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
@@ -817,22 +778,7 @@ mod tests {
                 || scoped.contains("search_path"),
             "fingerprint should carry the options: {scoped}"
         );
-        assert_ne!(
-            writer_lock_key(base).unwrap(),
-            writer_lock_key(&format!("{base}&options=-csearch_path%3Dother")).unwrap(),
-            "different schemas must not share the writer lock"
-        );
-        let other_user = "postgres://other@127.0.0.1:5432/lampo?sslmode=require";
-        assert_eq!(
-            writer_lock_key(base).unwrap(),
-            writer_lock_key(other_user).unwrap(),
-            "login role must not change the writer lock for the same schema"
-        );
-        let timeout = format!("{base}&options=-cstatement_timeout%3D1000");
-        assert_eq!(
-            writer_lock_key(base).unwrap(),
-            writer_lock_key(&timeout).unwrap(),
-            "non-schema options must not change the writer lock"
-        );
+        assert_ne!(writer_lock_key("{public}"), writer_lock_key("{other}"));
+        assert_eq!(writer_lock_key("{public}"), writer_lock_key("{public}"));
     }
 }

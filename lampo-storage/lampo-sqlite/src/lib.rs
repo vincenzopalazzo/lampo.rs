@@ -110,8 +110,7 @@ fn io_err(err: rusqlite::Error) -> io::Error {
 /// WAL serialises statements but not Lightning writers: two nodes on one file
 /// can still interleave channel-manager updates. Fail the second opener.
 fn acquire_writer_lock(path: &str) -> error::Result<File> {
-    let resolved = resolve_db_path(path);
-    let lock_path = resolved.with_extension("writerlock");
+    let lock_path = writer_lock_path(path);
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -143,6 +142,13 @@ fn acquire_writer_lock(path: &str) -> error::Result<File> {
         );
     }
     Ok(file)
+}
+
+fn writer_lock_path(path: &str) -> std::path::PathBuf {
+    let resolved = resolve_db_path(path);
+    let mut lock_name = resolved.as_os_str().to_os_string();
+    lock_name.push(".writerlock");
+    std::path::PathBuf::from(lock_name)
 }
 
 /// Resolve aliases (relative paths, symlinks) to one lock target per inode.
@@ -410,7 +416,21 @@ mod tests {
         // Lock released; reopening must succeed.
         let _second = SqliteStore::new(path).unwrap();
         let _ = std::fs::remove_file(path);
-        let _ = std::fs::remove_file(Path::new(path).with_extension("writerlock"));
+        let _ = std::fs::remove_file(writer_lock_path(path));
+    }
+
+    #[test]
+    fn lock_name_keeps_the_complete_database_filename() {
+        let dir = std::env::temp_dir();
+        let db = dir.join("node.db");
+        let sqlite = dir.join("node.sqlite");
+        assert_ne!(
+            writer_lock_path(db.to_str().unwrap()),
+            writer_lock_path(sqlite.to_str().unwrap())
+        );
+        assert!(writer_lock_path(db.to_str().unwrap())
+            .to_string_lossy()
+            .ends_with("node.db.writerlock"));
     }
 
     #[test]

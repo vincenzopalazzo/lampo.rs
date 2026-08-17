@@ -11,8 +11,7 @@ members = [
         "lampo-bdk-wallet",
         "lampo-storage/lampo-storage-common",
         "lampo-storage/lampo-sqlite",
-        "lampo-storage/lampo-postgres",
-        "lampo-storage/lampo-vss"
+        "lampo-storage/lampo-postgres"
 ]
 
 default-members = [
@@ -25,8 +24,7 @@ default-members = [
         "lampo-bdk-wallet",
         "lampo-storage/lampo-storage-common",
         "lampo-storage/lampo-sqlite",
-        "lampo-storage/lampo-postgres",
-        "lampo-storage/lampo-vss"
+        "lampo-storage/lampo-postgres"
 ]
 resolver = "2"
 

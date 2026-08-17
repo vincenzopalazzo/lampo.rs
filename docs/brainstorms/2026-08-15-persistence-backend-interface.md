@@ -230,6 +230,16 @@ Phasing after Revision 3:
 - PR 4: `lampo-storage/lampo-vss` shadow decorator + recovery/import tool and
   lag surfacing.
 
+## Revision 4 (2026-08-17): defer VSS
+
+The VSS shadow and `vss-url` configuration were removed from the persistence
+interface PR. A write-only, unencrypted shadow is not a complete recovery
+backend and exposes sensitive node state to the VSS operator.
+
+VSS will return as a first-class backend together with migration,
+restore/import, lag validation, client-side encryption, and key obfuscation.
+That work is tracked in [#592](https://github.com/vincenzopalazzo/lampo.rs/issues/592).
+
 ## Step-by-step implementation plan
 
 Written to be executed mechanically, one PR at a time. Every PR must build,

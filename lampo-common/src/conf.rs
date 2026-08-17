@@ -47,10 +47,6 @@ pub struct LampoConf {
     /// Connection string for the chosen backend: a file path for SQLite, a
     /// `postgres://` URL for Postgres. Ignored by the filesystem backend.
     pub storage_url: Option<String>,
-    /// Base URL of a VSS server to keep an experimental write-only shadow of
-    /// the node state on. Unset means no shadow. Lampo does not yet ship a
-    /// restore/import path from this copy.
-    pub vss_url: Option<String>,
 }
 
 impl Default for LampoConf {
@@ -88,7 +84,6 @@ impl Default for LampoConf {
             fast_sync: None,
             storage: None,
             storage_url: None,
-            vss_url: None,
         }
     }
 }
@@ -293,7 +288,6 @@ impl TryFrom<String> for LampoConf {
         // Parse storage fields - default to None (the filesystem store)
         let storage = conf.get_conf("storage").unwrap_or(None);
         let storage_url = conf.get_conf("storage-url").unwrap_or(None);
-        let vss_url = conf.get_conf("vss-url").unwrap_or(None);
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -319,7 +313,6 @@ impl TryFrom<String> for LampoConf {
             fast_sync,
             storage,
             storage_url,
-            vss_url,
         })
     }
 }
