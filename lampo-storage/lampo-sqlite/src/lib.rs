@@ -36,6 +36,12 @@ pub struct SqliteStore {
 impl SqliteStore {
     /// Open (creating if needed) the database at `path` and migrate it.
     pub fn new(path: &str) -> error::Result<Self> {
+        if path == ":memory:"
+            || path.starts_with("file::memory:")
+            || (path.starts_with("file:") && path.contains("mode=memory"))
+        {
+            error::bail!("in-memory SQLite is not a durable persistence backend");
+        }
         let writer_lock = acquire_writer_lock(path)?;
         let conn = Connection::open(path)?;
         Self::from_connection(conn, Some(writer_lock))
@@ -437,6 +443,17 @@ mod tests {
 
         assert!(SqliteStore::new(alias.to_str().unwrap()).is_err());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn production_store_rejects_memory_databases() {
+        for path in [
+            ":memory:",
+            "file::memory:?cache=shared",
+            "file:node?mode=memory",
+        ] {
+            assert!(SqliteStore::new(path).is_err(), "{path} must be rejected");
+        }
     }
 
     #[test]
