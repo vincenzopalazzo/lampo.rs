@@ -110,7 +110,7 @@ fn io_err(err: rusqlite::Error) -> io::Error {
 /// WAL serialises statements but not Lightning writers: two nodes on one file
 /// can still interleave channel-manager updates. Fail the second opener.
 fn acquire_writer_lock(path: &str) -> error::Result<File> {
-    let lock_path = writer_lock_path(path);
+    let lock_path = writer_lock_path(path)?;
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -144,15 +144,15 @@ fn acquire_writer_lock(path: &str) -> error::Result<File> {
     Ok(file)
 }
 
-fn writer_lock_path(path: &str) -> std::path::PathBuf {
-    let resolved = resolve_db_path(path);
+fn writer_lock_path(path: &str) -> error::Result<std::path::PathBuf> {
+    let resolved = resolve_db_path(path)?;
     let mut lock_name = resolved.as_os_str().to_os_string();
     lock_name.push(".writerlock");
-    std::path::PathBuf::from(lock_name)
+    Ok(std::path::PathBuf::from(lock_name))
 }
 
 /// Resolve aliases (relative paths, symlinks) to one lock target per inode.
-fn resolve_db_path(path: &str) -> std::path::PathBuf {
+fn resolve_db_path(path: &str) -> error::Result<std::path::PathBuf> {
     let path = Path::new(path);
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -163,14 +163,23 @@ fn resolve_db_path(path: &str) -> std::path::PathBuf {
         }
     };
     if let Ok(canonical) = std::fs::canonicalize(&absolute) {
-        return canonical;
+        return Ok(canonical);
+    }
+    if std::fs::symlink_metadata(&absolute)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        error::bail!(
+            "sqlite database path `{}` is a dangling symlink; create its target or use the target path",
+            absolute.display()
+        );
     }
     match (absolute.parent(), absolute.file_name()) {
         (Some(parent), Some(name)) => match std::fs::canonicalize(parent) {
-            Ok(parent) => parent.join(name),
-            Err(_) => absolute,
+            Ok(parent) => Ok(parent.join(name)),
+            Err(_) => Ok(absolute),
         },
-        _ => absolute,
+        _ => Ok(absolute),
     }
 }
 
@@ -416,7 +425,7 @@ mod tests {
         // Lock released; reopening must succeed.
         let _second = SqliteStore::new(path).unwrap();
         let _ = std::fs::remove_file(path);
-        let _ = std::fs::remove_file(writer_lock_path(path));
+        let _ = std::fs::remove_file(writer_lock_path(path).unwrap());
     }
 
     #[test]
@@ -425,12 +434,29 @@ mod tests {
         let db = dir.join("node.db");
         let sqlite = dir.join("node.sqlite");
         assert_ne!(
-            writer_lock_path(db.to_str().unwrap()),
-            writer_lock_path(sqlite.to_str().unwrap())
+            writer_lock_path(db.to_str().unwrap()).unwrap(),
+            writer_lock_path(sqlite.to_str().unwrap()).unwrap()
         );
         assert!(writer_lock_path(db.to_str().unwrap())
+            .unwrap()
             .to_string_lossy()
             .ends_with("node.db.writerlock"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_database_symlink_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let dir =
+            std::env::temp_dir().join(format!("lampo-sqlite-dangling-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("missing.db");
+        let alias = dir.join("alias.db");
+        symlink(&target, &alias).unwrap();
+
+        assert!(SqliteStore::new(alias.to_str().unwrap()).is_err());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -141,12 +141,37 @@ impl PostgresStore {
                         }
                     });
 
-                    // Advisory locks are already scoped to the connected
-                    // database. Derive the key from PostgreSQL's effective
-                    // schemas, not the configured host/user text, so aliases
-                    // and roles reaching the same tables still collide.
-                    let schema_identity = match client
-                        .query_one("SELECT current_schemas(false)::text", &[])
+                    // Never inherit a role/database default (or URL option)
+                    // that acknowledges a commit before its WAL is durable.
+                    if let Err(err) = client.batch_execute("SET synchronous_commit = on").await {
+                        let _ = ready_tx.send(Err(describe(err)));
+                        return;
+                    }
+                    let synchronous_commit =
+                        match client.query_one("SHOW synchronous_commit", &[]).await {
+                            Ok(row) => row.get::<_, String>(0),
+                            Err(err) => {
+                                let _ = ready_tx.send(Err(describe(err)));
+                                return;
+                            }
+                        };
+                    if synchronous_commit != "on" {
+                        let _ = ready_tx.send(Err(format!(
+                            "postgres synchronous_commit is `{synchronous_commit}`, expected `on`"
+                        )));
+                        return;
+                    }
+
+                    // Advisory locks are database-scoped. Existing Lampo
+                    // tables are identified by relation OID so different
+                    // search paths resolving to the same table still collide.
+                    // Before the first migration, current_schema identifies
+                    // where those tables will be created.
+                    let storage_identity = match client
+                        .query_one(
+                            "SELECT COALESCE(to_regclass('kv')::oid::text, current_schema()::text)",
+                            &[],
+                        )
                         .await
                     {
                         Ok(row) => row.get::<_, String>(0),
@@ -155,7 +180,7 @@ impl PostgresStore {
                             return;
                         }
                     };
-                    let writer_lock = writer_lock_key(&schema_identity);
+                    let writer_lock = writer_lock_key(&storage_identity);
                     match client
                         .query_one("SELECT pg_try_advisory_lock($1)", &[&writer_lock])
                         .await
