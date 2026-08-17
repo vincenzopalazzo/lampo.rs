@@ -162,14 +162,19 @@ impl PostgresStore {
                         return;
                     }
 
-                    // Advisory locks are database-scoped. Existing Lampo
-                    // tables are identified by relation OID so different
-                    // search paths resolving to the same table still collide.
-                    // Before the first migration, current_schema identifies
-                    // where those tables will be created.
+                    // Advisory locks are database-scoped. Resolve the schema
+                    // containing the visible `kv` relation so different
+                    // search paths reaching the same tables still collide.
+                    // The schema name is stable across the first migration,
+                    // unlike a relation OID that does not exist beforehand.
                     let storage_identity = match client
                         .query_one(
-                            "SELECT COALESCE(to_regclass('kv')::oid::text, current_schema()::text)",
+                            "SELECT COALESCE(\
+                                (SELECT n.nspname::text \
+                                 FROM pg_class c \
+                                 JOIN pg_namespace n ON n.oid = c.relnamespace \
+                                 WHERE c.oid = to_regclass('kv')),\
+                                current_schema()::text)",
                             &[],
                         )
                         .await
