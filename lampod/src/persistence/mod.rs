@@ -19,37 +19,30 @@ use lampo_common::ldk::util::persist::{
     CHANNEL_MONITOR_PERSISTENCE_SECONDARY_NAMESPACE,
 };
 use lampo_common::persist::{FsPersistence, LampoPersistenceBackend, STORAGE_SELECTION_FILE};
-use lampo_postgres::{destination_id as postgres_destination_id, PostgresStore};
-use lampo_sqlite::SqliteStore;
+use lampo_vss::VssStore;
 
 /// Build the persistence backend described by `conf`.
 ///
-/// Unset, or `fs`, keeps LDK's filesystem store under the node directory. The
-/// database backends need `storage-url`.
-pub fn persistence_for(conf: &LampoConf) -> error::Result<Arc<dyn LampoPersistenceBackend>> {
+/// Unset, or `fs`, keeps LDK's filesystem store under the node directory.
+/// `vss` keeps all Lampo and LDK state in the configured VSS store.
+pub fn persistence_for(
+    conf: &LampoConf,
+    node_id: &str,
+) -> error::Result<Arc<dyn LampoPersistenceBackend>> {
     let kind = conf.storage.as_deref().unwrap_or("fs");
-    let selection = storage_selection(conf, kind)?;
+    let store_id = format!("lampo-{}-{node_id}", conf.network);
+    let selection = storage_selection(conf, kind, &store_id)?;
     let record_selection = validate_storage_selection(conf, &selection)?;
     let persistence: Arc<dyn LampoPersistenceBackend> = match kind {
         "fs" => Arc::new(FsPersistence::new(conf.path().into())),
-        "sqlite" => {
-            // Default to a file inside the node directory, so `storage=sqlite`
-            // on its own is enough to get going.
-            let path = match conf.storage_url.as_deref() {
-                Some(url) => url.to_owned(),
-                None => format!("{}/lampo.db", conf.path()),
-            };
-            log::info!(target: "lampod", "persisting to the sqlite database at {path}");
-            Arc::new(SqliteStore::new(&path)?)
-        }
-        "postgres" => {
+        "vss" => {
             let url = conf.storage_url.as_deref().ok_or_else(|| {
-                error::anyhow!("storage=postgres needs storage-url set to a postgres:// URL")
+                error::anyhow!("storage=vss needs storage-url set to a VSS server URL")
             })?;
-            log::info!(target: "lampod", "persisting to postgres");
-            Arc::new(PostgresStore::new(url)?)
+            log::info!(target: "lampod", "persisting to the VSS server at {url}");
+            Arc::new(VssStore::new(url, &store_id)?)
         }
-        other => error::bail!("unknown storage backend `{other}`, expected fs, sqlite or postgres"),
+        other => error::bail!("unknown storage backend `{other}`, expected fs or vss"),
     };
     if record_selection {
         record_storage_selection(conf, &selection)?;
@@ -57,19 +50,18 @@ pub fn persistence_for(conf: &LampoConf) -> error::Result<Arc<dyn LampoPersisten
     Ok(persistence)
 }
 
-/// Keep backend choice and destination outside the backend itself so selecting
-/// an empty store cannot make an existing node silently start from fresh state.
+/// Keep backend choice outside the backend itself so selecting an empty store
+/// cannot make an existing node silently start from fresh state.
 fn validate_storage_selection(conf: &LampoConf, selection: &str) -> error::Result<bool> {
     let marker = storage_selection_path(conf);
-    let kind = selection_kind(selection);
+    let kind = selection
+        .split_once(':')
+        .map_or(selection, |(kind, _)| kind);
     match fs::read_to_string(&marker) {
         Ok(selected) if selected.trim() == selection => Ok(false),
-        // Older markers recorded only the backend kind. Accept them when the
-        // kind still matches, then rewrite with the destination fingerprint.
-        Ok(selected) if selected.trim() == kind => Ok(true),
         Ok(selected) => error::bail!(
             "storage backend is recorded as `{}` but configuration selects `{selection}`; \
-             migrate the node state before changing storage or storage-url",
+             migrate the node state before changing storage",
             selected.trim()
         ),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -88,61 +80,16 @@ fn validate_storage_selection(conf: &LampoConf, selection: &str) -> error::Resul
     }
 }
 
-fn selection_kind(selection: &str) -> &str {
-    selection
-        .split_once(':')
-        .map(|(kind, _)| kind)
-        .unwrap_or(selection)
-}
-
-fn storage_selection(conf: &LampoConf, kind: &str) -> error::Result<String> {
+fn storage_selection(conf: &LampoConf, kind: &str, store_id: &str) -> error::Result<String> {
     match kind {
         "fs" => Ok("fs".to_owned()),
-        "sqlite" => {
-            let path = match conf.storage_url.as_deref() {
-                Some(url) => url.to_owned(),
-                None => format!("{}/lampo.db", conf.path()),
-            };
-            Ok(format!(
-                "sqlite:{}",
-                sqlite_destination_path(&path).display()
-            ))
-        }
-        "postgres" => {
+        "vss" => {
             let url = conf.storage_url.as_deref().ok_or_else(|| {
-                error::anyhow!("storage=postgres needs storage-url set to a postgres:// URL")
+                error::anyhow!("storage=vss needs storage-url set to a VSS server URL")
             })?;
-            Ok(format!("postgres:{}", postgres_destination_id(url)?))
+            Ok(format!("vss:{url}:{store_id}"))
         }
-        other => error::bail!("unknown storage backend `{other}`, expected fs, sqlite or postgres"),
-    }
-}
-
-/// Resolve a SQLite path the same way before and after the file exists.
-///
-/// `canonicalize` fails for a missing file, so a relative `storage-url` would
-/// otherwise be recorded raw on first start and rewritten to an absolute path
-/// on the next start, looking like a destination change. Canonicalizing the
-/// parent when the file is absent keeps macOS `/var` → `/private/var` stable too.
-fn sqlite_destination_path(path: &str) -> PathBuf {
-    let path = Path::new(path);
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        match std::env::current_dir() {
-            Ok(cwd) => cwd.join(path),
-            Err(_) => path.to_path_buf(),
-        }
-    };
-    if let Ok(canonical) = fs::canonicalize(&absolute) {
-        return canonical;
-    }
-    match (absolute.parent(), absolute.file_name()) {
-        (Some(parent), Some(name)) => match fs::canonicalize(parent) {
-            Ok(parent) => parent.join(name),
-            Err(_) => absolute,
-        },
-        _ => absolute,
+        other => error::bail!("unknown storage backend `{other}`, expected fs or vss"),
     }
 }
 
@@ -234,12 +181,32 @@ mod tests {
         record_storage_selection(&conf, "fs").unwrap();
 
         assert!(!validate_storage_selection(&conf, "fs").unwrap());
-        assert!(validate_storage_selection(&conf, "sqlite:/tmp/other.db").is_err());
+        assert!(validate_storage_selection(&conf, "vss:https://example.test:node").is_err());
     }
 
     #[test]
-    fn legacy_filesystem_state_blocks_database_selection() {
-        let dir = ScratchDir::new("legacy");
+    fn unknown_storage_backend_is_rejected() {
+        let conf = LampoConf::default();
+        assert!(storage_selection(&conf, "sqlite", "node").is_err());
+        assert!(storage_selection(&conf, "postgres", "node").is_err());
+        assert_eq!(storage_selection(&conf, "fs", "node").unwrap(), "fs");
+    }
+
+    #[test]
+    fn vss_requires_a_url_and_records_its_destination() {
+        let mut conf = LampoConf::default();
+        assert!(storage_selection(&conf, "vss", "node").is_err());
+
+        conf.storage_url = Some("https://vss.example.test".to_owned());
+        assert_eq!(
+            storage_selection(&conf, "vss", "node").unwrap(),
+            "vss:https://vss.example.test:node"
+        );
+    }
+
+    #[test]
+    fn existing_filesystem_state_blocks_vss_selection() {
+        let dir = ScratchDir::new("legacy-filesystem");
         let conf = dir.conf();
         let store = FsPersistence::new(conf.path().into());
         KVStoreSync::write(
@@ -247,47 +214,11 @@ mod tests {
             CHANNEL_MANAGER_PERSISTENCE_PRIMARY_NAMESPACE,
             CHANNEL_MANAGER_PERSISTENCE_SECONDARY_NAMESPACE,
             CHANNEL_MANAGER_PERSISTENCE_KEY,
-            b"existing-manager".to_vec(),
+            b"manager".to_vec(),
         )
         .unwrap();
 
-        assert!(validate_storage_selection(&conf, "sqlite:/tmp/other.db").is_err());
+        assert!(validate_storage_selection(&conf, "vss:https://vss.example.test:node").is_err());
         assert!(!storage_selection_path(&conf).exists());
-    }
-
-    #[test]
-    fn recorded_sqlite_destination_switch_is_rejected() {
-        let dir = ScratchDir::new("sqlite-destination");
-        let mut conf = dir.conf();
-        conf.storage = Some("sqlite".to_owned());
-        conf.storage_url = Some(format!("{}/a.db", conf.path()));
-        let first = storage_selection(&conf, "sqlite").unwrap();
-        record_storage_selection(&conf, &first).unwrap();
-
-        conf.storage_url = Some(format!("{}/b.db", conf.path()));
-        let second = storage_selection(&conf, "sqlite").unwrap();
-        assert!(validate_storage_selection(&conf, &second).is_err());
-    }
-
-    #[test]
-    fn relative_sqlite_path_stays_stable_after_file_appears() {
-        let dir = ScratchDir::new("sqlite-relative");
-        let cwd = std::env::current_dir().unwrap();
-        let absolute = dir.0.join("relative.db");
-        let relative = absolute
-            .strip_prefix(&cwd)
-            .map(|rel| rel.display().to_string())
-            .unwrap_or_else(|_| absolute.display().to_string());
-        let before = sqlite_destination_path(&relative);
-        fs::write(&absolute, b"").unwrap();
-        let after = sqlite_destination_path(&relative);
-        assert_eq!(
-            before, after,
-            "creating the database must not change the recorded destination"
-        );
-        assert!(
-            before.is_absolute(),
-            "relative storage-url must be recorded as an absolute path"
-        );
     }
 }

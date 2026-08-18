@@ -457,8 +457,7 @@ mod tests {
 
 /// `listpayments`: the node's payment history, straight out of the store.
 ///
-/// The filtering happens in the store rather than here, so a database backend
-/// answers a time window from an index instead of walking every payment.
+/// The filtering happens in the store rather than here.
 pub async fn json_listpayments(
     ctx: &LampoDaemon,
     request: &json::Value,

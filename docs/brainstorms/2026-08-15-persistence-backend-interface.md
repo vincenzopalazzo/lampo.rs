@@ -232,13 +232,24 @@ Phasing after Revision 3:
 
 ## Revision 4 (2026-08-17): defer VSS
 
-The VSS shadow and `vss-url` configuration were removed from the persistence
-interface PR. A write-only, unencrypted shadow is not a complete recovery
-backend and exposes sensitive node state to the VSS operator.
+The VSS shadow and `vss-url` configuration were temporarily removed from the
+persistence interface PR. A write-only, unencrypted shadow is not a complete
+recovery backend and exposes sensitive node state to the VSS operator.
 
-VSS will return as a first-class backend together with migration,
-restore/import, lag validation, client-side encryption, and key obfuscation.
-That work is tracked in [#592](https://github.com/vincenzopalazzo/lampo.rs/issues/592).
+## Revision 5 (2026-08-17): filesystem and VSS primary backends
+
+Direct SQLite and Postgres backends are cut from this PR. Lampo supports two
+alternative primary backends selected by `storage=fs|vss`; VSS uses
+`storage-url` for its server endpoint.
+
+The VSS shadow/decorator is removed. Reads, writes, removals, and listings go
+directly to VSS, and writes are acknowledged only after the server commits
+them. Conditional key versions fence a second writer.
+
+Migration, authentication, client-side encryption, and key obfuscation remain
+tracked in [#592](https://github.com/vincenzopalazzo/lampo.rs/issues/592).
+Direct database backends can return later if needed; they are not part of this
+interface PR.
 
 ## Step-by-step implementation plan
 

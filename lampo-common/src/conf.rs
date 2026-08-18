@@ -58,12 +58,9 @@ pub struct LampoConf {
     /// `setasyncinvoicepaths`. Other RPCs stay unauthenticated (localhost
     /// plus the HTTP DNS-rebinding guard).
     pub api_token: Option<String>,
-    /// Where the node keeps its state: `"fs"` (default) for LDK's filesystem
-    /// store, `"sqlite"` or `"postgres"` for a database. The database backends
-    /// need [`Self::storage_url`].
+    /// Where the node keeps its state: `"fs"` (default) or `"vss"`.
     pub storage: Option<String>,
-    /// Connection string for the chosen backend: a file path for SQLite, a
-    /// `postgres://` URL for Postgres. Ignored by the filesystem backend.
+    /// Base URL of the selected VSS backend. Ignored by the filesystem backend.
     pub storage_url: Option<String>,
 }
 
