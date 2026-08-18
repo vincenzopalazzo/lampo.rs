@@ -32,6 +32,8 @@ use lampo_common::json;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
+use lampo_common::ldk::sign::NodeSigner;
+use lampo_common::persist::{LampoAsyncPersistence, LampoPersistenceBackend};
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
@@ -42,7 +44,7 @@ use crate::actions::Handler;
 use crate::chain::LampoChainManager;
 use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::persistence::LampoPersistence;
+use crate::persistence::persistence_for;
 use crate::utils::logger::LampoLogger;
 
 pub(crate) type P2PGossipSync =
@@ -67,15 +69,29 @@ pub struct LampoDaemon {
     wallet_manager: Arc<dyn WalletManager>,
     offchain_manager: Option<Arc<OffchainManager>>,
     logger: Arc<LampoLogger>,
-    persister: Arc<LampoPersistence>,
+    persister: Arc<dyn LampoPersistenceBackend>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
     chain_sync: Arc<ChainSyncCoordinator>,
 }
 
 impl LampoDaemon {
-    pub fn new(config: Arc<LampoConf>, wallet_manager: Arc<dyn WalletManager>) -> Self {
-        let root_path = config.path();
+    /// Build a daemon around `config`.
+    ///
+    /// Fallible because the persistence backend is opened here, and enabling
+    /// VSS can fail while seeding or contacting the server.
+    pub fn new(
+        config: Arc<LampoConf>,
+        wallet_manager: Arc<dyn WalletManager>,
+    ) -> error::Result<Self> {
+        // The node id namespaces the VSS store, so it is derived before the
+        // daemon exists; the wallet holds the keys already.
+        let node_id = wallet_manager
+            .ldk_keys()
+            .keys_manager
+            .get_node_id(ldk::sign::Recipient::Node)
+            .map_err(|()| error::anyhow!("deriving the node id"))?;
+        let persister = persistence_for(&config, &node_id.to_string())?;
         let chain_sync = Arc::new(ChainSyncCoordinator::new());
         // Wire the wallet to the coordinator here so every daemon (CLI, tests,
         // embedders) gets consistent sync-progress reporting with no per-caller
@@ -85,10 +101,10 @@ impl LampoDaemon {
             .ldk_keys()
             .keys_manager
             .set_wallet(wallet_manager.clone());
-        LampoDaemon {
+        Ok(LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
-            persister: Arc::new(LampoPersistence::new(root_path.into())),
+            persister,
             peer_manager: None,
             onchain_manager: None,
             channel_manager: None,
@@ -98,7 +114,7 @@ impl LampoDaemon {
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             chain_sync,
-        }
+        })
     }
 
     /// Backend-agnostic chain-sync coordinator shared across the daemon's
@@ -123,7 +139,7 @@ impl LampoDaemon {
         self.conf.clone()
     }
 
-    pub fn persister(&self) -> Arc<LampoPersistence> {
+    pub fn persister(&self) -> Arc<dyn LampoPersistenceBackend> {
         self.persister.clone()
     }
 
@@ -303,7 +319,7 @@ impl LampoDaemon {
 
         tokio::spawn(async move {
             process_events_async(
-                self.persister.clone(),
+                LampoAsyncPersistence::new(self.persister.clone()),
                 |env| self.handler_ldk_events(env),
                 self.channel_manager().chain_monitor(),
                 self.channel_manager().manager(),

@@ -1,0 +1,11 @@
+[package]
+name = "lampo-vss"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lampo-common = { path = "../../lampo-common" }
+
+vss-client = "0.3"
+tokio = { version = "1", features = ["rt", "net", "time"] }
+log = { version = "0.4", features = ["std"] }

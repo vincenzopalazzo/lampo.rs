@@ -112,6 +112,195 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
     Ok(())
 }
 
+/// A settled payment must show up in `listpayments`, from the store rather
+/// than from memory, which is what makes the history survive a restart.
+#[tokio_test_shutdown_timeout::test(5)]
+pub async fn listpayments_reports_a_settled_payment() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let btc = node1.btc.clone();
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
+    let _: response::Connect = node2
+        .lampod()
+        .call(
+            "connect",
+            request::Connect {
+                node_id: node1.info.node_id.clone(),
+                addr: "127.0.0.1".to_owned(),
+                port: node1.port,
+            },
+        )
+        .await
+        .unwrap();
+
+    let _: json::Value = node1
+        .lampod()
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: node2.info.node_id.clone(),
+                amount: 100000,
+                public: true,
+                port: None,
+                addr: None,
+                push_msat: None,
+            },
+        )
+        .await
+        .unwrap();
+    node2.fund_wallet(10).await.unwrap();
+
+    async_wait!(async {
+        let channels: response::Channels = node1
+            .lampod()
+            .call("channels", json::json!({}))
+            .await
+            .unwrap();
+        if channels.channels.iter().any(|channel| channel.ready) {
+            return Ok(());
+        }
+        Err(())
+    });
+
+    let invoice: response::Invoice = node2
+        .lampod()
+        .call(
+            "invoice",
+            request::GenerateInvoice {
+                amount_msat: Some(1_000),
+                description: "listpayments".to_owned(),
+                expiring_in: None,
+            },
+        )
+        .await
+        .unwrap();
+    let _: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: invoice.bolt11,
+                amount: None,
+                bolt12: None,
+                timeout: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    // The payer records the payment it sent...
+    async_wait!(async {
+        let payments: response::ListPayments = node1
+            .lampod()
+            .call("listpayments", json::json!({}))
+            .await
+            .unwrap();
+        if payments
+            .payments
+            .iter()
+            .any(|payment| payment.direction == "outbound" && payment.status == "succeeded")
+        {
+            return Ok(());
+        }
+        Err(())
+    });
+
+    // ...and the payee records the one it received.
+    async_wait!(async {
+        let payments: response::ListPayments = node2
+            .lampod()
+            .call("listpayments", json::json!({}))
+            .await
+            .unwrap();
+        if payments
+            .payments
+            .iter()
+            .any(|payment| payment.direction == "inbound" && payment.amount_msat == 1_000)
+        {
+            return Ok(());
+        }
+        Err(())
+    });
+
+    // The filter has to reach the store rather than being ignored.
+    let none: response::ListPayments = node1
+        .lampod()
+        .call("listpayments", json::json!({"status": "failed"}))
+        .await
+        .unwrap();
+    assert!(none.payments.is_empty(), "{:?}", none.payments);
+    Ok(())
+}
+
+/// A restarted node must find its channel state in the store, whichever
+/// backend holds it.
+///
+/// `is_restarting` used to check for a literal `<root>/manager` file. That
+/// only works for the filesystem store; a VSS-backed node would come back as
+/// brand-new while its monitors sat on the server. Run with
+/// `LAMPO_TEST_STORAGE=vss` and `LAMPO_TEST_STORAGE_URL=…` to exercise VSS.
+#[tokio_test_shutdown_timeout::test(5)]
+pub async fn channel_survives_a_node_restart() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let btc = node1.btc.clone();
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
+    let _: response::Connect = node2
+        .lampod()
+        .call(
+            "connect",
+            request::Connect {
+                node_id: node1.info.node_id.clone(),
+                addr: "127.0.0.1".to_owned(),
+                port: node1.port,
+            },
+        )
+        .await
+        .unwrap();
+
+    let response: json::Value = node1
+        .lampod()
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: node2.info.node_id.clone(),
+                amount: 100000,
+                public: true,
+                port: None,
+                addr: None,
+                push_msat: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(response.get("tx").is_some());
+    node2.fund_wallet(10).await.unwrap();
+
+    async_wait!(async {
+        let channels: response::Channels = node1
+            .lampod()
+            .call("channels", json::json!({}))
+            .await
+            .unwrap();
+        if channels.channels.is_empty() {
+            return Err(());
+        }
+        Ok(())
+    });
+
+    let node1 = node1.restart().await?;
+    let channels: response::Channels = node1
+        .lampod()
+        .call("channels", json::json!({}))
+        .await
+        .unwrap();
+    assert!(
+        !channels.channels.is_empty(),
+        "the restarted node lost its channel: state was not restored from the store"
+    );
+    Ok(())
+}
+
 /// `fundchannel` must honor the `public` flag it accepts.
 ///
 /// This used to fail: `open_channel` parsed `public` into the request and
@@ -294,7 +483,7 @@ pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
     Ok(())
 }
 
-#[tokio_test_shutdown_timeout::test(5)]
+#[tokio_test_shutdown_timeout::test(10)]
 pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
     init();
     let node1 = LampoTesting::tmp().await?;
@@ -322,7 +511,7 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
         .call(
             "pay",
             request::Pay {
-                invoice_str: offer.bolt12,
+                invoice_str: offer.bolt12.clone(),
                 amount: None,
                 bolt12: None,
                 timeout: Default::default(),
@@ -349,7 +538,9 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
 
     assert_eq!(
         proof.payment_hash().to_string(),
-        pay.payment_hash.unwrap(),
+        pay.payment_hash
+            .as_deref()
+            .expect("a settled offer payment must expose its hash"),
         "the proof must commit to the hash of the payment we made"
     );
     assert_eq!(
@@ -357,6 +548,48 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
         preimage,
         "the proof must carry the same preimage the RPC returned"
     );
+
+    // Offers are reusable. A second payment must get its own payment id and
+    // history row rather than replacing the first attempt.
+    let second: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: None,
+                bolt12: None,
+                timeout: Default::default(),
+            },
+        )
+        .await?;
+    assert_ne!(
+        pay.payment_hash, second.payment_hash,
+        "each offer payment must have a unique hash"
+    );
+
+    async_wait!(async {
+        let payments: response::ListPayments = node1
+            .lampod()
+            .call(
+                "listpayments",
+                json::json!({"direction": "outbound", "status": "succeeded"}),
+            )
+            .await
+            .unwrap();
+        if payments.payments.len() == 2
+            && payments.payments[0].id != payments.payments[1].id
+            && payments.payments[0].payment_hash != payments.payments[1].payment_hash
+            && payments
+                .payments
+                .iter()
+                .all(|payment| payment.amount_msat == 100_000)
+        {
+            Ok(())
+        } else {
+            Err(())
+        }
+    });
     Ok(())
 }
 

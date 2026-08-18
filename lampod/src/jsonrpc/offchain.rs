@@ -8,14 +8,15 @@ use lampo_common::handler::Handler;
 use lampo_common::hex;
 use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::ldk;
-use lampo_common::ldk::offers::offer;
+use lampo_common::ldk::offers::offer::{self, Amount};
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
-use lampo_common::model::request::Pay;
+use lampo_common::model::request::{self, Pay};
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
+use lampo_common::persist::{PaymentDirection, PaymentStatus};
 use lampo_common::{json, model::request::DecodeInvoice};
 use tokio::time::Instant;
 
@@ -101,23 +102,53 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     let request: Pay = json::from_value(request.clone())?;
     let mut events = ctx.handler().events();
 
-    let payment_id = if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
+    let (payment_id, payment_hash, amount_msat) = if let Ok(offer) =
+        offer::Offer::from_str(&request.invoice_str)
+    {
         log::debug!("Paying offer with bolt12 invoice: {}", request.invoice_str);
+        let amount_msat = match offer.amount() {
+            Some(Amount::Bitcoin { amount_msats }) => amount_msats,
+            Some(_) | None => request.amount.unwrap_or_default(),
+        };
         let payer_note = request.bolt12.and_then(|x| x.payer_note);
-        ctx.offchain_manager()
-            .pay_offer(&request.invoice_str, request.amount, payer_note)?
+        (
+            ctx.offchain_manager()
+                .pay_offer(&request.invoice_str, request.amount, payer_note)?,
+            String::new(),
+            amount_msat,
+        )
     } else {
         log::debug!(
             "Paying invoice with bolt11 invoice: {}",
             request.invoice_str
         );
-        ctx.offchain_manager()
-            .pay_invoice(&request.invoice_str, request.amount)?
+        let invoice = ctx
+            .offchain_manager()
+            .decode_invoice(&request.invoice_str)?;
+        let amount_msat = invoice
+            .amount_milli_satoshis()
+            .or(request.amount)
+            .unwrap_or_default();
+        (
+            ctx.offchain_manager()
+                .pay_invoice(&request.invoice_str, request.amount)?,
+            invoice.payment_hash().to_string(),
+            amount_msat,
+        )
     };
     // The event bus broadcasts to every subscriber, so a concurrent `pay` would
     // otherwise see this payment's result -- and now its preimage and payer
     // proof too. Only accept events carrying our own payment id.
     let payment_id = hex::encode(payment_id.0);
+    ctx.handler().record_payment(
+        payment_id.clone(),
+        payment_hash,
+        PaymentDirection::Outbound,
+        amount_msat,
+        None,
+        PaymentStatus::Pending,
+        Some(request.invoice_str),
+    );
     wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
 }
 
@@ -207,5 +238,43 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     // Same id semantics as `pay`: the hex payment hash identifies the
     // payment on the event bus.
     let payment_id = hex::encode(payment_id.0);
+    ctx.handler().record_payment(
+        payment_id.clone(),
+        payment_id.clone(),
+        PaymentDirection::Outbound,
+        request.amount_msat,
+        None,
+        PaymentStatus::Pending,
+        None,
+    );
     wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
+}
+
+/// `listpayments`: the node's payment history, straight out of the store.
+///
+/// The filtering happens in the store rather than here.
+pub async fn json_listpayments(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `listpayments` with request `{:?}`", request);
+    let request: request::ListPayments = json::from_value(request.clone())?;
+    let filter = request.to_filter().map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("{err}"),
+            data: None,
+        })
+    })?;
+    let payments = ctx.persister().list_payments(&filter).map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("{err}"),
+            data: None,
+        })
+    })?;
+    let response = response::ListPayments {
+        payments: payments.into_iter().map(response::Payment::from).collect(),
+    };
+    Ok(json::to_value(response)?)
 }

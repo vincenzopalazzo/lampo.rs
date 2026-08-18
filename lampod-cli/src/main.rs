@@ -174,7 +174,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let wallet = Arc::new(wallet);
 
     log::debug!(target: "lampod-cli", "wallet created with success");
-    let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+    let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone())?;
 
     // Do wallet syncing in the background! (`LampoDaemon::new` already shared
     // the chain-sync coordinator with the wallet.)
