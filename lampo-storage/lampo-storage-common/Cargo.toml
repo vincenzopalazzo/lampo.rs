@@ -1,7 +1,0 @@
-[package]
-name = "lampo-storage-common"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-lampo-common = { path = "../../lampo-common" }

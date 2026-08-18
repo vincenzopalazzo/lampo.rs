@@ -40,12 +40,9 @@ pub struct LampoConf {
     /// instead of scanning from genesis. Defaults to `true` and only applies
     /// to a fresh wallet (no UTXOs to miss); set `false` to force a full scan.
     pub fast_sync: Option<bool>,
-    /// Where the node keeps its state: `"fs"` (default) for LDK's filesystem
-    /// store, `"sqlite"` or `"postgres"` for a database. The database backends
-    /// need [`Self::storage_url`].
+    /// Where the node keeps its state: `"fs"` (default) or `"vss"`.
     pub storage: Option<String>,
-    /// Connection string for the chosen backend: a file path for SQLite, a
-    /// `postgres://` URL for Postgres. Ignored by the filesystem backend.
+    /// Base URL of the selected VSS backend. Ignored by the filesystem backend.
     pub storage_url: Option<String>,
 }
 

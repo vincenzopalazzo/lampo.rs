@@ -8,9 +8,7 @@
 //!   scorer, the BOLT 12 payer proofs. Key/value is the right shape there, and
 //!   it is what every Lightning implementation uses for this data.
 //! * [`PaymentStore`], for lampo's own records, which are *queried* rather than
-//!   fetched by key ("every payment last year"). Key/value is the wrong shape
-//!   for that, so SQL backends answer it with indexed columns, the way Core
-//!   Lightning keeps its wallet tables.
+//!   fetched by key ("every payment last year").
 //!
 //! Backends must not acknowledge a write before it is durable: LDK broadcasts
 //! the newest channel state it has persisted, so a write that is acked and then
@@ -38,8 +36,7 @@ pub const STORAGE_SELECTION_FILE: &str = ".lampo-storage-backend";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistenceKind {
     Filesystem,
-    Sqlite,
-    Postgres,
+    Vss,
 }
 
 /// Which way the money went.
@@ -58,8 +55,7 @@ pub enum PaymentStatus {
 }
 
 impl PaymentDirection {
-    /// Stored form. SQL backends keep this in a column, so it has to survive a
-    /// round trip unchanged.
+    /// Stable stored form.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Inbound => "inbound",
@@ -77,7 +73,7 @@ impl PaymentDirection {
 }
 
 impl PaymentStatus {
-    /// Stored form, see [`PaymentDirection::as_str`].
+    /// Stable stored form, see [`PaymentDirection::as_str`].
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -96,8 +92,7 @@ impl PaymentStatus {
     }
 }
 
-/// A payment as lampo records it, flat so a SQL backend can keep one column per
-/// field and index the ones that get filtered on.
+/// A payment as lampo records it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaymentRecord {
     /// Hex payment id for an outbound payment, hex payment hash for an inbound
@@ -139,9 +134,6 @@ pub struct PaymentFilter {
 
 impl PaymentFilter {
     /// Does `record` pass the field filters, ignoring limit and offset?
-    ///
-    /// SQL backends translate the filter into a query instead; this is for
-    /// backends that have to walk the records themselves.
     pub fn matches(&self, record: &PaymentRecord) -> bool {
         if self
             .from_unix_secs
@@ -195,17 +187,13 @@ pub trait LampoPersistenceBackend: KVStoreSync + PaymentStore + Send + Sync {
     fn kind(&self) -> PersistenceKind;
 
     /// Every `(primary_namespace, secondary_namespace, key)` in the store.
-    ///
-    /// The VSS shadow uses this to copy a node's existing state when it is
-    /// enabled after the fact; a shadow that only mirrors future writes would
-    /// silently miss any value that never changes again.
     fn list_all_keys(&self) -> error::Result<Vec<(String, String, String)>>;
 }
 
 /// Adapts lampo's synchronous backend interface to LDK's async [`KVStore`].
 ///
-/// Database calls and filesystem fsyncs run on Tokio's blocking pool instead
-/// of blocking the runtime thread that drives peer I/O.
+/// Backend calls run on Tokio's blocking pool instead of blocking the runtime
+/// thread that drives peer I/O.
 #[derive(Clone)]
 pub struct LampoAsyncPersistence(Arc<dyn LampoPersistenceBackend>);
 
@@ -280,9 +268,7 @@ fn offload<T: Send + 'static>(
 /// held in memory and written through to the `payments` namespace.
 ///
 /// Keeping every payment in memory is what ldk-node does, and it is fine at the
-/// size a filesystem node reaches. It is also why the SQL backends exist: they
-/// answer a query from an index instead of from a map that has to be loaded in
-/// full at startup.
+/// size a filesystem node reaches.
 pub struct FsPersistence {
     inner: FilesystemStore,
     payments: Mutex<HashMap<String, PaymentRecord>>,

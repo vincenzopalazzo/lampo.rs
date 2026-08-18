@@ -235,11 +235,10 @@ pub async fn listpayments_reports_a_settled_payment() -> error::Result<()> {
 /// A restarted node must find its channel state in the store, whichever
 /// backend holds it.
 ///
-/// This used to pass trivially on the filesystem and break silently on a
-/// database backend: `is_restarting` checked for a literal `<root>/manager`
-/// file, so a sqlite- or postgres-backed node came back as a brand-new node
-/// while its monitors sat in the database. Run with
-/// `LAMPO_TEST_STORAGE=sqlite` to exercise the database path.
+/// `is_restarting` used to check for a literal `<root>/manager` file. That
+/// only works for the filesystem store; a VSS-backed node would come back as
+/// brand-new while its monitors sat on the server. Run with
+/// `LAMPO_TEST_STORAGE=vss` and `LAMPO_TEST_STORAGE_URL=…` to exercise VSS.
 #[tokio_test_shutdown_timeout::test(5)]
 pub async fn channel_survives_a_node_restart() -> error::Result<()> {
     init();
