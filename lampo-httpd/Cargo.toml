@@ -4,7 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-actix-web = "4"
+# Omit default `http2` (and unused `ws`): http2 pulls h2 0.3.x, which is
+# affected by RUSTSEC-2026-0258, and actix has not moved to the patched
+# h2 >= 0.4.16 line yet. lampo-httpd only serves HTTP/1.1 REST locally.
+actix-web = { version = "4", default-features = false, features = [
+    "macros",
+    "compress-brotli",
+    "compress-gzip",
+    "compress-zstd",
+    "cookies",
+    "unicode",
+    "compat",
+] }
 paperclip = { version = "0.9.5", features = ["actix4"] }
 log = "*"
 paste = "1.0.15"
