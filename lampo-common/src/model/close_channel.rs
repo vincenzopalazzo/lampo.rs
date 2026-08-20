@@ -28,6 +28,18 @@ pub mod request {
                 .channel_id
                 .as_ref()
                 .ok_or(error::anyhow!("`channel_id` not found"))?;
+            // A channel id is exactly 32 bytes, i.e. 64 hex characters.
+            // Validate up front: `decode_hex` slices two chars at a time
+            // (panicking on odd-length input) and `copy_from_slice` below
+            // panics when the decoded vector is not 32 bytes long, so a
+            // malformed `channel_id` from a remote RPC caller would crash
+            // the node.
+            if id.len() != 64 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(error::anyhow!(
+                    "invalid `channel_id`: expected 64 hex characters, got a string of length {}",
+                    id.len()
+                ));
+            }
             let result = self.decode_hex(id)?;
             let mut result_array: [u8; 32] = [0; 32];
             result_array.copy_from_slice(&result);
@@ -83,13 +95,10 @@ pub mod tests {
         assert_eq!(channel_bytes, channel_id_bytes.unwrap().0);
     }
 
-    /// REPRO (bug 1a): an odd-length hex `channel_id` makes `decode_hex`
-    /// slice `&s[i..i + 2]` past the end of the string and panic.
-    /// Any unauthenticated caller of the local JSON-RPC/HTTP API can crash
-    /// the node with such a payload.
+    /// Regression (bug 1a): an odd-length hex `channel_id` must return a
+    /// clean error instead of panicking inside `decode_hex`'s slicing.
     #[test]
-    #[should_panic]
-    fn channel_id_odd_hex_panics() {
+    fn channel_id_odd_hex_returns_error() {
         let node_id =
             "039c108cc6777e7d5066dfa33c611c32e6baa1c49de6d546b5b76686486d0360ac".to_string();
         // 63 hex characters (odd length)
@@ -100,23 +109,38 @@ pub mod tests {
             node_id,
             channel_id: channel_hex,
         };
-        let _ = req.channel_id();
+        assert!(req.channel_id().is_err());
     }
 
-    /// REPRO (bug 1b): an even-length but shorter-than-32-bytes hex
-    /// `channel_id` makes `copy_from_slice` panic because the decoded
-    /// vector is not 32 bytes long.
+    /// Regression (bug 1b): an even-length but shorter-than-32-bytes hex
+    /// `channel_id` must return a clean error instead of panicking inside
+    /// `copy_from_slice`.
     #[test]
-    #[should_panic]
-    fn channel_id_short_even_hex_panics() {
+    fn channel_id_short_even_hex_returns_error() {
         let node_id =
             "039c108cc6777e7d5066dfa33c611c32e6baa1c49de6d546b5b76686486d0360ac".to_string();
-        // 4 hex characters -> 2 bytes, far from the 32 expected by copy_from_slice
+        // 4 hex characters -> 2 bytes, far from the 32 expected
         let channel_hex = Some("0a44".to_string());
         let req = crate::model::request::CloseChannel {
             node_id,
             channel_id: channel_hex,
         };
-        let _ = req.channel_id();
+        assert!(req.channel_id().is_err());
+    }
+
+    /// Regression (bug 1c): non-hex characters must return a clean error.
+    #[test]
+    fn channel_id_non_hex_returns_error() {
+        let node_id =
+            "039c108cc6777e7d5066dfa33c611c32e6baa1c49de6d546b5b76686486d0360ac".to_string();
+        // 64 chars but not hex
+        let channel_hex = Some(
+            "zz44677526ac8c607616bd91258d7e5df1d86fae9c32e23aa18703a650944c64".to_string(),
+        );
+        let req = crate::model::request::CloseChannel {
+            node_id,
+            channel_id: channel_hex,
+        };
+        assert!(req.channel_id().is_err());
     }
 }
