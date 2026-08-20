@@ -74,8 +74,10 @@ impl BDKWalletManager {
             log::info!(target: "lampo-wallet", "Using a private key for network {:?}", conf.network);
             let key = PrivateKey::new(key, conf.network);
             let channels_keys = conf.channels_keys.clone();
-            log::info!(target: "lampo-wallet", "channels_keys: {channels_keys:?}");
-            log::info!(target: "lampo-wallet", "key: {key:?}");
+            // SECURITY: never log `channels_keys` or `key` -- they are the
+            // channel secrets and the wallet WIF private key. Log presence
+            // only.
+            log::info!(target: "lampo-wallet", "channels_keys provided: {}", channels_keys.is_some());
             assert!(channels_keys.is_some());
             return Self::build_from_private_key(conf, key, channels_keys).await;
         }
