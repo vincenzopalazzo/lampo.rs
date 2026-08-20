@@ -126,3 +126,42 @@ impl TryInto<LampoConf> for LampoCliArgs {
 pub fn parse_args() -> Result<LampoCliArgs, error::Error> {
     Ok(LampoCliArgs::parse())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args_with_data_dir(data_dir: &str) -> LampoCliArgs {
+        LampoCliArgs {
+            data_dir: Some(data_dir.to_string()),
+            network: Some("regtest".to_string()),
+            client: None,
+            restore_wallet: false,
+            log_level: None,
+            log_file: None,
+            bitcoind_url: None,
+            bitcoind_user: None,
+            bitcoind_pass: None,
+            dev_force_poll: false,
+            api_host: None,
+            api_port: None,
+            subcommand: None,
+        }
+    }
+
+    /// REPRO (bug 3, CLI side): `try_into` calls `LampoConf::default()`
+    /// before overwriting the conf with `LampoConf::new`, so the panic on
+    /// an undeterminable home directory triggers even when the user
+    /// explicitly passes `--data-dir`.
+    ///
+    /// NOTE: ignored on normal developer machines, see
+    /// `lampo_common::conf::tests::lampo_conf_default_panics_without_home`.
+    #[test]
+    #[ignore = "only panics where no passwd fallback exists (containers)"]
+    #[should_panic(expected = "Impossible to get the home directory")]
+    fn try_into_panics_without_home_even_with_data_dir() {
+        std::env::remove_var("HOME");
+        let args = args_with_data_dir("/tmp/lampo-cli-repro-no-home");
+        let _: LampoConf = args.try_into().unwrap();
+    }
+}

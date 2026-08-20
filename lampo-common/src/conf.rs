@@ -340,3 +340,28 @@ impl TrimmedString for String {
         self.trim().to_owned()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LampoConf;
+
+    /// REPRO (bug 3): `LampoConf::default()` calls
+    /// `std::env::home_dir().expect("Impossible to get the home directory")`,
+    /// so it panics when the home directory cannot be determined (e.g. a
+    /// minimal systemd unit or a distroless container where `$HOME` is unset
+    /// and there is no passwd entry). The daemon should fall back gracefully
+    /// instead.
+    ///
+    /// NOTE: ignored on normal developer machines because on Unix
+    /// `std::env::home_dir()` falls back to the passwd database when `$HOME`
+    /// is unset, so the panic cannot be forced via env manipulation there.
+    /// Run with `cargo test -p lampo-common -- --ignored` inside a container
+    /// without a passwd entry to reproduce the panic.
+    #[test]
+    #[ignore = "only panics where no passwd fallback exists (containers)"]
+    #[should_panic(expected = "Impossible to get the home directory")]
+    fn lampo_conf_default_panics_without_home() {
+        std::env::remove_var("HOME");
+        let _ = LampoConf::default();
+    }
+}
