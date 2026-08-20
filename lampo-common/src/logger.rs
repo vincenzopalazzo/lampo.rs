@@ -50,15 +50,16 @@ impl Log for Logger {
                     Level::Trace => message.cyan().dimmed(),
                 };
 
-                writeln!(
+                // SECURITY/robustness: never panic the node because a log
+                // write failed (full disk, closed fd, EPIPE, ...).
+                let _ = writeln!(
                     stream,
                     "{} {}",
                     DateTime::<Utc>::from(SystemTime::now())
                         .to_rfc3339_opts(SecondsFormat::Millis, true)
                         .white(),
                     message,
-                )
-                .expect("write shouldn't fail");
+                );
             }
         }
     }
