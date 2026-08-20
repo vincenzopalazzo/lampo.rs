@@ -82,4 +82,41 @@ pub mod tests {
         let channel_id_bytes = req.channel_id();
         assert_eq!(channel_bytes, channel_id_bytes.unwrap().0);
     }
+
+    /// REPRO (bug 1a): an odd-length hex `channel_id` makes `decode_hex`
+    /// slice `&s[i..i + 2]` past the end of the string and panic.
+    /// Any unauthenticated caller of the local JSON-RPC/HTTP API can crash
+    /// the node with such a payload.
+    #[test]
+    #[should_panic]
+    fn channel_id_odd_hex_panics() {
+        let node_id =
+            "039c108cc6777e7d5066dfa33c611c32e6baa1c49de6d546b5b76686486d0360ac".to_string();
+        // 63 hex characters (odd length)
+        let channel_hex =
+            Some("0a44677526ac8c607616bd91258d7e5df1d86fae9c32e23aa18703a650944c6".to_string());
+        assert_eq!(channel_hex.as_ref().unwrap().len() % 2, 1);
+        let req = crate::model::request::CloseChannel {
+            node_id,
+            channel_id: channel_hex,
+        };
+        let _ = req.channel_id();
+    }
+
+    /// REPRO (bug 1b): an even-length but shorter-than-32-bytes hex
+    /// `channel_id` makes `copy_from_slice` panic because the decoded
+    /// vector is not 32 bytes long.
+    #[test]
+    #[should_panic]
+    fn channel_id_short_even_hex_panics() {
+        let node_id =
+            "039c108cc6777e7d5066dfa33c611c32e6baa1c49de6d546b5b76686486d0360ac".to_string();
+        // 4 hex characters -> 2 bytes, far from the 32 expected by copy_from_slice
+        let channel_hex = Some("0a44".to_string());
+        let req = crate::model::request::CloseChannel {
+            node_id,
+            channel_id: channel_hex,
+        };
+        let _ = req.channel_id();
+    }
 }
