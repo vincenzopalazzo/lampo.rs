@@ -23,6 +23,7 @@ use lampo_common::ldk;
 use lampo_common::ldk::chain::chaininterface::BroadcasterInterface;
 use lampo_common::ldk::events::bump_transaction::BumpTransactionEventHandler;
 use lampo_common::ldk::sign::{NodeSigner, SpendableOutputDescriptor};
+use lampo_common::ldk::types::payment::PaymentPreimage;
 use lampo_common::ldk::util::wallet_utils::{Utxo, Wallet, WalletSource};
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
@@ -457,21 +458,18 @@ impl Handler for LampoHandler {
                 payment_id: _,
                 ..
             } => {
-                let preimage = match purpose {
-                    ldk::events::PaymentPurpose::Bolt11InvoicePayment {
-                        payment_preimage, ..
-                    } => payment_preimage,
-                    ldk::events::PaymentPurpose::Bolt12OfferPayment {
-                        payment_preimage, ..
-                    } => payment_preimage,
-                    ldk::events::PaymentPurpose::Bolt12RefundPayment {
-                        payment_preimage, ..
-                    } => payment_preimage,
-                    ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
-                };
-                self.channel_manager
-                    .manager()
-                    .claim_funds(preimage.unwrap());
+                // FIXME(security): P0 — this helper currently reproduces the
+                // vulnerable behaviour on purpose (see the reproduction tests
+                // in `payment_claimable_repro_tests`): it never inspects
+                // `amount_msat`/`counterparty_skimmed_fee_msat`, so an
+                // underpaid invoice is claimed anyway, and it panics on a
+                // `None` preimage.
+                let preimage = payment_claim_preimage(
+                    amount_msat,
+                    counterparty_skimmed_fee_msat,
+                    purpose,
+                );
+                self.channel_manager.manager().claim_funds(preimage);
                 Ok(())
             }
             ldk::events::Event::PaymentClaimed {
@@ -728,5 +726,85 @@ impl Handler for LampoHandler {
                 Ok(())
             }
         }
+    }
+}
+
+/// Decide which preimage (if any) to release for a `PaymentClaimable` event.
+///
+/// FIXME(security): P0 — this is the **vulnerable** pre-fix logic, extracted
+/// verbatim from the `Event::PaymentClaimable` arm so the bug can be
+/// reproduced by unit tests:
+///
+/// 1. `amount_msat` and `counterparty_skimmed_fee_msat` are completely
+///    ignored, so a payment that is *smaller* than the invoiced amount (the
+///    previous hop skimmed an extra fee) is claimed anyway: we hand over the
+///    preimage — the cryptographic proof of payment — for less money than we
+///    invoiced.
+/// 2. `preimage.unwrap()` panics when the purpose carries no preimage (e.g.
+///    an invoice created with a hash-only inbound payment), killing the
+///    event handler.
+fn payment_claim_preimage(
+    _amount_msat: u64,
+    _counterparty_skimmed_fee_msat: u64,
+    purpose: ldk::events::PaymentPurpose,
+) -> PaymentPreimage {
+    let preimage = match purpose {
+        ldk::events::PaymentPurpose::Bolt11InvoicePayment {
+            payment_preimage, ..
+        } => payment_preimage,
+        ldk::events::PaymentPurpose::Bolt12OfferPayment {
+            payment_preimage, ..
+        } => payment_preimage,
+        ldk::events::PaymentPurpose::Bolt12RefundPayment {
+            payment_preimage, ..
+        } => payment_preimage,
+        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+    };
+    preimage.unwrap()
+}
+
+#[cfg(test)]
+mod payment_claimable_repro_tests {
+    //! Reproduction tests for the P0 `PaymentClaimable` vulnerability.
+    //!
+    //! These tests pin down the *current, buggy* behaviour of
+    //! `payment_claim_preimage` (which mirrors the `Event::PaymentClaimable`
+    //! match arm). They are expected to be rewritten to assert the *fixed*
+    //! behaviour in the follow-up commit.
+
+    use super::*;
+    use lampo_common::ldk::types::payment::PaymentSecret;
+
+    fn bolt11_purpose(preimage: Option<PaymentPreimage>) -> ldk::events::PaymentPurpose {
+        ldk::events::PaymentPurpose::Bolt11InvoicePayment {
+            payment_preimage: preimage,
+            payment_secret: PaymentSecret([0x42u8; 32]),
+        }
+    }
+
+    /// REPRODUCTION (bug b): a `PaymentClaimable` whose purpose carries no
+    /// preimage panics the event handler via `preimage.unwrap()`.
+    #[test]
+    #[should_panic]
+    fn repro_none_preimage_panics_the_handler() {
+        let _ = payment_claim_preimage(1_000_000, 0, bolt11_purpose(None));
+    }
+
+    /// REPRODUCTION (bug a): an underpaid payment — the channel counterparty
+    /// skimmed an extra fee, so `amount_msat` no longer covers the invoice —
+    /// is claimed anyway, releasing the preimage (proof of payment) for less
+    /// money than invoiced.
+    #[test]
+    fn repro_underpaid_payment_is_claimed_anyway() {
+        let preimage = PaymentPreimage([0x07u8; 32]);
+        // Invoice was for 1_000_000 msat, but the counterparty skimmed
+        // 5_000 msat: we will only ever see 995_000 msat, yet the handler
+        // still hands over the preimage.
+        let claimed =
+            payment_claim_preimage(995_000, 5_000, bolt11_purpose(Some(preimage.clone())));
+        assert_eq!(
+            claimed.0, preimage.0,
+            "BUG: the preimage is released even though the payment is underpaid"
+        );
     }
 }
