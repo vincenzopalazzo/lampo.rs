@@ -161,14 +161,11 @@ impl LampoChainSync {
             "Core Password is missing from the configuration file"
         ))?;
 
-        log::debug!("Core URL: {:?}", core_url);
-        // FIXME: somehow we should fix this
-        let url_parts: Vec<&str> = core_url.split(':').collect();
-        let host = url_parts[1];
-        let host = host.strip_prefix("//").unwrap_or(host);
-        let port = url_parts[2].parse::<u16>()?;
+        let (host, port) = Self::parse_core_url(core_url)?;
 
-        log::debug!("Connecting to core at: {:?} - {host}", url_parts);
+        // SECURITY: log host and port only -- never the raw URL, which can
+        // embed the RPC credentials.
+        log::debug!("Connecting to core at: {host}:{port}");
 
         let base_url = format!("http://{host}:{port}");
         let rpc_credentials = base64::encode(format!("{}:{}", core_user, core_pass));
@@ -185,6 +182,32 @@ impl LampoChainSync {
             wallet: OnceLock::new(),
             sweeper: OnceLock::new(),
         })
+    }
+
+    /// Parse a `http://host:port` (or bare `host:port`) core URL.
+    ///
+    /// Returns an error instead of panicking on malformed input: a typo in
+    /// `lampo.conf` must be a configuration error, not an
+    /// `index out of bounds` crash.
+    fn parse_core_url(core_url: &str) -> error::Result<(String, u16)> {
+        let url = core_url.trim();
+        let scheme_stripped = url
+            .strip_prefix("http://")
+            .or_else(|| url.strip_prefix("https://"))
+            .unwrap_or(url);
+        // Drop any userinfo (`user:pass@host:port`) so it can never end up
+        // in logs or in the host part by accident.
+        let host_port = scheme_stripped.rsplit('@').next().unwrap_or("");
+        let (host, port) = host_port.rsplit_once(':').ok_or_else(|| {
+            error::anyhow!("invalid core URL: expected `http://host:port`, missing port")
+        })?;
+        if host.is_empty() {
+            error::bail!("invalid core URL: expected `http://host:port`, empty host");
+        }
+        let port = port
+            .parse::<u16>()
+            .map_err(|_| error::anyhow!("invalid core URL: port is not a valid u16"))?;
+        Ok((host.to_string(), port))
     }
 
     pub fn set_channel_manager(&self, channel_manager: Arc<LampoChannel>) {
@@ -605,7 +628,56 @@ mod tests {
     use lampo_common::model::response::{NewAddress, Utxo};
     use lampo_common::wallet::{BlockRef, WalletManager};
 
-    use super::{mark_initial_sync_complete, WalletChainListener};
+    use super::{mark_initial_sync_complete, LampoChainSync, WalletChainListener};
+
+    fn conf_with_core_url(url: &str) -> Arc<LampoConf> {
+        let mut conf = LampoConf::default();
+        conf.core_url = Some(url.to_string());
+        conf.core_user = Some("lampo".to_string());
+        conf.core_pass = Some("lampo".to_string());
+        Arc::new(conf)
+    }
+
+    /// A well-formed `http://host:port` URL must keep working.
+    #[test]
+    fn valid_core_url_is_accepted() {
+        let backend = LampoChainSync::new(conf_with_core_url("http://127.0.0.1:18443"));
+        assert!(
+            backend.is_ok(),
+            "valid core URL must be accepted: {:?}",
+            backend.err()
+        );
+    }
+
+    /// Bug #3 (fixed): a malformed core URL (missing scheme, missing port,
+    /// garbage) returns a proper configuration error instead of panicking
+    /// on a blind `url_parts[2]` index.
+    #[test]
+    fn malformed_core_url_returns_error() {
+        for url in ["http://127.0.0.1", "", "not a url", "http://host:abc"] {
+            let res = LampoChainSync::new(conf_with_core_url(url));
+            assert!(res.is_err(), "malformed URL `{url}` must error, not panic");
+        }
+    }
+
+    /// `parse_core_url` keeps the historical behavior for
+    /// `http://host:port` and never carries userinfo into the host.
+    #[test]
+    fn parse_core_url_extracts_host_and_port() {
+        assert_eq!(
+            LampoChainSync::parse_core_url("http://127.0.0.1:18443").unwrap(),
+            ("127.0.0.1".to_string(), 18443)
+        );
+        assert_eq!(
+            LampoChainSync::parse_core_url("127.0.0.1:8332").unwrap(),
+            ("127.0.0.1".to_string(), 8332)
+        );
+        // Credentials in the URL must not leak into the host (and logs).
+        let (host, port) = LampoChainSync::parse_core_url("http://user:secret@localhost:8332").unwrap();
+        assert_eq!((host.as_str(), port), ("localhost", 8332));
+        assert!(LampoChainSync::parse_core_url("http://:8332").is_err());
+        assert!(LampoChainSync::parse_core_url("http://host:notaport").is_err());
+    }
 
     struct MockWallet {
         heights: Mutex<Vec<u32>>,
@@ -744,3 +816,4 @@ mod tests {
         }
     }
 }
+
