@@ -458,18 +458,28 @@ impl Handler for LampoHandler {
                 payment_id: _,
                 ..
             } => {
-                // FIXME(security): P0 — this helper currently reproduces the
-                // vulnerable behaviour on purpose (see the reproduction tests
-                // in `payment_claimable_repro_tests`): it never inspects
-                // `amount_msat`/`counterparty_skimmed_fee_msat`, so an
-                // underpaid invoice is claimed anyway, and it panics on a
-                // `None` preimage.
-                let preimage = payment_claim_preimage(
+                match decide_payment_claim(
                     amount_msat,
                     counterparty_skimmed_fee_msat,
-                    purpose,
-                );
-                self.channel_manager.manager().claim_funds(preimage);
+                    &purpose,
+                ) {
+                    PaymentClaimDecision::Claim(preimage) => {
+                        log::info!(
+                            target: "lampo::handler",
+                            "claiming payment `{payment_hash}` of {amount_msat} msat (claim deadline {claim_deadline:?})"
+                        );
+                        self.channel_manager.manager().claim_funds(preimage);
+                    }
+                    PaymentClaimDecision::FailBack(reason) => {
+                        log::error!(
+                            target: "lampo::handler",
+                            "refusing to claim payment `{payment_hash}` of {amount_msat} msat (counterparty skimmed {counterparty_skimmed_fee_msat} msat, claim deadline {claim_deadline:?}): {reason}; failing the HTLC(s) back to the sender"
+                        );
+                        self.channel_manager
+                            .manager()
+                            .fail_htlc_backwards(&payment_hash);
+                    }
+                }
                 Ok(())
             }
             ldk::events::Event::PaymentClaimed {
@@ -729,25 +739,43 @@ impl Handler for LampoHandler {
     }
 }
 
-/// Decide which preimage (if any) to release for a `PaymentClaimable` event.
+/// What to do with a `PaymentClaimable` event.
+#[derive(Debug, PartialEq, Eq)]
+enum PaymentClaimDecision {
+    /// Release the preimage and claim the funds.
+    Claim(PaymentPreimage),
+    /// Fail the HTLC(s) back to the sender instead of claiming; the string
+    /// explains why the payment was rejected.
+    FailBack(&'static str),
+}
+
+/// Validate a `PaymentClaimable` event *before* releasing the preimage (the
+/// cryptographic proof of payment) to the channel manager.
 ///
-/// FIXME(security): P0 — this is the **vulnerable** pre-fix logic, extracted
-/// verbatim from the `Event::PaymentClaimable` arm so the bug can be
-/// reproduced by unit tests:
+/// Security invariants:
 ///
-/// 1. `amount_msat` and `counterparty_skimmed_fee_msat` are completely
-///    ignored, so a payment that is *smaller* than the invoiced amount (the
-///    previous hop skimmed an extra fee) is claimed anyway: we hand over the
-///    preimage — the cryptographic proof of payment — for less money than we
-///    invoiced.
-/// 2. `preimage.unwrap()` panics when the purpose carries no preimage (e.g.
-///    an invoice created with a hash-only inbound payment), killing the
-///    event handler.
-fn payment_claim_preimage(
+/// 1. **Never claim an underpaid payment.** When
+///    `ChannelConfig::accept_underpaying_htlcs` is set, LDK may surface a
+///    payment whose previous hop skimmed an extra fee
+///    (`counterparty_skimmed_fee_msat > 0`), so `amount_msat` no longer
+///    covers the invoiced amount. Claiming it would hand the payer the
+///    preimage — proof of payment — for less money than we invoiced. Such
+///    payments are failed back instead.
+/// 2. **Never panic on a missing preimage.** Invoice purposes may carry no
+///    preimage (e.g. hash-only inbound payments created with
+///    `create_inbound_payment_for_hash`); those cannot be claimed safely and
+///    are failed back instead of hitting `unwrap()`.
+fn decide_payment_claim(
     _amount_msat: u64,
-    _counterparty_skimmed_fee_msat: u64,
-    purpose: ldk::events::PaymentPurpose,
-) -> PaymentPreimage {
+    counterparty_skimmed_fee_msat: u64,
+    purpose: &ldk::events::PaymentPurpose,
+) -> PaymentClaimDecision {
+    if counterparty_skimmed_fee_msat > 0 {
+        return PaymentClaimDecision::FailBack(
+            "payment is underpaid: the counterparty skimmed an extra fee, so the \
+             received amount does not cover the invoice",
+        );
+    }
     let preimage = match purpose {
         ldk::events::PaymentPurpose::Bolt11InvoicePayment {
             payment_preimage, ..
@@ -758,19 +786,25 @@ fn payment_claim_preimage(
         ldk::events::PaymentPurpose::Bolt12RefundPayment {
             payment_preimage, ..
         } => payment_preimage,
-        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => Some(preimage),
+        ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => {
+            return PaymentClaimDecision::Claim(preimage.clone())
+        }
     };
-    preimage.unwrap()
+    match preimage {
+        Some(preimage) => PaymentClaimDecision::Claim(preimage.clone()),
+        None => PaymentClaimDecision::FailBack(
+            "no preimage available for this payment purpose; cannot claim safely",
+        ),
+    }
 }
 
 #[cfg(test)]
-mod payment_claimable_repro_tests {
-    //! Reproduction tests for the P0 `PaymentClaimable` vulnerability.
+mod payment_claimable_tests {
+    //! Tests for the fixed `PaymentClaimable` handling.
     //!
-    //! These tests pin down the *current, buggy* behaviour of
-    //! `payment_claim_preimage` (which mirrors the `Event::PaymentClaimable`
-    //! match arm). They are expected to be rewritten to assert the *fixed*
-    //! behaviour in the follow-up commit.
+    //! The previous commit reproduced the P0 bug (underpaid payments claimed
+    //! anyway, `None` preimage panicking the handler); these tests assert the
+    //! fixed behaviour of `decide_payment_claim`.
 
     use super::*;
     use lampo_common::ldk::types::payment::PaymentSecret;
@@ -782,29 +816,51 @@ mod payment_claimable_repro_tests {
         }
     }
 
-    /// REPRODUCTION (bug b): a `PaymentClaimable` whose purpose carries no
-    /// preimage panics the event handler via `preimage.unwrap()`.
+    /// Regression for the P0 panic: a `PaymentClaimable` whose purpose
+    /// carries no preimage must be failed back, not `unwrap()`ed.
     #[test]
-    #[should_panic]
-    fn repro_none_preimage_panics_the_handler() {
-        let _ = payment_claim_preimage(1_000_000, 0, bolt11_purpose(None));
+    fn missing_preimage_is_failed_back_instead_of_panicking() {
+        let decision = decide_payment_claim(1_000_000, 0, &bolt11_purpose(None));
+        assert!(
+            matches!(decision, PaymentClaimDecision::FailBack(_)),
+            "a missing preimage must fail the HTLC back, got {decision:?}"
+        );
     }
 
-    /// REPRODUCTION (bug a): an underpaid payment — the channel counterparty
-    /// skimmed an extra fee, so `amount_msat` no longer covers the invoice —
-    /// is claimed anyway, releasing the preimage (proof of payment) for less
-    /// money than invoiced.
+    /// Regression for the P0 underpayment bug: a payment whose previous hop
+    /// skimmed an extra fee no longer covers the invoice and must be failed
+    /// back — the preimage (proof of payment) must NOT be released.
     #[test]
-    fn repro_underpaid_payment_is_claimed_anyway() {
-        let preimage = PaymentPreimage([0x07u8; 32]);
+    fn underpaid_payment_is_failed_back_not_claimed() {
         // Invoice was for 1_000_000 msat, but the counterparty skimmed
-        // 5_000 msat: we will only ever see 995_000 msat, yet the handler
-        // still hands over the preimage.
-        let claimed =
-            payment_claim_preimage(995_000, 5_000, bolt11_purpose(Some(preimage.clone())));
-        assert_eq!(
-            claimed.0, preimage.0,
-            "BUG: the preimage is released even though the payment is underpaid"
+        // 5_000 msat: we would only ever receive 995_000 msat.
+        let preimage = PaymentPreimage([0x07u8; 32]);
+        let decision =
+            decide_payment_claim(995_000, 5_000, &bolt11_purpose(Some(preimage.clone())));
+        assert!(
+            matches!(decision, PaymentClaimDecision::FailBack(_)),
+            "an underpaid payment must be failed back, got {decision:?}"
         );
+    }
+
+    /// A fully paid invoice payment is claimed as before.
+    #[test]
+    fn fully_paid_payment_is_claimed() {
+        let preimage = PaymentPreimage([0x07u8; 32]);
+        let decision = decide_payment_claim(1_000_000, 0, &bolt11_purpose(Some(preimage.clone())));
+        assert_eq!(decision, PaymentClaimDecision::Claim(preimage));
+    }
+
+    /// A spontaneous (keysend) payment always carries its preimage and is
+    /// claimed as before.
+    #[test]
+    fn spontaneous_payment_is_claimed() {
+        let preimage = PaymentPreimage([0x09u8; 32]);
+        let decision = decide_payment_claim(
+            42_000,
+            0,
+            &ldk::events::PaymentPurpose::SpontaneousPayment(preimage.clone()),
+        );
+        assert_eq!(decision, PaymentClaimDecision::Claim(preimage));
     }
 }
