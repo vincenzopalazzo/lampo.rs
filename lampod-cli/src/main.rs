@@ -51,14 +51,29 @@ async fn main() -> error::Result<()> {
 }
 
 fn write_words_to_file<P: AsRef<Path>>(path: P, words: String) -> error::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?;
+    // SECURITY: `path` will hold the BIP39 mnemonic. Create it owner-only
+    // (0600); the default umask (022) would otherwise leave it
+    // world-readable (0644) for any local user.
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path.as_ref())?;
 
     // FIXME: we should give the possibility to encrypt this file.
     file.write_all(words.as_bytes())?;
+
+    // `OpenOptions::mode` only applies when the file is created (and is
+    // masked by the umask), so tighten the permissions explicitly to also
+    // cover pre-existing files with looser modes.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path.as_ref(), std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(())
 }
 
@@ -86,8 +101,16 @@ async fn create_new_wallet(
             BDKWalletManager::new(lampo_conf.clone()).await?
         }
     };
-    write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic.clone())?;
-    println!("Your new wallet mnemonic is:\n{mnemonic}\nPLEASE BACK IT UP SECURELY!");
+    let wallet_path = format!("{}/wallet.dat", words_path);
+    write_words_to_file(&wallet_path, mnemonic.clone())?;
+    // SECURITY: do not print the mnemonic to the terminal -- it would leak
+    // into scrollback buffers, tmux/screen logs, CI logs and `ps`-visible
+    // transcripts. Point the user at the (0600) wallet file instead.
+    println!(
+        "Your new wallet mnemonic has been written to `{wallet_path}` (permissions 0600).\n\
+         PLEASE BACK IT UP SECURELY and keep it private: anyone who reads these words \
+         controls your funds."
+    );
     Ok(Arc::new(wallet))
 }
 
@@ -226,4 +249,67 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
     log::info!("preparing httpd api on addr `{url}`");
     tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// REPRO (bug #2): `wallet.dat` holds the BIP39 mnemonic but is created
+    /// with default `OpenOptions` (no explicit mode), so with the typical
+    /// umask 022 it ends up world-readable (0644). Any local user can read
+    /// the node's wallet seed.
+    #[cfg(unix)]
+    #[test]
+    fn wallet_dat_is_written_with_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("lampod-cli-repro-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wallet_path = dir.join("wallet.dat");
+
+        write_words_to_file(&wallet_path, "abandon abandon abandon".to_string()).unwrap();
+
+        let mode = std::fs::metadata(&wallet_path)
+            .unwrap()
+            .permissions()
+            .mode();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "wallet.dat contains the mnemonic and must be 0600, got {:o}",
+            mode & 0o777
+        );
+    }
+
+    /// Regression: pre-existing wallet.dat with loose permissions must be
+    /// tightened to 0600 as well.
+    #[cfg(unix)]
+    #[test]
+    fn wallet_dat_permissions_are_tightened_on_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("lampod-cli-repro2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wallet_path = dir.join("wallet.dat");
+        std::fs::write(&wallet_path, "old words").unwrap();
+        std::fs::set_permissions(&wallet_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_words_to_file(&wallet_path, "abandon abandon abandon".to_string()).unwrap();
+
+        let mode = std::fs::metadata(&wallet_path)
+            .unwrap()
+            .permissions()
+            .mode();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "existing wallet.dat must be tightened to 0600, got {:o}",
+            mode & 0o777
+        );
+    }
 }
