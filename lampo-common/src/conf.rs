@@ -42,14 +42,32 @@ pub struct LampoConf {
     pub fast_sync: Option<bool>,
 }
 
+impl LampoConf {
+    /// Resolve the default lampo root path.
+    ///
+    /// Resolution order: `$LAMPO_HOME`, then `$HOME/.lampo`, then
+    /// `./.lampo` as a last-resort fallback. Never panics: a daemon
+    /// started from a minimal systemd unit or a container may not have
+    /// a determinable home directory.
+    /// (uses the deprecated `std::env::home_dir()` to avoid a dependency on dirs)
+    pub fn default_root_path() -> String {
+        if let Ok(path) = std::env::var("LAMPO_HOME") {
+            path
+        } else {
+            #[allow(deprecated)]
+            match std::env::home_dir() {
+                Some(path) => format!("{}/.lampo", path.to_string_lossy()),
+                None => "./.lampo".to_owned(),
+            }
+        }
+    }
+}
+
 impl Default for LampoConf {
     fn default() -> Self {
-        // default path for the configuration file
-        // (use deprecated std::env::home_dir() to avoid a dependency on dirs)
-        #[allow(deprecated)]
-        let path = std::env::home_dir().expect("Impossible to get the home directory");
-        let path = path.to_str().unwrap();
-        let lampo_home = format!("{}/.lampo", path);
+        // default path for the configuration file (never panics, see
+        // `LampoConf::default_root_path`)
+        let lampo_home = Self::default_root_path();
         Self {
             inner: None,
             // default network is testnet
@@ -338,5 +356,35 @@ trait TrimmedString {
 impl TrimmedString for String {
     fn to_trimmed(self) -> String {
         self.trim().to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LampoConf;
+
+    /// Regression (bug 3): `LampoConf::default()` must not panic when the
+    /// home directory cannot be determined; it falls back to `$LAMPO_HOME`
+    /// and finally to `./.lampo`.
+    ///
+    /// NOTE: before the fix this panicked with
+    /// `expect("Impossible to get the home directory")` only where
+    /// `std::env::home_dir()` has no passwd fallback (e.g. distroless
+    /// containers); on developer machines the panic could not be forced
+    /// via env manipulation, so this asserts the new fallback behavior.
+    #[test]
+    fn lampo_conf_default_falls_back_gracefully() {
+        std::env::remove_var("LAMPO_HOME");
+        std::env::remove_var("HOME");
+        // No HOME and no LAMPO_HOME: must not panic. Where a passwd
+        // fallback exists the real home is used; otherwise we get the
+        // `./.lampo` relative fallback. Either way the path is usable.
+        let conf = LampoConf::default();
+        assert!(!conf.root_path.is_empty());
+        // LAMPO_HOME always wins.
+        std::env::set_var("LAMPO_HOME", "/tmp/lampo-home-fallback-test");
+        let conf = LampoConf::default();
+        assert_eq!(conf.root_path, "/tmp/lampo-home-fallback-test");
+        std::env::remove_var("LAMPO_HOME");
     }
 }

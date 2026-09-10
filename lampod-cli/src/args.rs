@@ -75,11 +75,9 @@ impl TryInto<LampoConf> for LampoCliArgs {
     type Error = error::Error;
 
     fn try_into(self) -> Result<LampoConf, Self::Error> {
-        let mut conf = LampoConf::default();
-
         // if network is not specified, set the testnet dir
         let network = self.network.unwrap_or(String::from("testnet"));
-        conf.network = match network.as_str() {
+        let network = match network.as_str() {
             "bitcoin" => Network::Bitcoin,
             "testnet" => Network::Testnet,
             "regtest" => Network::Regtest,
@@ -87,9 +85,16 @@ impl TryInto<LampoConf> for LampoCliArgs {
             _ => error::bail!("Invalid network {network}"),
         };
 
-        let path = self.data_dir.unwrap_or(conf.root_path);
+        // Resolve the data dir without going through `LampoConf::default()`:
+        // prefer the explicit `--data-dir`, otherwise the same
+        // panic-free resolution used by `Default` (`$LAMPO_HOME`, then
+        // `$HOME/.lampo`, then `./.lampo`). Previously this called
+        // `LampoConf::default()` first, which panicked when the home
+        // directory could not be determined -- even when the user had
+        // passed an explicit `--data-dir`.
+        let path = self.data_dir.unwrap_or_else(LampoConf::default_root_path);
         // FIXME: this override the full configuration, we should merge the two
-        conf = LampoConf::new(Some(path), Some(conf.network), None)?;
+        let mut conf = LampoConf::new(Some(path), Some(network), None)?;
         conf.prepare_dirs()?;
 
         log::debug!(target: "lampod-cli", "lampo data dir `{}`", conf.path());
@@ -125,4 +130,58 @@ impl TryInto<LampoConf> for LampoCliArgs {
 
 pub fn parse_args() -> Result<LampoCliArgs, error::Error> {
     Ok(LampoCliArgs::parse())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args_with_data_dir(data_dir: &str) -> LampoCliArgs {
+        LampoCliArgs {
+            data_dir: Some(data_dir.to_string()),
+            network: Some("regtest".to_string()),
+            client: None,
+            restore_wallet: false,
+            log_level: None,
+            log_file: None,
+            bitcoind_url: None,
+            bitcoind_user: None,
+            bitcoind_pass: None,
+            dev_force_poll: false,
+            api_host: None,
+            api_port: None,
+            subcommand: None,
+        }
+    }
+
+    /// Regression (bug 3, CLI side): `try_into` no longer calls
+    /// `LampoConf::default()`, so it must succeed even when the home
+    /// directory cannot be determined -- an explicit `--data-dir` is
+    /// enough. Before the fix this panicked with
+    /// `expect("Impossible to get the home directory")`.
+    ///
+    /// NOTE: the original panic was only forcible where
+    /// `std::env::home_dir()` has no passwd fallback (e.g. distroless
+    /// containers); this asserts the new panic-free behavior.
+    #[test]
+    fn try_into_never_panics_without_home() {
+        // NOTE: single test on purpose -- env manipulation is
+        // process-global and would race across parallel tests.
+        std::env::remove_var("HOME");
+        std::env::remove_var("LAMPO_HOME");
+
+        // An explicit `--data-dir` is enough.
+        let args = args_with_data_dir("/tmp/lampo-cli-regression-no-home");
+        let conf: LampoConf = args.try_into().unwrap();
+        assert_eq!(conf.root_path, "/tmp/lampo-cli-regression-no-home");
+
+        // Without `--data-dir`, the panic-free fallback resolution is
+        // used ($LAMPO_HOME first).
+        std::env::set_var("LAMPO_HOME", "/tmp/lampo-cli-regression-lampo-home");
+        let mut args = args_with_data_dir("/tmp/unused");
+        args.data_dir = None;
+        let conf: LampoConf = args.try_into().unwrap();
+        assert_eq!(conf.root_path, "/tmp/lampo-cli-regression-lampo-home");
+        std::env::remove_var("LAMPO_HOME");
+    }
 }
