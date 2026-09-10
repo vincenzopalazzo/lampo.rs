@@ -1,10 +1,6 @@
 #[allow(dead_code)]
 mod args;
 
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::Read;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -18,8 +14,8 @@ use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::logger;
+use lampo_common::wallet::WalletManager;
 use lampo_httpd::handler::HttpdHandler;
-use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
 
 use crate::args::LampoCliArgs;
@@ -30,65 +26,24 @@ async fn main() -> error::Result<()> {
     let args = args::parse_args()?;
     match &args.subcommand {
         Some(crate::args::LampoCliSubcommand::NewWallet) => {
-            // Prepare minimal config for wallet creation (no logger needed)
             let mut lampo_conf: LampoConf = args.clone().try_into()?;
             lampo_conf
                 .ldk_conf
                 .channel_handshake_limits
                 .force_announced_channel_preference = false;
             let lampo_conf = Arc::new(lampo_conf);
-            let client = lampo_conf.node.clone();
-            let client: Arc<dyn Backend> = match client.as_str() {
-                "core" => Arc::new(LampoChainSync::new(lampo_conf.clone())?),
-                _ => error::bail!("client {:?} not supported", client),
-            };
-            let words_path = format!("{}/", lampo_conf.path());
-            create_new_wallet(lampo_conf, client, &words_path).await?;
+            let (_, is_new) = BDKWalletManager::make_or_restore(lampo_conf.clone()).await?;
+            if is_new {
+                let mnemonic =
+                    std::fs::read_to_string(format!("{}/wallet.dat", lampo_conf.path()))?;
+                println!("Your new wallet mnemonic is:\n{mnemonic}\nPLEASE BACK IT UP SECURELY!");
+            } else {
+                println!("Wallet already exists, loaded from existing mnemonic.");
+            }
             return Ok(());
         }
         _ => run(args).await,
     }
-}
-
-fn write_words_to_file<P: AsRef<Path>>(path: P, words: String) -> error::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?;
-
-    // FIXME: we should give the possibility to encrypt this file.
-    file.write_all(words.as_bytes())?;
-    Ok(())
-}
-
-fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
-    let mut file = File::open(path.as_ref())?;
-    let mut content = String::new();
-
-    file.read_to_string(&mut content)?;
-
-    if content.is_empty() {
-        let path = path.as_ref().to_string_lossy().to_string();
-        error::bail!("The content of the wallet located at `{path}`. You lost the secret? Please report a bug this should never happens")
-    } else {
-        Ok(content)
-    }
-}
-
-async fn create_new_wallet(
-    lampo_conf: Arc<LampoConf>,
-    client: Arc<dyn Backend>,
-    words_path: &str,
-) -> error::Result<Arc<dyn WalletManager>> {
-    let (wallet, mnemonic) = match client.kind() {
-        lampo_common::backend::BackendKind::Core => {
-            BDKWalletManager::new(lampo_conf.clone()).await?
-        }
-    };
-    write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic.clone())?;
-    println!("Your new wallet mnemonic is:\n{mnemonic}\nPLEASE BACK IT UP SECURELY!");
-    Ok(Arc::new(wallet))
 }
 
 /// Return the root directory.
@@ -124,51 +79,29 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         _ => error::bail!("client {:?} not supported", client),
     };
 
-    let words_path = format!("{}/", lampo_conf.path());
-    let wallet = if restore_wallet {
-        if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
-            // Load the mnemonic from the file
-            let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
-            let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
-                }
-            };
-            wallet
-        } else {
-            // If file doesn't exist, ask for user input
-            let mnemonic: String = term::input(
-                "BIP 39 Mnemonic",
-                None,
-                Some("To restore the wallet, lampo needs the BIP39 mnemonic with words separated by spaces."),
-            )?;
-            // FIXME: make some sanity check about the mnemonic string
-            let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    // SAFETY: It is safe to unwrap the mnemonic because we check it
-                    // before.
-                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
-                }
-            };
-            write_words_to_file(format!("{}/wallet.dat", words_path), mnemonic)?;
-            wallet
-        }
+    let wallet = if restore_wallet
+        && !Path::new(&format!("{}/wallet.dat", lampo_conf.path())).exists()
+    {
+        // Interactive restore: prompt the user for their mnemonic
+        let mnemonic: String = term::input(
+            "BIP 39 Mnemonic",
+            None,
+            Some("To restore the wallet, lampo needs the BIP39 mnemonic with words separated by spaces."),
+        )?;
+        // FIXME: make some sanity check about the mnemonic string
+        let wallet = BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?;
+        std::fs::create_dir_all(lampo_conf.path())?;
+        std::fs::write(format!("{}/wallet.dat", lampo_conf.path()), &mnemonic)?;
+        wallet
     } else {
-        if Path::new(&format!("{}/wallet.dat", words_path)).exists() {
-            // Load the mnemonic from the file
-            log::warn!("Loading from existing wallet");
-            let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
-            let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
-                    BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
-                }
-            };
-            wallet
+        // Common path: create or restore from persisted wallet.dat
+        let (wallet, is_new) = BDKWalletManager::make_or_restore(lampo_conf.clone()).await?;
+        if is_new {
+            log::info!(target: "lampod-cli", "New wallet created. Back up your mnemonic!");
         } else {
-            // Use the new function for wallet creation
-            create_new_wallet(lampo_conf.clone(), client.clone(), &words_path).await?;
-            return Ok(());
+            log::info!(target: "lampod-cli", "Loading from existing wallet");
         }
+        wallet
     };
 
     let wallet = Arc::new(wallet);
