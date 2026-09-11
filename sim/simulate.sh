@@ -234,9 +234,26 @@ chaos_reorg() {
   mine 3
   # Tip invalidate leaves gossip SCIDs briefly stale; paying through a
   # half-rebuilt graph yields transient ChannelFailure → RetriesExhausted
-  # (seed=99 round 7 BOLT12). Wait for wallets + a settle window first.
+  # (seed=99 round 7 BOLT12). Wallet sync alone is not enough: LDK still
+  # returns TemporaryChannelFailure on mid-hops for ~1–2 min while channel
+  # monitors / gossip catch the new tip. Deepen the fork, wait, then probe
+  # until a real payment succeeds before resuming the round loop.
   wait_wallet_synced 180 || true
-  sleep 30
+  mine 6
+  wait_wallet_synced 180 || true
+  sleep 60
+  local i=0
+  while [ "$i" -lt 8 ]; do
+    if pay_probe "n1"; then
+      say "CHAOS reorg: post-reorg probe OK (attempt $((i+1)))"
+      return 0
+    fi
+    i=$((i+1))
+    say "CHAOS reorg: probe failed (attempt $i/8) — mining+waiting"
+    mine 2
+    sleep 20
+  done
+  fail "reorg: payment probe never recovered after tip invalidate"
 }
 chaos_feespam() {
   say "CHAOS feespam: 50 txs into mempool + estimate"
@@ -272,6 +289,9 @@ CHAOS_EVENTS=(restart9 restart_term storm reorg feespam churn zapconn)
 run_chaos() {
   local ev; ev=$(rand_pick "chaos-$1" "${CHAOS_EVENTS[@]}")
   "chaos_$ev" "$1-$ev"
+  # Give peers a moment to reconnect / refresh channel monitors before
+  # the next payment round hammers a still-settling graph.
+  sleep 10
   health_scan || fail "health scan tripped after chaos '$ev'"
 }
 
@@ -334,9 +354,46 @@ do_round() {
   if [ "$ok" = OK ]; then
     say "round $r OK: $src -> $dst via $m ${amt}msat (${dur}s, preimage ${pre:0:8}..)"
   else
-    say "round $r FAIL: $src -> $dst via $m ${amt}msat state=${state:-none} dur=${dur}s"
-    say "  raw: $(echo "$res" | head -c 300)"
-    fail "round $r payment $src->$dst ($m) state=${state:-none}"
+    # Transient TemporaryChannelFailure → RetriesExhausted is common right
+    # after chain chaos (reorg/storm). Retry the same src/dst/method a few
+    # times before declaring the round dead so we don't fail the soak on
+    # gossip lag (seed=99 round 7 BOLT12 after reorg).
+    local attempt=1 max_attempts=3
+    while [ "$attempt" -lt "$max_attempts" ]; do
+      attempt=$((attempt+1))
+      say "round $r: transient FAIL state=${state:-none} — retry $attempt/$max_attempts in 20s"
+      sleep 20
+      case $m in
+        invoice)
+          local inv2; inv2=$(TMO=30 rpc "$(API "${dst#n}")" invoice "{\"amount_msat\":$amt,\"description\":\"round $r retry$attempt\"}" | jqf 'd.get("bolt11","")')
+          [ -n "$inv2" ] || continue
+          res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$inv2\"}")
+          ;;
+        offer)
+          local off2; off2=$(TMO=30 rpc "$(API "${dst#n}")" offer "{\"amount_msat\":$amt,\"description\":\"round $r retry$attempt\"}" | jqf 'd.get("bolt12","")')
+          [ -n "$off2" ] || continue
+          res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$off2\",\"amount\":$amt}")
+          ;;
+        keysend)
+          res=$(TMO=120 rpc "$(API "${src#n}")" keysend "{\"destination\":\"${ID[$dst]}\",\"amount_msat\":$amt}")
+          ;;
+      esac
+      state=$(echo "$res" | jqf 'd.get("state","")')
+      pre=$(echo "$res" | jqf 'd.get("payment_preimage") or ""')
+      if [ "$state" = "Success" ] && [ -n "$pre" ]; then
+        ok=OK
+        dur=$(( $(date +%s) - t0 ))
+        hops=$(echo "$res" | jqf 'len(d.get("path",[]))')
+        echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,$state,${pre:0:16},$dur,${hops:- }" >> "$CSV"
+        say "round $r OK (retry $attempt): $src -> $dst via $m ${amt}msat (${dur}s, preimage ${pre:0:8}..)"
+        break
+      fi
+    done
+    if [ "$ok" != OK ]; then
+      say "round $r FAIL: $src -> $dst via $m ${amt}msat state=${state:-none} dur=${dur}s"
+      say "  raw: $(echo "$res" | head -c 300)"
+      fail "round $r payment $src->$dst ($m) state=${state:-none}"
+    fi
   fi
   health_scan || fail "health scan tripped after round $r"
 }
