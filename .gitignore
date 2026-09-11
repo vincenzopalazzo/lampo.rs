@@ -3,7 +3,7 @@ target
 # simulation run dirs / artifacts (never commit)
 sim-run*/
 **/sim-run/
-sim/**/artifacts/
+simulations/**/artifacts/
 
 # tools ignores
 **/__pycache__

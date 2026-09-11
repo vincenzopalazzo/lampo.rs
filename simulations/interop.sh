@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sim/interop.sh — lampo ↔ LDK-Server cross-implementation test (regtest).
+# simulations/interop.sh — lampo ↔ LDK-Server cross-implementation test (regtest).
 #
 # Topology (dead-end: lp1 and lp2 share NO channel):
 #   lp1 (lampo) ──c1── lk1 (ldk) ──c2── lk2 (ldk) ──c3── lp2 (lampo)
@@ -12,7 +12,7 @@
 # LDK side + lampo auto-reconnect, log health. Rows -> interop-results.csv.
 #
 # Prereqs (on the server):
-#   sim/ldk-deploy.sh build && sim/ldk-deploy.sh start 2
+#   simulations/ldk-deploy.sh build && simulations/ldk-deploy.sh start 2
 #   $REPO built (cargo build --release, or ship.sh <branch> -> BUILD_OK)
 #
 # Env: REPO BIN SIMDIR SEED TMO KEEP_GOING CHANNEL_SAT
@@ -211,7 +211,7 @@ done
 save_ids
 
 for n in lk1 lk2; do
-  ldk_up "$n" || { say "$n not running — run sim/ldk-deploy.sh start 2 first"; exit 2; }
+  ldk_up "$n" || { say "$n not running — run simulations/ldk-deploy.sh start 2 first"; exit 2; }
   ID[$n]=$(ldk_id "$n"); say "$n id=${ID[$n]:0:16}.. (grpc $(ldk_port $n), p2p $(ldk_p2p $n))"
 done
 

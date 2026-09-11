@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sim/run-mh.sh <soak|recover|stop> — the ONLY sanctioned way to start/stop
+# simulations/run-mh.sh <soak|recover|stop> — the ONLY sanctioned way to start/stop
 # the mh-cluster harnesses on the server. Makes concurrent instances
 # structurally impossible:
 #   1. kills every mh harness + mh node by exact data-dir patterns

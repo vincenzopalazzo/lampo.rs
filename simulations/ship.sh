@@ -6,15 +6,15 @@
 # Use when the build host has no GitHub credentials. Requires LAMPO_HOST.
 #
 # Usage:
-#   LAMPO_HOST=user@host ./sim/ship.sh main
-#   LAMPO_HOST=user@host ./sim/ship.sh fix/some-bug --no-build
+#   LAMPO_HOST=user@host ./simulations/ship.sh main
+#   LAMPO_HOST=user@host ./simulations/ship.sh fix/some-bug --no-build
 #
 # Env:
 #   LAMPO_HOST        required (e.g. user@regtest-host)
 #   LAMPO_REMOTE_DIR  remote clone path (default: $HOME/lampo-sim)
 #   LAMPO_BUNDLES     remote bundle dir (default: $HOME/bundles)
 #   LAMPO_HARNESS_DIR out-of-repo harness copy name (default: lampo-sim-harness)
-#   LAMPO_HARNESS_SYNC  set 0 to skip rsync of sim/ (default: 1)
+#   LAMPO_HARNESS_SYNC  set 0 to skip rsync of simulations/ (default: 1)
 set -euo pipefail
 
 BRANCH=${1:?usage: LAMPO_HOST=user@host ship.sh <branch> [--no-build]}
@@ -59,10 +59,10 @@ fi
 REMOTE
 if [ "${LAMPO_HARNESS_SYNC:-1}" = 1 ]; then
   if ssh "$HOST" 'command -v rsync >/dev/null'; then
-    rsync -a --delete "$(git rev-parse --show-toplevel)/sim/" "$HOST:$HARNESS_DIR/"
+    rsync -a --delete "$(git rev-parse --show-toplevel)/simulations/" "$HOST:$HARNESS_DIR/"
   else
     ssh "$HOST" "mkdir -p ~/$HARNESS_DIR"
-    scp -qr "$(git rev-parse --show-toplevel)/sim/" "$HOST:$HARNESS_DIR/"
+    scp -qr "$(git rev-parse --show-toplevel)/simulations/" "$HOST:$HARNESS_DIR/"
   fi
   ssh "$HOST" "chmod +x ~/$HARNESS_DIR/*.sh 2>/dev/null || true"
 fi

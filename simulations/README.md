@@ -1,4 +1,4 @@
-# lampo simulation harness (`sim/`)
+# lampo simulation harness (`simulations/`)
 
 Pre-production soak testing for lampo on a **private regtest** bitcoind.
 The harness never touches mainnet or any production / “sacred” nodes.
@@ -37,7 +37,7 @@ export BIN=$PWD/target/release/lampod-cli
 export REPO=$PWD
 export SIMDIR=$PWD/sim-run-recover
 
-SEED=99 MATRIX=1 STRESS=1 STRESS_CYCLES=25 ./sim/recover.sh
+SEED=99 MATRIX=1 STRESS=1 STRESS_CYCLES=25 ./simulations/recover.sh
 ```
 
 Expect a final `RECOVERY COMPLETE: N PASS / 0 FAIL` line (campaign gate used `46 PASS / 0 FAIL`).
@@ -53,13 +53,13 @@ export SIMDIR=$PWD/sim-run-phase2
 
 NODES=10 ROUNDS=20 SEED=99 CHAOS_EVERY=3 \
   API_BASE=8310 P2P_BASE=20210 \
-  ./sim/simulate.sh
+  ./simulations/simulate.sh
 ```
 
 Smoke (faster):
 
 ```bash
-NODES=3 ROUNDS=2 CHAOS_EVERY=2 ./sim/simulate.sh
+NODES=3 ROUNDS=2 CHAOS_EVERY=2 ./simulations/simulate.sh
 ```
 
 `CHAOS_EVERY=3` with `SEED=99` hits a tip-invalidate reorg before round 7; the harness settles (wallet sync, deepen fork, payment probe) before the next round.
@@ -73,7 +73,7 @@ Results: `$SIMDIR/results.csv`, `$SIMDIR/sim.log`, failure artifacts under `$SIM
 ```bash
 export LAMPO_HOST=user@your-regtest-host   # required — no default
 export LAMPO_REMOTE_DIR='$HOME/lampo-sim'
-./sim/ship.sh <branch>
+./simulations/ship.sh <branch>
 ```
 
 ## Agent / contributor notes

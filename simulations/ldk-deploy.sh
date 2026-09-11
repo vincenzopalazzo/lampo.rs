@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# sim/ldk-deploy.sh — provision LDK-Server nodes on the debian server for the
+# simulations/ldk-deploy.sh — provision LDK-Server nodes on the debian server for the
 # lampo interop/simln tiers. Run ON THE SERVER (or via ssh).
 #
-#   ./sim/ldk-deploy.sh build            # clone + protoc + cargo build (once)
-#   ./sim/ldk-deploy.sh start [N]        # write configs, launch lk1..lkN
-#   ./sim/ldk-deploy.sh stop [N]         # SIGTERM lk1..lkN
-#   ./sim/ldk-deploy.sh status           # show node info of all running
+#   ./simulations/ldk-deploy.sh build            # clone + protoc + cargo build (once)
+#   ./simulations/ldk-deploy.sh start [N]        # write configs, launch lk1..lkN
+#   ./simulations/ldk-deploy.sh stop [N]         # SIGTERM lk1..lkN
+#   ./simulations/ldk-deploy.sh status           # show node info of all running
 #
 # Env: LDK_REPO(~/ldk-server) LDK_REF(main) LDKDIR($LDK_REPO/ldk-nodes)
 #      LDK_GRPC_BASE(3540) LDK_P2P_BASE(9840)

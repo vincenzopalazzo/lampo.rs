@@ -13,8 +13,8 @@ lk3 (ldk) ── lp1 (lampo) ── lp2 (lampo) ── lk1/lk2 (ldk)
 
 ## Setup
 
-1. Interop tier running (`./sim/ldk-deploy.sh start 4`, `./sim/interop.sh` —
-   or a bigger seeded cluster from `./sim/simulate.sh` plus LDK edges).
+1. Interop tier running (`./simulations/ldk-deploy.sh start 4`, `./simulations/interop.sh` —
+   or a bigger seeded cluster from `./simulations/simulate.sh` plus LDK edges).
 2. Channels between LDK edges and lampo relays must be **announced**.
 3. Build sim-ln:
 
@@ -26,12 +26,12 @@ lk3 (ldk) ── lp1 (lampo) ── lp2 (lampo) ── lk1/lk2 (ldk)
 4. Copy `sim.json.tpl` → `sim.json` and fill:
    - `api_key`: hex of `<ldk node>/data/regtest/api_key`
    - `cert`: path under `$LDK_HOME` (see template placeholders)
-   - node ids from `./sim/ldk-deploy.sh status`
+   - node ids from `./simulations/ldk-deploy.sh status`
 
 ## Run
 
 ```bash
-cd sim/simln
+cd simulations/simln
 # random activity
 sim-cli --sim-file sim.json \
   --expected-payment-amount 50000sat --capacity-multiplier 4 --fix-seed 21
@@ -46,4 +46,4 @@ load, and keep seeded `simulate.sh` for strict replay.
 
 - lampo: `$SIMDIR/results.csv`, `getinfo` snapshots, log health
 - ldk: `ldk-server-cli list-forwarded-payments` per node
-- money guard: `./sim/recover.sh` STRESS against the mixed cluster
+- money guard: `./simulations/recover.sh` STRESS against the mixed cluster

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sim/lib.sh — shared helpers for the lampo simulation harnesses.
+# simulations/lib.sh — shared helpers for the lampo simulation harnesses.
 #
 # Sourced by multihop.sh / recover.sh. simulate.sh intentionally stays
 # standalone: the endless soak on the server keeps running against the

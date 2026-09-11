@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sim/multihop.sh — dedicated multi-hop payment harness.
+# simulations/multihop.sh — dedicated multi-hop payment harness.
 #
 # Why: the ring cluster of simulate.sh pays mostly over short routes and
 # only LOGS the hop count; nothing forces a payment that cannot be direct.
@@ -96,7 +96,7 @@ while :; do
   [ "$MH_ROUNDS" != 0 ] && [ "$r" -ge "$MH_ROUNDS" ] && break
 done
 
-say "phase 4: relay bounce (light bridge to sim/recover.sh — the heavy matrix lives there)"
+say "phase 4: relay bounce (light bridge to simulations/recover.sh — the heavy matrix lives there)"
 bounce_marks=$(log_marks)
 kill9 hm; sleep 2
 start_node hm

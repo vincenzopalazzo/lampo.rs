@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sim/recover.sh — lightning-node state recovery matrix + stress loop.
+# simulations/recover.sh — lightning-node state recovery matrix + stress loop.
 #
 # Question answered: "the process / the chain / the disk did something bad —
 # does the node come back with its lightning state intact (and its funds)?"

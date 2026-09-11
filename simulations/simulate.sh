@@ -4,7 +4,7 @@
 #
 # SimLN-style defined/random payment activity + chaos events on a private
 # regtest cluster, with hard assertions and artifact collection on failure.
-# See sim/README.md for how to run Phase 1 / Phase 2 gates.
+# See simulations/README.md for how to run Phase 1 / Phase 2 gates.
 #
 # Reuses hard-won lessons from earlier multihop soaks:
 #   - never delete lampod.pid (flock on unlinked path = two daemons = corrupt `manager`)
