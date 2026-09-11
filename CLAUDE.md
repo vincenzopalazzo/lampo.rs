@@ -13,6 +13,7 @@ Upstream soak harness for pre-prod gates. Details: `simulations/README.md` and `
 
 - Phase 1: `SEED=99 MATRIX=1 STRESS=1 STRESS_CYCLES=25 ./simulations/recover.sh`
 - Phase 2: `NODES=10 ROUNDS=20 SEED=99 CHAOS_EVERY=3 ./simulations/simulate.sh`
+  (edge-role matrix + coverage gate = lampo send/recv proof; SimLN ≠ that proof)
 - Regtest only. Never delete `lampod.pid`. Never touch mainnet / sacred nodes.
 - Set `BIN` / `REPO` / `SIMDIR` explicitly when not using defaults under `$HOME/lampo-sim`.
 

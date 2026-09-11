@@ -15,7 +15,11 @@
 #
 # Config via env vars (all optional): NODES ROUNDS SEED PAY_MIN_MSAT
 # PAY_MAX_MSAT CHAOS_EVERY METHODS TMO KEEP_GOING BIN CORE_URL CORE_USER
-# CORE_PASS API_BASE P2P_BASE
+# CORE_PASS API_BASE P2P_BASE ROLE_MATRIX MIN_MULTIHOP
+#
+# Phase 2 proves lampo as sender AND receiver (edge-role matrix + CSV
+# coverage gate). SimLN is optional relay load only — see simln/README.md.
+
 set -uo pipefail
 
 REPO=${REPO:-$HOME/lampo-sim}
@@ -28,6 +32,8 @@ PAY_MIN_MSAT=${PAY_MIN_MSAT:-10000}
 PAY_MAX_MSAT=${PAY_MAX_MSAT:-50000000}
 CHAOS_EVERY=${CHAOS_EVERY:-5}
 METHODS=${METHODS:-"invoice offer keysend"}
+ROLE_MATRIX=${ROLE_MATRIX:-1}
+MIN_MULTIHOP=${MIN_MULTIHOP:-1}
 TMO=${TMO:-60}
 KEEP_GOING=${KEEP_GOING:-0}
 API_BASE=${API_BASE:-8100}
@@ -296,20 +302,238 @@ run_chaos() {
 }
 
 # --- payments --------------------------------------------------------
+# do_pay <tag> <src> <dst> <method> <amt> [min_hops]
+# Core payment primitive used by probes, the edge-role matrix, and soak
+# rounds. Asserts Success+preimage; when min_hops is set, also requires
+# len(path) >= min_hops so lampo is proven as a multi-hop endpoint (not
+# only a direct peer payment).
+do_pay() {
+  local tag=$1 src=$2 dst=$3 m=$4 amt=$5 min_hops=${6:-0}
+  local t0 t1 res state pre dur ok=FAIL hops=" " attempt max_attempts
+  t0=$(date +%s)
+  case $m in
+    invoice)
+      local inv
+      inv=$(TMO=30 rpc "$(API "${dst#n}")" invoice "{\"amount_msat\":$amt,\"description\":\"$tag\"}" | jqf 'd.get("bolt11","")')
+      [ -n "$inv" ] || { say "$tag: $dst issued no invoice"; echo "$(date -Iseconds),$tag,$src,$dst,$m,$amt,NoInvoice,,$(( $(date +%s)-t0 )), " >> "$CSV"; return 1; }
+      res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$inv\"}")
+      ;;
+    offer)
+      local off
+      off=$(TMO=30 rpc "$(API "${dst#n}")" offer "{\"amount_msat\":$amt,\"description\":\"$tag\"}" | jqf 'd.get("bolt12","")')
+      [ -n "$off" ] || { say "$tag: $dst issued no offer"; echo "$(date -Iseconds),$tag,$src,$dst,$m,$amt,NoOffer,,$(( $(date +%s)-t0 )), " >> "$CSV"; return 1; }
+      res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$off\",\"amount\":$amt}")
+      ;;
+    keysend)
+      res=$(TMO=120 rpc "$(API "${src#n}")" keysend "{\"destination\":\"${ID[$dst]}\",\"amount_msat\":$amt}")
+      ;;
+    *) say "$tag: unknown method $m"; return 1 ;;
+  esac
+  t1=$(date +%s); dur=$((t1-t0))
+  state=$(echo "$res" | jqf 'd.get("state","")')
+  pre=$(echo "$res" | jqf 'd.get("payment_preimage") or ""')
+  if [ "$m" != keysend ]; then hops=$(echo "$res" | jqf 'len(d.get("path",[]))'); fi
+  if [ "$state" = "Success" ] && [ -n "$pre" ]; then ok=OK; fi
+  if [ "$ok" = OK ] && [ "$min_hops" -gt 0 ]; then
+    if [ "$m" = keysend ] || [ "${hops:-0}" -lt "$min_hops" ]; then
+      ok=FAIL
+      say "$tag: hop assert failed (method=$m hops=${hops:-?} want>=$min_hops)"
+    fi
+  fi
+  echo "$(date -Iseconds),$tag,$src,$dst,$m,$amt,$state,${pre:0:16},$dur,${hops:- }" >> "$CSV"
+  if [ "$ok" = OK ]; then
+    say "$tag OK: $src -> $dst via $m ${amt}msat (${dur}s, hops=${hops:-?}, preimage ${pre:0:8}..)"
+    return 0
+  fi
+  # Transient TemporaryChannelFailure → RetriesExhausted is common right
+  # after chain chaos (reorg/storm). Retry the same src/dst/method a few
+  # times before declaring the payment dead so we don't fail the soak on
+  # gossip lag (seed=99 round 7 BOLT12 after reorg).
+  attempt=1; max_attempts=3
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    attempt=$((attempt+1))
+    say "$tag: transient FAIL state=${state:-none} — retry $attempt/$max_attempts in 20s"
+    sleep 20
+    case $m in
+      invoice)
+        local inv2
+        inv2=$(TMO=30 rpc "$(API "${dst#n}")" invoice "{\"amount_msat\":$amt,\"description\":\"$tag retry$attempt\"}" | jqf 'd.get("bolt11","")')
+        [ -n "$inv2" ] || continue
+        res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$inv2\"}")
+        ;;
+      offer)
+        local off2
+        off2=$(TMO=30 rpc "$(API "${dst#n}")" offer "{\"amount_msat\":$amt,\"description\":\"$tag retry$attempt\"}" | jqf 'd.get("bolt12","")')
+        [ -n "$off2" ] || continue
+        res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$off2\",\"amount\":$amt}")
+        ;;
+      keysend)
+        res=$(TMO=120 rpc "$(API "${src#n}")" keysend "{\"destination\":\"${ID[$dst]}\",\"amount_msat\":$amt}")
+        ;;
+    esac
+    state=$(echo "$res" | jqf 'd.get("state","")')
+    pre=$(echo "$res" | jqf 'd.get("payment_preimage") or ""')
+    hops=" "
+    if [ "$m" != keysend ]; then hops=$(echo "$res" | jqf 'len(d.get("path",[]))'); fi
+    ok=FAIL
+    if [ "$state" = "Success" ] && [ -n "$pre" ]; then ok=OK; fi
+    if [ "$ok" = OK ] && [ "$min_hops" -gt 0 ]; then
+      if [ "$m" = keysend ] || [ "${hops:-0}" -lt "$min_hops" ]; then ok=FAIL; fi
+    fi
+    dur=$(( $(date +%s) - t0 ))
+    echo "$(date -Iseconds),$tag,$src,$dst,$m,$amt,$state,${pre:0:16},$dur,${hops:- }" >> "$CSV"
+    if [ "$ok" = OK ]; then
+      say "$tag OK (retry $attempt): $src -> $dst via $m ${amt}msat (${dur}s, hops=${hops:-?})"
+      health_scan || fail "health scan tripped after $tag"
+      return 0
+    fi
+  done
+  say "$tag FAIL: $src -> $dst via $m ${amt}msat state=${state:-none} dur=${dur}s hops=${hops:-?}"
+  say "  raw: $(echo "$res" | head -c 300)"
+  return 1
+}
+
 # pay_probe <src>: small known-good payment to a random OTHER node (asserted)
 pay_probe() {
-  local src=$1 dst amt inv offer res state pre
-  dst=$(rand_pick "probe-$1-dst" "${NAMES[@]}"); [ "$dst" = "$src" ] && dst=$([ "$src" = "${NAMES[0]}" ] && echo "${NAMES[1]}" || echo "${NAMES[0]}")
-  amt=1000000
-  inv=$(TMO=30 rpc "$(API "${dst#n}")" invoice "{\"amount_msat\":$amt,\"description\":\"probe\"}" | jqf 'd.get("bolt11","")')
-  [ -n "$inv" ] || { say "probe: $dst issued no invoice"; return 1; }
-  res=$(TMO=90 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$inv\"}")
-  state=$(echo "$res" | jqf 'd.get("state","")'); pre=$(echo "$res" | jqf 'd.get("payment_preimage") or ""')
-  [ "$state" = "Success" ] && [ -n "$pre" ]
+  local src=$1 dst
+  dst=$(rand_pick "probe-$1-dst" "${NAMES[@]}")
+  [ "$dst" = "$src" ] && dst=$([ "$src" = "${NAMES[0]}" ] && echo "${NAMES[1]}" || echo "${NAMES[0]}")
+  do_pay "probe-$src" "$src" "$dst" invoice 1000000
 }
+
+# opposite_node <name>: diametric peer on the ring (forces multi-hop when N>=3)
+# peer_other <name>: a different node (prefer ring-opposite for path diversity)
+peer_other() {
+  local n=$1 i idx=0 opp
+  for i in "${!NAMES[@]}"; do
+    if [ "${NAMES[$i]}" = "$n" ]; then idx=$i; break; fi
+  done
+  opp=$(( (idx + Nnodes / 2) % Nnodes ))
+  if [ "${NAMES[$opp]}" = "$n" ]; then
+    echo "$([ "$n" = "${NAMES[0]}" ] && echo "${NAMES[1]}" || echo "${NAMES[0]}")"
+  else
+    echo "${NAMES[$opp]}"
+  fi
+}
+
+# is_direct_chord <a> <b>: true if simulate.sh opens a chord between them
+is_direct_chord() {
+  case "$1:$2" in
+    n1:n3|n3:n1) [ "$Nnodes" -ge 3 ] && return 0 ;;
+    n4:n6|n6:n4) [ "$Nnodes" -ge 6 ] && return 0 ;;
+  esac
+  return 1
+}
+
+# find_multihop_pair: first ring pair with distance >=2 and no chord, so a
+# Success payment must actually route (not a direct channel). Empty if none.
+find_multihop_pair() {
+  local i j d a b d2
+  for i in "${!NAMES[@]}"; do
+    for j in "${!NAMES[@]}"; do
+      [ "$i" = "$j" ] && continue
+      d=$(( (j - i + Nnodes) % Nnodes ))
+      d2=$(( Nnodes - d ))
+      [ "$d2" -lt "$d" ] && d=$d2
+      [ "$d" -lt 2 ] && continue
+      a=${NAMES[$i]}; b=${NAMES[$j]}
+      is_direct_chord "$a" "$b" && continue
+      echo "$a $b"
+      return 0
+    done
+  done
+  return 1
+}
+
+# run_edge_matrix: prove every lampo node can SEND and RECEIVE, across
+# invoice/offer/keysend, plus a multi-hop subset when the topology allows.
+# SimLN can only drive LDK edges; this matrix is the Phase 2 send/recv proof.
+run_edge_matrix() {
+  local n other m amt done=0 src dst pair
+  say "phase 5.5: edge-role matrix (every node sends + receives)"
+  for n in "${NAMES[@]}"; do
+    other=$(peer_other "$n")
+    amt=$(rand_amount "edge-send-$n")
+    do_pay "edge-send-$n" "$n" "$other" invoice "$amt" || fail "edge-send $n->$other invoice"
+  done
+  for n in "${NAMES[@]}"; do
+    other=$(peer_other "$n")
+    amt=$(rand_amount "edge-recv-$n")
+    # other pays n → n is the receiver under test
+    do_pay "edge-recv-$n" "$other" "$n" invoice "$amt" || fail "edge-recv $other->$n invoice"
+  done
+  # Method coverage with lampo on both ends (not just invoice).
+  for m in $METHODS; do
+    [ "$m" = invoice ] && continue
+    amt=$(rand_amount "edge-method-$m")
+    do_pay "edge-method-$m" "${NAMES[0]}" "${NAMES[1]}" "$m" "$amt"       || fail "edge-method $m ${NAMES[0]}->${NAMES[1]}"
+  done
+  # Structural multi-hop when a non-adjacent, non-chord pair exists.
+  # Tiny rings (N<4) are fully adjacent — hop proof lives in multihop.sh.
+  if [ "$MIN_MULTIHOP" -gt 0 ]; then
+    done=0
+    if pair=$(find_multihop_pair); then
+      src=${pair%% *}; dst=${pair##* }
+      amt=$(rand_amount "edge-mh-0")
+      if do_pay "edge-mh-0" "$src" "$dst" invoice "$amt" 2; then
+        done=1
+      else
+        fail "edge-multihop $src->$dst (need hops>=2)"
+      fi
+    fi
+    if [ "$done" -lt "$MIN_MULTIHOP" ]; then
+      if [ "$Nnodes" -lt 4 ]; then
+        say "edge-multihop: skipped (N=$Nnodes fully adjacent; use simulations/multihop.sh)"
+      else
+        fail "edge-multihop: no non-adjacent pair / only $done successes, want >=$MIN_MULTIHOP"
+      fi
+    fi
+  fi
+  health_scan || fail "health scan after edge-role matrix"
+}
+
+# assert_edge_coverage: Phase 2 gate — Success rows must cover every node
+# as sender AND as receiver. Random soak alone can miss a node.
+assert_edge_coverage() {
+  python3 - "$CSV" "${NAMES[@]}" <<'PY'
+import csv, sys
+path, names = sys.argv[1], sys.argv[2:]
+send = {n: 0 for n in names}
+recv = {n: 0 for n in names}
+mh = 0
+with open(path) as f:
+    r = csv.DictReader(f)
+    for row in r:
+        st = row.get("state", "")
+        if st not in ("Success", "OK"):
+            continue
+        s, d = row.get("src", ""), row.get("dst", "")
+        if s in send:
+            send[s] += 1
+        if d in recv:
+            recv[d] += 1
+        try:
+            hops = int(str(row.get("hops", "")).strip() or 0)
+        except ValueError:
+            hops = 0
+        tag = row.get("round", "")
+        if hops >= 2 or str(tag).startswith("edge-mh-"):
+            mh += 1
+missing_s = [n for n, c in send.items() if c < 1]
+missing_r = [n for n, c in recv.items() if c < 1]
+print(f"coverage send={send} recv={recv} multihop_rows={mh}")
+if missing_s:
+    print(f"MISSING_SEND:{','.join(missing_s)}")
+    sys.exit(2)
+if missing_r:
+    print(f"MISSING_RECV:{','.join(missing_r)}")
+    sys.exit(3)
+PY
+}
+
 # do_round: one simulated payment, method chosen from $METHODS
 do_round() {
-  local r=$1 src dst m amt t0 t1 res state pre dur ok=FAIL
+  local r=$1 src dst m amt
   src=$(rand_pick "round-$r-src" "${NAMES[@]}")
   dst=$(rand_pick "round-$r-dst" "${NAMES[@]}")
   local tries=0
@@ -319,84 +543,10 @@ do_round() {
   [ "$dst" = "$src" ] && dst=$([ "$src" = "${NAMES[0]}" ] && echo "${NAMES[1]}" || echo "${NAMES[0]}")
   m=$(rand_pick "round-$r-m" $METHODS)
   amt=$(rand_amount "round-$r")
-  t0=$(date +%s)
-  case $m in
-    invoice)
-      local inv; inv=$(TMO=30 rpc "$(API "${dst#n}")" invoice "{\"amount_msat\":$amt,\"description\":\"round $r\"}" | jqf 'd.get("bolt11","")')
-      [ -n "$inv" ] || { say "round $r: $dst issued no invoice"; echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,NoInvoice,,$(( $(date +%s)-t0 )), " >> "$CSV"; return 1; }
-      res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$inv\"}")
-      ;;
-    offer)
-      local off; off=$(TMO=30 rpc "$(API "${dst#n}")" offer "{\"amount_msat\":$amt,\"description\":\"round $r\"}" | jqf 'd.get("bolt12","")')
-      [ -n "$off" ] || { say "round $r: $dst issued no offer"; echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,NoOffer,,$(( $(date +%s)-t0 )), " >> "$CSV"; return 1; }
-      res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$off\",\"amount\":$amt}")
-      ;;
-    keysend)
-      # json_keysend returns {} on success; failures surface as RPC "error".
-      res=$(TMO=120 rpc "$(API "${src#n}")" keysend "{\"destination\":\"${ID[$dst]}\",\"amount_msat\":$amt}")
-      ;;
-  esac
-  t1=$(date +%s); dur=$((t1-t0))
-  state=$(echo "$res" | jqf 'd.get("state","")')
-  pre=$(echo "$res" | jqf 'd.get("payment_preimage") or ""')
-  if [ "$m" = keysend ]; then
-    # Since PR #568 the keysend RPC returns the same PayResult shape as
-    # pay (state + payment_preimage), so the standard verification below
-    # applies. On older builds (pre-#568) the RPC answered {} and the
-    # outcome was unverifiable — see issue #567.
-    state=$(echo "$res" | jqf 'd.get("state","")')
-    pre=$(echo "$res" | jqf 'd.get("payment_preimage") or ""')
-  fi
-  if [ "$state" = "Success" ] && [ -n "$pre" ]; then ok=OK; else ok=FAIL; fi
-  local hops=" "
-  if [ "$m" != keysend ]; then hops=$(echo "$res" | jqf 'len(d.get("path",[]))'); fi
-  echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,$state,${pre:0:16},$dur,${hops:- }" >> "$CSV"
-  if [ "$ok" = OK ]; then
-    say "round $r OK: $src -> $dst via $m ${amt}msat (${dur}s, preimage ${pre:0:8}..)"
-  else
-    # Transient TemporaryChannelFailure → RetriesExhausted is common right
-    # after chain chaos (reorg/storm). Retry the same src/dst/method a few
-    # times before declaring the round dead so we don't fail the soak on
-    # gossip lag (seed=99 round 7 BOLT12 after reorg).
-    local attempt=1 max_attempts=3
-    while [ "$attempt" -lt "$max_attempts" ]; do
-      attempt=$((attempt+1))
-      say "round $r: transient FAIL state=${state:-none} — retry $attempt/$max_attempts in 20s"
-      sleep 20
-      case $m in
-        invoice)
-          local inv2; inv2=$(TMO=30 rpc "$(API "${dst#n}")" invoice "{\"amount_msat\":$amt,\"description\":\"round $r retry$attempt\"}" | jqf 'd.get("bolt11","")')
-          [ -n "$inv2" ] || continue
-          res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$inv2\"}")
-          ;;
-        offer)
-          local off2; off2=$(TMO=30 rpc "$(API "${dst#n}")" offer "{\"amount_msat\":$amt,\"description\":\"round $r retry$attempt\"}" | jqf 'd.get("bolt12","")')
-          [ -n "$off2" ] || continue
-          res=$(TMO=120 rpc "$(API "${src#n}")" pay "{\"invoice_str\":\"$off2\",\"amount\":$amt}")
-          ;;
-        keysend)
-          res=$(TMO=120 rpc "$(API "${src#n}")" keysend "{\"destination\":\"${ID[$dst]}\",\"amount_msat\":$amt}")
-          ;;
-      esac
-      state=$(echo "$res" | jqf 'd.get("state","")')
-      pre=$(echo "$res" | jqf 'd.get("payment_preimage") or ""')
-      if [ "$state" = "Success" ] && [ -n "$pre" ]; then
-        ok=OK
-        dur=$(( $(date +%s) - t0 ))
-        hops=$(echo "$res" | jqf 'len(d.get("path",[]))')
-        echo "$(date -Iseconds),$r,$src,$dst,$m,$amt,$state,${pre:0:16},$dur,${hops:- }" >> "$CSV"
-        say "round $r OK (retry $attempt): $src -> $dst via $m ${amt}msat (${dur}s, preimage ${pre:0:8}..)"
-        break
-      fi
-    done
-    if [ "$ok" != OK ]; then
-      say "round $r FAIL: $src -> $dst via $m ${amt}msat state=${state:-none} dur=${dur}s"
-      say "  raw: $(echo "$res" | head -c 300)"
-      fail "round $r payment $src->$dst ($m) state=${state:-none}"
-    fi
-  fi
+  do_pay "round-$r" "$src" "$dst" "$m" "$amt" || fail "round $r payment $src->$dst ($m)"
   health_scan || fail "health scan tripped after round $r"
 }
+
 
 # ============================ main ====================================
 mkdir -p "$SIMDIR" "$ART"
@@ -469,6 +619,13 @@ done
 say "phase 5: waiting 150s for node_announcement propagation (BOLT12 precondition)"
 sleep 150
 
+
+if [ "$ROLE_MATRIX" = 1 ]; then
+  run_edge_matrix
+else
+  say "phase 5.5: edge-role matrix skipped (ROLE_MATRIX=$ROLE_MATRIX)"
+fi
+
 say "phase 6: activity loop (rounds=$ROUNDS, chaos every $CHAOS_EVERY)"
 r=0
 while :; do
@@ -479,5 +636,7 @@ while :; do
   [ "$ROUNDS" != 0 ] && [ "$r" -ge "$ROUNDS" ] && break
 done
 
-say "SIMULATION COMPLETE: $r rounds, $(grep -c ',OK\|,Success' "$CSV" 2>/dev/null || echo 0) successful payments recorded in $CSV"
+cov_out=$(assert_edge_coverage) || { say "edge coverage FAILED: $cov_out"; fail "edge-role coverage gate"; }
+say "edge coverage OK: $cov_out"
+say "SIMULATION COMPLETE: $r rounds, $(grep -c ',Success' "$CSV" 2>/dev/null || echo 0) successful payments recorded in $CSV"
 exit 0
