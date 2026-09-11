@@ -203,6 +203,25 @@ chaos_restart9() { # $1 = tag
   sleep 10
   pay_probe "n1" || fail "restart9: payment probe failed after $n restart"
 }
+# Graceful SIGTERM must release lampod.pid (see PR #603). Escalate to
+# SIGKILL only if the process ignores TERM past the deadline — same as recover.
+chaos_restart_term() { # $1 = tag
+  local n deadline p
+  n=$(rand_pick "chaos-$1-n" "${NAMES[@]:1}")
+  say "CHAOS restart_term: SIGTERM $n (channels open)"
+  p=$(node_pid "$n")
+  [ -n "$p" ] && kill -TERM "$p"
+  deadline=$(( $(date +%s) + 60 ))
+  while [ -n "$(node_pid "$n")" ] && [ "$(date +%s)" -le "$deadline" ]; do sleep 2; done
+  if [ -n "$(node_pid "$n")" ]; then
+    say "CHAOS restart_term: $n still alive after 60s — escalating SIGKILL"
+    kill -9 "$(node_pid "$n")" 2>/dev/null; sleep 2
+  fi
+  start_node "$n"
+  wait_up "$n" >/dev/null || { fail "restart_term: $n never came back"; return; }
+  sleep 10
+  pay_probe "n1" || fail "restart_term: payment probe failed after $n restart"
+}
 chaos_storm() { # $1 = tag
   local k=$(( 10 + $(rand0 "storm-$1" 40) ))
   say "CHAOS storm: mining $k blocks at once"
@@ -244,7 +263,7 @@ chaos_zapconn() { # $1 = tag
   sleep 15
   pay_probe "n1" || fail "zapconn: payment probe failed after connection loss on $n"
 }
-CHAOS_EVENTS=(restart9 storm reorg feespam churn zapconn)
+CHAOS_EVENTS=(restart9 restart_term storm reorg feespam churn zapconn)
 run_chaos() {
   local ev; ev=$(rand_pick "chaos-$1" "${CHAOS_EVENTS[@]}")
   "chaos_$ev" "$1-$ev"
