@@ -31,7 +31,7 @@ SEED=99 MATRIX=1 STRESS=1 STRESS_CYCLES=25 ./simulations/recover.sh
 
 Gate: `RECOVERY COMPLETE: … PASS / 0 FAIL` (campaign baseline: 46/0).
 
-### Phase 2 (N-node soak)
+### Phase 2 (N-node soak — send/receive proof)
 
 ```bash
 export BIN=$PWD/target/release/lampod-cli REPO=$PWD
@@ -40,9 +40,17 @@ NODES=10 ROUNDS=20 SEED=99 CHAOS_EVERY=3 \
   API_BASE=8310 P2P_BASE=20210 ./simulations/simulate.sh
 ```
 
-Gate: `SIMULATION COMPLETE: 20 rounds, 20 successful payments`.
+Gates:
+
+- Edge-role matrix: every node sends and receives (`ROLE_MATRIX=1`).
+- Coverage: CSV Success rows include every node as `src` and as `dst`.
+- Final line: `SIMULATION COMPLETE: …` after `edge coverage OK: …`.
 
 Smoke: `NODES=3 ROUNDS=2 CHAOS_EVERY=2 ./simulations/simulate.sh`.
+
+Do **not** treat SimLN-only LDK-edge traffic as a send/recv proof for lampo —
+see `simulations/simln/README.md`. Use `multihop.sh` for structural
+`hs—hm—hr` path assertions.
 
 ### Sacred constraints (non-negotiable)
 
@@ -56,6 +64,8 @@ Smoke: `NODES=3 ROUNDS=2 CHAOS_EVERY=2 ./simulations/simulate.sh`.
 
 - Prefer extending `lib.sh` / chaos hooks over one-off shell.
 - Assert payment `state=="Success"` **and** preimage — never grep log prose.
+- Phase 2 must prove lampo as **sender and receiver** (edge-role matrix +
+  coverage gate), not only as a relay under SimLN.
 - Wait for funding tx in mempool **before** mining.
 - After tip-invalidate / reorg chaos: settle (wallet sync + payment probe) before the next pay round.
 - Keep `simulate.sh` runnable standalone (soak must not depend on mid-run edits).
