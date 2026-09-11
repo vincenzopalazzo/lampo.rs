@@ -7,6 +7,16 @@
 - `cargo check -p <crate>` — Type-check a single crate
 - `cargo test -p <crate>` — Test a single crate
 
+## Simulation (`simulations/`)
+
+Upstream soak harness for pre-prod gates. Details: `simulations/README.md` and `AGENTS.md`.
+
+- Phase 1: `SEED=99 MATRIX=1 STRESS=1 STRESS_CYCLES=25 ./simulations/recover.sh`
+- Phase 2: `NODES=10 ROUNDS=20 SEED=99 CHAOS_EVERY=3 ./simulations/simulate.sh`
+  (edge-role matrix + coverage gate = lampo send/recv proof; SimLN ≠ that proof)
+- Regtest only. Never delete `lampod.pid`. Never touch mainnet / sacred nodes.
+- Set `BIN` / `REPO` / `SIMDIR` explicitly when not using defaults under `$HOME/lampo-sim`.
+
 ## Code Style
 
 - Follow Rust standard formatting (`cargo fmt`). Always run `make fmt` before committing.
@@ -23,7 +33,7 @@
 - Subject line ≤ 50 chars. Wrap body at 72 chars.
 - Each commit must pass all tests, lints, and checks independently.
 - **Never include fixup commits in a PR.** If a commit introduces a problem (e.g. formatting), squash the fix into the original commit. Do not leave separate "fix formatting" or "fix lint" commits in the history.
-- May include a crate prefix: `cli:`, `chain:`, `node:`, `docs:`, `ci:`.
+- May include a crate prefix: `cli:`, `chain:`, `node:`, `sim:`, `docs:`, `ci:`.
 
 ## PR Workflow
 

@@ -86,6 +86,12 @@ Integration tests can be run using the following command:
 make integration
 ```
 
+## Simulation
+
+Pre-production soak harness lives in [`simulations/`](simulations/) (regtest only). See
+[`simulations/README.md`](simulations/README.md), [`AGENTS.md`](AGENTS.md), and [`CLAUDE.md`](CLAUDE.md)
+for Phase 1 recovery/stress and Phase 2 N-node chaos soak gates.
+
 ## Contributing guidelines
 
 Please read our [Contributing guide](/CONTRIBUTING.md).
