@@ -1,15 +1,42 @@
 # SimLN integration (optional)
 
 [SimLN](https://github.com/bitcoin-dev-project/sim-ln) generates realistic
-payment activity. It supports LND/CLN/Eclair/**LDK-Server** — not lampo — but
-that is enough: put **LDK-Server nodes at the edges** and **lampo nodes as the
-announced relays between them**, and every simulated payment routes through
-lampo.
+payment activity. It speaks LND/CLN/Eclair/**LDK-Server** RPCs — **not lampo**.
+
+That means SimLN **cannot** prove lampo send/receive by itself. Use it as an
+optional **forwarding load** generator on top of the native soak.
+
+## What each layer proves
+
+| Layer | Lampo as sender | Lampo as receiver | Lampo as relay |
+|-------|-----------------|-------------------|----------------|
+| `simulate.sh` edge-role matrix + soak | **required gate** | **required gate** | exercised when path ≥2 hops |
+| `multihop.sh` | yes (hs/hr) | yes (hs/hr) | yes (hm) |
+| `interop.sh` | yes ↔ LDK | yes ↔ LDK | cross-impl path |
+| SimLN (this dir) | no (LDK pays) | no (LDK invoiced) | **yes** (lampo mid-path) |
+
+**Phase 2 soak-green always means the native harness gates**, not SimLN.
+
+## Relay-load topology (SimLN)
+
+Put LDK-Server at the edges SimLN can drive, and lampo as announced mid-hops:
 
 ```
 lk3 (ldk) ── lp1 (lampo) ── lp2 (lampo) ── lk1/lk2 (ldk)
    payer        relay         relay          payees
 ```
+
+Useful for graph/HTLC forwarding under synthetic traffic. It does **not**
+replace lampo-as-edge coverage in `simulate.sh`.
+
+## Mixed-edge goal (follow-up)
+
+Prefer clusters where **lampo is also an edge** for some flows:
+
+- native harness: lampo → lampo and lampo ↔ LDK (`interop.sh`)
+- SimLN: LDK → … → LDK through lampo relays (this directory)
+
+Until SimLN grows a lampo adapter, do not treat “SimLN green” as send/recv proof.
 
 ## Setup
 
@@ -40,7 +67,7 @@ sim-cli --sim-file sim-activity.json
 ```
 
 `--fix-seed` fixes dispatch order; completion order still varies — treat it as
-load, and keep seeded `simulate.sh` for strict replay.
+load, and keep seeded `simulate.sh` for strict replay / send-recv gates.
 
 ## Watching
 

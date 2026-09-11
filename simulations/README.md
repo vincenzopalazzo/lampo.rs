@@ -44,7 +44,11 @@ Expect a final `RECOVERY COMPLETE: N PASS / 0 FAIL` line (campaign gate used `46
 
 Useful knobs: `MATRIX`, `STRESS`, `STRESS_CYCLES`, `SEED`, `KEEP_GOING`, `API_BASE`, `P2P_BASE`, `CORE_URL`, `CORE_USER`, `CORE_PASS`.
 
-## Phase 2 — N-node soak
+## Phase 2 — N-node soak (send + receive + chaos)
+
+Phase 2 is the **lampo edge proof**: every node must successfully **send** and
+**receive** (invoice/offer/keysend), not only forward. SimLN is optional relay
+load only — see `simln/README.md`.
 
 ```bash
 export BIN=$PWD/target/release/lampod-cli
@@ -62,7 +66,16 @@ Smoke (faster):
 NODES=3 ROUNDS=2 CHAOS_EVERY=2 ./simulations/simulate.sh
 ```
 
-`CHAOS_EVERY=3` with `SEED=99` hits a tip-invalidate reorg before round 7; the harness settles (wallet sync, deepen fork, payment probe) before the next round.
+What must pass before `SIMULATION COMPLETE`:
+
+1. **Edge-role matrix** (`ROLE_MATRIX=1`, default): each node sends once and
+   receives once; non-invoice methods covered; when the topology allows, at
+   least one payment with `hops >= 2` (`MIN_MULTIHOP`, default 1).
+2. Seeded soak rounds with chaos (`CHAOS_EVERY=3` + `SEED=99` hits a tip
+   invalidate before round 7; harness settles before the next pay).
+3. **Coverage gate**: CSV Success rows cover every node as `src` and as `dst`.
+
+For a structural dead-end multihop path (`hs—hm—hr`), also run `multihop.sh`.
 
 Results: `$SIMDIR/results.csv`, `$SIMDIR/sim.log`, failure artifacts under `$SIMDIR/artifacts/`.
 
