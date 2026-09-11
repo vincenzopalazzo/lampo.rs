@@ -530,7 +530,10 @@ impl WalletManager for BDKWalletManager {
 
     async fn listen(self: Arc<Self>) -> error::Result<()> {
         let sched = JobScheduler::new().await?;
-        sched.shutdown_on_ctrl_c();
+        // Do not call `shutdown_on_ctrl_c` here: lampod-cli owns the process
+        // signal handler and calls `LampoDaemon::shutdown()`. Registering a
+        // second ctrlc handler either races with or silently replaces it,
+        // which left nodes alive (and holding lampod.pid) after SIGTERM.
 
         async fn innet_sync(wallet: Arc<BDKWalletManager>) -> error::Result<()> {
             // Gate: hold the Emitter scan until the LDK chain listeners have
