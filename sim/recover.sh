@@ -439,6 +439,9 @@ if [ "$STRESS" = 1 ]; then
         else
           kill9 "$victim"
         fi
+        # Match R01/R02: wait for graceful exit, escalate to SIGKILL so
+        # lampod.pid is released before we try to restart.
+        wait_dead "$victim" 60 || { kill9 "$victim"; sleep 2; }
         start_node "$victim" ;;
       chain-advance) kill9 "$victim"; sleep 2; mine "$(rand0 "rc-$c-blocks" 20)" ; start_node "$victim"; wait_wallet_synced 300 || true ;;
       double-kill)   other=$(rand_pick "rc-$c-other" "${ALLNODES[@]}"); [ "$other" = "$victim" ] && other=hs
