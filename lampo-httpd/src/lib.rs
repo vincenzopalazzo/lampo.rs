@@ -239,6 +239,9 @@ pub async fn run<T: ToSocketAddrs + Display>(
     // treats wildcards as "IP-literal Host only", not "allow anything".
     let enforce_host = !bind_host.is_empty();
 
+    // lampod-cli owns process signals (SIGINT/SIGTERM via ctrlc with
+    // `termination`) and drives `LampoDaemon::shutdown()`. Leave OS signals
+    // to that handler so actix does not race or swallow SIGTERM.
     let server = HttpServer::new(move || {
         let state = AppState::new(lampod.clone(), host_str.clone(), open_api_url.clone()).unwrap();
         let host_guard = HostGuard {
@@ -270,6 +273,7 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_stop)
             .build()
     })
+    .disable_signals()
     .bind(host)?;
     server.run().await?;
     Ok(())
