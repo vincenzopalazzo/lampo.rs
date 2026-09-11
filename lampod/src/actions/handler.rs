@@ -458,11 +458,7 @@ impl Handler for LampoHandler {
                 payment_id: _,
                 ..
             } => {
-                match decide_payment_claim(
-                    amount_msat,
-                    counterparty_skimmed_fee_msat,
-                    &purpose,
-                ) {
+                match decide_payment_claim(amount_msat, counterparty_skimmed_fee_msat, &purpose) {
                     PaymentClaimDecision::Claim(preimage) => {
                         log::info!(
                             target: "lampo::handler",

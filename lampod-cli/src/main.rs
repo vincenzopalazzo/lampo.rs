@@ -171,6 +171,17 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         }
     };
 
+    // Take the pid lock before starting background wallet sync / LDK init.
+    // Holding it late let a dying process keep the flock while a restart
+    // burned through wallet restore and then failed with EAGAIN — and the
+    // failed restart could linger because JobScheduler threads outlive main.
+    log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
+    let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
+        .map_err(|err| {
+            log::error!("{err}");
+            error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?")
+        })?;
+
     let wallet = Arc::new(wallet);
 
     log::debug!(target: "lampod-cli", "wallet created with success");
@@ -183,13 +194,6 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     // Init the lampod
     lampod.init(client).await?;
 
-    log::debug!(target: "lampod-cli", "Lampo directory `{}`", lampo_conf.path());
-    let mut _pid = filelock_rs::pid::Pid::new(lampo_conf.path(), "lampod".to_owned())
-        .map_err(|err| {
-            log::error!("{err}");
-            error::anyhow!("impossible take a lock on the `lampod.pid` file, maybe there is another instance running?")
-        })?;
-
     let lampod = Arc::new(lampod);
 
     run_httpd(lampod.clone()).await?;
@@ -200,19 +204,23 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     ))?);
     lampod.add_external_handler(handler).await?;
 
-    // Signal the daemon to shut down gracefully on Ctrl+C.
+    // Signal the daemon to shut down gracefully on Ctrl+C / SIGTERM.
     // This causes the LDK event processor to persist all state
     // (channel manager, scorer, network graph) before exiting.
     let shutdown_lampod = lampod.clone();
     ctrlc::set_handler(move || {
-        log::info!("Shutdown signal received, shutting down gracefully...");
+        log::info!(target: "lampod-cli", "Shutdown signal received, shutting down gracefully...");
         shutdown_lampod.shutdown();
     })?;
 
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     lampod.listen().await??;
     log::info!(target: "lampod-cli", "Shutdown complete.");
-    Ok(())
+    // BDK's JobScheduler keeps non-daemon threads alive after listen()
+    // returns, so returning normally would leave this process (and the
+    // pid flock) hung forever and block any subsequent start. Exit so the
+    // OS releases the flock.
+    std::process::exit(0);
 }
 
 pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
