@@ -232,6 +232,11 @@ chaos_reorg() {
   local tip; tip=$(bcres getbestblockhash | tr -d '"')
   bcli invalidateblock "[\"$tip\"]" >/dev/null 2>&1
   mine 3
+  # Tip invalidate leaves gossip SCIDs briefly stale; paying through a
+  # half-rebuilt graph yields transient ChannelFailure → RetriesExhausted
+  # (seed=99 round 7 BOLT12). Wait for wallets + a settle window first.
+  wait_wallet_synced 180 || true
+  sleep 30
 }
 chaos_feespam() {
   say "CHAOS feespam: 50 txs into mempool + estimate"
@@ -356,8 +361,9 @@ fi
 # are fine (checked via /proc/<pid>/environ, same-user readable)
 _others=$(pgrep -af "[s]imulate.sh" | grep -v "^$$" || true)
 if [ -n "$_others" ]; then
-  for _pid in $(echo "$_others" | awk "{print \$1}"); do
-    if tr "\0" "\n" < "/proc/$_pid/environ" 2>/dev/null | grep -q "^SIMDIR=$SIMDIR$"; then
+  for _pid in $(echo "$_others" | awk '{print $1}'); do
+    [ -r "/proc/$_pid/environ" ] || continue
+    if tr '\0' '\n' < "/proc/$_pid/environ" | grep -q "^SIMDIR=$SIMDIR$"; then
       say "another simulate.sh instance against SIMDIR=$SIMDIR is already running — refusing to start"
       exit 1
     fi
