@@ -1273,6 +1273,8 @@ pub async fn pay_offer_blip42_contact_roundtrip() -> error::Result<()> {
             request::GenerateOffer {
                 description: Some("blip42 contact offer".to_owned()),
                 amount_msat: Some(50_000),
+                currency: None,
+                currency_amount: None,
             },
         )
         .await?;
@@ -1292,6 +1294,8 @@ pub async fn pay_offer_blip42_contact_roundtrip() -> error::Result<()> {
                     intro_node: Some(node2.info.node_id.clone()),
                 }),
                 timeout: Default::default(),
+                max_fee_msat: None,
+                timeout_secs: None,
             },
         )
         .await?;
@@ -1344,6 +1348,8 @@ pub async fn pay_offer_blip42_contact_roundtrip() -> error::Result<()> {
                     intro_node: Some(node1.info.node_id.clone()),
                 }),
                 timeout: Default::default(),
+                max_fee_msat: None,
+                timeout_secs: None,
             },
         )
         .await?;

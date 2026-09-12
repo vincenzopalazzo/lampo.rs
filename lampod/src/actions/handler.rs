@@ -39,8 +39,8 @@ use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
 use crate::ln::{
-    ContactStore, LampoChannelManager, LampoInventoryManager, LampoPeerManager, OnionMessageMailbox,
-    StaticInvoiceStore,
+    ContactStore, LampoChannelManager, LampoInventoryManager, LampoPeerManager,
+    OnionMessageMailbox, StaticInvoiceStore,
 };
 use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
