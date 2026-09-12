@@ -142,11 +142,23 @@ impl OffchainManager {
             ..Default::default()
         };
         if let Some(contact) = contact {
+            let payer_offer_len = contact.payer_offer.as_ref().len();
+            log::info!(
+                target: "lampo::offchain",
+                "BLIP-42 pay: payer_offer_tlv_len={payer_offer_len} (limit 300), has_secrets={}",
+                contact.secrets.primary_secret().as_bytes().len() == 32
+            );
+            // Surface the size failure before LDK's opaque InvalidPayerOffer.
+            if payer_offer_len > 300 {
+                error::bail!(
+                    "compact payer_offer is {payer_offer_len} bytes; BLIP-42 requires <= 300 (use BIP-353 return path)"
+                );
+            }
             params.contact_secrets = Some(contact.secrets);
             params.payer_offer = Some(contact.payer_offer);
         }
 
-        log::debug!(
+        log::info!(
             target: "lampo::offchain",
             "paying offer with amount `{}msat`, reveal_contact={}",
             amount,
