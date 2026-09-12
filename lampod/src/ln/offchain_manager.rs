@@ -215,6 +215,10 @@ impl OffchainManager {
 
         let mut params = OptionalOfferPaymentParams {
             payer_note,
+            // Compact-offer payback needs enough time for the invoice-request
+            // onion round-trip plus route attempts on blinded payment paths.
+            // Match the non-contact pay timeout (ldk-node uses 10s; we use 120s
+            // so static-invoice round trips are not reported as failed early).
             retry_strategy: Retry::Timeout(Duration::from_secs(120)),
             route_params_config: ldk::routing::router::RouteParametersConfig {
                 max_total_routing_fee_msat: max_fee_msat,
@@ -270,6 +274,19 @@ impl OffchainManager {
             payer_offer,
             nonce: Some(nonce),
         })
+    }
+
+    /// Create a compact payer offer for BLIP-42 without deriving a new contact secret.
+    /// Used when paying back a contact whose secret we already stored from an inbound payment.
+    pub fn create_compact_payer_offer(&self, intro_node: pubkey) -> error::Result<(Offer, Nonce)> {
+        let manager = self.channel_manager.manager();
+        let (builder, nonce) = manager
+            .create_compact_offer_builder(intro_node)
+            .map_err(|err| error::anyhow!("create_compact_offer_builder: {:?}", err))?;
+        let payer_offer = builder
+            .build()
+            .map_err(|err| error::anyhow!("build compact payer offer: {:?}", err))?;
+        Ok((payer_offer, nonce))
     }
 
     pub fn pay_invoice(
