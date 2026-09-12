@@ -271,14 +271,24 @@ impl LampoTesting {
         Ok(())
     }
 
-    /// Counterparty fund channel with us
-    /// counterparty is the node that will fund the channel with us
-    /// counterparty -> self and not self -> counterparty
+    /// Fund a channel from `self` to `counterparty` (`self` is the channel funder).
     pub async fn fund_channel_with(
         &self,
         // FIXME: we should abstract it to a lightning trait
         counterparty: Arc<LampoTesting>,
         amount: u64,
+    ) -> error::Result<()> {
+        self.fund_channel_with_push(counterparty, amount, None)
+            .await
+    }
+
+    /// Like [`Self::fund_channel_with`], but optionally push msat to the
+    /// counterparty so they start with outbound liquidity on the same channel.
+    pub async fn fund_channel_with_push(
+        &self,
+        counterparty: Arc<LampoTesting>,
+        amount: u64,
+        push_msat: Option<u64>,
     ) -> error::Result<()> {
         let _: response::Connect = self
             .lampod()
@@ -293,6 +303,19 @@ impl LampoTesting {
             .await
             .unwrap();
 
+        let channels_before: response::Channels = counterparty
+            .lampod()
+            .call("channels", json::json!({}))
+            .await
+            .unwrap_or(response::Channels {
+                channels: Vec::new(),
+            });
+        let ready_before = channels_before
+            .channels
+            .iter()
+            .filter(|c| c.ready && c.peer_id == self.info.node_id)
+            .count();
+
         let mut events = counterparty.lampod().events();
 
         let response: json::Value = self
@@ -305,7 +328,7 @@ impl LampoTesting {
                     public: true,
                     port: None,
                     addr: None,
-                    push_msat: None,
+                    push_msat,
                 },
             )
             .await
@@ -326,20 +349,23 @@ impl LampoTesting {
                     }
                     return Ok(());
                 };
-                // check if lampo see the channel
+                // Prefer counting ready channels with this peer so a second
+                // channel is not declared ready just because an older one is.
                 let channels: response::Channels = counterparty
                     .lampod()
                     .call("channels", json::json!({}))
                     .await
                     .unwrap();
                 log::info!(target: "tests", "Channels {:?}", channels);
-                if channels.channels.is_empty() {
-                    return Err(());
-                }
-
-                if channels.channels.first().unwrap().ready {
+                let ready_now = channels
+                    .channels
+                    .iter()
+                    .filter(|c| c.ready && c.peer_id == self.info.node_id)
+                    .count();
+                if ready_now > ready_before {
                     return Ok(());
                 }
+                return Err(());
             }
             Err(())
         });

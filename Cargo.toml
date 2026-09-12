@@ -27,9 +27,12 @@ resolver = "2"
 # Bump every lightning* crate together so the stack stays on one version
 # (see issue #537).
 [workspace.dependencies]
-lightning = "0.3.0-beta1"
-lightning-block-sync = "0.3.0-beta1"
-lightning-persister = { version = "0.3.0-beta1", features = ["tokio"] }
-lightning-background-processor = "0.3.0-beta1"
-lightning-net-tokio = "0.3.0-beta1"
-lightning-rapid-gossip-sync = "0.3.0-beta1"
+# WIP: BLIP-42 (Bolt 12 contacts) via vincenzopalazzo/rust-lightning@blip42-on-0.3
+# crates.io 0.3.0-beta1 lacks OptionalOfferPaymentParams::{contact_secrets,payer_offer}.
+# Pinned to the compact-payer-offer SCID fix so signet/mutinet offers stay <= 300 bytes.
+lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "1f889201a", package = "lightning" }
+lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "1f889201a", package = "lightning-block-sync" }
+lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "1f889201a", package = "lightning-persister", features = ["tokio"] }
+lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "1f889201a", package = "lightning-background-processor" }
+lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "1f889201a", package = "lightning-net-tokio" }
+lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "1f889201a", package = "lightning-rapid-gossip-sync" }

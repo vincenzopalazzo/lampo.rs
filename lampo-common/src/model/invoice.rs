@@ -37,6 +37,49 @@ pub mod request {
     #[derive(Serialize, Deserialize, Apiv2Schema)]
     pub struct Bolt12Pay {
         pub payer_note: Option<String>,
+        /// When true, reveal BLIP-42 contact identity (contact_secret + compact payer offer).
+        #[serde(default)]
+        pub reveal_contact: Option<bool>,
+        /// Label under which to store/load this contact in the local contact book.
+        #[serde(default)]
+        pub contact_label: Option<String>,
+        /// Intro node pubkey (hex) used to build a compact payer offer blinded path.
+        /// Required when `reveal_contact` is set unless a stored contact already
+        /// has `our_offer` + nonce.
+        #[serde(default)]
+        pub intro_node: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct AddContact {
+        pub label: String,
+        /// Remote BOLT12 offer used to pay this contact back.
+        pub offer: String,
+        /// Optional hex contact secret received from an inbound payment.
+        /// When set, secrets are derived via `ContactSecrets::from_remote_secret`.
+        #[serde(default)]
+        pub contact_secret_hex: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct ListContacts {}
+}
+
+pub mod contacts_response {
+    use paperclip::actix::Apiv2Schema;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Apiv2Schema)]
+    pub struct ContactInfo {
+        pub label: String,
+        pub remote_offer: String,
+        pub primary_secret_hex: String,
+        pub our_offer: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct Contacts {
+        pub contacts: Vec<ContactInfo>,
     }
 }
 
