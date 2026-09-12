@@ -28,6 +28,8 @@ use lampo_common::ldk::ln::channelmanager::{
     Bolt11InvoiceParameters, OptionalBolt11PaymentParams, OptionalOfferPaymentParams, PaymentId,
 };
 use lampo_common::ldk::ln::outbound_payment::{RecipientOnionFields, Retry};
+use lampo_common::ldk::offers::contacts::ContactSecrets;
+use lampo_common::ldk::offers::nonce::Nonce;
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
@@ -181,6 +183,18 @@ impl OffchainManager {
         payer_note: Option<String>,
         max_fee_msat: Option<u64>,
     ) -> error::Result<PaymentId> {
+        self.pay_offer_with_contact(offer_str, amount_msat, payer_note, max_fee_msat, None)
+    }
+
+    /// Pay a BOLT12 offer, optionally revealing BLIP-42 contact identity.
+    pub fn pay_offer_with_contact(
+        &self,
+        offer_str: &str,
+        amount_msat: Option<u64>,
+        payer_note: Option<String>,
+        max_fee_msat: Option<u64>,
+        contact: Option<ContactPaymentParams>,
+    ) -> error::Result<PaymentId> {
         // Same as ldk-node: a fresh random id per attempt. Hashing the offer
         // string collides on a second pay of the same offer, and a 1s retry
         // is too short for the static-invoice onion-message round trip
@@ -199,26 +213,63 @@ impl OffchainManager {
             None => Some(amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?),
         };
 
-        log::debug!(target: "lampo::offchain", "paying offer with amount `{:?}` & payer_note: `{}`", amount, payer_note.as_ref().unwrap_or(&"".to_string()));
+        let mut params = OptionalOfferPaymentParams {
+            payer_note,
+            retry_strategy: Retry::Timeout(Duration::from_secs(120)),
+            route_params_config: ldk::routing::router::RouteParametersConfig {
+                max_total_routing_fee_msat: max_fee_msat,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        if let Some(contact) = contact {
+            params.contact_secrets = Some(contact.secrets);
+            params.payer_offer = Some(contact.payer_offer);
+        }
+
+        log::debug!(
+            target: "lampo::offchain",
+            "paying offer with amount `{:?}`, reveal_contact={}",
+            amount,
+            params.contact_secrets.is_some()
+        );
         self.channel_manager
             .manager()
-            .pay_for_offer_with_conversion(
-                &offer,
-                amount,
-                payment_id,
-                OptionalOfferPaymentParams {
-                    payer_note,
-                    retry_strategy: Retry::Timeout(Duration::from_secs(120)),
-                    route_params_config: ldk::routing::router::RouteParametersConfig {
-                        max_total_routing_fee_msat: max_fee_msat,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                &conversion,
-            )
+            .pay_for_offer_with_conversion(&offer, amount, payment_id, params, &conversion)
             .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(payment_id)
+    }
+
+    /// Build a compact payer offer + contact secrets for BLIP-42 reveal.
+    pub fn build_contact_payment_params(
+        &self,
+        their_offer: &Offer,
+        intro_node: pubkey,
+        existing: Option<(Offer, Nonce, ContactSecrets)>,
+    ) -> error::Result<ContactPaymentParams> {
+        if let Some((payer_offer, nonce, secrets)) = existing {
+            return Ok(ContactPaymentParams {
+                secrets,
+                payer_offer,
+                nonce: Some(nonce),
+            });
+        }
+
+        let manager = self.channel_manager.manager();
+        let (builder, nonce) = manager
+            .create_compact_offer_builder(intro_node)
+            .map_err(|err| error::anyhow!("create_compact_offer_builder: {:?}", err))?;
+        let payer_offer = builder
+            .build()
+            .map_err(|err| error::anyhow!("build compact payer offer: {:?}", err))?;
+        let secrets = manager
+            .compute_contact_secret(&payer_offer, nonce, their_offer)
+            .map_err(|err| error::anyhow!("compute_contact_secret: {:?}", err))?;
+        Ok(ContactPaymentParams {
+            secrets,
+            payer_offer,
+            nonce: Some(nonce),
+        })
     }
 
     pub fn pay_invoice(
@@ -286,4 +337,11 @@ impl OffchainManager {
         log::info!("Keysend successfully done!");
         Ok(payment_result)
     }
+}
+
+/// Parameters required to reveal BLIP-42 contact identity on a BOLT12 pay.
+pub struct ContactPaymentParams {
+    pub secrets: ContactSecrets,
+    pub payer_offer: Offer,
+    pub nonce: Option<Nonce>,
 }
