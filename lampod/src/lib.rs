@@ -18,6 +18,7 @@ pub mod jsonrpc;
 pub mod ln;
 pub mod persistence;
 
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -44,7 +45,7 @@ use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
 use crate::ln::OffchainManager;
-use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::ln::{ContactStore, LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
@@ -70,6 +71,7 @@ pub struct LampoDaemon {
     wallet_manager: Arc<dyn WalletManager>,
     signer: Arc<dyn LampoSigner>,
     offchain_manager: Option<Arc<OffchainManager>>,
+    contact_store: Option<Arc<ContactStore>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
@@ -111,6 +113,7 @@ impl LampoDaemon {
             wallet_manager,
             signer,
             offchain_manager: None,
+            contact_store: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             chain_sync,
@@ -204,6 +207,19 @@ impl LampoDaemon {
             })
     }
 
+    pub fn contact_store(&self) -> Arc<ContactStore> {
+        self.contact_store
+            .clone()
+            .expect("contact store need to be initialized")
+    }
+
+    pub fn init_contact_store(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init contact store ...");
+        let store = ContactStore::open(Path::new(&self.conf.path()))?;
+        self.contact_store = Some(Arc::new(store));
+        Ok(())
+    }
+
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init offchain manager ...");
         let manager = OffchainManager::new(
@@ -280,6 +296,7 @@ impl LampoDaemon {
         self.init_onchaind(client.clone())?;
         self.init_channeld().await?;
         self.init_offchain_manager()?;
+        self.init_contact_store()?;
         self.init_peer_manager()?;
         self.init_inventory_manager()?;
         self.init_event_handler()?;
