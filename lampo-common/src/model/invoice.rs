@@ -69,7 +69,7 @@ pub mod contacts_response {
     use paperclip::actix::Apiv2Schema;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    #[derive(Serialize, Deserialize, Debug, Clone, Apiv2Schema)]
     pub struct ContactInfo {
         pub label: String,
         pub remote_offer: String,

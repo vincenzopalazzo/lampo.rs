@@ -136,7 +136,9 @@ impl OffchainManager {
 
         let mut params = OptionalOfferPaymentParams {
             payer_note,
-            retry_strategy: Retry::Timeout(std::time::Duration::from_secs(1)),
+            // Compact-offer payback needs enough time for the invoice-request
+            // onion round-trip plus route attempts on blinded payment paths.
+            retry_strategy: Retry::Timeout(std::time::Duration::from_secs(10)),
             ..Default::default()
         };
         if let Some(contact) = contact {
@@ -187,6 +189,19 @@ impl OffchainManager {
             payer_offer,
             nonce: Some(nonce),
         })
+    }
+
+    /// Create a compact payer offer for BLIP-42 without deriving a new contact secret.
+    /// Used when paying back a contact whose secret we already stored from an inbound payment.
+    pub fn create_compact_payer_offer(&self, intro_node: pubkey) -> error::Result<(Offer, Nonce)> {
+        let manager = self.channel_manager.manager();
+        let (builder, nonce) = manager
+            .create_compact_offer_builder(intro_node)
+            .map_err(|err| error::anyhow!("create_compact_offer_builder: {:?}", err))?;
+        let payer_offer = builder
+            .build()
+            .map_err(|err| error::anyhow!("build compact payer offer: {:?}", err))?;
+        Ok((payer_offer, nonce))
     }
 
     pub fn pay_invoice(

@@ -612,3 +612,105 @@ pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
     );
     Ok(())
 }
+
+#[tokio_test_shutdown_timeout::test(60)]
+pub async fn pay_offer_blip42_contact_roundtrip() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let btc = node1.btc.clone();
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
+    // Push half the capacity so node2 can pay back on the same channel
+    // (mirrors LDK's announced-chan-with-push setup for BLIP-42 tests).
+    node1
+        .fund_channel_with_push(node2.clone(), 1_000_000, Some(500_000_000))
+        .await?;
+
+    let offer: response::Offer = node2
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: Some("blip42 contact offer".to_owned()),
+                amount_msat: Some(50_000),
+            },
+        )
+        .await?;
+
+    // node1 pays node2 and reveals BLIP-42 contact info using node2 as intro peer.
+    let pay: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: None,
+                bolt12: Some(request::Bolt12Pay {
+                    payer_note: Some("hi from node1".to_owned()),
+                    reveal_contact: Some(true),
+                    contact_label: Some("node2".to_owned()),
+                    intro_node: Some(node2.info.node_id.clone()),
+                }),
+                timeout: Default::default(),
+            },
+        )
+        .await?;
+    assert_eq!(
+        pay.state,
+        response::PaymentState::Success,
+        "reveal-contact pay must succeed: {pay:?}"
+    );
+    assert!(pay.payment_preimage.is_some());
+
+    // node1 should have stored the outbound contact.
+    let n1_contacts: response::Contacts = node1
+        .lampod()
+        .call("listcontacts", request::ListContacts {})
+        .await?;
+    assert!(
+        n1_contacts
+            .contacts
+            .iter()
+            .any(|c| c.label == "node2" && c.our_offer.is_some()),
+        "node1 must persist outbound contact with our_offer: {n1_contacts:?}"
+    );
+
+    // node2 should have remembered the inbound contact (+ payer offer return path).
+    let n2_contacts: response::Contacts = node2
+        .lampod()
+        .call("listcontacts", request::ListContacts {})
+        .await?;
+    let inbound = n2_contacts
+        .contacts
+        .iter()
+        .find(|c| !c.remote_offer.is_empty())
+        .cloned()
+        .expect(&format!(
+            "node2 must store inbound BLIP-42 contact: {n2_contacts:?}"
+        ));
+
+    // Pay back using the stored compact payer offer + shared contact secret.
+    let payback: response::PayResult = node2
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: inbound.remote_offer.clone(),
+                amount: Some(40_000),
+                bolt12: Some(request::Bolt12Pay {
+                    payer_note: None,
+                    reveal_contact: Some(false),
+                    contact_label: Some(inbound.label.clone()),
+                    intro_node: Some(node1.info.node_id.clone()),
+                }),
+                timeout: Default::default(),
+            },
+        )
+        .await?;
+    assert_eq!(
+        payback.state,
+        response::PaymentState::Success,
+        "payback via stored contact must succeed: {payback:?}"
+    );
+    assert!(payback.payment_preimage.is_some());
+    Ok(())
+}
