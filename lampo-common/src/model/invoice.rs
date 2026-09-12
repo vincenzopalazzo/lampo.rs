@@ -80,24 +80,6 @@ pub mod request {
 
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct ListContacts {}
-}
-
-pub mod contacts_response {
-    use paperclip::actix::Apiv2Schema;
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Serialize, Deserialize, Debug, Clone, Apiv2Schema)]
-    pub struct ContactInfo {
-        pub label: String,
-        pub remote_offer: String,
-        pub primary_secret_hex: String,
-        pub our_offer: Option<String>,
-    }
-
-    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
-    pub struct Contacts {
-        pub contacts: Vec<ContactInfo>,
-    }
 
     /// Mint blinded paths on a static-invoice server for an often-offline
     /// recipient. `node_id` must be a channel counterparty; those pubkey
@@ -124,6 +106,24 @@ pub mod contacts_response {
         pub token: Option<String>,
         #[serde(default)]
         pub force: bool,
+    }
+}
+
+pub mod contacts_response {
+    use paperclip::actix::Apiv2Schema;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Apiv2Schema)]
+    pub struct ContactInfo {
+        pub label: String,
+        pub remote_offer: String,
+        pub primary_secret_hex: String,
+        pub our_offer: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct Contacts {
+        pub contacts: Vec<ContactInfo>,
     }
 }
 
