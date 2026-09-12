@@ -118,31 +118,54 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
             .as_ref()
             .and_then(|x| x.reveal_contact)
             .unwrap_or(false);
-        let contact_params = if reveal {
-            Some(build_reveal_contact_params(
+        let (contact_params, new_outbound) = if reveal {
+            let (params, outbound) = build_reveal_contact_params(
                 ctx,
                 &request.invoice_str,
                 bolt12.as_ref().and_then(|x| x.contact_label.clone()),
                 bolt12.as_ref().and_then(|x| x.intro_node.clone()),
-            )?)
+            )?;
+            (Some(params), outbound)
         } else if let Some(label) = bolt12.as_ref().and_then(|x| x.contact_label.clone()) {
             // Pay back a stored contact when paying their remote offer.
             // `intro_node` is only needed if we still have to mint our compact offer.
-            maybe_payback_contact_params(
-                ctx,
-                &request.invoice_str,
-                &label,
-                bolt12.as_ref().and_then(|x| x.intro_node.clone()),
-            )?
+            (
+                maybe_payback_contact_params(
+                    ctx,
+                    &request.invoice_str,
+                    &label,
+                    bolt12.as_ref().and_then(|x| x.intro_node.clone()),
+                )?,
+                None,
+            )
         } else {
-            None
+            (None, None)
         };
-        ctx.offchain_manager().pay_offer_with_contact(
+        let payment_id = ctx.offchain_manager().pay_offer_with_contact(
             &request.invoice_str,
             request.amount,
             payer_note,
             contact_params,
-        )?
+        )?;
+        // Persist outbound contact only after LDK accepted the payer offer.
+        if let Some(outbound) = new_outbound {
+            ctx.contact_store()
+                .remember_outbound(
+                    &outbound.label,
+                    &outbound.remote_offer,
+                    &outbound.primary_secret,
+                    &outbound.our_offer,
+                    &outbound.our_offer_nonce_hex,
+                )
+                .map_err(|err| {
+                    Error::Rpc(RpcError {
+                        code: -1,
+                        message: err.to_string(),
+                        data: None,
+                    })
+                })?;
+        }
+        payment_id
     } else {
         log::debug!(
             "Paying invoice with bolt11 invoice: {}",
@@ -247,12 +270,20 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
 }
 
+struct NewOutboundContact {
+    label: String,
+    remote_offer: Offer,
+    primary_secret: ContactSecret,
+    our_offer: Offer,
+    our_offer_nonce_hex: String,
+}
+
 fn build_reveal_contact_params(
     ctx: &LampoDaemon,
     offer_str: &str,
     contact_label: Option<String>,
     intro_node: Option<String>,
-) -> Result<ContactPaymentParams, Error> {
+) -> Result<(ContactPaymentParams, Option<NewOutboundContact>), Error> {
     let label = contact_label.ok_or_else(|| {
         Error::Rpc(RpcError {
             code: -1,
@@ -272,7 +303,10 @@ fn build_reveal_contact_params(
     // If we already know this contact (especially after an inbound payment),
     // reuse their secret and only (re)build our compact payer offer if needed.
     if let Some(contact) = store.get(&label) {
-        return contact_params_from_stored(ctx, &their_offer, &contact, intro_node.as_deref());
+        return Ok((
+            contact_params_from_stored(ctx, &their_offer, &contact, intro_node.as_deref())?,
+            None,
+        ));
     }
 
     let intro_pk = parse_pubkey(&intro_node.ok_or_else(|| {
@@ -303,22 +337,14 @@ fn build_reveal_contact_params(
                 data: None,
             })
         })?;
-    store
-        .remember_outbound(
-            &label,
-            &their_offer,
-            params.secrets.primary_secret(),
-            &params.payer_offer,
-            &nonce_hex,
-        )
-        .map_err(|err| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: err.to_string(),
-                data: None,
-            })
-        })?;
-    Ok(params)
+    let outbound = NewOutboundContact {
+        label,
+        remote_offer: their_offer,
+        primary_secret: *params.secrets.primary_secret(),
+        our_offer: params.payer_offer.clone(),
+        our_offer_nonce_hex: nonce_hex,
+    };
+    Ok((params, Some(outbound)))
 }
 
 fn maybe_payback_contact_params(

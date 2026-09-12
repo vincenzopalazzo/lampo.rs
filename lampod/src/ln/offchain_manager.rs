@@ -187,20 +187,36 @@ impl OffchainManager {
         }
 
         let manager = self.channel_manager.manager();
-        let (builder, nonce) = manager
-            .create_compact_offer_builder(intro_node)
-            .map_err(|err| error::anyhow!("create_compact_offer_builder: {:?}", err))?;
-        let payer_offer = builder
-            .build()
-            .map_err(|err| error::anyhow!("build compact payer offer: {:?}", err))?;
-        let secrets = manager
-            .compute_contact_secret(&payer_offer, nonce, their_offer)
-            .map_err(|err| error::anyhow!("compute_contact_secret: {:?}", err))?;
-        Ok(ContactPaymentParams {
-            secrets,
-            payer_offer,
-            nonce: Some(nonce),
-        })
+        // Compact payer offers must be <= 300 TLV bytes (BLIP-42). On signet the
+        // explicit chain hash + blinded path can land just over the limit; retry a
+        // few times in case path padding/nonce encoding varies, then fail clearly.
+        let mut last_len = 0usize;
+        for attempt in 0..8 {
+            let (builder, nonce) = manager
+                .create_compact_offer_builder(intro_node)
+                .map_err(|err| error::anyhow!("create_compact_offer_builder: {:?}", err))?;
+            let payer_offer = builder
+                .build()
+                .map_err(|err| error::anyhow!("build compact payer offer: {:?}", err))?;
+            last_len = payer_offer.as_ref().len();
+            log::info!(
+                target: "lampo::offchain",
+                "compact payer_offer attempt {attempt}: tlv_len={last_len}"
+            );
+            if last_len <= 300 {
+                let secrets = manager
+                    .compute_contact_secret(&payer_offer, nonce, their_offer)
+                    .map_err(|err| error::anyhow!("compute_contact_secret: {:?}", err))?;
+                return Ok(ContactPaymentParams {
+                    secrets,
+                    payer_offer,
+                    nonce: Some(nonce),
+                });
+            }
+        }
+        error::bail!(
+            "compact payer_offer stayed at {last_len} bytes after retries; BLIP-42 requires <= 300 (need BIP-353 or smaller blinded path / SCID intro)"
+        );
     }
 
     /// Create a compact payer offer for BLIP-42 without deriving a new contact secret.
