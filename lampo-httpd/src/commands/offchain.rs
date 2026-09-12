@@ -6,8 +6,8 @@ use paste::paste;
 use lampo_common::json;
 use lampo_common::model::{request, response};
 use lampod::jsonrpc::offchain::{
-    json_asyncinvoicepaths, json_decode, json_invoice, json_keysend, json_offer, json_pay,
-    json_setasyncinvoicepaths,
+    json_addcontact, json_asyncinvoicepaths, json_decode, json_invoice, json_keysend,
+    json_listcontacts, json_offer, json_pay, json_setasyncinvoicepaths,
 };
 
 use crate::{post, AppState, ResultJson};
@@ -20,3 +20,5 @@ post!(pay, request: request::Pay, response: response::PayResult);
 post!(keysend, request: request::KeySend, response: response::PayResult);
 post!(asyncinvoicepaths, request: request::GenerateAsyncInvoicePaths, response: response::AsyncInvoicePaths);
 post!(setasyncinvoicepaths, request: request::SetAsyncInvoicePaths, response: response::AsyncInvoicePaths);
+post!(listcontacts, request: request::ListContacts, response: response::Contacts);
+post!(addcontact, request: request::AddContact, response: response::ContactInfo);

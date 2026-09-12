@@ -124,13 +124,38 @@ impl ContactStore {
         let contact = Contact {
             label: label.to_string(),
             primary_secret_hex: hex::encode(secret.as_bytes()),
-            remote_offer: payer_offer
-                .map(|o| o.to_string())
-                .ok_or_else(|| error::anyhow!("inbound contact requires a payer_offer return path"))?,
+            remote_offer: payer_offer.map(|o| o.to_string()).ok_or_else(|| {
+                error::anyhow!("inbound contact requires a payer_offer return path")
+            })?,
             our_offer: None,
             our_offer_nonce_hex: None,
             additional_remote_secrets_hex: Vec::new(),
         };
+        self.upsert(contact.clone())?;
+        Ok(contact)
+    }
+
+    /// Store/update a contact we are revealing ourselves to (outbound pay).
+    pub fn remember_outbound(
+        &self,
+        label: &str,
+        remote_offer: &Offer,
+        primary_secret: &ContactSecret,
+        our_offer: &Offer,
+        our_offer_nonce_hex: &str,
+    ) -> error::Result<Contact> {
+        let mut contact = self.get(label).unwrap_or(Contact {
+            label: label.to_string(),
+            primary_secret_hex: hex::encode(primary_secret.as_bytes()),
+            remote_offer: remote_offer.to_string(),
+            our_offer: None,
+            our_offer_nonce_hex: None,
+            additional_remote_secrets_hex: Vec::new(),
+        });
+        contact.primary_secret_hex = hex::encode(primary_secret.as_bytes());
+        contact.remote_offer = remote_offer.to_string();
+        contact.our_offer = Some(our_offer.to_string());
+        contact.our_offer_nonce_hex = Some(our_offer_nonce_hex.to_string());
         self.upsert(contact.clone())?;
         Ok(contact)
     }
