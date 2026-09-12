@@ -30,6 +30,7 @@ pub mod response {
     pub use crate::model::close_channel::response::*;
     pub use crate::model::connect::Connect;
     pub use crate::model::getinfo::*;
+    pub use crate::model::invoice::contacts_response::*;
     pub use crate::model::invoice::response::*;
     pub use crate::model::keysend::response::*;
     pub use crate::model::network::response::*;

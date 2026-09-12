@@ -5,7 +5,10 @@ use paste::paste;
 
 use lampo_common::json;
 use lampo_common::model::{request, response};
-use lampod::jsonrpc::offchain::{json_decode, json_invoice, json_keysend, json_offer, json_pay};
+use lampod::jsonrpc::offchain::{
+    json_addcontact, json_decode, json_invoice, json_keysend, json_listcontacts, json_offer,
+    json_pay,
+};
 
 use crate::{post, AppState, ResultJson};
 
@@ -15,3 +18,6 @@ post!(offer, request: request::GenerateOffer, response: response::Offer);
 post!(decode, request: request::DecodeInvoice, response: response::Decode);
 post!(pay, request: request::Pay, response: response::PayResult);
 post!(keysend, request: request::KeySend, response: response::PayResult);
+
+post!(listcontacts, request: request::ListContacts, response: response::Contacts);
+post!(addcontact, request: request::AddContact, response: response::ContactInfo);

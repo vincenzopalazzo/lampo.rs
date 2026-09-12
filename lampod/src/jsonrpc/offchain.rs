@@ -2,23 +2,32 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+use lampo_common::bitcoin::secp256k1::PublicKey;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::hex;
 use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::ldk;
+use lampo_common::ldk::offers::contacts::{ContactSecret, ContactSecrets};
+use lampo_common::ldk::offers::nonce::Nonce;
 use lampo_common::ldk::offers::offer;
+use lampo_common::ldk::offers::offer::Offer;
+use lampo_common::model::request::AddContact;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
+use lampo_common::model::request::ListContacts;
 use lampo_common::model::request::Pay;
+use lampo_common::model::response::ContactInfo;
+use lampo_common::model::response::Contacts;
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
 use lampo_common::{json, model::request::DecodeInvoice};
 use tokio::time::Instant;
 
+use crate::ln::{Contact, ContactPaymentParams};
 use crate::LampoDaemon;
 
 pub async fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
@@ -103,9 +112,31 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
 
     let payment_id = if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
         log::debug!("Paying offer with bolt12 invoice: {}", request.invoice_str);
-        let payer_note = request.bolt12.and_then(|x| x.payer_note);
-        ctx.offchain_manager()
-            .pay_offer(&request.invoice_str, request.amount, payer_note)?
+        let bolt12 = request.bolt12;
+        let payer_note = bolt12.as_ref().and_then(|x| x.payer_note.clone());
+        let reveal = bolt12
+            .as_ref()
+            .and_then(|x| x.reveal_contact)
+            .unwrap_or(false);
+        let contact_params = if reveal {
+            Some(build_reveal_contact_params(
+                ctx,
+                &request.invoice_str,
+                bolt12.as_ref().and_then(|x| x.contact_label.clone()),
+                bolt12.as_ref().and_then(|x| x.intro_node.clone()),
+            )?)
+        } else if let Some(label) = bolt12.as_ref().and_then(|x| x.contact_label.clone()) {
+            // Pay back a stored contact when paying their remote offer.
+            maybe_payback_contact_params(ctx, &request.invoice_str, &label)?
+        } else {
+            None
+        };
+        ctx.offchain_manager().pay_offer_with_contact(
+            &request.invoice_str,
+            request.amount,
+            payer_note,
+            contact_params,
+        )?
     } else {
         log::debug!(
             "Paying invoice with bolt11 invoice: {}",
@@ -208,4 +239,304 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     // payment on the event bus.
     let payment_id = hex::encode(payment_id.0);
     wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
+}
+
+fn build_reveal_contact_params(
+    ctx: &LampoDaemon,
+    offer_str: &str,
+    contact_label: Option<String>,
+    intro_node: Option<String>,
+) -> Result<ContactPaymentParams, Error> {
+    let label = contact_label.ok_or_else(|| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: "reveal_contact requires bolt12.contact_label".into(),
+            data: None,
+        })
+    })?;
+    let their_offer = Offer::from_str(offer_str).map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("invalid offer: {err:?}"),
+            data: None,
+        })
+    })?;
+
+    let store = ctx.contact_store();
+    let existing = store
+        .get(&label)
+        .and_then(|c| load_existing_contact_params(&c).ok());
+
+    let params = if let Some(existing_params) = existing {
+        // `intro_node` is ignored when `existing` is provided; pass a placeholder
+        // pubkey derived from intro_node when available, otherwise from the offer issuer.
+        let intro_pk = match &intro_node {
+            Some(h) => parse_pubkey(h)?,
+            None => their_offer
+                .issuer_signing_pubkey()
+                .ok_or_else(|| {
+                    Error::Rpc(RpcError {
+                        code: -1,
+                        message: "offer missing issuer_signing_pubkey for contact reuse".into(),
+                        data: None,
+                    })
+                })?,
+        };
+        ctx.offchain_manager().build_contact_payment_params(
+            &their_offer,
+            intro_pk,
+            Some(existing_params),
+        )
+    } else {
+        let intro_pk = parse_pubkey(&intro_node.ok_or_else(|| {
+            Error::Rpc(RpcError {
+                code: -1,
+                message: "reveal_contact requires bolt12.intro_node unless the contact already has our_offer+nonce".into(),
+                data: None,
+            })
+        })?)?;
+        ctx.offchain_manager()
+            .build_contact_payment_params(&their_offer, intro_pk, None)
+    }
+    .map_err(|err| Error::Rpc(RpcError {
+        code: -1,
+        message: err.to_string(),
+        data: None,
+    }))?;
+
+    let nonce_hex = params
+        .nonce
+        .as_ref()
+        .map(|n| hex::encode(n.as_slice()))
+        .ok_or_else(|| {
+            Error::Rpc(RpcError {
+                code: -1,
+                message: "compact payer offer missing nonce".into(),
+                data: None,
+            })
+        })?;
+    store
+        .remember_outbound(
+            &label,
+            &their_offer,
+            params.secrets.primary_secret(),
+            &params.payer_offer,
+            &nonce_hex,
+        )
+        .map_err(|err| {
+            Error::Rpc(RpcError {
+                code: -1,
+                message: err.to_string(),
+                data: None,
+            })
+        })?;
+    Ok(params)
+}
+
+fn maybe_payback_contact_params(
+    ctx: &LampoDaemon,
+    offer_str: &str,
+    label: &str,
+) -> Result<Option<ContactPaymentParams>, Error> {
+    let store = ctx.contact_store();
+    let Some(contact) = store.get(label) else {
+        return Ok(None);
+    };
+    if contact.remote_offer != offer_str {
+        return Ok(None);
+    }
+    let secrets = store.secrets_for(&contact).map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: err.to_string(),
+            data: None,
+        })
+    })?;
+    let (payer_offer, nonce) = match (&contact.our_offer, &contact.our_offer_nonce_hex) {
+        (Some(offer_s), Some(nonce_hex)) => {
+            let offer = Offer::from_str(offer_s).map_err(|err| {
+                Error::Rpc(RpcError {
+                    code: -1,
+                    message: format!("stored our_offer invalid: {err:?}"),
+                    data: None,
+                })
+            })?;
+            (offer, Some(decode_nonce(nonce_hex)?))
+        }
+        _ => {
+            return Err(Error::Rpc(RpcError {
+                code: -1,
+                message: format!(
+                    "contact `{label}` has no stored our_offer for payback; pay with reveal_contact=true and intro_node"
+                ),
+                data: None,
+            }));
+        }
+    };
+    Ok(Some(ContactPaymentParams {
+        secrets,
+        payer_offer,
+        nonce,
+    }))
+}
+
+fn load_existing_contact_params(
+    contact: &Contact,
+) -> lampo_common::error::Result<(Offer, Nonce, ContactSecrets)> {
+    use lampo_common::error;
+    let offer_s = contact
+        .our_offer
+        .as_ref()
+        .ok_or_else(|| error::anyhow!("missing our_offer"))?;
+    let nonce_hex = contact
+        .our_offer_nonce_hex
+        .as_ref()
+        .ok_or_else(|| error::anyhow!("missing our_offer_nonce_hex"))?;
+    let offer = Offer::from_str(offer_s).map_err(|e| error::anyhow!("{e:?}"))?;
+    let nonce = {
+        let bytes = hex::decode(nonce_hex)?;
+        Nonce::try_from(bytes.as_slice()).map_err(|_| error::anyhow!("bad nonce"))?
+    };
+    Ok((
+        offer,
+        nonce,
+        /* secrets filled by caller via secrets_for */ store_secrets(contact)?,
+    ))
+}
+
+fn store_secrets(contact: &Contact) -> lampo_common::error::Result<ContactSecrets> {
+    use lampo_common::error;
+    let bytes = hex::decode(&contact.primary_secret_hex)?;
+    if bytes.len() != 32 {
+        error::bail!("bad secret len");
+    }
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&bytes);
+    let mut secrets = ContactSecrets::new(ContactSecret::new(arr));
+    for extra in &contact.additional_remote_secrets_hex {
+        let bytes = hex::decode(extra)?;
+        if bytes.len() != 32 {
+            error::bail!("bad secret len");
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        secrets.add_remote_secret(ContactSecret::new(arr));
+    }
+    Ok(secrets)
+}
+
+fn decode_nonce(nonce_hex: &str) -> Result<Nonce, Error> {
+    let bytes = hex::decode(nonce_hex).map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("invalid nonce hex: {err}"),
+            data: None,
+        })
+    })?;
+    Nonce::try_from(bytes.as_slice()).map_err(|_| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: "contact our_offer_nonce_hex must be 16 bytes".into(),
+            data: None,
+        })
+    })
+}
+
+fn parse_pubkey(hex_str: &str) -> Result<PublicKey, Error> {
+    let bytes = hex::decode(hex_str).map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("invalid intro_node hex: {err}"),
+            data: None,
+        })
+    })?;
+    PublicKey::from_slice(&bytes).map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("invalid intro_node pubkey: {err}"),
+            data: None,
+        })
+    })
+}
+
+pub async fn json_listcontacts(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    let _: ListContacts = json::from_value(request.clone()).unwrap_or(ListContacts {});
+    let contacts = ctx
+        .contact_store()
+        .list()
+        .into_iter()
+        .map(|c| ContactInfo {
+            label: c.label,
+            remote_offer: c.remote_offer,
+            primary_secret_hex: c.primary_secret_hex,
+            our_offer: c.our_offer,
+        })
+        .collect();
+    Ok(json::to_value(Contacts { contacts })?)
+}
+
+pub async fn json_addcontact(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    let request: AddContact = json::from_value(request.clone())?;
+    let _offer = Offer::from_str(&request.offer).map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: format!("invalid offer: {err:?}"),
+            data: None,
+        })
+    })?;
+    let primary_secret_hex = if let Some(secret_hex) = request.contact_secret_hex {
+        let bytes = hex::decode(&secret_hex).map_err(|err| {
+            Error::Rpc(RpcError {
+                code: -1,
+                message: format!("invalid contact_secret_hex: {err}"),
+                data: None,
+            })
+        })?;
+        if bytes.len() != 32 {
+            return Err(Error::Rpc(RpcError {
+                code: -1,
+                message: "contact_secret_hex must be 32 bytes".into(),
+                data: None,
+            }));
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        let secrets = ContactSecrets::from_remote_secret(ContactSecret::new(arr));
+        hex::encode(secrets.primary_secret().as_bytes())
+    } else {
+        return Err(Error::Rpc(RpcError {
+            code: -1,
+            message:
+                "addcontact currently requires contact_secret_hex (from an inbound BLIP-42 payment)"
+                    .into(),
+            data: None,
+        }));
+    };
+    let contact = Contact {
+        label: request.label.clone(),
+        primary_secret_hex,
+        remote_offer: request.offer,
+        our_offer: None,
+        our_offer_nonce_hex: None,
+        additional_remote_secrets_hex: Vec::new(),
+    };
+    ctx.contact_store().upsert(contact.clone()).map_err(|err| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: err.to_string(),
+            data: None,
+        })
+    })?;
+    Ok(json::to_value(ContactInfo {
+        label: contact.label,
+        remote_offer: contact.remote_offer,
+        primary_secret_hex: contact.primary_secret_hex,
+        our_offer: contact.our_offer,
+    })?)
 }
