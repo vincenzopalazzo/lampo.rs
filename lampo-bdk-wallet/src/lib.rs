@@ -372,14 +372,25 @@ impl WalletManager for BDKWalletManager {
         log::info!("lampo-wallet: list transactions");
         let wallet = self.wallet.lock().unwrap();
         log::info!("lampo-wallet: wallet lock taken");
+        let tip_height = wallet.local_chain().tip().height();
         let txs = wallet
             .list_unspent()
-            .map(|tx| Utxo {
-                txid: tx.outpoint.txid.to_string(),
-                vout: tx.outpoint.vout,
-                reserved: tx.is_spent,
-                confirmed: 0,
-                amount_msat: tx.txout.value.to_sat() * 1000_u64,
+            .map(|tx| {
+                // `confirmed` is the confirmation count (0 = mempool / not yet
+                // anchored). Operators and restore checks use this to decide
+                // whether an UTXO is safe to spend or to treat as recovered.
+                let confirmed = tx
+                    .chain_position
+                    .confirmation_height_upper_bound()
+                    .map(|height| tip_height.saturating_sub(height).saturating_add(1))
+                    .unwrap_or(0);
+                Utxo {
+                    txid: tx.outpoint.txid.to_string(),
+                    vout: tx.outpoint.vout,
+                    reserved: tx.is_spent,
+                    confirmed,
+                    amount_msat: tx.txout.value.to_sat() * 1000_u64,
+                }
             })
             .collect::<Vec<_>>();
         Ok(txs)
