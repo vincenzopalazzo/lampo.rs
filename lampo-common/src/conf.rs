@@ -44,6 +44,14 @@ pub struct LampoConf {
     /// instead of scanning from genesis. Defaults to `true` and only applies
     /// to a fresh wallet (no UTXOs to miss); set `false` to force a full scan.
     pub fast_sync: Option<bool>,
+    /// Async payments role: `client` holds outbound HTLCs at the next hop so
+    /// the node can go offline after sending; `server` holds HTLCs and serves
+    /// static invoices on behalf of often-offline recipients.
+    pub async_payments_role: Option<String>,
+    /// Hex-encoded `Vec<BlindedMessagePath>` obtained out-of-band from a
+    /// static invoice server. Configures this node as an often-offline async
+    /// recipient: `offer` then returns the async receive offer.
+    pub async_invoice_server_paths: Option<String>,
 }
 
 impl LampoConf {
@@ -99,6 +107,8 @@ impl Default for LampoConf {
             wallet_sync_parallel: None,
             sync_mode: None,
             fast_sync: None,
+            async_payments_role: None,
+            async_invoice_server_paths: None,
         }
     }
 }
@@ -306,6 +316,16 @@ impl TryFrom<String> for LampoConf {
             .get_conf("fast-sync")
             .unwrap_or(None)
             .map(|s| s.to_lowercase() == "true" || s == "1");
+        let async_payments_role = conf.get_conf("async-payments-role").unwrap_or(None);
+        if let Some(role) = async_payments_role.as_deref() {
+            if role != "client" && role != "server" {
+                anyhow::bail!(
+                    "invalid async-payments-role `{role}`: expected `client` or `server`"
+                );
+            }
+        }
+        let async_invoice_server_paths =
+            conf.get_conf("async-invoice-server-paths").unwrap_or(None);
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -331,6 +351,8 @@ impl TryFrom<String> for LampoConf {
             wallet_sync_parallel,
             sync_mode,
             fast_sync,
+            async_payments_role,
+            async_invoice_server_paths,
         })
     }
 }
@@ -338,6 +360,27 @@ impl TryFrom<String> for LampoConf {
 impl LampoConf {
     pub fn path(&self) -> String {
         format!("{}/{}", self.root_path, self.network)
+    }
+
+    /// The LDK config adjusted for the configured async payments role.
+    ///
+    /// Mirrors ldk-node's builder: a `server` holds HTLCs for often-offline
+    /// recipients and accepts forwards to private channels (the recipient's
+    /// channel to its server is typically unannounced); a `client` asks its
+    /// next hop to hold outbound HTLCs so it can go offline after sending.
+    pub fn ldk_conf_with_async_role(&self) -> UserConfig {
+        let mut conf = self.ldk_conf.clone();
+        match self.async_payments_role.as_deref() {
+            Some("server") => {
+                conf.enable_htlc_hold = true;
+                conf.accept_forwards_to_priv_channels = true;
+            }
+            Some("client") => {
+                conf.hold_outbound_htlcs_at_next_hop = true;
+            }
+            _ => {}
+        }
+        conf
     }
 
     pub fn get_values(&self, key: &str) -> Option<Vec<String>> {
