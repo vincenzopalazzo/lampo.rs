@@ -32,7 +32,7 @@ use lampo_common::utils::logger::LampoLogger;
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
-use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager, StaticInvoiceStore};
 use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
 
@@ -89,6 +89,9 @@ pub struct LampoHandler {
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
     persister: Arc<LampoPersistence>,
+    /// Present only when this node is a static invoice server
+    /// (`async-payments-role=server`).
+    static_invoice_store: Option<StaticInvoiceStore>,
     bump_tx_event_handler: BumpHandler,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
@@ -117,6 +120,10 @@ impl LampoHandler {
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
             persister: lampod.persister(),
+            static_invoice_store: match lampod.conf().async_payments_role.as_deref() {
+                Some("server") => Some(StaticInvoiceStore::new(lampod.persister())),
+                _ => None,
+            },
             bump_tx_event_handler,
             external_handlers: RwLock::new(Vec::new()),
             emitter,
@@ -725,6 +732,66 @@ impl Handler for LampoHandler {
             }
             ldk::events::Event::BumpTransaction(event) => {
                 self.bump_tx_event_handler.handle_event(&event).await;
+                Ok(())
+            }
+            ldk::events::Event::PersistStaticInvoice {
+                invoice,
+                invoice_request_path,
+                invoice_slot,
+                recipient_id,
+                invoice_persisted_path,
+            } => {
+                let Some(store) = &self.static_invoice_store else {
+                    log::debug!(target: "lampo::handler", "ignoring PersistStaticInvoice: not a static invoice server");
+                    return Ok(());
+                };
+                // An error here makes LDK replay the event (see
+                // `handler_ldk_events`), so the invoice is not lost to a
+                // transient store failure. Confirming to the recipient
+                // happens only after the write durably succeeded.
+                store
+                    .persist(invoice, invoice_request_path, invoice_slot, &recipient_id)
+                    .map_err(|err| {
+                        log::error!(target: "lampo::handler", "failed to persist static invoice for slot {invoice_slot}: {err}");
+                        err
+                    })?;
+                self.channel_manager
+                    .manager()
+                    .static_invoice_persisted(invoice_persisted_path);
+                Ok(())
+            }
+            ldk::events::Event::StaticInvoiceRequested {
+                recipient_id,
+                invoice_slot,
+                reply_path,
+                invoice_request,
+            } => {
+                let Some(store) = &self.static_invoice_store else {
+                    log::debug!(target: "lampo::handler", "ignoring StaticInvoiceRequested: not a static invoice server");
+                    return Ok(());
+                };
+                match store.load(&recipient_id, invoice_slot)? {
+                    Some((invoice, invoice_request_path)) => {
+                        if let Err(err) = self
+                            .channel_manager
+                            .manager()
+                            .respond_to_static_invoice_request(
+                                invoice,
+                                reply_path,
+                                invoice_request,
+                                invoice_request_path,
+                            )
+                        {
+                            // Not replayed: the payer's invoice request has
+                            // its own retry/timeout, and the recipient can
+                            // re-serve a fresh invoice.
+                            log::error!(target: "lampo::handler", "failed to answer static invoice request for slot {invoice_slot}: {err:?}");
+                        }
+                    }
+                    None => {
+                        log::debug!(target: "lampo::handler", "no static invoice stored for slot {invoice_slot}; ignoring request");
+                    }
+                }
                 Ok(())
             }
             _ => {

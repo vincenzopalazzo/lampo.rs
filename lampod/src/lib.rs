@@ -350,13 +350,22 @@ impl LampoDaemon {
         })
     }
 
-    // Only `SpendableOutputs` is replayed on failure: dropping it would
-    // lose the descriptors needed to claim closed-channel funds on-chain.
-    // Other handlers can fail permanently (peer disconnected, wallet
-    // without funds); LDK keeps a failed event at the head of the queue,
-    // so replaying those would block every later event forever.
+    // `SpendableOutputs` is replayed on failure: dropping it would lose the
+    // descriptors needed to claim closed-channel funds on-chain. The static
+    // invoice events are replayed too: dropping `PersistStaticInvoice` loses
+    // a recipient's invoice (the payer then times out for no reason), and a
+    // transient store error on `StaticInvoiceRequested` is worth one retry —
+    // LDK regenerates neither across restarts, so replay is the only
+    // recovery. Other handlers can fail permanently (peer disconnected,
+    // wallet without funds); LDK keeps a failed event at the head of the
+    // queue, so replaying those would block every later event forever.
     async fn handler_ldk_events(&self, env: Event) -> Result<(), ReplayEvent> {
-        let replay_on_failure = matches!(env, Event::SpendableOutputs { .. });
+        let replay_on_failure = matches!(
+            env,
+            Event::SpendableOutputs { .. }
+                | Event::PersistStaticInvoice { .. }
+                | Event::StaticInvoiceRequested { .. }
+        );
         if let Err(err) = self.handler().handle(env).await {
             if replay_on_failure {
                 log::error!(target: "lampod", "Error handling event, will replay it: {:?}", err);
