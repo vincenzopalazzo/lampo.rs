@@ -33,7 +33,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<LampoKeysManager>>>,
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
-    IgnoringMessageHandler,
+    Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
 >;
@@ -134,7 +134,7 @@ impl LampoPeerManager {
             channel_manager.manager(),
             Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone())),
             channel_manager.manager(), // Use channel manager for offers message handler
-            IgnoringMessageHandler {}, // async_payments_message_handler
+            channel_manager.manager(), // async_payments_message_handler
             IgnoringMessageHandler {}, // custom_onion_message_handler
             IgnoringMessageHandler {}, // custom_onion_message_contents
         ));
