@@ -429,7 +429,7 @@ impl LampoChannelManager {
         // up unannounced no matter what the caller asked for, and a payment
         // could never route *through* a lampo node — gossip never learned
         // its channels existed.
-        let mut config = self.conf.ldk_conf.clone();
+        let mut config = self.conf.ldk_conf_with_async_role();
         config.channel_handshake_config.announce_for_forwarding = open_channel.public;
         let peer_id = open_channel.node_id()?;
         let push_msat = open_channel.push_msat.unwrap_or(0);
@@ -652,7 +652,7 @@ impl LampoChannelManager {
             self.router.get().expect("router not initialized").clone(),
             default_message_router,
             self.logger.clone(),
-            self.conf.ldk_conf.clone(),
+            self.conf.ldk_conf_with_async_role(),
             monitors.iter().collect(),
         );
         let mut channel_manager_file = File::open(format!("{}/manager", self.conf.path()))?;
@@ -722,7 +722,7 @@ impl LampoChannelManager {
             keymanagers.clone(),
             keymanagers.clone(),
             keymanagers,
-            self.conf.ldk_conf.clone(),
+            self.conf.ldk_conf_with_async_role(),
             chain_params,
             now.as_secs() as u32,
         ));
