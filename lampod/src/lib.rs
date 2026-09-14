@@ -29,6 +29,7 @@ use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::LampoConf;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
+use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
@@ -165,6 +166,33 @@ impl LampoDaemon {
 
     pub fn offchain_manager(&self) -> Arc<OffchainManager> {
         self.offchain_manager.clone().unwrap()
+    }
+
+    /// Mint blinded paths that an often-offline async recipient uses to reach
+    /// this node as its static invoice server. Server role only; the paths
+    /// are handed to the recipient out-of-band (config or runtime call).
+    pub fn blinded_paths_for_async_recipient(
+        &self,
+        recipient_id: Vec<u8>,
+    ) -> error::Result<Vec<BlindedMessagePath>> {
+        if self.conf.async_payments_role.as_deref() != Some("server") {
+            error::bail!("blinded_paths_for_async_recipient requires async-payments-role=server");
+        }
+        self.channel_manager()
+            .manager()
+            .blinded_paths_for_async_recipient(recipient_id, None)
+            .map_err(|_| {
+                error::anyhow!(
+                    "cannot create blinded paths for async recipient (no usable onion-message peers?)"
+                )
+            })
+    }
+
+    /// Configure this node as an often-offline async recipient with paths to
+    /// its static invoice server. Runtime equivalent of the
+    /// `async-invoice-server-paths` config key.
+    pub fn set_async_receive_paths(&self, paths: Vec<BlindedMessagePath>) -> error::Result<()> {
+        self.offchain_manager().set_async_receive_paths(paths)
     }
 
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
