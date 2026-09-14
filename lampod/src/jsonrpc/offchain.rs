@@ -38,6 +38,23 @@ pub async fn json_invoice(ctx: &LampoDaemon, request: &json::Value) -> Result<js
 pub async fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
     log::info!("call for `offer` with request `{:?}`", request);
     let request: GenerateOffer = json::from_value(request.clone())?;
+
+    // An async recipient's offer is built interactively with its static
+    // invoice server; description/amount cannot be applied to it.
+    if ctx.offchain_manager().async_receive_enabled() {
+        if request.description.is_some() || request.amount_msat.is_some() {
+            return Err(crate::rpc_error!(
+                "description/amount_msat cannot be set on an async receive offer; the offer is built with the static invoice server"
+            ));
+        }
+        let offer: response::Offer = ctx
+            .offchain_manager()
+            .async_offer()
+            .map_err(|err| crate::rpc_error!("{err:?}"))?
+            .into();
+        return Ok(json::to_value(&offer)?);
+    }
+
     let manager = ctx.channel_manager().manager();
     let mut offer_builder = manager
         .create_offer_builder()
