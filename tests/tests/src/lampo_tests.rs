@@ -612,3 +612,174 @@ pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
     );
     Ok(())
 }
+
+/// Spin up a static-invoice server and a recipient, and return them once
+/// their channel is usable.
+///
+/// The server -> recipient channel is **private**: a recipient that appears
+/// in the network graph (via a public channel announcement) but announces no
+/// addresses builds self-introduced blinded paths, and `DefaultMessageRouter`
+/// cannot route onion messages to announced nodes without addresses. Keeping
+/// the recipient out of the graph makes its paths introduction-point at the
+/// server, which every payer of its offers is connected to by construction.
+async fn async_payments_server_and_recipient(
+    btc: Arc<BtcNode>,
+) -> error::Result<(Arc<LampoTesting>, Arc<LampoTesting>)> {
+    let server = Arc::new(
+        LampoTesting::new_with(btc, |conf| {
+            conf.async_payments_role = Some("server".to_owned());
+        })
+        .await?,
+    );
+    let recipient = Arc::new(LampoTesting::new(server.btc.clone()).await?);
+
+    // server -> recipient: the recipient needs inbound liquidity for the
+    // static invoice's payment paths, and the channel connects the two for
+    // the onion-message handshake that builds the offer.
+    server
+        .fund_channel_with_privacy(recipient.clone(), 1_000_000, false)
+        .await?;
+
+    Ok((server, recipient))
+}
+
+/// Wait until `node`'s own graph knows `node_id`, i.e. a channel
+/// announcement naming it has been processed. A node only mints
+/// self-introduced blinded paths once it is announced; minting earlier
+/// produces paths introduced by whatever peer happened to be connected.
+async fn wait_node_in_graph(node: &LampoTesting, node_id: &str) {
+    let node_id = lampo_common::bitcoin::secp256k1::PublicKey::from_str(node_id).unwrap();
+    let node_id = lampo_common::ldk::routing::gossip::NodeId::from_pubkey(&node_id);
+    async_wait!(
+        async {
+            let graph = node.daemon().channel_manager().graph();
+            if graph.read_only().nodes().contains_key(&node_id) {
+                Ok(())
+            } else {
+                Err(())
+            }
+        },
+        5
+    );
+}
+
+/// Wait for the recipient's async receive offer to be built with the server.
+async fn wait_async_offer(node: &LampoTesting) -> response::Offer {
+    let mut offer = None;
+    async_wait!(
+        async {
+            match node
+                .lampod()
+                .call::<_, response::Offer>(
+                    "offer",
+                    request::GenerateOffer {
+                        description: None,
+                        amount_msat: None,
+                    },
+                )
+                .await
+            {
+                Ok(o) => {
+                    offer = Some(o);
+                    Ok(())
+                }
+                Err(err) => {
+                    log::debug!(target: "tests", "async offer not ready yet: {err}");
+                    Err(())
+                }
+            }
+        },
+        5
+    );
+    offer.unwrap()
+}
+
+#[tokio_test_shutdown_timeout::test(120)]
+pub async fn async_receive_offer_roundtrip() -> error::Result<()> {
+    init();
+    let server = LampoTesting::tmp_with(|conf| {
+        conf.async_payments_role = Some("server".to_owned());
+    })
+    .await?;
+    let recipient = Arc::new(LampoTesting::new(server.btc.clone()).await?);
+
+    server
+        .fund_channel_with(recipient.clone(), 1_000_000)
+        .await?;
+
+    // Minting before the server's own graph has processed its channel
+    // announcement would produce paths introduced by the recipient instead
+    // of self-introduced ones — fine for this two-node handshake, but not
+    // the shape a real payer relies on.
+    wait_node_in_graph(&server, &server.info.node_id.clone()).await;
+
+    let paths = server
+        .daemon()
+        .blinded_paths_for_async_recipient(vec![1, 2, 3])?;
+    recipient.daemon().set_async_receive_paths(paths)?;
+
+    let offer = wait_async_offer(&recipient).await;
+    assert!(
+        offer.bolt12.starts_with("lno1"),
+        "expected a BOLT12 offer, got `{}`",
+        offer.bolt12
+    );
+    Ok(())
+}
+
+#[tokio_test_shutdown_timeout::test(180)]
+pub async fn async_payment_held_htlc_roundtrip() -> error::Result<()> {
+    init();
+    // The payer is a private node that asks its next hop to hold the HTLC,
+    // so the server exercises the full hold/release cycle.
+    let payer = LampoTesting::tmp_with(|conf| {
+        conf.async_payments_role = Some("client".to_owned());
+    })
+    .await?;
+    let (server, recipient) = async_payments_server_and_recipient(payer.btc.clone()).await?;
+
+    // payer -> server, so the payer can reach the static invoice's paths.
+    // Public: the server must be announced before it mints self-introduced
+    // paths for the recipient.
+    payer.fund_channel_with(server.clone(), 1_000_000).await?;
+    wait_node_in_graph(&server, &server.info.node_id.clone()).await;
+
+    let paths = server
+        .daemon()
+        .blinded_paths_for_async_recipient(vec![1, 2, 3])?;
+    recipient.daemon().set_async_receive_paths(paths)?;
+
+    let offer = wait_async_offer(&recipient).await;
+    log::info!(target: &payer.info.node_id, "paying async offer `{}`", offer.bolt12);
+
+    let pay: response::PayResult = payer
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: Some(100_000),
+                bolt12: None,
+                timeout: Default::default(),
+            },
+        )
+        .await?;
+    log::info!(target: &recipient.info.node_id, "async payment made `{pay:?}`");
+
+    assert_eq!(pay.state, response::PaymentState::Success);
+    assert!(
+        pay.payment_preimage.is_some(),
+        "a settled async payment must expose its preimage"
+    );
+    // The payment settled against the static invoice served by the server,
+    // not a live invoice from the recipient: static invoices cannot produce
+    // a payer proof, while a live BOLT12 payment always does here. The hold
+    // itself is not directly observable from the test; it was verified during
+    // development via the server's `Intercepted held HTLC ... holding until
+    // the recipient is online` log line.
+    assert!(
+        pay.payer_proof.is_none(),
+        "a static-invoice payment cannot carry a payer proof"
+    );
+    Ok(())
+}
