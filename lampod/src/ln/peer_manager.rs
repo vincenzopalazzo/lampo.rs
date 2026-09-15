@@ -23,6 +23,7 @@ use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph}
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
+use crate::ln::async_payments::AsyncPaymentsHandler;
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
@@ -33,7 +34,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<LampoKeysManager>>>,
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
-    Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
+    Arc<AsyncPaymentsHandler>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
 >;
@@ -108,6 +109,7 @@ impl LampoPeerManager {
         _onchain_manager: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
         channel_manager: Arc<LampoChannelManager>,
+        async_payments_enabled: Arc<AtomicBool>,
     ) -> error::Result<()> {
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -126,6 +128,13 @@ impl LampoPeerManager {
         let ephemeral_bytes = keys.get_secure_random_bytes();
         let graph = channel_manager.graph();
         let message_router = Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone()));
+        // Off unless the operator set a role or recipient paths (or later
+        // calls `setasyncinvoicepaths`). Default nodes must not process
+        // static-invoice onion messages.
+        let async_payments = Arc::new(AsyncPaymentsHandler::new(
+            channel_manager.manager(),
+            async_payments_enabled,
+        ));
         // A static invoice server buffers onion messages for offline peers
         // (e.g. `HeldHtlcAvailable` for a recipient that is away) and
         // forwards them on reconnect. `intercept_for_unknown_scids` stays
@@ -140,7 +149,7 @@ impl LampoPeerManager {
                 channel_manager.manager(),
                 message_router,
                 channel_manager.manager(), // Use channel manager for offers message handler
-                channel_manager.manager(), // async_payments_message_handler
+                async_payments,
                 IgnoringMessageHandler {}, // custom_onion_message_handler
                 IgnoringMessageHandler {}, // custom_onion_message_contents
                 false,
@@ -155,7 +164,7 @@ impl LampoPeerManager {
                 channel_manager.manager(),
                 message_router,
                 channel_manager.manager(), // Use channel manager for offers message handler
-                channel_manager.manager(), // async_payments_message_handler
+                async_payments,
                 IgnoringMessageHandler {}, // custom_onion_message_handler
                 IgnoringMessageHandler {}, // custom_onion_message_contents
             ))
