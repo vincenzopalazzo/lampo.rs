@@ -109,25 +109,33 @@ impl StaticInvoiceStore {
         }
     }
 
-    fn check_rate_limit(limiter: &Mutex<RateLimiter>, recipient_id: &[u8]) -> error::Result<()> {
+    fn allow_rate(limiter: &Mutex<RateLimiter>, recipient_id: &[u8]) -> error::Result<bool> {
         let mut limiter = limiter
             .lock()
             .map_err(|_| error::anyhow!("rate limiter lock poisoned"))?;
-        if !limiter.allow(recipient_id) {
-            error::bail!("rate limit exceeded for recipient");
-        }
-        Ok(())
+        Ok(limiter.allow(recipient_id))
     }
 
     /// Persist an invoice from an `Event::PersistStaticInvoice`.
+    ///
+    /// `Ok(true)` means the write landed and the handler may confirm to the
+    /// recipient. `Ok(false)` means this recipient is rate-limited: do not
+    /// confirm and do not treat it as a store failure (a rate-limit `Err`
+    /// would be replayed forever at the head of the LDK event queue).
     pub fn persist(
         &self,
         invoice: StaticInvoice,
         request_path: BlindedMessagePath,
         invoice_slot: u16,
         recipient_id: &[u8],
-    ) -> error::Result<()> {
-        Self::check_rate_limit(&self.persist_rate_limiter, recipient_id)?;
+    ) -> error::Result<bool> {
+        if !Self::allow_rate(&self.persist_rate_limiter, recipient_id)? {
+            log::debug!(
+                target: "lampo::static_invoice_store",
+                "rate-limited persist for slot {invoice_slot}; skipping write"
+            );
+            return Ok(false);
+        }
         let (secondary, key) = storage_location(invoice_slot, recipient_id);
         let record = PersistedStaticInvoice {
             invoice,
@@ -139,7 +147,7 @@ impl StaticInvoiceStore {
             &key,
             record.encode(),
         )?;
-        Ok(())
+        Ok(true)
     }
 
     /// Load an invoice for an `Event::StaticInvoiceRequested`. `Ok(None)`
@@ -149,7 +157,13 @@ impl StaticInvoiceStore {
         recipient_id: &[u8],
         invoice_slot: u16,
     ) -> error::Result<Option<(StaticInvoice, BlindedMessagePath)>> {
-        Self::check_rate_limit(&self.request_rate_limiter, recipient_id)?;
+        if !Self::allow_rate(&self.request_rate_limiter, recipient_id)? {
+            log::debug!(
+                target: "lampo::static_invoice_store",
+                "rate-limited load for slot {invoice_slot}; treating as empty"
+            );
+            return Ok(None);
+        }
         let (secondary, key) = storage_location(invoice_slot, recipient_id);
         match self
             .persister

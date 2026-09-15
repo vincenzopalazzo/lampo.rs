@@ -114,7 +114,8 @@ pub async fn json_setasyncinvoicepaths(
         request
     );
     let request: SetAsyncInvoicePaths = json::from_value(request.clone())?;
-    ctx.set_async_receive_paths_hex(&request.paths)
+    ctx.offchain_manager()
+        .set_async_receive_paths_hex(&request.paths)
         .map_err(|err| crate::rpc_error!("{err}"))?;
     Ok(json::to_value(&response::AsyncInvoicePaths {
         paths: request.paths,

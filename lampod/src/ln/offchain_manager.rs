@@ -95,11 +95,20 @@ impl OffchainManager {
     /// produced by the `asyncinvoicepaths` RPC (or written in
     /// `async-invoice-server-paths`).
     pub fn set_async_receive_paths_hex(&self, paths_hex: &str) -> error::Result<()> {
+        // A few blinded paths encode to well under this; reject oversized
+        // hex before allocating the decoded buffer.
+        const MAX_PATHS_HEX_LEN: usize = 16 * 1024;
+        if paths_hex.len() > MAX_PATHS_HEX_LEN {
+            error::bail!("async-invoice-server-paths hex is too long");
+        }
         let bytes = hex::decode(paths_hex)
             .map_err(|err| error::anyhow!("async-invoice-server-paths is not hex: {err}"))?;
         let paths = <Vec<BlindedMessagePath>>::read(&mut &bytes[..]).map_err(|err| {
             error::anyhow!("async-invoice-server-paths is not a valid path list: {err:?}")
         })?;
+        if paths.is_empty() {
+            error::bail!("async-invoice-server-paths must not be empty");
+        }
         self.set_async_receive_paths(paths)
     }
 
