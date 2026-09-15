@@ -44,6 +44,22 @@ pub mod request {
     pub struct Bolt12Pay {
         pub payer_note: Option<String>,
     }
+
+    /// Mint blinded paths on a static-invoice server for an often-offline
+    /// recipient. `recipient_id` is an operator-chosen hex identifier; the
+    /// same bytes must be used later if the server looks the recipient up.
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct GenerateAsyncInvoicePaths {
+        pub recipient_id: String,
+    }
+
+    /// Install hex-encoded blinded paths (from `asyncinvoicepaths`) on an
+    /// often-offline recipient. Runtime equivalent of
+    /// `async-invoice-server-paths` in `lampo.conf`.
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct SetAsyncInvoicePaths {
+        pub paths: String,
+    }
 }
 
 pub mod response {
@@ -60,6 +76,13 @@ pub mod response {
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct Invoice {
         pub bolt11: String,
+    }
+
+    /// Hex-encoded `Vec<BlindedMessagePath>` a recipient installs as its
+    /// path to the static invoice server (`async-invoice-server-paths`).
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct AsyncInvoicePaths {
+        pub paths: String,
     }
 
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]

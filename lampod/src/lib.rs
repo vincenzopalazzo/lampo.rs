@@ -170,7 +170,7 @@ impl LampoDaemon {
 
     /// Mint blinded paths that an often-offline async recipient uses to reach
     /// this node as its static invoice server. Server role only; the paths
-    /// are handed to the recipient out-of-band (config or runtime call).
+    /// are handed to the recipient out-of-band (RPC, config, or runtime call).
     pub fn blinded_paths_for_async_recipient(
         &self,
         recipient_id: Vec<u8>,
@@ -193,6 +193,13 @@ impl LampoDaemon {
     /// `async-invoice-server-paths` config key.
     pub fn set_async_receive_paths(&self, paths: Vec<BlindedMessagePath>) -> error::Result<()> {
         self.offchain_manager().set_async_receive_paths(paths)
+    }
+
+    /// Same as [`Self::set_async_receive_paths`], taking the hex encoding
+    /// returned by the `asyncinvoicepaths` RPC.
+    pub fn set_async_receive_paths_hex(&self, paths_hex: &str) -> error::Result<()> {
+        self.offchain_manager()
+            .set_async_receive_paths_hex(paths_hex)
     }
 
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
