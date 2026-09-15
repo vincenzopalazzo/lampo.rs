@@ -32,7 +32,10 @@ use lampo_common::utils::logger::LampoLogger;
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
-use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager, StaticInvoiceStore};
+use crate::ln::{
+    LampoChannelManager, LampoInventoryManager, LampoPeerManager, OnionMessageMailbox,
+    StaticInvoiceStore,
+};
 use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
 
@@ -92,6 +95,10 @@ pub struct LampoHandler {
     /// Present only when this node is a static invoice server
     /// (`async-payments-role=server`).
     static_invoice_store: Option<StaticInvoiceStore>,
+    /// Buffers onion messages for offline peers; present only when the
+    /// onion messenger was built with offline-peer interception (server
+    /// role).
+    om_mailbox: Option<OnionMessageMailbox>,
     bump_tx_event_handler: BumpHandler,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
@@ -122,6 +129,10 @@ impl LampoHandler {
             persister: lampod.persister(),
             static_invoice_store: match lampod.conf().async_payments_role.as_deref() {
                 Some("server") => Some(StaticInvoiceStore::new(lampod.persister())),
+                _ => None,
+            },
+            om_mailbox: match lampod.conf().async_payments_role.as_deref() {
+                Some("server") => Some(OnionMessageMailbox::new()),
                 _ => None,
             },
             bump_tx_event_handler,
@@ -790,6 +801,41 @@ impl Handler for LampoHandler {
                     }
                     None => {
                         log::debug!(target: "lampo::handler", "no static invoice stored for slot {invoice_slot}; ignoring request");
+                    }
+                }
+                Ok(())
+            }
+            ldk::events::Event::OnionMessageIntercepted {
+                next_hop, message, ..
+            } => {
+                let ldk::blinded_path::message::NextMessageHop::NodeId(peer_node_id) = next_hop
+                else {
+                    // Unreachable: the onion messenger is built with
+                    // `intercept_for_unknown_scids = false`.
+                    log::error!(target: "lampo::handler", "onion message intercepted for an unknown SCID; dropping it");
+                    return Ok(());
+                };
+                match &self.om_mailbox {
+                    Some(mailbox) => mailbox.onion_message_intercepted(peer_node_id, message),
+                    None => {
+                        log::debug!(target: "lampo::handler", "onion message intercepted, but this node is not a static invoice server")
+                    }
+                }
+                Ok(())
+            }
+            ldk::events::Event::OnionMessagePeerConnected { peer_node_id } => {
+                if let Some(mailbox) = &self.om_mailbox {
+                    for message in mailbox.onion_message_peer_connected(peer_node_id) {
+                        if let Err(err) = self
+                            .peer_manager
+                            .onion_messager()
+                            .forward_onion_message(message, &peer_node_id)
+                        {
+                            // Not buffered again: the sender re-drives its
+                            // flow on the next timer tick, and the mailbox
+                            // caps make a re-insert loop unbounded.
+                            log::debug!(target: "lampo::handler", "failed to forward buffered onion message to `{peer_node_id}`: {err:?}");
+                        }
                     }
                 }
                 Ok(())
