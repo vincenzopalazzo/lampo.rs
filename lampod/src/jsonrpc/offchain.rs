@@ -9,10 +9,13 @@ use lampo_common::hex;
 use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::ldk;
 use lampo_common::ldk::offers::offer;
+use lampo_common::ldk::util::ser::Writeable;
+use lampo_common::model::request::GenerateAsyncInvoicePaths;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
 use lampo_common::model::request::Pay;
+use lampo_common::model::request::SetAsyncInvoicePaths;
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
@@ -75,6 +78,47 @@ pub async fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json
         .into();
     log::debug!("Generated offer: {:?}", offer);
     Ok(json::to_value(&offer)?)
+}
+
+/// Mint hex-encoded blinded paths that an often-offline recipient installs
+/// as `async-invoice-server-paths` (or via `setasyncinvoicepaths`).
+///
+/// Server role only. `recipient_id` is operator-chosen hex; the same bytes
+/// key the static-invoice store for this recipient.
+pub async fn json_asyncinvoicepaths(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!("call for `asyncinvoicepaths` with request `{:?}`", request);
+    let request: GenerateAsyncInvoicePaths = json::from_value(request.clone())?;
+    let recipient_id = hex::decode(&request.recipient_id)
+        .map_err(|err| crate::rpc_error!("recipient_id is not hex: {err}"))?;
+    if recipient_id.is_empty() {
+        return Err(crate::rpc_error!("recipient_id must not be empty"));
+    }
+    let paths = ctx
+        .blinded_paths_for_async_recipient(recipient_id)
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    let paths = hex::encode(paths.encode());
+    Ok(json::to_value(&response::AsyncInvoicePaths { paths })?)
+}
+
+/// Install hex-encoded blinded paths on an often-offline recipient.
+/// Runtime equivalent of the `async-invoice-server-paths` config key.
+pub async fn json_setasyncinvoicepaths(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    log::info!(
+        "call for `setasyncinvoicepaths` with request `{:?}`",
+        request
+    );
+    let request: SetAsyncInvoicePaths = json::from_value(request.clone())?;
+    ctx.set_async_receive_paths_hex(&request.paths)
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    Ok(json::to_value(&response::AsyncInvoicePaths {
+        paths: request.paths,
+    })?)
 }
 
 pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {

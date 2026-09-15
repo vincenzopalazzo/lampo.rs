@@ -91,7 +91,10 @@ impl OffchainManager {
         Ok(())
     }
 
-    fn set_async_receive_paths_hex(&self, paths_hex: &str) -> error::Result<()> {
+    /// Same as [`Self::set_async_receive_paths`], taking the hex encoding
+    /// produced by the `asyncinvoicepaths` RPC (or written in
+    /// `async-invoice-server-paths`).
+    pub fn set_async_receive_paths_hex(&self, paths_hex: &str) -> error::Result<()> {
         let bytes = hex::decode(paths_hex)
             .map_err(|err| error::anyhow!("async-invoice-server-paths is not hex: {err}"))?;
         let paths = <Vec<BlindedMessagePath>>::read(&mut &bytes[..]).map_err(|err| {
