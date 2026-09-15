@@ -188,20 +188,6 @@ impl LampoDaemon {
             })
     }
 
-    /// Configure this node as an often-offline async recipient with paths to
-    /// its static invoice server. Runtime equivalent of the
-    /// `async-invoice-server-paths` config key.
-    pub fn set_async_receive_paths(&self, paths: Vec<BlindedMessagePath>) -> error::Result<()> {
-        self.offchain_manager().set_async_receive_paths(paths)
-    }
-
-    /// Same as [`Self::set_async_receive_paths`], taking the hex encoding
-    /// returned by the `asyncinvoicepaths` RPC.
-    pub fn set_async_receive_paths_hex(&self, paths_hex: &str) -> error::Result<()> {
-        self.offchain_manager()
-            .set_async_receive_paths_hex(paths_hex)
-    }
-
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init offchain manager ...");
         let manager = OffchainManager::new(
@@ -391,9 +377,11 @@ impl LampoDaemon {
     // a recipient's invoice (the payer then times out for no reason), and a
     // transient store error on `StaticInvoiceRequested` is worth one retry —
     // LDK regenerates neither across restarts, so replay is the only
-    // recovery. Other handlers can fail permanently (peer disconnected,
-    // wallet without funds); LDK keeps a failed event at the head of the
-    // queue, so replaying those would block every later event forever.
+    // recovery. Rate-limit skips are `Ok`, not errors, so they do not replay
+    // and cannot stall the queue. Other handlers can fail permanently (peer
+    // disconnected, wallet without funds); LDK keeps a failed event at the
+    // head of the queue, so replaying those would block every later event
+    // forever.
     async fn handler_ldk_events(&self, env: Event) -> Result<(), ReplayEvent> {
         let replay_on_failure = matches!(
             env,

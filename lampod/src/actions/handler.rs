@@ -784,19 +784,23 @@ impl Handler for LampoHandler {
                     log::debug!(target: "lampo::handler", "ignoring PersistStaticInvoice: not a static invoice server");
                     return Ok(());
                 };
-                // An error here makes LDK replay the event (see
+                // An IO error here makes LDK replay the event (see
                 // `handler_ldk_events`), so the invoice is not lost to a
-                // transient store failure. Confirming to the recipient
-                // happens only after the write durably succeeded.
-                store
+                // transient store failure. Rate-limit skips confirm without
+                // erroring: the recipient retries, and a replayed rate-limit
+                // would sit at the head of the event queue forever.
+                // Confirming happens only after the write durably succeeded.
+                let stored = store
                     .persist(invoice, invoice_request_path, invoice_slot, &recipient_id)
                     .map_err(|err| {
                         log::error!(target: "lampo::handler", "failed to persist static invoice for slot {invoice_slot}: {err}");
                         err
                     })?;
-                self.channel_manager
-                    .manager()
-                    .static_invoice_persisted(invoice_persisted_path);
+                if stored {
+                    self.channel_manager
+                        .manager()
+                        .static_invoice_persisted(invoice_persisted_path);
+                }
                 Ok(())
             }
             ldk::events::Event::StaticInvoiceRequested {
