@@ -132,7 +132,7 @@ impl LampoHandler {
                 _ => None,
             },
             om_mailbox: match lampod.conf().async_payments_role.as_deref() {
-                Some("server") => Some(OnionMessageMailbox::new()),
+                Some("server") => Some(OnionMessageMailbox::with_store(Some(lampod.persister()))),
                 _ => None,
             },
             bump_tx_event_handler,
@@ -153,6 +153,15 @@ impl LampoHandler {
 
     pub fn peer_manager(&self) -> Arc<LampoPeerManager> {
         self.peer_manager.clone()
+    }
+
+    /// Messages waiting in the onion-message mailbox for `peer_node_id`.
+    /// Zero when this node is not a static invoice server.
+    pub fn buffered_onion_messages(&self, peer_node_id: lampo_common::types::NodeId) -> usize {
+        self.om_mailbox
+            .as_ref()
+            .map(|mailbox| mailbox.queued(peer_node_id))
+            .unwrap_or(0)
     }
 
     /// Call any method supported by the lampod configuration. This includes
