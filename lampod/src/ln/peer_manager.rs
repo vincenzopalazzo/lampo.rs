@@ -125,19 +125,41 @@ impl LampoPeerManager {
         // responder under any node_id). Seed from the node's CSPRNG instead.
         let ephemeral_bytes = keys.get_secure_random_bytes();
         let graph = channel_manager.graph();
-        let onion_messenger = Arc::new(OnionMessenger::new(
-            keys.clone(),
-            keys.clone(),
-            self.logger.clone(),
-            // ChannelManager implements NodeIdLookUp; use it (not EmptyNodeIdLookUp)
-            // so the messenger can resolve hops when advancing offer blinded paths.
-            channel_manager.manager(),
-            Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone())),
-            channel_manager.manager(), // Use channel manager for offers message handler
-            channel_manager.manager(), // async_payments_message_handler
-            IgnoringMessageHandler {}, // custom_onion_message_handler
-            IgnoringMessageHandler {}, // custom_onion_message_contents
-        ));
+        let message_router = Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone()));
+        // A static invoice server buffers onion messages for offline peers
+        // (e.g. `HeldHtlcAvailable` for a recipient that is away) and
+        // forwards them on reconnect. `intercept_for_unknown_scids` stays
+        // off: lampo only buffers messages addressed to known node ids.
+        let onion_messenger = if self.conf.async_payments_role.as_deref() == Some("server") {
+            Arc::new(OnionMessenger::new_with_offline_peer_interception(
+                keys.clone(),
+                keys.clone(),
+                self.logger.clone(),
+                // ChannelManager implements NodeIdLookUp; use it (not EmptyNodeIdLookUp)
+                // so the messenger can resolve hops when advancing offer blinded paths.
+                channel_manager.manager(),
+                message_router,
+                channel_manager.manager(), // Use channel manager for offers message handler
+                channel_manager.manager(), // async_payments_message_handler
+                IgnoringMessageHandler {}, // custom_onion_message_handler
+                IgnoringMessageHandler {}, // custom_onion_message_contents
+                false,
+            ))
+        } else {
+            Arc::new(OnionMessenger::new(
+                keys.clone(),
+                keys.clone(),
+                self.logger.clone(),
+                // ChannelManager implements NodeIdLookUp; use it (not EmptyNodeIdLookUp)
+                // so the messenger can resolve hops when advancing offer blinded paths.
+                channel_manager.manager(),
+                message_router,
+                channel_manager.manager(), // Use channel manager for offers message handler
+                channel_manager.manager(), // async_payments_message_handler
+                IgnoringMessageHandler {}, // custom_onion_message_handler
+                IgnoringMessageHandler {}, // custom_onion_message_contents
+            ))
+        };
 
         let gossip_sync = Arc::new(P2PGossipSync::new(
             graph.clone(),
