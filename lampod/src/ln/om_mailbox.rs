@@ -6,14 +6,28 @@
 //! The mailbox holds them until `Event::OnionMessagePeerConnected` fires and
 //! they can be forwarded. Ported from ldk-node's
 //! `src/payment/asynchronous/om_mailbox.rs`.
+//!
+//! Queues are written to the filesystem store so a server restart does not
+//! drop in-flight `HeldHtlcAvailable` (and similar) messages. Layout:
+//! `om_mailbox/<hex compressed pubkey>` — a `Writeable` `Vec<OnionMessage>`.
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use lampo_common::bitcoin::secp256k1::PublicKey;
+use lampo_common::hex;
+use lampo_common::ldk::io::ErrorKind;
 use lampo_common::ldk::ln::msgs::OnionMessage;
+use lampo_common::ldk::util::persist::KVStoreSync;
+use lampo_common::ldk::util::ser::{LengthReadable, Writeable};
+
+use crate::persistence::LampoPersistence;
+
+const MAILBOX_NAMESPACE: &str = "om_mailbox";
+const QUEUE_VERSION: u8 = 1;
 
 pub struct OnionMessageMailbox {
     map: Mutex<HashMap<PublicKey, VecDeque<OnionMessage>>>,
+    persister: Option<Arc<LampoPersistence>>,
 }
 
 impl OnionMessageMailbox {
@@ -21,9 +35,27 @@ impl OnionMessageMailbox {
     const MAX_PEERS: usize = 300;
 
     pub fn new() -> Self {
-        Self {
-            map: Mutex::new(HashMap::with_capacity(Self::MAX_PEERS)),
+        Self::with_store(None)
+    }
+
+    pub fn with_store(persister: Option<Arc<LampoPersistence>>) -> Self {
+        let mut map = HashMap::with_capacity(Self::MAX_PEERS);
+        if let Some(store) = persister.as_ref() {
+            load_queues(store, &mut map);
         }
+        Self {
+            map: Mutex::new(map),
+            persister,
+        }
+    }
+
+    /// How many messages are buffered for `peer_node_id`.
+    pub fn queued(&self, peer_node_id: PublicKey) -> usize {
+        let map = self
+            .map
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        map.get(&peer_node_id).map(|queue| queue.len()).unwrap_or(0)
     }
 
     /// Buffer a message for an offline peer. Bounds are enforced by dropping
@@ -52,8 +84,9 @@ impl OnionMessageMailbox {
             "buffered onion message for offline peer `{peer_node_id}` (queue {})",
             queue.len()
         );
+        let queue_snapshot: Vec<OnionMessage> = queue.iter().cloned().collect();
 
-        if map.len() > Self::MAX_PEERS {
+        let evicted = if map.len() > Self::MAX_PEERS {
             let peer_to_remove = map
                 .iter()
                 .max_by_key(|(_, queue)| queue.len())
@@ -64,7 +97,20 @@ impl OnionMessageMailbox {
                     "mailbox peer cap reached; evicting `{peer}`"
                 );
                 map.remove(&peer);
+                Some(peer)
+            } else {
+                None
             }
+        } else {
+            None
+        };
+        drop(map);
+
+        if evicted != Some(peer_node_id) {
+            self.persist_queue(peer_node_id, &queue_snapshot);
+        }
+        if let Some(peer) = evicted {
+            self.remove_queue(peer);
         }
     }
 
@@ -78,14 +124,147 @@ impl OnionMessageMailbox {
             .remove(&peer_node_id)
             .map(|queue| queue.into())
             .unwrap_or_default();
+        drop(map);
         if !drained.is_empty() {
             log::debug!(
                 target: "lampo::om-mailbox",
                 "draining {} buffered onion message(s) for `{peer_node_id}`",
                 drained.len()
             );
+            self.remove_queue(peer_node_id);
         }
         drained
+    }
+
+    fn persist_queue(&self, peer_node_id: PublicKey, queue: &[OnionMessage]) {
+        let Some(persister) = &self.persister else {
+            return;
+        };
+        let key = hex::encode(peer_node_id.serialize());
+        if let Err(err) = persister.write(MAILBOX_NAMESPACE, "", &key, encode_queue(queue)) {
+            log::error!(
+                target: "lampo::om-mailbox",
+                "failed to persist mailbox for `{peer_node_id}`: {err}"
+            );
+        }
+    }
+
+    fn remove_queue(&self, peer_node_id: PublicKey) {
+        let Some(persister) = &self.persister else {
+            return;
+        };
+        let key = hex::encode(peer_node_id.serialize());
+        if let Err(err) = persister.remove(MAILBOX_NAMESPACE, "", &key, false) {
+            log::error!(
+                target: "lampo::om-mailbox",
+                "failed to remove mailbox for `{peer_node_id}`: {err}"
+            );
+        }
+    }
+}
+
+fn load_queues(persister: &LampoPersistence, map: &mut HashMap<PublicKey, VecDeque<OnionMessage>>) {
+    let keys = match persister.list(MAILBOX_NAMESPACE, "") {
+        Ok(keys) => keys,
+        Err(err) => {
+            log::error!(target: "lampo::om-mailbox", "failed to list mailbox keys: {err}");
+            return;
+        }
+    };
+    for key in keys {
+        if map.len() >= OnionMessageMailbox::MAX_PEERS {
+            log::warn!(
+                target: "lampo::om-mailbox",
+                "mailbox peer cap reached while loading; leaving remaining keys on disk"
+            );
+            break;
+        }
+        match persister.read(MAILBOX_NAMESPACE, "", &key) {
+            Ok(buf) => match decode_queue(&buf) {
+                Ok(mut messages) => {
+                    let Ok(pk_bytes) = hex::decode(&key) else {
+                        drop_corrupt(persister, &key, "key is not hex");
+                        continue;
+                    };
+                    let Ok(peer) = PublicKey::from_slice(&pk_bytes) else {
+                        drop_corrupt(persister, &key, "key is not a public key");
+                        continue;
+                    };
+                    if messages.len() > OnionMessageMailbox::MAX_MESSAGES_PER_PEER {
+                        let skip = messages.len() - OnionMessageMailbox::MAX_MESSAGES_PER_PEER;
+                        messages.drain(..skip);
+                    }
+                    if !messages.is_empty() {
+                        map.insert(peer, messages.into());
+                    }
+                }
+                Err(err) => drop_corrupt(persister, &key, &err),
+            },
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => {
+                log::error!(
+                    target: "lampo::om-mailbox",
+                    "failed to read mailbox `{key}`: {err}"
+                );
+            }
+        }
+    }
+}
+
+/// version, big-endian u16 count, then each message as a u32 length
+/// prefix plus its `Writeable` encoding. `OnionMessage` is only
+/// `LengthReadable`, so the vec cannot delimit itself.
+fn encode_queue(queue: &[OnionMessage]) -> Vec<u8> {
+    let mut buf = vec![QUEUE_VERSION];
+    buf.extend_from_slice(&(queue.len() as u16).to_be_bytes());
+    for message in queue {
+        let encoded = message.encode();
+        buf.extend_from_slice(&(encoded.len() as u32).to_be_bytes());
+        buf.extend_from_slice(&encoded);
+    }
+    buf
+}
+
+fn decode_queue(buf: &[u8]) -> Result<Vec<OnionMessage>, String> {
+    if buf.len() < 3 {
+        return Err(format!("mailbox record too short: {} bytes", buf.len()));
+    }
+    if buf[0] != QUEUE_VERSION {
+        return Err(format!("unsupported mailbox record version {}", buf[0]));
+    }
+    let count = u16::from_be_bytes([buf[1], buf[2]]) as usize;
+    let mut rest = &buf[3..];
+    let mut messages = Vec::with_capacity(count);
+    for _ in 0..count {
+        if rest.len() < 4 {
+            return Err("mailbox record truncated at message length".to_owned());
+        }
+        let msg_len = u32::from_be_bytes([rest[0], rest[1], rest[2], rest[3]]) as usize;
+        rest = &rest[4..];
+        if rest.len() < msg_len {
+            return Err(format!(
+                "mailbox record truncated: want {msg_len} message bytes, have {}",
+                rest.len()
+            ));
+        }
+        let message = OnionMessage::read_from_fixed_length_buffer(&mut &rest[..msg_len])
+            .map_err(|err| format!("decoding onion message: {err:?}"))?;
+        rest = &rest[msg_len..];
+        messages.push(message);
+    }
+    Ok(messages)
+}
+
+fn drop_corrupt(persister: &LampoPersistence, key: &str, reason: &str) {
+    log::error!(
+        target: "lampo::om-mailbox",
+        "dropping corrupt mailbox `{key}`: {reason}"
+    );
+    if let Err(err) = persister.remove(MAILBOX_NAMESPACE, "", key, false) {
+        log::error!(
+            target: "lampo::om-mailbox",
+            "failed to remove corrupt mailbox `{key}`: {err}"
+        );
     }
 }
 
@@ -93,6 +272,7 @@ impl OnionMessageMailbox {
 mod tests {
     use super::*;
     use lampo_common::bitcoin::secp256k1::{Secp256k1, SecretKey};
+    use lampo_common::ldk::persister::fs_store::v1::FilesystemStore;
 
     fn peer(seed: u16) -> PublicKey {
         let secp = Secp256k1::new();
@@ -114,6 +294,19 @@ mod tests {
         }
     }
 
+    fn temp_store() -> (Arc<LampoPersistence>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "lampo-om-mailbox-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        (Arc::new(FilesystemStore::new(dir.clone())), dir)
+    }
+
     #[test]
     fn buffers_and_drains_per_peer() {
         let mailbox = OnionMessageMailbox::new();
@@ -123,6 +316,7 @@ mod tests {
         mailbox.onion_message_intercepted(peer_a, message(2));
         mailbox.onion_message_intercepted(peer_b, message(3));
 
+        assert_eq!(mailbox.queued(peer_a), 2);
         let drained = mailbox.onion_message_peer_connected(peer_a);
         assert_eq!(drained.len(), 2);
         // Draining is destructive.
@@ -155,5 +349,27 @@ mod tests {
         }
         // The longest queue (full_peer, 3 messages) was evicted.
         assert!(mailbox.onion_message_peer_connected(full_peer).is_empty());
+    }
+
+    #[test]
+    fn reloads_queued_messages_from_the_store() {
+        let (persister, dir) = temp_store();
+        let peer_a = peer(1);
+        {
+            let mailbox = OnionMessageMailbox::with_store(Some(persister.clone()));
+            mailbox.onion_message_intercepted(peer_a, message(7));
+            mailbox.onion_message_intercepted(peer_a, message(8));
+            assert_eq!(mailbox.queued(peer_a), 2);
+        }
+        let reloaded = OnionMessageMailbox::with_store(Some(persister));
+        let drained = reloaded.onion_message_peer_connected(peer_a);
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].onion_routing_packet.hop_data[0], 7);
+        assert_eq!(drained[1].onion_routing_packet.hop_data[0], 8);
+        // Drain removes the on-disk queue.
+        let empty =
+            OnionMessageMailbox::with_store(Some(Arc::new(FilesystemStore::new(dir.clone()))));
+        assert!(empty.onion_message_peer_connected(peer_a).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
