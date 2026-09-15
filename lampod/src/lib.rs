@@ -208,6 +208,7 @@ impl LampoDaemon {
             self.onchain_manager(),
             self.wallet_manager.clone(),
             self.channel_manager(),
+            self.offchain_manager().async_payments_gate(),
         )?;
         self.peer_manager = Some(Arc::new(peer_manager));
         Ok(())

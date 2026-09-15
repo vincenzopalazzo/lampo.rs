@@ -40,9 +40,11 @@ pub struct LampoConf {
     /// instead of scanning from genesis. Defaults to `true` and only applies
     /// to a fresh wallet (no UTXOs to miss); set `false` to force a full scan.
     pub fast_sync: Option<bool>,
-    /// Async payments role: `client` holds outbound HTLCs at the next hop so
-    /// the node can go offline after sending; `server` holds HTLCs and serves
-    /// static invoices on behalf of often-offline recipients.
+    /// Async payments role. Unset (the default) leaves async payments off:
+    /// this node does not process static-invoice onion messages or hold HTLCs.
+    /// `client` holds outbound HTLCs at the next hop so the node can go
+    /// offline after sending; `server` holds HTLCs and serves static invoices
+    /// on behalf of often-offline recipients.
     pub async_payments_role: Option<String>,
     /// Hex-encoded `Vec<BlindedMessagePath>` obtained out-of-band from a
     /// static invoice server. Configures this node as an often-offline async
@@ -347,12 +349,22 @@ impl LampoConf {
         format!("{}/{}", self.root_path, self.network)
     }
 
+    /// Whether this config opts into async payments at startup.
+    ///
+    /// A later `setasyncinvoicepaths` call is a separate runtime opt-in.
+    /// Hold flags and the onion-message handler stay off until one of
+    /// those is set.
+    pub fn async_payments_configured(&self) -> bool {
+        self.async_payments_role.is_some() || self.async_invoice_server_paths.is_some()
+    }
+
     /// The LDK config adjusted for the configured async payments role.
     ///
-    /// Mirrors ldk-node's builder: a `server` holds HTLCs for often-offline
-    /// recipients and accepts forwards to private channels (the recipient's
-    /// channel to its server is typically unannounced); a `client` asks its
-    /// next hop to hold outbound HTLCs so it can go offline after sending.
+    /// Defaults keep `enable_htlc_hold` and `hold_outbound_htlcs_at_next_hop`
+    /// off. A `server` holds HTLCs for often-offline recipients and accepts
+    /// forwards to private channels (the recipient's channel to its server is
+    /// typically unannounced); a `client` asks its next hop to hold outbound
+    /// HTLCs so it can go offline after sending.
     pub fn ldk_conf_with_async_role(&self) -> UserConfig {
         let mut conf = self.ldk_conf.clone();
         match self.async_payments_role.as_deref() {
@@ -398,5 +410,38 @@ trait TrimmedString {
 impl TrimmedString for String {
     fn to_trimmed(self) -> String {
         self.trim().to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn async_payments_disabled_by_default() {
+        let conf = LampoConf::default();
+        assert!(!conf.async_payments_configured());
+        assert!(conf.async_payments_role.is_none());
+        assert!(conf.async_invoice_server_paths.is_none());
+
+        let ldk = conf.ldk_conf_with_async_role();
+        assert!(!ldk.enable_htlc_hold);
+        assert!(!ldk.hold_outbound_htlcs_at_next_hop);
+    }
+
+    #[test]
+    fn async_payments_role_enables_hold_flags() {
+        let mut client = LampoConf::default();
+        client.async_payments_role = Some("client".to_owned());
+        assert!(client.async_payments_configured());
+        let client_ldk = client.ldk_conf_with_async_role();
+        assert!(client_ldk.hold_outbound_htlcs_at_next_hop);
+        assert!(!client_ldk.enable_htlc_hold);
+
+        let mut server = LampoConf::default();
+        server.async_payments_role = Some("server".to_owned());
+        let server_ldk = server.ldk_conf_with_async_role();
+        assert!(server_ldk.enable_htlc_hold);
+        assert!(server_ldk.accept_forwards_to_priv_channels);
     }
 }

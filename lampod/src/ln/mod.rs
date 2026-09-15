@@ -1,4 +1,5 @@
 //! Lampo Channel Manager
+mod async_payments;
 mod channel_manager;
 mod inventory_manager;
 mod offchain_manager;

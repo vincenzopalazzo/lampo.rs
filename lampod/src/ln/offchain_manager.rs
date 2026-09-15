@@ -49,6 +49,9 @@ pub struct OffchainManager {
     /// either from `async-invoice-server-paths` in the config or from a
     /// runtime [`Self::set_async_receive_paths`] call.
     async_receive_enabled: AtomicBool,
+    /// Shared with the onion messenger: false until the operator opts in
+    /// via `async-payments-role`, config paths, or `setasyncinvoicepaths`.
+    async_payments_enabled: Arc<AtomicBool>,
 }
 
 impl OffchainManager {
@@ -60,6 +63,8 @@ impl OffchainManager {
         lampo_conf: Arc<LampoConf>,
         chain_manager: Arc<LampoChainManager>,
     ) -> error::Result<Self> {
+        let async_payments_enabled =
+            Arc::new(AtomicBool::new(lampo_conf.async_payments_role.is_some()));
         let manager = Self {
             channel_manager,
             keys_manager,
@@ -67,6 +72,7 @@ impl OffchainManager {
             lampo_conf,
             chain_manager,
             async_receive_enabled: AtomicBool::new(false),
+            async_payments_enabled,
         };
         if let Some(paths_hex) = &manager.lampo_conf.async_invoice_server_paths {
             manager.set_async_receive_paths_hex(paths_hex)?;
@@ -79,6 +85,11 @@ impl OffchainManager {
         self.async_receive_enabled.load(Ordering::Acquire)
     }
 
+    /// Shared with the onion messenger so a later opt-in flips the same flag.
+    pub(crate) fn async_payments_gate(&self) -> Arc<AtomicBool> {
+        self.async_payments_enabled.clone()
+    }
+
     /// Configure this node as an often-offline async recipient with blinded
     /// paths to its static invoice server, obtained out-of-band from the
     /// server operator.
@@ -88,6 +99,7 @@ impl OffchainManager {
             .set_paths_to_static_invoice_server(paths)
             .map_err(|_| error::anyhow!("invalid async invoice server paths"))?;
         self.async_receive_enabled.store(true, Ordering::Release);
+        self.async_payments_enabled.store(true, Ordering::Release);
         Ok(())
     }
 
