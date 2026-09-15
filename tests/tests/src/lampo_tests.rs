@@ -612,3 +612,521 @@ pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
     );
     Ok(())
 }
+
+/// Spin up a static-invoice server and a recipient, and return them once
+/// their channel is usable.
+///
+/// The server -> recipient channel is **private**: a recipient that appears
+/// in the network graph (via a public channel announcement) but announces no
+/// addresses builds self-introduced blinded paths, and `DefaultMessageRouter`
+/// cannot route onion messages to announced nodes without addresses. Keeping
+/// the recipient out of the graph makes its paths introduction-point at the
+/// server, which every payer of its offers is connected to by construction.
+async fn async_payments_server_and_recipient(
+    btc: Arc<BtcNode>,
+) -> error::Result<(Arc<LampoTesting>, Arc<LampoTesting>)> {
+    let server = Arc::new(
+        LampoTesting::new_with(btc, |conf| {
+            conf.async_payments_role = Some("server".to_owned());
+        })
+        .await?,
+    );
+    let recipient = Arc::new(LampoTesting::new(server.btc.clone()).await?);
+
+    // server -> recipient: the recipient needs inbound liquidity for the
+    // static invoice's payment paths, and the channel connects the two for
+    // the onion-message handshake that builds the offer.
+    server
+        .fund_channel_with_privacy(recipient.clone(), 1_000_000, false)
+        .await?;
+
+    Ok((server, recipient))
+}
+
+/// Wait until `node`'s own graph knows `node_id`, i.e. a channel
+/// announcement naming it has been processed. A node only mints
+/// self-introduced blinded paths once it is announced; minting earlier
+/// produces paths introduced by whatever peer happened to be connected.
+async fn wait_node_in_graph(node: &LampoTesting, node_id: &str) {
+    let node_id = lampo_common::bitcoin::secp256k1::PublicKey::from_str(node_id).unwrap();
+    let node_id = lampo_common::ldk::routing::gossip::NodeId::from_pubkey(&node_id);
+    async_wait!(
+        async {
+            let graph = node.daemon().channel_manager().graph();
+            if graph.read_only().nodes().contains_key(&node_id) {
+                Ok(())
+            } else {
+                Err(())
+            }
+        },
+        5
+    );
+}
+
+/// Mint server paths over RPC and install them on the recipient.
+///
+/// This is the operator path: `asyncinvoicepaths` on the server, then
+/// `setasyncinvoicepaths` on the recipient (or the hex in
+/// `async-invoice-server-paths`).
+async fn provision_async_receive(
+    server: &LampoTesting,
+    recipient: &LampoTesting,
+) -> error::Result<String> {
+    let paths: response::AsyncInvoicePaths = server
+        .lampod()
+        .call(
+            "asyncinvoicepaths",
+            request::GenerateAsyncInvoicePaths {
+                node_id: recipient.info.node_id.clone(),
+                token: None,
+            },
+        )
+        .await?;
+    assert!(
+        !paths.paths.is_empty(),
+        "server must return hex-encoded blinded paths"
+    );
+    recipient
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "setasyncinvoicepaths",
+            request::SetAsyncInvoicePaths {
+                paths: paths.paths.clone(),
+                token: None,
+                force: false,
+            },
+        )
+        .await?;
+    Ok(paths.paths)
+}
+
+/// Wait for the recipient's async receive offer to be built with the server.
+async fn wait_async_offer(node: &LampoTesting) -> response::Offer {
+    let mut offer = None;
+    async_wait!(
+        async {
+            match node
+                .lampod()
+                .call::<_, response::Offer>(
+                    "offer",
+                    request::GenerateOffer {
+                        description: None,
+                        amount_msat: None,
+                    },
+                )
+                .await
+            {
+                Ok(o) => {
+                    offer = Some(o);
+                    Ok(())
+                }
+                Err(err) => {
+                    log::debug!(target: "tests", "async offer not ready yet: {err}");
+                    Err(())
+                }
+            }
+        },
+        5
+    );
+    offer.unwrap()
+}
+
+#[tokio_test_shutdown_timeout::test(120)]
+pub async fn async_receive_offer_roundtrip() -> error::Result<()> {
+    init();
+    let server = LampoTesting::tmp_with(|conf| {
+        conf.async_payments_role = Some("server".to_owned());
+    })
+    .await?;
+    let recipient = Arc::new(LampoTesting::new(server.btc.clone()).await?);
+
+    server
+        .fund_channel_with(recipient.clone(), 1_000_000)
+        .await?;
+
+    // Minting before the server's own graph has processed its channel
+    // announcement would produce paths introduced by the recipient instead
+    // of self-introduced ones — fine for this two-node handshake, but not
+    // the shape a real payer relies on.
+    wait_node_in_graph(&server, &server.info.node_id.clone()).await;
+
+    // A non-server node cannot mint paths.
+    let not_server = recipient
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "asyncinvoicepaths",
+            request::GenerateAsyncInvoicePaths {
+                node_id: recipient.info.node_id.clone(),
+                token: None,
+            },
+        )
+        .await;
+    assert!(
+        not_server.is_err(),
+        "asyncinvoicepaths is server-role only, got {not_server:?}"
+    );
+
+    // Minting is bound to a channel counterparty, not an arbitrary id.
+    let not_peer = server
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "asyncinvoicepaths",
+            request::GenerateAsyncInvoicePaths {
+                node_id: server.info.node_id.clone(),
+                token: None,
+            },
+        )
+        .await;
+    assert!(
+        not_peer.is_err(),
+        "asyncinvoicepaths requires a channel counterparty, got {not_peer:?}"
+    );
+
+    let paths = provision_async_receive(&server, &recipient).await?;
+    let on_server = server
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "setasyncinvoicepaths",
+            request::SetAsyncInvoicePaths {
+                paths: paths.clone(),
+                token: None,
+                force: false,
+            },
+        )
+        .await;
+    assert!(
+        on_server.is_err(),
+        "setasyncinvoicepaths is not for the server role, got {on_server:?}"
+    );
+    let overwrite = recipient
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "setasyncinvoicepaths",
+            request::SetAsyncInvoicePaths {
+                paths: paths.clone(),
+                token: None,
+                force: false,
+            },
+        )
+        .await;
+    assert!(
+        overwrite.is_err(),
+        "setasyncinvoicepaths must not overwrite without force, got {overwrite:?}"
+    );
+    recipient
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "setasyncinvoicepaths",
+            request::SetAsyncInvoicePaths {
+                paths,
+                token: None,
+                force: true,
+            },
+        )
+        .await?;
+
+    let offer = wait_async_offer(&recipient).await;
+    assert!(
+        offer.bolt12.starts_with("lno1"),
+        "expected a BOLT12 offer, got `{}`",
+        offer.bolt12
+    );
+    Ok(())
+}
+
+#[tokio_test_shutdown_timeout::test(180)]
+pub async fn async_payment_held_htlc_roundtrip() -> error::Result<()> {
+    init();
+    // The payer is a private node that asks its next hop to hold the HTLC,
+    // so the server exercises the full hold/release cycle.
+    let payer = LampoTesting::tmp_with(|conf| {
+        conf.async_payments_role = Some("client".to_owned());
+    })
+    .await?;
+    let (server, recipient) = async_payments_server_and_recipient(payer.btc.clone()).await?;
+
+    // payer -> server, so the payer can reach the static invoice's paths.
+    // Public: the server must be announced before it mints self-introduced
+    // paths for the recipient.
+    payer.fund_channel_with(server.clone(), 1_000_000).await?;
+    wait_node_in_graph(&server, &server.info.node_id.clone()).await;
+
+    provision_async_receive(&server, &recipient).await?;
+
+    let offer = wait_async_offer(&recipient).await;
+    log::info!(target: &payer.info.node_id, "paying async offer `{}`", offer.bolt12);
+
+    let pay: response::PayResult = payer
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: Some(100_000),
+                bolt12: None,
+                timeout: Default::default(),
+            },
+        )
+        .await?;
+    log::info!(target: &recipient.info.node_id, "async payment made `{pay:?}`");
+
+    assert_eq!(pay.state, response::PaymentState::Success);
+    assert!(
+        pay.payment_preimage.is_some(),
+        "a settled async payment must expose its preimage"
+    );
+    // The payment settled against the static invoice served by the server,
+    // not a live invoice from the recipient: static invoices cannot produce
+    // a payer proof, while a live BOLT12 payment always does here. The hold
+    // itself is not directly observable from the test; it was verified during
+    // development via the server's `Intercepted held HTLC ... holding until
+    // the recipient is online` log line.
+    assert!(
+        pay.payer_proof.is_none(),
+        "a static-invoice payment cannot carry a payer proof"
+    );
+    Ok(())
+}
+
+/// Same topology as [`async_payment_held_htlc_roundtrip`], but the
+/// recipient is taken off the reconnect loop. A pay while they are down
+/// must buffer onion messages in the mailbox (the HTLC itself fails),
+/// an explicit reconnect must drain that mailbox, and a later pay must
+/// still settle.
+#[tokio_test_shutdown_timeout::test(180)]
+pub async fn async_payment_offline_recipient_roundtrip() -> error::Result<()> {
+    init();
+    let payer = LampoTesting::tmp_with(|conf| {
+        conf.async_payments_role = Some("client".to_owned());
+    })
+    .await?;
+    let (server, recipient) = async_payments_server_and_recipient(payer.btc.clone()).await?;
+    payer.fund_channel_with(server.clone(), 1_000_000).await?;
+    wait_node_in_graph(&server, &server.info.node_id.clone()).await;
+
+    provision_async_receive(&server, &recipient).await?;
+    let offer = wait_async_offer(&recipient).await;
+
+    let recipient_id = lampo_common::types::NodeId::from_str(&recipient.info.node_id)?;
+    let server_id = lampo_common::types::NodeId::from_str(&server.info.node_id)?;
+    // Both sides redial channel counterparties from peers.json. Forget
+    // first so an in-flight tick cannot reload the address after we
+    // disconnect.
+    server.lampod().peer_manager().forget_peer(&recipient_id);
+    recipient.lampod().peer_manager().forget_peer(&server_id);
+    server
+        .lampod()
+        .peer_manager()
+        .disconnect(recipient_id)
+        .await?;
+    if recipient
+        .lampod()
+        .peer_manager()
+        .is_connected_with(server_id)
+    {
+        recipient
+            .lampod()
+            .peer_manager()
+            .disconnect(server_id)
+            .await?;
+    }
+    for _ in 0..20 {
+        if server
+            .lampod()
+            .peer_manager()
+            .is_connected_with(recipient_id)
+        {
+            server.lampod().peer_manager().forget_peer(&recipient_id);
+            recipient.lampod().peer_manager().forget_peer(&server_id);
+            let _ = server
+                .lampod()
+                .peer_manager()
+                .disconnect(recipient_id)
+                .await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(
+        !server
+            .lampod()
+            .peer_manager()
+            .is_connected_with(recipient_id),
+        "recipient must stay offline; the reconnect loop must not win"
+    );
+
+    // A client payer sends HeldHtlcAvailable (and the HTLC) immediately.
+    // The HTLC fails while the recipient is down; the onion message must
+    // still be buffered. After reconnect the mailbox drains, and a second
+    // pay settles on the live path.
+    let payer_rpc = payer.lampod();
+    let offer_str = offer.bolt12.clone();
+    let offline_pay = tokio::spawn(async move {
+        payer_rpc
+            .call::<_, response::PayResult>(
+                "pay",
+                request::Pay {
+                    invoice_str: offer_str,
+                    amount: Some(100_000),
+                    bolt12: None,
+                    timeout: request::PayTimeout::Fast,
+                },
+            )
+            .await
+    });
+
+    async_wait!(
+        async {
+            if server.lampod().buffered_onion_messages(recipient_id) > 0 {
+                Ok(())
+            } else {
+                Err(())
+            }
+        },
+        5
+    );
+    assert!(
+        !server
+            .lampod()
+            .peer_manager()
+            .is_connected_with(recipient_id),
+        "mailbox must fill while the recipient is still offline"
+    );
+
+    recipient
+        .lampod()
+        .call::<_, response::Connect>(
+            "connect",
+            request::Connect {
+                node_id: server.info.node_id.clone(),
+                addr: "127.0.0.1".to_owned(),
+                port: server.port,
+            },
+        )
+        .await?;
+    async_wait!(
+        async {
+            if server.lampod().buffered_onion_messages(recipient_id) == 0
+                && server
+                    .lampod()
+                    .peer_manager()
+                    .is_connected_with(recipient_id)
+            {
+                Ok(())
+            } else {
+                Err(())
+            }
+        },
+        5
+    );
+    let _ = offline_pay.await;
+
+    let pay: response::PayResult = payer
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12,
+                amount: Some(100_000),
+                bolt12: None,
+                timeout: Default::default(),
+            },
+        )
+        .await?;
+    assert_eq!(pay.state, response::PaymentState::Success);
+    assert!(
+        pay.payment_preimage.is_some(),
+        "a settled async payment must expose its preimage"
+    );
+    assert!(
+        pay.payer_proof.is_none(),
+        "a static-invoice payment cannot carry a payer proof"
+    );
+    Ok(())
+}
+
+#[tokio_test_shutdown_timeout::test(120)]
+pub async fn asyncinvoicepaths_requires_token_when_configured() -> error::Result<()> {
+    init();
+    let server = LampoTesting::tmp_with(|conf| {
+        conf.async_payments_role = Some("server".to_owned());
+        conf.api_token = Some("server-secret".to_owned());
+    })
+    .await?;
+    let recipient = Arc::new(
+        LampoTesting::new_with(server.btc.clone(), |conf| {
+            conf.api_token = Some("recipient-secret".to_owned());
+        })
+        .await?,
+    );
+    server
+        .fund_channel_with(recipient.clone(), 1_000_000)
+        .await?;
+    wait_node_in_graph(&server, &server.info.node_id.clone()).await;
+
+    let missing = server
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "asyncinvoicepaths",
+            request::GenerateAsyncInvoicePaths {
+                node_id: recipient.info.node_id.clone(),
+                token: None,
+            },
+        )
+        .await;
+    assert!(
+        missing.is_err(),
+        "asyncinvoicepaths must require the configured token, got {missing:?}"
+    );
+    let wrong = server
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "asyncinvoicepaths",
+            request::GenerateAsyncInvoicePaths {
+                node_id: recipient.info.node_id.clone(),
+                token: Some("nope".to_owned()),
+            },
+        )
+        .await;
+    assert!(
+        wrong.is_err(),
+        "asyncinvoicepaths must reject the wrong token, got {wrong:?}"
+    );
+    let paths: response::AsyncInvoicePaths = server
+        .lampod()
+        .call(
+            "asyncinvoicepaths",
+            request::GenerateAsyncInvoicePaths {
+                node_id: recipient.info.node_id.clone(),
+                token: Some("server-secret".to_owned()),
+            },
+        )
+        .await?;
+
+    let set_missing = recipient
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "setasyncinvoicepaths",
+            request::SetAsyncInvoicePaths {
+                paths: paths.paths.clone(),
+                token: None,
+                force: false,
+            },
+        )
+        .await;
+    assert!(
+        set_missing.is_err(),
+        "setasyncinvoicepaths must require the configured token, got {set_missing:?}"
+    );
+    recipient
+        .lampod()
+        .call::<_, response::AsyncInvoicePaths>(
+            "setasyncinvoicepaths",
+            request::SetAsyncInvoicePaths {
+                paths: paths.paths,
+                token: Some("recipient-secret".to_owned()),
+                force: false,
+            },
+        )
+        .await?;
+    Ok(())
+}

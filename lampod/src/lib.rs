@@ -29,6 +29,7 @@ use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::LampoConf;
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
+use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
@@ -167,6 +168,26 @@ impl LampoDaemon {
         self.offchain_manager.clone().unwrap()
     }
 
+    /// Mint blinded paths that an often-offline async recipient uses to reach
+    /// this node as its static invoice server. Server role only; the paths
+    /// are handed to the recipient out-of-band (RPC, config, or runtime call).
+    pub fn blinded_paths_for_async_recipient(
+        &self,
+        recipient_id: Vec<u8>,
+    ) -> error::Result<Vec<BlindedMessagePath>> {
+        if self.conf.async_payments_role.as_deref() != Some("server") {
+            error::bail!("blinded_paths_for_async_recipient requires async-payments-role=server");
+        }
+        self.channel_manager()
+            .manager()
+            .blinded_paths_for_async_recipient(recipient_id, None)
+            .map_err(|_| {
+                error::anyhow!(
+                    "cannot create blinded paths for async recipient (no usable onion-message peers?)"
+                )
+            })
+    }
+
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init offchain manager ...");
         let manager = OffchainManager::new(
@@ -187,6 +208,7 @@ impl LampoDaemon {
             self.onchain_manager(),
             self.wallet_manager.clone(),
             self.channel_manager(),
+            self.offchain_manager().async_payments_gate(),
         )?;
         self.peer_manager = Some(Arc::new(peer_manager));
         Ok(())
@@ -350,13 +372,24 @@ impl LampoDaemon {
         })
     }
 
-    // Only `SpendableOutputs` is replayed on failure: dropping it would
-    // lose the descriptors needed to claim closed-channel funds on-chain.
-    // Other handlers can fail permanently (peer disconnected, wallet
-    // without funds); LDK keeps a failed event at the head of the queue,
-    // so replaying those would block every later event forever.
+    // `SpendableOutputs` is replayed on failure: dropping it would lose the
+    // descriptors needed to claim closed-channel funds on-chain. The static
+    // invoice events are replayed too: dropping `PersistStaticInvoice` loses
+    // a recipient's invoice (the payer then times out for no reason), and a
+    // transient store error on `StaticInvoiceRequested` is worth one retry —
+    // LDK regenerates neither across restarts, so replay is the only
+    // recovery. Rate-limit skips are `Ok`, not errors, so they do not replay
+    // and cannot stall the queue. Other handlers can fail permanently (peer
+    // disconnected, wallet without funds); LDK keeps a failed event at the
+    // head of the queue, so replaying those would block every later event
+    // forever.
     async fn handler_ldk_events(&self, env: Event) -> Result<(), ReplayEvent> {
-        let replay_on_failure = matches!(env, Event::SpendableOutputs { .. });
+        let replay_on_failure = matches!(
+            env,
+            Event::SpendableOutputs { .. }
+                | Event::PersistStaticInvoice { .. }
+                | Event::StaticInvoiceRequested { .. }
+        );
         if let Err(err) = self.handler().handle(env).await {
             if replay_on_failure {
                 log::error!(target: "lampod", "Error handling event, will replay it: {:?}", err);

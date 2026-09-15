@@ -38,6 +38,33 @@ pub mod request {
     pub struct Bolt12Pay {
         pub payer_note: Option<String>,
     }
+
+    /// Mint blinded paths on a static-invoice server for an often-offline
+    /// recipient. `node_id` must be a channel counterparty; those pubkey
+    /// bytes key the static-invoice store. `token` is required when
+    /// `api-token` is set in `lampo.conf`.
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct GenerateAsyncInvoicePaths {
+        pub node_id: String,
+        #[serde(default)]
+        pub token: Option<String>,
+    }
+
+    /// Install hex-encoded blinded paths (from `asyncinvoicepaths`) on an
+    /// often-offline recipient. Runtime equivalent of
+    /// `async-invoice-server-paths` in `lampo.conf`.
+    ///
+    /// Rejected when this node is `async-payments-role=server` or already
+    /// has paths, unless `force` is true. `token` is required when
+    /// `api-token` is set in `lampo.conf`.
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct SetAsyncInvoicePaths {
+        pub paths: String,
+        #[serde(default)]
+        pub token: Option<String>,
+        #[serde(default)]
+        pub force: bool,
+    }
 }
 
 pub mod response {
@@ -54,6 +81,13 @@ pub mod response {
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct Invoice {
         pub bolt11: String,
+    }
+
+    /// Hex-encoded `Vec<BlindedMessagePath>` a recipient installs as its
+    /// path to the static invoice server (`async-invoice-server-paths`).
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct AsyncInvoicePaths {
+        pub paths: String,
     }
 
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]

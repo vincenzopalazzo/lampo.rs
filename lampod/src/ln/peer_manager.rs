@@ -23,6 +23,7 @@ use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph}
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
+use crate::ln::async_payments::AsyncPaymentsHandler;
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
@@ -33,7 +34,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<LampoKeysManager>>>,
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
-    IgnoringMessageHandler,
+    Arc<AsyncPaymentsHandler>,
     IgnoringMessageHandler,
     IgnoringMessageHandler,
 >;
@@ -108,6 +109,7 @@ impl LampoPeerManager {
         _onchain_manager: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
         channel_manager: Arc<LampoChannelManager>,
+        async_payments_enabled: Arc<AtomicBool>,
     ) -> error::Result<()> {
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -125,19 +127,48 @@ impl LampoPeerManager {
         // responder under any node_id). Seed from the node's CSPRNG instead.
         let ephemeral_bytes = keys.get_secure_random_bytes();
         let graph = channel_manager.graph();
-        let onion_messenger = Arc::new(OnionMessenger::new(
-            keys.clone(),
-            keys.clone(),
-            self.logger.clone(),
-            // ChannelManager implements NodeIdLookUp; use it (not EmptyNodeIdLookUp)
-            // so the messenger can resolve hops when advancing offer blinded paths.
+        let message_router = Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone()));
+        // Off unless the operator set a role or recipient paths (or later
+        // calls `setasyncinvoicepaths`). Default nodes must not process
+        // static-invoice onion messages.
+        let async_payments = Arc::new(AsyncPaymentsHandler::new(
             channel_manager.manager(),
-            Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone())),
-            channel_manager.manager(), // Use channel manager for offers message handler
-            IgnoringMessageHandler {}, // async_payments_message_handler
-            IgnoringMessageHandler {}, // custom_onion_message_handler
-            IgnoringMessageHandler {}, // custom_onion_message_contents
+            async_payments_enabled,
         ));
+        // A static invoice server buffers onion messages for offline peers
+        // (e.g. `HeldHtlcAvailable` for a recipient that is away) and
+        // forwards them on reconnect. `intercept_for_unknown_scids` stays
+        // off: lampo only buffers messages addressed to known node ids.
+        let onion_messenger = if self.conf.async_payments_role.as_deref() == Some("server") {
+            Arc::new(OnionMessenger::new_with_offline_peer_interception(
+                keys.clone(),
+                keys.clone(),
+                self.logger.clone(),
+                // ChannelManager implements NodeIdLookUp; use it (not EmptyNodeIdLookUp)
+                // so the messenger can resolve hops when advancing offer blinded paths.
+                channel_manager.manager(),
+                message_router,
+                channel_manager.manager(), // Use channel manager for offers message handler
+                async_payments,
+                IgnoringMessageHandler {}, // custom_onion_message_handler
+                IgnoringMessageHandler {}, // custom_onion_message_contents
+                false,
+            ))
+        } else {
+            Arc::new(OnionMessenger::new(
+                keys.clone(),
+                keys.clone(),
+                self.logger.clone(),
+                // ChannelManager implements NodeIdLookUp; use it (not EmptyNodeIdLookUp)
+                // so the messenger can resolve hops when advancing offer blinded paths.
+                channel_manager.manager(),
+                message_router,
+                channel_manager.manager(), // Use channel manager for offers message handler
+                async_payments,
+                IgnoringMessageHandler {}, // custom_onion_message_handler
+                IgnoringMessageHandler {}, // custom_onion_message_contents
+            ))
+        };
 
         let gossip_sync = Arc::new(P2PGossipSync::new(
             graph.clone(),
@@ -436,6 +467,12 @@ impl LampoPeerManager {
         Ok(())
     }
 
+    /// Drop `node_id` from the reconnect store so the 10s redial loop
+    /// will not bring this peer back. Does not disconnect a live socket.
+    pub fn forget_peer(&self, node_id: &NodeId) {
+        forget_peer(&peer_store_path(&self.conf), node_id);
+    }
+
     pub async fn disconnect(&self, node_id: NodeId) -> error::Result<()> {
         //check the pubkey matches a valid connected peer
         if self.manager().peer_by_node_id(&node_id).is_none() {
@@ -533,10 +570,22 @@ fn load_peers(path: &std::path::Path) -> std::collections::HashMap<String, Strin
 fn remember_peer(path: &std::path::Path, node_id: &NodeId, host: &SocketAddr) {
     let mut peers = load_peers(path);
     peers.insert(node_id.to_string(), host.to_string());
-    match lampo_common::json::to_string_pretty(&peers) {
+    write_peers(path, &peers);
+}
+
+fn forget_peer(path: &std::path::Path, node_id: &NodeId) {
+    let mut peers = load_peers(path);
+    if peers.remove(&node_id.to_string()).is_none() {
+        return;
+    }
+    write_peers(path, &peers);
+}
+
+fn write_peers(path: &std::path::Path, peers: &std::collections::HashMap<String, String>) {
+    match lampo_common::json::to_string_pretty(peers) {
         Ok(json) => {
             if let Err(err) = std::fs::write(path, json) {
-                log::warn!(target: "lampo", "failed to persist peer address: {err}");
+                log::warn!(target: "lampo", "failed to persist peer store: {err}");
             }
         }
         Err(err) => log::warn!(target: "lampo", "failed to serialize peer store: {err}"),

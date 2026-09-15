@@ -11,6 +11,7 @@
 //!
 //! Author: Vincenzo Palazzo <vincenzopalazzo@member.fsf.org>
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,8 +20,10 @@ use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
+use lampo_common::hex;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
+use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
 use lampo_common::ldk::ln::channelmanager::{
     Bolt11InvoiceParameters, OptionalBolt11PaymentParams, OptionalOfferPaymentParams, PaymentId,
 };
@@ -30,6 +33,7 @@ use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
 use lampo_common::ldk::sign::EntropySource;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
+use lampo_common::ldk::util::ser::Readable;
 
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
@@ -41,6 +45,13 @@ pub struct OffchainManager {
     logger: Arc<LampoLogger>,
     lampo_conf: Arc<LampoConf>,
     chain_manager: Arc<LampoChainManager>,
+    /// Set once this node is configured as an often-offline async recipient,
+    /// either from `async-invoice-server-paths` in the config or from a
+    /// runtime [`Self::set_async_receive_paths`] call.
+    async_receive_enabled: AtomicBool,
+    /// Shared with the onion messenger: false until the operator opts in
+    /// via `async-payments-role`, config paths, or `setasyncinvoicepaths`.
+    async_payments_enabled: Arc<AtomicBool>,
 }
 
 impl OffchainManager {
@@ -52,13 +63,78 @@ impl OffchainManager {
         lampo_conf: Arc<LampoConf>,
         chain_manager: Arc<LampoChainManager>,
     ) -> error::Result<Self> {
-        Ok(Self {
+        let async_payments_enabled =
+            Arc::new(AtomicBool::new(lampo_conf.async_payments_role.is_some()));
+        let manager = Self {
             channel_manager,
             keys_manager,
             logger,
             lampo_conf,
             chain_manager,
-        })
+            async_receive_enabled: AtomicBool::new(false),
+            async_payments_enabled,
+        };
+        if let Some(paths_hex) = &manager.lampo_conf.async_invoice_server_paths {
+            manager.set_async_receive_paths_hex(paths_hex)?;
+        }
+        Ok(manager)
+    }
+
+    /// Whether this node receives async payments as an often-offline recipient.
+    pub fn async_receive_enabled(&self) -> bool {
+        self.async_receive_enabled.load(Ordering::Acquire)
+    }
+
+    /// Shared with the onion messenger so a later opt-in flips the same flag.
+    pub(crate) fn async_payments_gate(&self) -> Arc<AtomicBool> {
+        self.async_payments_enabled.clone()
+    }
+
+    /// Configure this node as an often-offline async recipient with blinded
+    /// paths to its static invoice server, obtained out-of-band from the
+    /// server operator.
+    pub fn set_async_receive_paths(&self, paths: Vec<BlindedMessagePath>) -> error::Result<()> {
+        self.channel_manager
+            .manager()
+            .set_paths_to_static_invoice_server(paths)
+            .map_err(|_| error::anyhow!("invalid async invoice server paths"))?;
+        self.async_receive_enabled.store(true, Ordering::Release);
+        self.async_payments_enabled.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    /// Same as [`Self::set_async_receive_paths`], taking the hex encoding
+    /// produced by the `asyncinvoicepaths` RPC (or written in
+    /// `async-invoice-server-paths`).
+    pub fn set_async_receive_paths_hex(&self, paths_hex: &str) -> error::Result<()> {
+        // A few blinded paths encode to well under this; reject oversized
+        // hex before allocating the decoded buffer.
+        const MAX_PATHS_HEX_LEN: usize = 16 * 1024;
+        if paths_hex.len() > MAX_PATHS_HEX_LEN {
+            error::bail!("async-invoice-server-paths hex is too long");
+        }
+        let bytes = hex::decode(paths_hex)
+            .map_err(|err| error::anyhow!("async-invoice-server-paths is not hex: {err}"))?;
+        let paths = <Vec<BlindedMessagePath>>::read(&mut &bytes[..]).map_err(|err| {
+            error::anyhow!("async-invoice-server-paths is not a valid path list: {err:?}")
+        })?;
+        if paths.is_empty() {
+            error::bail!("async-invoice-server-paths must not be empty");
+        }
+        self.set_async_receive_paths(paths)
+    }
+
+    /// The async receive offer, ready once the interactive static-invoice
+    /// flow with the server has completed.
+    pub fn async_offer(&self) -> error::Result<Offer> {
+        self.channel_manager
+            .manager()
+            .get_async_receive_offer()
+            .map_err(|_| {
+                error::anyhow!(
+                    "async receive offer not ready yet; the static invoice server handshake is still in flight"
+                )
+            })
     }
 
     /// Generate an invoice with a specific amount and a specific

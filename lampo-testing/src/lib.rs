@@ -103,6 +103,7 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
 
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
+    daemon: Arc<LampoDaemon>,
     root_path: Arc<TempDir>,
     pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
@@ -113,13 +114,26 @@ pub struct LampoTesting {
 
 impl LampoTesting {
     pub async fn tmp() -> error::Result<Self> {
+        Self::tmp_with(|_| {}).await
+    }
+
+    /// Like [`Self::tmp`], but `conf_fn` may adjust the [`LampoConf`] before
+    /// the daemon is built from it.
+    pub async fn tmp_with(conf_fn: impl FnOnce(&mut LampoConf)) -> error::Result<Self> {
         let mut conf = Conf::default();
         conf.wallet = None;
         let conf = Arc::new(conf);
-        Self::with_conf(conf).await
+        Self::with_conf_and(conf, conf_fn).await
     }
 
     pub async fn with_conf(conf: Arc<Conf<'static>>) -> error::Result<Self> {
+        Self::with_conf_and(conf, |_| {}).await
+    }
+
+    pub async fn with_conf_and(
+        conf: Arc<Conf<'static>>,
+        conf_fn: impl FnOnce(&mut LampoConf),
+    ) -> error::Result<Self> {
         let conf_clone = conf.clone();
         let btc = tokio::task::spawn_blocking(move || {
             if let Ok(exec_path) = btc::exe_path() {
@@ -131,10 +145,19 @@ impl LampoTesting {
         })
         .await??;
         let btc = Arc::new(btc);
-        Self::new(btc).await
+        Self::new_with(btc, conf_fn).await
     }
 
     pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
+        Self::new_with(btc, |_| {}).await
+    }
+
+    /// Like [`Self::new`], but `conf_fn` may adjust the [`LampoConf`] before
+    /// the daemon is built from it.
+    pub async fn new_with(
+        btc: Arc<BtcNode>,
+        conf_fn: impl FnOnce(&mut LampoConf),
+    ) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // SAFETY: this should be safe because if the system has no
@@ -161,6 +184,7 @@ impl LampoTesting {
             .ldk_conf
             .channel_handshake_limits
             .force_announced_channel_preference = false;
+        conf_fn(&mut lampo_conf);
         log::info!("creating bitcoin core wallet");
 
         let lampo_conf = Arc::new(lampo_conf);
@@ -189,7 +213,7 @@ impl LampoTesting {
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
-        tokio::spawn(lampo.listen());
+        tokio::spawn(lampo.clone().listen());
 
         // wait that lampo starts
         while let Err(err) = handler
@@ -204,6 +228,7 @@ impl LampoTesting {
         log::info!("ready `{:#?}` for integration testing!", info);
         let node = Self {
             inner: handler,
+            daemon: lampo,
             mnemonic,
             port: port.into(),
             wallet,
@@ -280,6 +305,21 @@ impl LampoTesting {
         counterparty: Arc<LampoTesting>,
         amount: u64,
     ) -> error::Result<()> {
+        self.fund_channel_with_privacy(counterparty, amount, true)
+            .await
+    }
+
+    /// Like [`Self::fund_channel_with`], with explicit control over whether
+    /// the channel is announced. Async payments tests need unannounced
+    /// recipients: a node that appears in the graph (via a public channel
+    /// announcement) but has no announced addresses builds self-introduced
+    /// blinded paths that non-peers cannot reach.
+    pub async fn fund_channel_with_privacy(
+        &self,
+        counterparty: Arc<LampoTesting>,
+        amount: u64,
+        public: bool,
+    ) -> error::Result<()> {
         let _: response::Connect = self
             .lampod()
             .call(
@@ -302,7 +342,7 @@ impl LampoTesting {
                 request::OpenChannel {
                     node_id: counterparty.info.node_id.clone(),
                     amount: amount,
-                    public: true,
+                    public,
                     port: None,
                     addr: None,
                     push_msat: None,
@@ -348,6 +388,10 @@ impl LampoTesting {
 
     pub fn lampod(&self) -> Arc<LampoHandler> {
         self.inner.clone()
+    }
+
+    pub fn daemon(&self) -> Arc<LampoDaemon> {
+        self.daemon.clone()
     }
 
     pub fn root_path(&self) -> Arc<TempDir> {

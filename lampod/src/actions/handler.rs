@@ -32,7 +32,10 @@ use lampo_common::utils::logger::LampoLogger;
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
-use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::ln::{
+    LampoChannelManager, LampoInventoryManager, LampoPeerManager, OnionMessageMailbox,
+    StaticInvoiceStore,
+};
 use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
 
@@ -89,6 +92,13 @@ pub struct LampoHandler {
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
     persister: Arc<LampoPersistence>,
+    /// Present only when this node is a static invoice server
+    /// (`async-payments-role=server`).
+    static_invoice_store: Option<StaticInvoiceStore>,
+    /// Buffers onion messages for offline peers; present only when the
+    /// onion messenger was built with offline-peer interception (server
+    /// role).
+    om_mailbox: Option<OnionMessageMailbox>,
     bump_tx_event_handler: BumpHandler,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
@@ -117,6 +127,14 @@ impl LampoHandler {
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
             persister: lampod.persister(),
+            static_invoice_store: match lampod.conf().async_payments_role.as_deref() {
+                Some("server") => Some(StaticInvoiceStore::new(lampod.persister())),
+                _ => None,
+            },
+            om_mailbox: match lampod.conf().async_payments_role.as_deref() {
+                Some("server") => Some(OnionMessageMailbox::with_store(Some(lampod.persister()))),
+                _ => None,
+            },
             bump_tx_event_handler,
             external_handlers: RwLock::new(Vec::new()),
             emitter,
@@ -135,6 +153,15 @@ impl LampoHandler {
 
     pub fn peer_manager(&self) -> Arc<LampoPeerManager> {
         self.peer_manager.clone()
+    }
+
+    /// Messages waiting in the onion-message mailbox for `peer_node_id`.
+    /// Zero when this node is not a static invoice server.
+    pub fn buffered_onion_messages(&self, peer_node_id: lampo_common::types::NodeId) -> usize {
+        self.om_mailbox
+            .as_ref()
+            .map(|mailbox| mailbox.queued(peer_node_id))
+            .unwrap_or(0)
     }
 
     /// Call any method supported by the lampod configuration. This includes
@@ -725,6 +752,105 @@ impl Handler for LampoHandler {
             }
             ldk::events::Event::BumpTransaction(event) => {
                 self.bump_tx_event_handler.handle_event(&event).await;
+                Ok(())
+            }
+            ldk::events::Event::PersistStaticInvoice {
+                invoice,
+                invoice_request_path,
+                invoice_slot,
+                recipient_id,
+                invoice_persisted_path,
+            } => {
+                let Some(store) = &self.static_invoice_store else {
+                    log::debug!(target: "lampo::handler", "ignoring PersistStaticInvoice: not a static invoice server");
+                    return Ok(());
+                };
+                // An IO error here makes LDK replay the event (see
+                // `handler_ldk_events`), so the invoice is not lost to a
+                // transient store failure. Rate-limit skips confirm without
+                // erroring: the recipient retries, and a replayed rate-limit
+                // would sit at the head of the event queue forever.
+                // Confirming happens only after the write durably succeeded.
+                let stored = store
+                    .persist(invoice, invoice_request_path, invoice_slot, &recipient_id)
+                    .map_err(|err| {
+                        log::error!(target: "lampo::handler", "failed to persist static invoice for slot {invoice_slot}: {err}");
+                        err
+                    })?;
+                if stored {
+                    self.channel_manager
+                        .manager()
+                        .static_invoice_persisted(invoice_persisted_path);
+                }
+                Ok(())
+            }
+            ldk::events::Event::StaticInvoiceRequested {
+                recipient_id,
+                invoice_slot,
+                reply_path,
+                invoice_request,
+            } => {
+                let Some(store) = &self.static_invoice_store else {
+                    log::debug!(target: "lampo::handler", "ignoring StaticInvoiceRequested: not a static invoice server");
+                    return Ok(());
+                };
+                match store.load(&recipient_id, invoice_slot)? {
+                    Some((invoice, invoice_request_path)) => {
+                        if let Err(err) = self
+                            .channel_manager
+                            .manager()
+                            .respond_to_static_invoice_request(
+                                invoice,
+                                reply_path,
+                                invoice_request,
+                                invoice_request_path,
+                            )
+                        {
+                            // Not replayed: the payer's invoice request has
+                            // its own retry/timeout, and the recipient can
+                            // re-serve a fresh invoice.
+                            log::error!(target: "lampo::handler", "failed to answer static invoice request for slot {invoice_slot}: {err:?}");
+                        }
+                    }
+                    None => {
+                        log::debug!(target: "lampo::handler", "no static invoice stored for slot {invoice_slot}; ignoring request");
+                    }
+                }
+                Ok(())
+            }
+            ldk::events::Event::OnionMessageIntercepted {
+                next_hop, message, ..
+            } => {
+                let ldk::blinded_path::message::NextMessageHop::NodeId(peer_node_id) = next_hop
+                else {
+                    // Unreachable: the onion messenger is built with
+                    // `intercept_for_unknown_scids = false`.
+                    log::error!(target: "lampo::handler", "onion message intercepted for an unknown SCID; dropping it");
+                    return Ok(());
+                };
+                match &self.om_mailbox {
+                    Some(mailbox) => mailbox.onion_message_intercepted(peer_node_id, message),
+                    None => {
+                        log::debug!(target: "lampo::handler", "onion message intercepted, but this node is not a static invoice server")
+                    }
+                }
+                Ok(())
+            }
+            ldk::events::Event::OnionMessagePeerConnected { peer_node_id } => {
+                if let Some(mailbox) = &self.om_mailbox {
+                    for message in mailbox.onion_message_peer_connected(peer_node_id) {
+                        if let Err(err) = self
+                            .peer_manager
+                            .onion_messager()
+                            .forward_onion_message(message, &peer_node_id)
+                        {
+                            // Not buffered again: the sender re-drives its
+                            // flow on the next timer tick, and the mailbox
+                            // caps make a re-insert loop unbounded.
+                            log::debug!(target: "lampo::handler", "failed to forward buffered onion message to `{peer_node_id}`: {err:?}");
+                        }
+                    }
+                }
                 Ok(())
             }
             _ => {
