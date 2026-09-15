@@ -40,19 +40,30 @@ pub mod request {
     }
 
     /// Mint blinded paths on a static-invoice server for an often-offline
-    /// recipient. `recipient_id` is an operator-chosen hex identifier; the
-    /// same bytes must be used later if the server looks the recipient up.
+    /// recipient. `node_id` must be a channel counterparty; those pubkey
+    /// bytes key the static-invoice store. `token` is required when
+    /// `api-token` is set in `lampo.conf`.
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct GenerateAsyncInvoicePaths {
-        pub recipient_id: String,
+        pub node_id: String,
+        #[serde(default)]
+        pub token: Option<String>,
     }
 
     /// Install hex-encoded blinded paths (from `asyncinvoicepaths`) on an
     /// often-offline recipient. Runtime equivalent of
     /// `async-invoice-server-paths` in `lampo.conf`.
+    ///
+    /// Rejected when this node is `async-payments-role=server` or already
+    /// has paths, unless `force` is true. `token` is required when
+    /// `api-token` is set in `lampo.conf`.
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct SetAsyncInvoicePaths {
         pub paths: String,
+        #[serde(default)]
+        pub token: Option<String>,
+        #[serde(default)]
+        pub force: bool,
     }
 }
 

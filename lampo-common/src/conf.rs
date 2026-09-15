@@ -48,6 +48,10 @@ pub struct LampoConf {
     /// static invoice server. Configures this node as an often-offline async
     /// recipient: `offer` then returns the async receive offer.
     pub async_invoice_server_paths: Option<String>,
+    /// Optional token required by `asyncinvoicepaths` and
+    /// `setasyncinvoicepaths`. Other RPCs stay unauthenticated (localhost
+    /// plus the HTTP DNS-rebinding guard).
+    pub api_token: Option<String>,
 }
 
 impl Default for LampoConf {
@@ -85,6 +89,7 @@ impl Default for LampoConf {
             fast_sync: None,
             async_payments_role: None,
             async_invoice_server_paths: None,
+            api_token: None,
         }
     }
 }
@@ -296,6 +301,17 @@ impl TryFrom<String> for LampoConf {
         }
         let async_invoice_server_paths =
             conf.get_conf("async-invoice-server-paths").unwrap_or(None);
+        let api_token = conf
+            .get_conf("api-token")
+            .unwrap_or(None)
+            .and_then(|token| {
+                let token = token.trim().to_owned();
+                if token.is_empty() {
+                    None
+                } else {
+                    Some(token)
+                }
+            });
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -321,6 +337,7 @@ impl TryFrom<String> for LampoConf {
             fast_sync,
             async_payments_role,
             async_invoice_server_paths,
+            api_token,
         })
     }
 }

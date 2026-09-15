@@ -19,6 +19,7 @@ use lampo_common::model::request::SetAsyncInvoicePaths;
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
+use lampo_common::types::NodeId;
 use lampo_common::{json, model::request::DecodeInvoice};
 use tokio::time::Instant;
 
@@ -83,21 +84,27 @@ pub async fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json
 /// Mint hex-encoded blinded paths that an often-offline recipient installs
 /// as `async-invoice-server-paths` (or via `setasyncinvoicepaths`).
 ///
-/// Server role only. `recipient_id` is operator-chosen hex; the same bytes
-/// key the static-invoice store for this recipient.
+/// Server role only. `node_id` must be a channel counterparty; those
+/// pubkey bytes key the static-invoice store for this recipient.
 pub async fn json_asyncinvoicepaths(
     ctx: &LampoDaemon,
     request: &json::Value,
 ) -> Result<json::Value, Error> {
-    log::info!("call for `asyncinvoicepaths` with request `{:?}`", request);
+    log::info!(target: "lampod::jsonrpc::offchain", "call for `asyncinvoicepaths`");
     let request: GenerateAsyncInvoicePaths = json::from_value(request.clone())?;
-    let recipient_id = hex::decode(&request.recipient_id)
-        .map_err(|err| crate::rpc_error!("recipient_id is not hex: {err}"))?;
-    if recipient_id.is_empty() {
-        return Err(crate::rpc_error!("recipient_id must not be empty"));
+    require_path_rpc_token(ctx, request.token.as_deref())?;
+    let node_id = NodeId::from_str(&request.node_id)
+        .map_err(|err| crate::rpc_error!("node_id is not a public key: {err}"))?;
+    if ctx
+        .channel_manager()
+        .manager()
+        .list_channels_with_counterparty(&node_id)
+        .is_empty()
+    {
+        return Err(crate::rpc_error!("node_id must be a channel counterparty"));
     }
     let paths = ctx
-        .blinded_paths_for_async_recipient(recipient_id)
+        .blinded_paths_for_async_recipient(node_id.serialize().to_vec())
         .map_err(|err| crate::rpc_error!("{err}"))?;
     let paths = hex::encode(paths.encode());
     Ok(json::to_value(&response::AsyncInvoicePaths { paths })?)
@@ -109,17 +116,38 @@ pub async fn json_setasyncinvoicepaths(
     ctx: &LampoDaemon,
     request: &json::Value,
 ) -> Result<json::Value, Error> {
-    log::info!(
-        "call for `setasyncinvoicepaths` with request `{:?}`",
-        request
-    );
+    log::info!(target: "lampod::jsonrpc::offchain", "call for `setasyncinvoicepaths`");
     let request: SetAsyncInvoicePaths = json::from_value(request.clone())?;
+    require_path_rpc_token(ctx, request.token.as_deref())?;
+    if ctx.conf().async_payments_role.as_deref() == Some("server") && !request.force {
+        return Err(crate::rpc_error!(
+            "setasyncinvoicepaths is for often-offline recipients, not async-payments-role=server"
+        ));
+    }
+    if ctx.offchain_manager().async_receive_enabled() && !request.force {
+        return Err(crate::rpc_error!(
+            "async receive paths already set; pass force=true to overwrite"
+        ));
+    }
     ctx.offchain_manager()
         .set_async_receive_paths_hex(&request.paths)
         .map_err(|err| crate::rpc_error!("{err}"))?;
     Ok(json::to_value(&response::AsyncInvoicePaths {
         paths: request.paths,
     })?)
+}
+
+/// When `api-token` is set, the two path RPCs require a matching token.
+/// Missing and wrong tokens share one error so the token is not enumerable.
+fn require_path_rpc_token(ctx: &LampoDaemon, token: Option<&str>) -> Result<(), Error> {
+    let conf = ctx.conf();
+    let Some(expected) = conf.api_token.as_deref() else {
+        return Ok(());
+    };
+    if token == Some(expected) {
+        return Ok(());
+    }
+    Err(crate::rpc_error!("api-token required"))
 }
 
 pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {

@@ -458,6 +458,12 @@ impl LampoPeerManager {
         Ok(())
     }
 
+    /// Drop `node_id` from the reconnect store so the 10s redial loop
+    /// will not bring this peer back. Does not disconnect a live socket.
+    pub fn forget_peer(&self, node_id: &NodeId) {
+        forget_peer(&peer_store_path(&self.conf), node_id);
+    }
+
     pub async fn disconnect(&self, node_id: NodeId) -> error::Result<()> {
         //check the pubkey matches a valid connected peer
         if self.manager().peer_by_node_id(&node_id).is_none() {
@@ -555,10 +561,22 @@ fn load_peers(path: &std::path::Path) -> std::collections::HashMap<String, Strin
 fn remember_peer(path: &std::path::Path, node_id: &NodeId, host: &SocketAddr) {
     let mut peers = load_peers(path);
     peers.insert(node_id.to_string(), host.to_string());
-    match lampo_common::json::to_string_pretty(&peers) {
+    write_peers(path, &peers);
+}
+
+fn forget_peer(path: &std::path::Path, node_id: &NodeId) {
+    let mut peers = load_peers(path);
+    if peers.remove(&node_id.to_string()).is_none() {
+        return;
+    }
+    write_peers(path, &peers);
+}
+
+fn write_peers(path: &std::path::Path, peers: &std::collections::HashMap<String, String>) {
+    match lampo_common::json::to_string_pretty(peers) {
         Ok(json) => {
             if let Err(err) = std::fs::write(path, json) {
-                log::warn!(target: "lampo", "failed to persist peer address: {err}");
+                log::warn!(target: "lampo", "failed to persist peer store: {err}");
             }
         }
         Err(err) => log::warn!(target: "lampo", "failed to serialize peer store: {err}"),
