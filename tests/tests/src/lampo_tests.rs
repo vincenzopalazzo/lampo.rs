@@ -146,6 +146,7 @@ pub async fn listpayments_reports_a_settled_payment() -> error::Result<()> {
                 port: None,
                 addr: None,
                 push_msat: None,
+                sat_per_vbyte: None,
             },
         )
         .await
@@ -185,6 +186,8 @@ pub async fn listpayments_reports_a_settled_payment() -> error::Result<()> {
                 amount: None,
                 bolt12: None,
                 timeout: Default::default(),
+                max_fee_msat: None,
+                timeout_secs: None,
             },
         )
         .await
@@ -271,6 +274,7 @@ pub async fn channel_survives_a_node_restart() -> error::Result<()> {
                 port: None,
                 addr: None,
                 push_msat: None,
+                sat_per_vbyte: None,
             },
         )
         .await
@@ -567,6 +571,8 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
                 amount: None,
                 bolt12: None,
                 timeout: Default::default(),
+                max_fee_msat: None,
+                timeout_secs: None,
             },
         )
         .await?;

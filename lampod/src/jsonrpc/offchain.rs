@@ -14,8 +14,8 @@ use lampo_common::model::request::GenerateAsyncInvoicePaths;
 use lampo_common::model::request::GenerateInvoice;
 use lampo_common::model::request::GenerateOffer;
 use lampo_common::model::request::KeySend;
-use lampo_common::model::request::{self, Pay};
 use lampo_common::model::request::SetAsyncInvoicePaths;
+use lampo_common::model::request::{self, Pay};
 use lampo_common::model::response::PayResult;
 use lampo_common::model::response::{self, Decode};
 use lampo_common::model::response::{Bolt11InvoiceInfo, Bolt12InvoiceInfo, Invoice};
@@ -452,7 +452,6 @@ mod tests {
         assert_eq!(path_value_and_fee(&[hop(20), hop(400)]), (400, 20));
         assert_eq!(path_value_and_fee(&[hop(30), hop(600)]), (600, 30));
     }
-}
 }
 
 /// `listpayments`: the node's payment history, straight out of the store.

@@ -394,6 +394,8 @@ impl LampoTesting {
             btc,
             root_path,
             info,
+            lnd_rest_port: 0,
+            lnd_admin_macaroon_hex: String::new(),
         })
     }
 
