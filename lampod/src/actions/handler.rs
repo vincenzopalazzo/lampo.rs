@@ -360,9 +360,19 @@ impl Handler for LampoHandler {
                 };
                 // Same as ldk-node: ChannelFunding is 12-block economical,
                 // read from the cache (never block the event loop on RPC).
-                let fee_rate = self
-                    .chain_manager
-                    .estimate_fee_rate(FeeTarget::ChannelFunding);
+                // An explicit `sat_per_vbyte` from the caller (LND REST
+                // `openchannel`) takes precedence when present.
+                let fee_rate = match self
+                    .channel_manager
+                    .take_funding_fee_rate(&temporary_channel_id)?
+                {
+                    Some(sat_per_vbyte) => lampo_common::bitcoin::FeeRate::from_sat_per_kwu(
+                        sat_per_vbyte.saturating_mul(250),
+                    ),
+                    None => self
+                        .chain_manager
+                        .estimate_fee_rate(FeeTarget::ChannelFunding),
+                };
                 log::info!(
                     target: "lampo",
                     "funding fee rate {} sat/kW",
