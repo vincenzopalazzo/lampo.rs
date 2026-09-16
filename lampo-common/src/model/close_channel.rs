@@ -111,6 +111,7 @@ pub mod tests {
         let req = crate::model::request::CloseChannel {
             node_id,
             channel_id: channel_hex,
+            force: false,
         };
         assert!(req.channel_id().is_err());
     }
@@ -127,6 +128,7 @@ pub mod tests {
         let req = crate::model::request::CloseChannel {
             node_id,
             channel_id: channel_hex,
+            force: false,
         };
         assert!(req.channel_id().is_err());
     }
@@ -142,6 +144,7 @@ pub mod tests {
         let req = crate::model::request::CloseChannel {
             node_id,
             channel_id: channel_hex,
+            force: false,
         };
         assert!(req.channel_id().is_err());
     }

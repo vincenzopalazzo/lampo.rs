@@ -151,6 +151,7 @@ mod tests {
     use super::*;
 
     fn args_with_data_dir(data_dir: &str) -> LampoCliArgs {
+        #[allow(clippy::needless_update)]
         LampoCliArgs {
             data_dir: Some(data_dir.to_string()),
             network: Some("regtest".to_string()),
@@ -164,6 +165,8 @@ mod tests {
             dev_force_poll: false,
             api_host: None,
             api_port: None,
+            lnd: false,
+            lnd_tls_sans: Vec::new(),
             subcommand: None,
         }
     }

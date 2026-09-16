@@ -597,6 +597,7 @@ pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
             request::CloseChannel {
                 node_id: node2.info.node_id.clone(),
                 channel_id: None,
+                force: false,
             },
         )
         .await?;

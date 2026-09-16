@@ -350,15 +350,50 @@ async fn connect_peer(
     }
 }
 
+/// LND sends `AddressType` as its protobuf-JSON name (e.g.
+/// `"WITNESS_PUBKEY_HASH"`) or its raw enum number. Accept both: the field
+/// itself is ignored (lampo always returns a bech32 address), but rejecting
+/// the string form would break Zeus and the documented curl examples.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NewAddressBody {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_address_type")]
     #[allow(dead_code)]
     r#type: i32,
     #[serde(default)]
     #[allow(dead_code)]
     account: String,
+}
+
+/// Deserialize an LND `AddressType` given either as the wire number or as
+/// the protobuf-JSON enum name; the value is unused beyond validation.
+fn deserialize_address_type<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Null => Ok(0),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .and_then(|n| i32::try_from(n).ok())
+            .ok_or_else(|| D::Error::custom("address type must be a valid enum number")),
+        serde_json::Value::String(s) => {
+            let name = s.to_uppercase();
+            // Mirror lnrpc::AddressType discriminants.
+            Ok(match name.as_str() {
+                "WITNESS_PUBKEY_HASH" => 0,
+                "NESTED_PUBKEY_HASH" => 1,
+                "UNUSED_WITNESS_PUBKEY_HASH" => 2,
+                "TAPROOT_PUBKEY" => 4,
+                _ => return Err(D::Error::custom(format!("unknown address type `{s}`"))),
+            })
+        }
+        other => Err(D::Error::custom(format!(
+            "invalid address type `{other:?}`"
+        ))),
+    }
 }
 
 #[post("/v1/newaddress")]
@@ -383,9 +418,14 @@ async fn new_address(
 struct AddInvoiceBody {
     #[serde(default)]
     memo: String,
-    #[serde(default, deserialize_with = "deserialize_i64")]
+    // LND's REST accepts both the protobuf-JSON camelCase names and the
+    // original snake_case field names; Zeus and the documented curl examples
+    // send either. Without the aliases the amount fields silently default to
+    // 0 and a zero-amount invoice is created (seen live: `value_msat` was
+    // dropped entirely).
+    #[serde(default, alias = "value", deserialize_with = "deserialize_i64")]
     value: i64,
-    #[serde(default, deserialize_with = "deserialize_i64")]
+    #[serde(default, alias = "value_msat", deserialize_with = "deserialize_i64")]
     value_msat: i64,
     #[serde(default, deserialize_with = "deserialize_i64")]
     expiry: i64,
@@ -594,7 +634,7 @@ struct SendPaymentBody {
         deserialize_with = "deserialize_optional_i64"
     )]
     fee_limit_msat: Option<i64>,
-    #[serde(default)]
+    #[serde(default, alias = "fee_limit")]
     fee_limit: Option<FeeLimitBody>,
 }
 
@@ -603,7 +643,11 @@ struct SendPaymentBody {
 struct FeeLimitBody {
     #[serde(default, deserialize_with = "deserialize_optional_i64")]
     fixed: Option<i64>,
-    #[serde(default, deserialize_with = "deserialize_optional_i64")]
+    #[serde(
+        default,
+        alias = "fixed_msat",
+        deserialize_with = "deserialize_optional_i64"
+    )]
     fixed_msat: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_i64")]
     percent: Option<i64>,
