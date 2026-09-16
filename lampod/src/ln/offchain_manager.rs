@@ -184,9 +184,11 @@ impl OffchainManager {
         payer_note: Option<String>,
         max_fee_msat: Option<u64>,
     ) -> error::Result<PaymentId> {
-        // check if it is an invoice or an offer
-        let offer_hash = Sha256::hash(offer_str.as_bytes());
-        let payment_id = PaymentId(*offer_hash.as_ref());
+        // Same as ldk-node: a fresh random id per attempt. Hashing the offer
+        // string collides on a second pay of the same offer, and a 1s retry
+        // is too short for the static-invoice onion-message round trip
+        // (ldk-node uses `Retry::Timeout(10s)`).
+        let payment_id = PaymentId(self.keys_manager.get_secure_random_bytes());
         let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
 
         let amount = match offer.amount() {
@@ -207,7 +209,12 @@ impl OffchainManager {
                 payment_id,
                 OptionalOfferPaymentParams {
                     payer_note,
-                    retry_strategy: Retry::Timeout(std::time::Duration::from_secs(1)),
+                    // json_pay waits up to the RPC timeout for a terminal
+                    // event. Retry must cover that window: a 1s/10s timeout
+                    // (ldk-node can use 10s because it returns PaymentId
+                    // immediately) expires the HTLC while we are still
+                    // waiting, so the waiter never sees Success.
+                    retry_strategy: Retry::Timeout(Duration::from_secs(120)),
                     route_params_config: ldk::routing::router::RouteParametersConfig {
                         max_total_routing_fee_msat: max_fee_msat,
                         ..Default::default()

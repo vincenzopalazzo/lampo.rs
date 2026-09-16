@@ -882,6 +882,8 @@ pub async fn async_payment_held_htlc_roundtrip() -> error::Result<()> {
                 amount: Some(100_000),
                 bolt12: None,
                 timeout: Default::default(),
+                max_fee_msat: None,
+                timeout_secs: None,
             },
         )
         .await?;
@@ -986,6 +988,8 @@ pub async fn async_payment_offline_recipient_roundtrip() -> error::Result<()> {
                     amount: Some(100_000),
                     bolt12: None,
                     timeout: request::PayTimeout::Fast,
+                    max_fee_msat: None,
+                    timeout_secs: None,
                 },
             )
             .await
@@ -1046,6 +1050,8 @@ pub async fn async_payment_offline_recipient_roundtrip() -> error::Result<()> {
                 amount: Some(100_000),
                 bolt12: None,
                 timeout: Default::default(),
+                max_fee_msat: None,
+                timeout_secs: None,
             },
         )
         .await?;
