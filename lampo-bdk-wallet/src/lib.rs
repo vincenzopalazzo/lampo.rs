@@ -536,14 +536,23 @@ impl WalletManager for BDKWalletManager {
         // which left nodes alive (and holding lampod.pid) after SIGTERM.
 
         async fn innet_sync(wallet: Arc<BDKWalletManager>) -> error::Result<()> {
-            // Gate: hold the Emitter scan until the LDK chain listeners have
-            // synced, so the two pipelines don't compete for the same RPC.
-            // Active only when a coordinator is wired in and
-            // `wallet_sync_parallel` is unset; otherwise sync runs as before.
-            // `wallet_scan_allowed` opens the gate after a grace window even
-            // when the listener sync is stuck, so a degraded backend cannot
-            // block the wallet forever.
+            // Unified mode: the wallet rides `synchronize_listeners` + SpvClient
+            // with ChannelManager. A second Emitter would double-apply blocks
+            // and steal RPC during catch-up (the mutinynet channel_ready
+            // deadlock). Legacy / `wallet_sync_parallel` still use the Emitter.
             let parallel = wallet.conf.wallet_sync_parallel.unwrap_or(false);
+            let legacy = wallet
+                .conf
+                .sync_mode
+                .as_deref()
+                .is_some_and(|m| m.eq_ignore_ascii_case("legacy"));
+            if !parallel && !legacy {
+                log::debug!(
+                    target: "lampo-wallet",
+                    "unified chain sync: wallet follows LDK listeners, skipping Emitter"
+                );
+                return Ok(());
+            }
             if !parallel {
                 if let Some(coordinator) = wallet.coordinator.get() {
                     if !coordinator.wallet_scan_allowed() {

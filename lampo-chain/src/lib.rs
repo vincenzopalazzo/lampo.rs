@@ -101,16 +101,28 @@ fn mark_initial_sync_complete(
 }
 
 /// The set of ongoing chain listeners fed by the SPV client after the
-/// initial synchronization. The sweeper has to stay on this path: without
-/// block notifications it never sees a sweep confirm and tracked outputs
-/// stay pending forever.
+/// initial synchronization. Channel manager, chain monitor, sweeper, and
+/// on-chain wallet stay on this path together so BDK history cannot drift
+/// from LDK's chain view.
 struct ChainListeners {
     chain_monitor: Arc<LampoChainMonitor>,
     channel_manager: Arc<LampoChannel>,
     sweeper: Option<Arc<LampoSweeper>>,
+    wallet: Option<WalletChainListener>,
 }
 
 impl chain::Listen for ChainListeners {
+    fn block_connected(&self, block: &Block, height: u32) {
+        self.chain_monitor.block_connected(block, height);
+        self.channel_manager.block_connected(block, height);
+        if let Some(ref sweeper) = self.sweeper {
+            sweeper.block_connected(block, height);
+        }
+        if let Some(ref wallet) = self.wallet {
+            wallet.block_connected(block, height);
+        }
+    }
+
     fn filtered_block_connected(
         &self,
         header: &lampo_common::bitcoin::block::Header,
@@ -124,13 +136,19 @@ impl chain::Listen for ChainListeners {
         if let Some(ref sweeper) = self.sweeper {
             sweeper.filtered_block_connected(header, txdata, height);
         }
+        if let Some(ref wallet) = self.wallet {
+            wallet.filtered_block_connected(header, txdata, height);
+        }
     }
 
     fn blocks_disconnected(&self, fork_point: chain::BlockLocator) {
         self.chain_monitor.blocks_disconnected(fork_point.clone());
         self.channel_manager.blocks_disconnected(fork_point.clone());
         if let Some(ref sweeper) = self.sweeper {
-            sweeper.blocks_disconnected(fork_point);
+            sweeper.blocks_disconnected(fork_point.clone());
+        }
+        if let Some(ref wallet) = self.wallet {
+            wallet.blocks_disconnected(fork_point);
         }
     }
 }
@@ -424,17 +442,14 @@ impl Backend for LampoChainSync {
         // causing a "Blocks must be connected in chain-order" assertion.
         let manager_best = channel_manager.current_best_block();
 
-        // Catch up LDK (channel manager + chain monitor + sweeper) first, and
-        // *do not* attach the BDK wallet to this pass.
-        //
-        // `synchronize_listeners` walks every header from the oldest listener
-        // to tip in one future. Putting a wallet checkpoint millions of
-        // blocks behind the ChannelManager on that same pass means the 120s
-        // timeout fires before LDK ever reaches tip. Observed live on
-        // mutinynet (tip ~3.4M, ChannelManager 209946, wallet ~148k):
-        // lampo received the opener's `channel_ready` but never sent its
-        // own, so inbound channels stayed `is_channel_ready: false` forever.
-        // The wallet Emitter starts only after this pass finishes.
+        // Catch up ChannelManager, chain monitor, sweeper, and BDK wallet on
+        // the *same* `synchronize_listeners` pass. They must share one chain
+        // view: a wallet that lags LDK (or vice versa) is an out-of-sync
+        // hazard for funding, sweeps, and restart. The deadlock on mutinynet
+        // was not "wallet on this pass", it was aborting the pass every 120s
+        // and then starting a second BDK Emitter that stole RPC. Keep the
+        // wallet here; do not bound the future; keep the Emitter gated until
+        // this pass finishes.
 
         log::info!(
             target: "lampo-chain",
@@ -443,12 +458,33 @@ impl Backend for LampoChainSync {
             manager_best.height
         );
 
+        let parallel = self.config.wallet_sync_parallel.unwrap_or(false);
+        let legacy = match self.config.sync_mode.as_deref() {
+            Some(mode) if mode.eq_ignore_ascii_case("legacy") => true,
+            Some("unified") | None => false,
+            Some(mode) => {
+                log::warn!(
+                    target: "lampo-chain",
+                    "unrecognized sync_mode `{mode}`; falling back to unified"
+                );
+                false
+            }
+        };
+        let unified = !legacy && !parallel;
+        let wallet = if unified { self.wallet() } else { None };
+        let wallet_listener = wallet.as_ref().map(|w| WalletChainListener::new(w.clone()));
+
         // Retry on transient RPC failures so a hiccup in `synchronize_listeners`
         // can't leave the coordinator stuck in `PendingInitialSync` (which would
         // permanently gate the on-chain wallet). Each attempt rebuilds the
         // listener set from the current best blocks, resuming where it left off.
         let mut retry_delay = std::time::Duration::from_secs(5);
+        let mut wallet_included;
         let (cache, synced_chain_tip) = loop {
+            wallet_included = false;
+            if let Some(listener) = wallet_listener.as_ref() {
+                listener.reset();
+            }
             let manager_best = channel_manager.current_best_block();
             log::info!(
                 target: "lampo-chain",
@@ -468,6 +504,25 @@ impl Backend for LampoChainSync {
                     &*chain_monitor as &(dyn chain::Listen + Send + Sync),
                 ),
             ];
+            if let (Some(wallet), Some(listener)) = (wallet.as_ref(), wallet_listener.as_ref()) {
+                match wallet.current_best_block() {
+                    Ok(best) => {
+                        log::info!(
+                            target: "lampo-chain",
+                            "Including on-chain wallet in chain sync from height {}",
+                            best.height
+                        );
+                        chain_listeners.push((
+                            chain::BlockLocator::new(best.hash, best.height),
+                            listener as &(dyn chain::Listen + Send + Sync),
+                        ));
+                        wallet_included = true;
+                    }
+                    Err(err) => {
+                        log::error!(target: "lampo-chain", "skipping on-chain wallet in chain sync: {err}")
+                    }
+                }
+            }
             if let Some((_, ref sweeper)) = sweeper_listener {
                 let best_block = sweeper.current_best_block();
                 log::info!(
@@ -482,10 +537,11 @@ impl Backend for LampoChainSync {
             }
 
             // Do not bound this future. `synchronize_listeners` is one walk
-            // from the oldest LDK checkpoint to tip; aborting it after 120s
-            // drops in-flight progress and, on a 3M-block chain, never
-            // finishes. A hung RPC is retried via the `Err` arm. The wallet
-            // Emitter stays gated until this pass completes.
+            // from the oldest listener (often the wallet) to tip; aborting it
+            // after 120s drops in-flight progress and, on a 3M-block chain,
+            // never finishes. A hung RPC is retried via the `Err` arm. The
+            // wallet Emitter stays gated until this pass completes so it
+            // cannot compete for `getblock`.
             match init::synchronize_listeners(self.as_ref(), self.config.network, chain_listeners)
                 .await
             {
@@ -503,18 +559,28 @@ impl Backend for LampoChainSync {
 
         log::info!(target: "lampo-chain", "Chain listeners synced to current tip");
 
-        // Publish listener-sync completion so gated components (e.g. the
-        // on-chain wallet) can proceed over the now-free RPC. No-op when no
-        // coordinator was injected. The wallet is not on this pass, so
-        // `Running` waits for the wallet Emitter to catch up on its own.
+        if wallet_listener.as_ref().is_some_and(|l| l.had_failure()) {
+            log::warn!(
+                target: "lampo-chain",
+                "on-chain wallet did not fully apply during unified sync; the wallet scan will recover it from its last good checkpoint"
+            );
+        }
+
+        // Wallet rode this pass, so mark Running when it applied cleanly.
+        // Otherwise leave ListenersSynced and let the Emitter finish.
         if let Some(coordinator) = self.coordinator.get() {
-            mark_initial_sync_complete(coordinator, false, false);
+            mark_initial_sync_complete(
+                coordinator,
+                wallet_included,
+                wallet_listener.as_ref().is_some_and(|l| l.had_failure()),
+            );
         }
 
         let chain_listener = ChainListeners {
             chain_monitor,
             channel_manager,
             sweeper: sweeper_listener.map(|(_, sweeper)| sweeper),
+            wallet: wallet_listener,
         };
         let chain_poller = poll::ChainPoller::new(self.as_ref(), self.config.network);
         let mut spv_client = SpvClient::new(synced_chain_tip, chain_poller, cache, &chain_listener);
@@ -668,20 +734,6 @@ mod tests {
 
         assert!(listener.had_failure());
         assert_eq!(wallet.heights.lock().unwrap().as_slice(), &[42]);
-    }
-
-    #[test]
-    fn listener_sync_without_wallet_leaves_running_to_the_emitter() {
-        // Production `listen()` now always calls this with `wallet_included=false`
-        // so a multi-million-block wallet catch-up cannot stall ChannelManager
-        // (mutinynet: inbound `channel_ready` never sent).
-        let coordinator = ChainSyncCoordinator::new();
-        mark_initial_sync_complete(&coordinator, false, false);
-        assert_eq!(coordinator.state(), SyncState::ListenersSynced);
-        assert!(coordinator.chain_listeners_synced());
-        assert!(coordinator.wallet_scan_allowed());
-        coordinator.mark_running();
-        assert_eq!(coordinator.state(), SyncState::Running);
     }
 
     #[test]
