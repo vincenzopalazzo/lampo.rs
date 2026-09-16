@@ -434,7 +434,7 @@ impl Backend for LampoChainSync {
         // mutinynet (tip ~3.4M, ChannelManager 209946, wallet ~148k):
         // lampo received the opener's `channel_ready` but never sent its
         // own, so inbound channels stayed `is_channel_ready: false` forever.
-        // The wallet still has its own Emitter after `LISTENER_SYNC_GRACE`.
+        // The wallet Emitter starts only after this pass finishes.
 
         log::info!(
             target: "lampo-chain",
@@ -450,10 +450,15 @@ impl Backend for LampoChainSync {
         let mut retry_delay = std::time::Duration::from_secs(5);
         let (cache, synced_chain_tip) = loop {
             let manager_best = channel_manager.current_best_block();
-            // Channel manager + chain monitor only. The sweeper is fed by
-            // `SpvClient` after this pass; attaching a stale sweeper
-            // checkpoint here would reintroduce the same stall.
-            let chain_listeners: Vec<(chain::BlockLocator, &(dyn chain::Listen + Send + Sync))> = vec![
+            log::info!(
+                target: "lampo-chain",
+                "LDK listener catch-up from height {}",
+                manager_best.height
+            );
+            let mut chain_listeners: Vec<(
+                chain::BlockLocator,
+                &(dyn chain::Listen + Send + Sync),
+            )> = vec![
                 (
                     manager_best.clone(),
                     &*channel_manager as &(dyn chain::Listen + Send + Sync),
@@ -463,12 +468,24 @@ impl Backend for LampoChainSync {
                     &*chain_monitor as &(dyn chain::Listen + Send + Sync),
                 ),
             ];
+            if let Some((_, ref sweeper)) = sweeper_listener {
+                let best_block = sweeper.current_best_block();
+                log::info!(
+                    target: "lampo-chain",
+                    "Including output sweeper in chain sync from height {}",
+                    best_block.height
+                );
+                chain_listeners.push((
+                    best_block,
+                    sweeper.as_ref() as &(dyn chain::Listen + Send + Sync),
+                ));
+            }
 
             // Do not bound this future. `synchronize_listeners` is one walk
             // from the oldest LDK checkpoint to tip; aborting it after 120s
             // drops in-flight progress and, on a 3M-block chain, never
             // finishes. A hung RPC is retried via the `Err` arm. The wallet
-            // is gated by `LISTENER_SYNC_GRACE` so it is not blocked forever.
+            // Emitter stays gated until this pass completes.
             match init::synchronize_listeners(self.as_ref(), self.config.network, chain_listeners)
                 .await
             {
