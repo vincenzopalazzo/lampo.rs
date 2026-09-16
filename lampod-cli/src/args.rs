@@ -66,6 +66,14 @@ pub struct LampoCliArgs {
     #[arg(long = "api-port")]
     pub api_port: Option<u64>,
 
+    /// Serve the LND-compatible API instead of lampo-httpd
+    #[arg(long = "lnd")]
+    pub lnd: bool,
+
+    /// Add a DNS name or IP address to the LND REST TLS certificate
+    #[arg(long = "lnd-tls-san", value_delimiter = ',')]
+    pub lnd_tls_sans: Vec<String>,
+
     /// Subcommand to run
     #[command(subcommand)]
     pub subcommand: Option<LampoCliSubcommand>,
@@ -124,6 +132,12 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if let Some(api_port) = self.api_port {
             conf.api_port = api_port;
         }
+        if self.lnd {
+            conf.lnd = Some(true);
+        }
+        if !self.lnd_tls_sans.is_empty() {
+            conf.lnd_tls_sans = self.lnd_tls_sans;
+        }
         Ok(conf)
     }
 }
@@ -137,6 +151,7 @@ mod tests {
     use super::*;
 
     fn args_with_data_dir(data_dir: &str) -> LampoCliArgs {
+        #[allow(clippy::needless_update)]
         LampoCliArgs {
             data_dir: Some(data_dir.to_string()),
             network: Some("regtest".to_string()),
@@ -150,6 +165,8 @@ mod tests {
             dev_force_poll: false,
             api_host: None,
             api_port: None,
+            lnd: false,
+            lnd_tls_sans: Vec::new(),
             subcommand: None,
         }
     }

@@ -26,6 +26,10 @@ pub struct LampoConf {
     pub announce_addr: Option<String>,
     pub api_host: String,
     pub api_port: u64,
+    /// Serve the LND-compatible API instead of lampo-httpd.
+    pub lnd: Option<bool>,
+    /// Additional DNS names or IP addresses for the LND REST TLS certificate.
+    pub lnd_tls_sans: Vec<String>,
     pub reindex: Option<Height>,
     pub dev_sync: Option<bool>,
     /// Allow the on-chain wallet to scan in parallel with the LDK chain
@@ -88,6 +92,8 @@ impl Default for LampoConf {
             announce_addr: None,
             api_host: "127.0.0.1".to_owned(),
             api_port: 7878,
+            lnd: None,
+            lnd_tls_sans: Vec::new(),
             reindex: None,
             dev_sync: None,
             wallet_sync_parallel: None,
@@ -277,6 +283,12 @@ impl TryFrom<String> for LampoConf {
         let api_host = api_host.unwrap_or("http://127.0.0.1".to_owned());
         let api_port: u64 = api_port.unwrap_or("7979".to_owned()).parse()?;
 
+        let lnd = conf
+            .get_conf("lnd")
+            .unwrap_or(None)
+            .map(|s| s.to_lowercase() == "true" || s == "1");
+        let lnd_tls_sans = conf.get_confs("lnd-tls-san");
+
         // Parse dev_sync field - defaults to None (false)
         let dev_sync = conf
             .get_conf("dev-sync")
@@ -312,6 +324,8 @@ impl TryFrom<String> for LampoConf {
             announce_addr,
             api_host,
             api_port,
+            lnd,
+            lnd_tls_sans,
             reindex,
             dev_sync,
             wallet_sync_parallel,

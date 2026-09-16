@@ -14,6 +14,8 @@ pub mod request {
         pub node_id: String,
         // Hex of the channel
         pub channel_id: Option<String>,
+        #[serde(default)]
+        pub force: bool,
     }
 
     impl CloseChannel {
@@ -86,6 +88,7 @@ pub mod tests {
         let req = crate::model::request::CloseChannel {
             node_id: node_id.clone(),
             channel_id: channel_hex,
+            force: false,
         };
         let channel_bytes = [
             10, 68, 103, 117, 38, 172, 140, 96, 118, 22, 189, 145, 37, 141, 126, 93, 241, 216, 111,
@@ -108,6 +111,7 @@ pub mod tests {
         let req = crate::model::request::CloseChannel {
             node_id,
             channel_id: channel_hex,
+            force: false,
         };
         assert!(req.channel_id().is_err());
     }
@@ -124,6 +128,7 @@ pub mod tests {
         let req = crate::model::request::CloseChannel {
             node_id,
             channel_id: channel_hex,
+            force: false,
         };
         assert!(req.channel_id().is_err());
     }
@@ -139,6 +144,7 @@ pub mod tests {
         let req = crate::model::request::CloseChannel {
             node_id,
             channel_id: channel_hex,
+            force: false,
         };
         assert!(req.channel_id().is_err());
     }

@@ -28,10 +28,16 @@ pub mod request {
     pub struct Pay {
         pub invoice_str: String,
         pub amount: Option<u64>,
+        /// Maximum routing fees allowed for this payment, in millisatoshis.
+        #[serde(default)]
+        pub max_fee_msat: Option<u64>,
         pub bolt12: Option<Bolt12Pay>,
         /// How long the RPC waits for the terminal `PaymentEvent` (`fast` / `medium` / `large`).
         #[serde(default)]
         pub timeout: PayTimeout,
+        /// Retry deadline before an HTLC is launched, for compatible payment APIs.
+        #[serde(default)]
+        pub timeout_secs: Option<u64>,
     }
 
     #[derive(Serialize, Deserialize, Apiv2Schema)]
@@ -78,6 +84,8 @@ pub mod response {
     #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
     pub struct Bolt11InvoiceInfo {
         pub issuer_id: Option<String>,
+        pub payment_hash: String,
+        pub timestamp: u64,
         pub expiry_time: Option<u64>,
         pub description: Option<String>,
         pub routes: Vec<String>,
@@ -173,6 +181,12 @@ pub mod response {
         pub path: Vec<PaymentHop>,
         pub payment_hash: Option<String>,
         pub state: PaymentState,
+        /// Total value delivered across all successful MPP paths.
+        pub value_msat: u64,
+        /// Total routing fees paid across all successful MPP paths.
+        pub fee_msat: u64,
+        /// Terminal failure detail, when the payment failed.
+        pub reason: Option<String>,
         /// Hex encoded preimage, the receipt of the payment.
         pub payment_preimage: Option<String>,
         /// Bech32 encoded BOLT 12 payer proof, proving to a third party that

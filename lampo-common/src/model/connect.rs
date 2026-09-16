@@ -1,5 +1,6 @@
 //! Connect Model
-use std::{net::SocketAddr, str::FromStr};
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::str::FromStr;
 
 use paperclip::actix::Apiv2Schema;
 use serde::{Deserialize, Serialize};
@@ -21,12 +22,37 @@ impl Connect {
     }
 
     pub fn addr(&self) -> error::Result<SocketAddr> {
-        let addr = format!("{}:{}", self.addr, self.port);
-        let result = SocketAddr::from_str(&addr);
-        match result {
-            Ok(res) => Ok(res),
-            Err(e) => Err(e.into()),
+        let port = u16::try_from(self.port)
+            .map_err(|_| error::anyhow!("peer port must be between 1 and 65535"))?;
+        if port == 0 {
+            error::bail!("peer port must be between 1 and 65535");
         }
+        (self.addr.as_str(), port)
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| error::anyhow!("peer address did not resolve"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Connect;
+
+    #[test]
+    fn resolves_hostname_and_unbracketed_ipv6() {
+        let hostname = Connect {
+            node_id: String::new(),
+            addr: "localhost".into(),
+            port: 9735,
+        };
+        assert_eq!(hostname.addr().unwrap().port(), 9735);
+
+        let ipv6 = Connect {
+            node_id: String::new(),
+            addr: "::1".into(),
+            port: 9735,
+        };
+        assert!(ipv6.addr().unwrap().is_ipv6());
     }
 }
 

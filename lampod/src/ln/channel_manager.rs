@@ -77,6 +77,10 @@ pub struct LampoChannelManager {
     router: OnceLock<Arc<LampoRouter>>,
     /// Shared with the event handler; see [`FundingWaitState`].
     funding_wait_state: Mutex<HashMap<ChannelId, FundingWaitState>>,
+    /// Explicit per-open fee requested by the caller (LND `sat_per_vbyte`),
+    /// consumed by `FundingGenerationReady` when present; otherwise the
+    /// cached estimate for `FeeTarget::ChannelFunding` is used.
+    funding_fee_rates: Mutex<HashMap<ChannelId, u64>>,
     /// Restored (or freshly created) output sweeper, paired with the best
     /// block its persisted state was last synced to so the chain backend can
     /// catch it up independently of the channel manager.
@@ -109,6 +113,7 @@ impl LampoChannelManager {
             score: OnceLock::new(),
             router: OnceLock::new(),
             funding_wait_state: Mutex::new(HashMap::new()),
+            funding_fee_rates: Mutex::new(HashMap::new()),
             sweeper: OnceLock::new(),
         }
     }
@@ -450,6 +455,12 @@ impl LampoChannelManager {
                 Some(config),
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
+        if let Some(sat_per_vbyte) = open_channel.sat_per_vbyte {
+            self.funding_fee_rates
+                .lock()
+                .map_err(|_| error::anyhow!("funding fee-rate lock is poisoned"))?
+                .insert(temp_channel_id, sat_per_vbyte);
+        }
 
         // Wait for *this* channel's funding transaction to be broadcast, or
         // for the open to fail. The event bus is process-wide: any
@@ -615,10 +626,31 @@ impl LampoChannelManager {
         let channel_id = channel.channel_id()?;
         let node_id = channel.counterpart_node_id()?;
 
-        self.manager()
-            .close_channel(&channel_id, &node_id)
-            .map_err(|err| error::anyhow!("{:?}", err))?;
+        if channel.force {
+            self.manager()
+                .force_close_broadcasting_latest_txn(
+                    &channel_id,
+                    &node_id,
+                    "Force close requested by RPC client".into(),
+                )
+                .map_err(|err| error::anyhow!("{:?}", err))?;
+        } else {
+            self.manager()
+                .close_channel(&channel_id, &node_id)
+                .map_err(|err| error::anyhow!("{:?}", err))?;
+        }
         Ok(())
+    }
+
+    pub fn take_funding_fee_rate(
+        &self,
+        temporary_channel_id: &ChannelId,
+    ) -> error::Result<Option<u64>> {
+        Ok(self
+            .funding_fee_rates
+            .lock()
+            .map_err(|_| error::anyhow!("funding fee-rate lock is poisoned"))?
+            .remove(temporary_channel_id))
     }
 
     pub fn is_restarting(&self) -> error::Result<bool> {

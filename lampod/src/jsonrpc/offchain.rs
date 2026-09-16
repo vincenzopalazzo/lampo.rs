@@ -69,6 +69,8 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
     {
         let bolt11_invoice = Bolt11InvoiceInfo {
             issuer_id: invoice.payee_pub_key().map(|id| id.to_string()),
+            payment_hash: hex::encode(invoice.payment_hash().0),
+            timestamp: invoice.duration_since_epoch().as_secs(),
             amount_msat: invoice.amount_milli_satoshis(),
             network: invoice.network().to_string(),
             description: match invoice.description() {
@@ -79,7 +81,7 @@ pub async fn json_decode(ctx: &LampoDaemon, request: &json::Value) -> Result<jso
             },
             routes: Vec::new(),
             hints: Vec::new(),
-            expiry_time: Some(invoice.expiry_time().as_millis() as u64),
+            expiry_time: Some(invoice.expiry_time().as_secs()),
         };
 
         return Ok(json::to_value(&Decode::from(bolt11_invoice))?);
@@ -101,24 +103,60 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     let request: Pay = json::from_value(request.clone())?;
     let mut events = ctx.handler().events();
 
-    let payment_id = if let Ok(_) = offer::Offer::from_str(&request.invoice_str) {
+    let parsed_offer = offer::Offer::from_str(&request.invoice_str);
+    let expected_value_msat = match &parsed_offer {
+        Ok(offer) => match offer.amount() {
+            Some(offer::Amount::Bitcoin { amount_msats }) => Some(amount_msats),
+            _ => request.amount,
+        },
+        Err(_) => ctx
+            .offchain_manager()
+            .decode_invoice(&request.invoice_str)
+            .ok()
+            .and_then(|invoice| invoice.amount_milli_satoshis())
+            .or(request.amount),
+    };
+
+    let payment_id = if parsed_offer.is_ok() {
         log::debug!("Paying offer with bolt12 invoice: {}", request.invoice_str);
         let payer_note = request.bolt12.and_then(|x| x.payer_note);
-        ctx.offchain_manager()
-            .pay_offer(&request.invoice_str, request.amount, payer_note)?
+        ctx.offchain_manager().pay_offer(
+            &request.invoice_str,
+            request.amount,
+            payer_note,
+            request.max_fee_msat,
+        )?
     } else {
         log::debug!(
             "Paying invoice with bolt11 invoice: {}",
             request.invoice_str
         );
-        ctx.offchain_manager()
-            .pay_invoice(&request.invoice_str, request.amount)?
+        ctx.offchain_manager().pay_invoice(
+            &request.invoice_str,
+            request.amount,
+            request.max_fee_msat,
+            request.timeout_secs,
+        )?
     };
     // The event bus broadcasts to every subscriber, so a concurrent `pay` would
     // otherwise see this payment's result -- and now its preimage and payer
     // proof too. Only accept events carrying our own payment id.
     let payment_id = hex::encode(payment_id.0);
-    wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
+    // LND-compatible callers use `timeout_secs` as the retry deadline before
+    // an HTLC is launched. Once the payment API accepts an initial route, wait
+    // for the real terminal event so an in-flight payment is never reported as
+    // failed merely because that deadline elapsed.
+    let timeout = terminal_wait_timeout(request.timeout_secs, request.timeout.duration());
+    wait_for_payment_result(events, &payment_id, expected_value_msat, timeout).await
+}
+
+fn terminal_wait_timeout(
+    compatible_retry_timeout_secs: Option<u64>,
+    default_timeout: Duration,
+) -> Option<Duration> {
+    compatible_retry_timeout_secs
+        .is_none()
+        .then_some(default_timeout)
 }
 
 /// Hold the `PaymentReceipt` (preimage, payer proof) until the terminal
@@ -129,40 +167,47 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
 async fn wait_for_payment_result(
     mut events: lampo_common::chan::UnboundedReceiver<Event>,
     payment_id: &str,
-    timeout: Duration,
+    expected_value_msat: Option<u64>,
+    timeout: Option<Duration>,
 ) -> Result<json::Value, Error> {
-    // Single deadline for the whole RPC wait. The event bus is broadcast, so
-    // unrelated events must not reset the timer — only the terminal
-    // `PaymentEvent` for `payment_id` completes the call (success or failure).
-    // If that event never arrives, stop waiting after `timeout` instead of
-    // blocking forever; the payment itself may still be retried in the background.
-    let deadline = Instant::now() + timeout;
+    // Regular JSON-RPC calls retain a single deadline for the whole wait.
+    // LND-compatible calls have no terminal deadline because their timeout only
+    // limits the period before launching an HTLC.
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
 
     // The receipt lands on `PaymentReceipt` and the hop path on the terminal
     // `PaymentEvent`, so hold the receipt until the payment finishes.
     let mut receipt: Option<(String, Option<String>)> = None;
+    let mut successful_path = Vec::new();
+    let mut value_msat = 0_u64;
+    let mut fee_msat = 0_u64;
+    let mut successful_payment_hash = None;
 
     loop {
         log::warn!(target: "lampod::jsonrpc::offchain", "Waiting for payment event...");
-        let event = tokio::time::timeout_at(deadline, events.recv())
-            .await
-            .map_err(|_| {
-                Error::Rpc(RpcError {
-                    code: -1,
-                    message: format!(
-                        "payment `{}` did not complete within {}s (no terminal Payment event; \
-                         payment status unknown — it may still be retried in the background)",
-                        payment_id,
-                        timeout.as_secs()
-                    ),
-                    data: None,
-                })
-            })?
-            .ok_or(Error::Rpc(RpcError {
-                code: -1,
-                message: format!("No event received, communication channel dropped"),
-                data: None,
-            }))?;
+        let event = if let Some(deadline) = deadline {
+            tokio::time::timeout_at(deadline, events.recv())
+                .await
+                .map_err(|_| {
+                    Error::Rpc(RpcError {
+                        code: -1,
+                        message: format!(
+                            "payment `{}` did not complete within {}s (no terminal Payment event; \
+                             payment status unknown — it may still be retried in the background)",
+                            payment_id,
+                            timeout.map(|value| value.as_secs()).unwrap_or_default()
+                        ),
+                        data: None,
+                    })
+                })?
+        } else {
+            events.recv().await
+        }
+        .ok_or(Error::Rpc(RpcError {
+            code: -1,
+            message: format!("No event received, communication channel dropped"),
+            data: None,
+        }))?;
 
         match event {
             Event::Lightning(LightningEvent::PaymentReceipt {
@@ -177,16 +222,43 @@ async fn wait_for_payment_result(
                 payment_hash,
                 path,
                 state,
-                reason: _,
+                reason,
             }) if id == payment_id => {
+                if state == lampo_common::model::response::PaymentState::Success {
+                    let (path_value_msat, path_fee_msat) = path_value_and_fee(&path);
+                    value_msat = value_msat.saturating_add(path_value_msat);
+                    fee_msat = fee_msat.saturating_add(path_fee_msat);
+                    successful_path.extend(path);
+                    successful_payment_hash =
+                        successful_payment_hash.or_else(|| payment_hash.clone());
+
+                    // A blinded-path last hop (BOLT 12 offers) reports the
+                    // blinded-path *fee* in `fee_msat`, not the payment value,
+                    // so `path_value_msat` can legitimately be 0. Waiting for
+                    // the expected value then discards the terminal Success
+                    // event until the deadline even though the payment
+                    // settled (seen live: offer payments timed out at 120s
+                    // with a Success event already received). Only keep
+                    // waiting for the remaining MPP parts when the path
+                    // reported an actual value.
+                    let path_reports_value = path_value_msat > 0;
+                    if path_reports_value
+                        && expected_value_msat.is_some_and(|expected| value_msat < expected)
+                    {
+                        continue;
+                    }
+                }
                 let (payment_preimage, payer_proof) = match receipt {
                     Some((preimage, proof)) => (Some(preimage), proof),
                     None => (None, None),
                 };
                 return Ok(json::to_value(PayResult {
                     state,
-                    path,
-                    payment_hash,
+                    path: successful_path,
+                    payment_hash: successful_payment_hash.or(payment_hash),
+                    value_msat,
+                    fee_msat,
+                    reason,
                     payment_preimage,
                     payer_proof,
                 })?);
@@ -207,5 +279,50 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     // Same id semantics as `pay`: the hex payment hash identifies the
     // payment on the event bus.
     let payment_id = hex::encode(payment_id.0);
-    wait_for_payment_result(events, &payment_id, request.timeout.duration()).await
+    wait_for_payment_result(
+        events,
+        &payment_id,
+        Some(request.amount_msat),
+        Some(request.timeout.duration()),
+    )
+    .await
+}
+
+fn path_value_and_fee(path: &[response::PaymentHop]) -> (u64, u64) {
+    let value_msat = path.last().map(|hop| hop.hop_fee_msat).unwrap_or(0);
+    let total_msat = path
+        .iter()
+        .fold(0_u64, |total, hop| total.saturating_add(hop.hop_fee_msat));
+    (value_msat, total_msat.saturating_sub(value_msat))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compatible_retry_deadline_does_not_end_terminal_wait() {
+        assert_eq!(
+            terminal_wait_timeout(Some(60), Duration::from_secs(120)),
+            None
+        );
+        assert_eq!(
+            terminal_wait_timeout(None, Duration::from_secs(120)),
+            Some(Duration::from_secs(120))
+        );
+    }
+
+    #[test]
+    fn aggregates_value_and_fees_per_mpp_path() {
+        let hop = |fee| response::PaymentHop {
+            node_id: String::new(),
+            short_channel_id: 0,
+            hop_fee_msat: fee,
+            cltv_expiry_delta: 0,
+            private_hop: false,
+        };
+
+        assert_eq!(path_value_and_fee(&[hop(20), hop(400)]), (400, 20));
+        assert_eq!(path_value_and_fee(&[hop(30), hop(600)]), (600, 30));
+    }
 }
