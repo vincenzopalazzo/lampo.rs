@@ -232,7 +232,19 @@ async fn wait_for_payment_result(
                     successful_payment_hash =
                         successful_payment_hash.or_else(|| payment_hash.clone());
 
-                    if expected_value_msat.is_some_and(|expected| value_msat < expected) {
+                    // A blinded-path last hop (BOLT 12 offers) reports the
+                    // blinded-path *fee* in `fee_msat`, not the payment value,
+                    // so `path_value_msat` can legitimately be 0. Waiting for
+                    // the expected value then discards the terminal Success
+                    // event until the deadline even though the payment
+                    // settled (seen live: offer payments timed out at 120s
+                    // with a Success event already received). Only keep
+                    // waiting for the remaining MPP parts when the path
+                    // reported an actual value.
+                    let path_reports_value = path_value_msat > 0;
+                    if path_reports_value
+                        && expected_value_msat.is_some_and(|expected| value_msat < expected)
+                    {
                         continue;
                     }
                 }
