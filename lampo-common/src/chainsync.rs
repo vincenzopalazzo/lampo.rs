@@ -10,8 +10,7 @@
 //! The coordinator is driven now: `mark_listeners_synced` is called from
 //! `lampo-chain` after `synchronize_listeners`, and `mark_running` is called
 //! from the wallet `sync()` once the on-chain scan is up to tip.
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::watch;
 
@@ -30,11 +29,6 @@ pub enum SyncState {
 /// Sentinel for "no wallet scan height reported yet" stored in the atomic.
 const NO_HEIGHT: u64 = u64::MAX;
 
-/// How long the on-chain wallet waits for the LDK listener sync before it
-/// scans independently, so a hung or very slow backend cannot permanently gate
-/// the wallet (mirrors `main`'s parallel scan). See `wallet_scan_allowed`.
-const LISTENER_SYNC_GRACE: Duration = Duration::from_secs(300);
-
 /// Backend-agnostic coordinator for the node's chain-sync state.
 ///
 /// Cheap to clone behind an `Arc`; all methods take `&self`.
@@ -45,10 +39,6 @@ pub struct ChainSyncCoordinator {
     state: watch::Sender<SyncState>,
     /// Latest wallet scan height, or `NO_HEIGHT` when none has been reported.
     wallet_scan_height: AtomicU64,
-    /// When the listener sync began; used by the wallet-gate escape path.
-    listener_sync_started: Instant,
-    /// Guards the one-time escape-path log message.
-    escape_logged: AtomicBool,
 }
 
 impl ChainSyncCoordinator {
@@ -57,8 +47,6 @@ impl ChainSyncCoordinator {
         Self {
             state,
             wallet_scan_height: AtomicU64::new(NO_HEIGHT),
-            listener_sync_started: Instant::now(),
-            escape_logged: AtomicBool::new(false),
         }
     }
 
@@ -136,27 +124,12 @@ impl ChainSyncCoordinator {
 
     /// Whether the on-chain wallet may scan right now.
     ///
-    /// `true` once the listeners have synced. As an escape path, also `true`
-    /// after `LISTENER_SYNC_GRACE` has elapsed without the listeners finishing,
-    /// so a hung or very slow backend cannot permanently block the wallet (it
-    /// then scans in parallel, as on `main`). Logged once when the escape fires.
+    /// `true` only once the LDK listeners have reached tip. A timed escape
+    /// that started the BDK Emitter in parallel was the mutinynet
+    /// `channel_ready` deadlock: both pipelines `getblock` the same bitcoind
+    /// and ChannelManager never catches up far enough to confirm funding.
     pub fn wallet_scan_allowed(&self) -> bool {
-        if self.chain_listeners_synced() {
-            return true;
-        }
-        let elapsed = self.listener_sync_started.elapsed();
-        if elapsed >= LISTENER_SYNC_GRACE {
-            if !self.escape_logged.swap(true, Ordering::Relaxed) {
-                log::warn!(
-                    target: "lampo-chain-sync",
-                    "listener sync not complete after {:?}; allowing the on-chain wallet to scan independently so it is not blocked",
-                    elapsed
-                );
-            }
-            true
-        } else {
-            false
-        }
+        self.chain_listeners_synced()
     }
 
     /// Whether the full initial sync (listeners + wallet) has completed.
@@ -243,7 +216,9 @@ mod tests {
     #[test]
     fn wallet_scan_allowed_reflects_sync_state() {
         let coord = ChainSyncCoordinator::new();
-        // Before the listeners sync the wallet must wait (grace not elapsed).
+        // Before the listeners sync the wallet must wait. A timed escape
+        // used to start it in parallel and starved ChannelManager on
+        // mutinynet.
         assert!(!coord.wallet_scan_allowed());
         coord.mark_listeners_synced();
         // Once listeners are synced the wallet is always allowed to scan.
