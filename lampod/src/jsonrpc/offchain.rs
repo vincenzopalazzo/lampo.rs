@@ -306,6 +306,24 @@ async fn wait_for_payment_result(
                 payer_proof,
             }) if id == payment_id => {
                 receipt = Some((payment_preimage, payer_proof));
+                // Path success can arrive first. Once we have the receipt
+                // and a successful path, the payment is done.
+                if !successful_path.is_empty() {
+                    let (payment_preimage, payer_proof) = receipt
+                        .clone()
+                        .map(|(preimage, proof)| (Some(preimage), proof))
+                        .unwrap_or((None, None));
+                    return Ok(json::to_value(PayResult {
+                        state: lampo_common::model::response::PaymentState::Success,
+                        path: successful_path,
+                        payment_hash: successful_payment_hash,
+                        value_msat: expected_value_msat.unwrap_or(value_msat),
+                        fee_msat,
+                        reason: None,
+                        payment_preimage,
+                        payer_proof,
+                    })?);
+                }
             }
             Event::Lightning(LightningEvent::PaymentEvent {
                 payment_id: Some(id),
@@ -321,20 +339,20 @@ async fn wait_for_payment_result(
                     successful_path.extend(path);
                     successful_payment_hash =
                         successful_payment_hash.or_else(|| payment_hash.clone());
-
-                    // A blinded-path last hop (BOLT 12 offers) reports the
-                    // blinded-path *fee* in `fee_msat`, not the payment value,
-                    // so `path_value_msat` can legitimately be 0. Waiting for
-                    // the expected value then discards the terminal Success
-                    // event until the deadline even though the payment
-                    // settled (seen live: offer payments timed out at 120s
-                    // with a Success event already received). Only keep
-                    // waiting for the remaining MPP parts when the path
-                    // reported an actual value.
-                    let path_reports_value = path_value_msat > 0;
-                    if path_reports_value
-                        && expected_value_msat.is_some_and(|expected| value_msat < expected)
-                    {
+                    // Last-hop `fee_msat` is the intro-node / blinded-path
+                    // *fee*, not the payment value (async static-invoice
+                    // path: hop_fee=1000, invoice=100000). Waiting until
+                    // hop fees sum to the invoice never finishes. ldk-node
+                    // treats PaymentSent as terminal and does not compare
+                    // hop fees. Fill the reported value from the invoice
+                    // when hops do not carry it.
+                    if value_msat < expected_value_msat.unwrap_or(0) {
+                        value_msat = expected_value_msat.unwrap_or(value_msat);
+                    }
+                    // PaymentPathSuccessful can race PaymentSent. Hold the
+                    // Success until the receipt (preimage) lands so `pay`
+                    // does not return without it.
+                    if receipt.is_none() {
                         continue;
                     }
                 }
