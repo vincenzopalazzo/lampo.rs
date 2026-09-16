@@ -19,7 +19,7 @@ use lampod::LampoDaemon;
 use commands::daemon::rest_stop;
 use commands::inventory::{rest_funds, rest_getinfo, rest_networkchannels};
 use commands::offchain::{
-    rest_asyncinvoicepaths, rest_decode, rest_invoice, rest_keysend, rest_pay,
+    rest_asyncinvoicepaths, rest_decode, rest_invoice, rest_keysend, rest_listpayments, rest_pay,
     rest_setasyncinvoicepaths,
 };
 use commands::onchain::rest_new_addr;
@@ -222,11 +222,44 @@ async fn reject_rebinding(
     }
 }
 
+pub struct RunningHttpServer {
+    handle: actix_web::dev::ServerHandle,
+    task: tokio::task::JoinHandle<std::io::Result<()>>,
+}
+
+impl RunningHttpServer {
+    pub async fn stop(self) -> error::Result<()> {
+        self.handle.stop(true).await;
+        self.task.await??;
+        Ok(())
+    }
+}
+
+pub fn spawn<T: ToSocketAddrs + Display>(
+    lampod: Arc<LampoDaemon>,
+    host: T,
+    open_api_url: String,
+) -> error::Result<RunningHttpServer> {
+    let server = build_server(lampod, host, open_api_url)?;
+    let handle = server.handle();
+    let task = tokio::spawn(server);
+    Ok(RunningHttpServer { handle, task })
+}
+
 pub async fn run<T: ToSocketAddrs + Display>(
     lampod: Arc<LampoDaemon>,
     host: T,
     open_api_url: String,
 ) -> error::Result<()> {
+    build_server(lampod, host, open_api_url)?.await?;
+    Ok(())
+}
+
+fn build_server<T: ToSocketAddrs + Display>(
+    lampod: Arc<LampoDaemon>,
+    host: T,
+    open_api_url: String,
+) -> error::Result<actix_web::dev::Server> {
     let host_str = format!("{host}");
     log::info!("httpd api running on `{host_str}`");
 
@@ -270,6 +303,7 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_offer)
             .service(rest_decode)
             .service(rest_pay)
+            .service(rest_listpayments)
             .service(rest_keysend)
             .service(rest_asyncinvoicepaths)
             .service(rest_setasyncinvoicepaths)
@@ -280,8 +314,7 @@ pub async fn run<T: ToSocketAddrs + Display>(
     })
     .disable_signals()
     .bind(host)?;
-    server.run().await?;
-    Ok(())
+    Ok(server.run())
 }
 
 // this is just a hack to support swagger UI with https://paperclip-rs.github.io/paperclip/
