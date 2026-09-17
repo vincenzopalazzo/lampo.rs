@@ -34,6 +34,11 @@ CORE_USER=${CORE_USER:-testutil}
 CORE_PASS=${CORE_PASS:-testutilpassword}
 CLN_BIN=${CLN_BIN:-/usr/local/bin/lightningd}
 CLN_CLI=${CLN_CLI:-/usr/local/bin/lightning-cli}
+# Modern CLN built from source (v26.06.7); override to test other versions.
+if [ -x "$HOME/cln-src/lightningd/lightningd" ]; then
+  CLN_BIN="$HOME/cln-src/lightningd/lightningd"
+  CLN_CLI="$HOME/cln-src/cli/lightning-cli"
+fi
 CLN_DIR=${CLN_DIR:-/tmp/lampo-cln1}
 CLN_P2P=${CLN_P2P:-9736}
 LDK_REPO=${LDK_REPO:-/Users/vincenzopalazzo/github/work/btc/ldk-server}
@@ -80,7 +85,8 @@ API() { case $1 in lp1) echo $API_BASE;; lp2) echo $((API_BASE + 2));; esac; }
 P2PPORT() { case $1 in lp1) echo $((P2P_BASE + 1));; lp2) echo $((P2P_BASE + 2));; lk1) echo $((LDK_P2P_BASE + 1));; esac; }
 
 say "cln-interop start: repo=$REPO simdir=$SIMDIR"
-
+say "CLN version: $("$CLN_BIN" --version 2>/dev/null || echo unknown)"
+say "lampo build: $($BIN --version 2>/dev/null || echo unknown) at $(cd "$REPO" && git log --oneline -1 2>/dev/null)"
 # ---- 0. chain up -----------------------------------------------------
 [ -n "$(bcres getblockcount)" ] || { say "bitcoind not reachable on $CORE_URL"; exit 2; }
 TIP=$(bcres getblockcount); say "bitcoind tip=$TIP"

@@ -22,6 +22,7 @@ use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::chain::chaininterface::BroadcasterInterface;
 use lampo_common::ldk::events::bump_transaction::BumpTransactionEventHandler;
+use lampo_common::ldk::ln::msgs::BaseMessageHandler;
 use lampo_common::ldk::sign::{NodeSigner, SpendableOutputDescriptor};
 use lampo_common::ldk::types::payment::PaymentPreimage;
 use lampo_common::ldk::util::wallet_utils::{Utxo, Wallet, WalletSource};
@@ -254,6 +255,32 @@ impl Handler for LampoHandler {
                     channel_id,
                     channel_type,
                 }));
+                // Public channels announced right after this moment do not
+                // always reach us through incremental gossip relay: a node
+                // that connected before the announcements existed stays
+                // RouteNotFound for tens of minutes (issue #612), while a
+                // restart - which re-runs `RoutingMessageHandler::
+                // peer_connected` - converges in seconds. Re-run that hook
+                // for the counterparty: it queues a fresh
+                // `GossipTimestampFilter`, so the peer re-sends the gossip
+                // table (full range for the first LDK syncs, last hour
+                // afterwards - which covers channels announced minutes ago).
+                let mut init_features = ldk::types::features::InitFeatures::empty();
+                init_features.set_gossip_queries_optional();
+                let init = ldk::ln::msgs::Init {
+                    features: init_features,
+                    networks: None,
+                    remote_network_address: None,
+                };
+                let requery = self.channel_manager.gossip_sync().peer_connected(
+                    counterparty_node_id,
+                    &init,
+                    false,
+                );
+                log::debug!(
+                    target: "lampo",
+                    "gossip re-query for `{counterparty_node_id}` after channel ready: {requery:?}"
+                );
                 Ok(())
             }
             ldk::events::Event::ChannelClosed {

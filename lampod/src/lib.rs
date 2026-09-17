@@ -300,6 +300,7 @@ impl LampoDaemon {
             None::<Arc<LampoChainManager>>,
             self.logger.clone(),
         ));
+        self.channel_manager().set_gossip_sync(gossip_sync.clone());
 
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().listen();

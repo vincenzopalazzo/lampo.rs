@@ -74,6 +74,9 @@ pub struct LampoChannelManager {
     graph: OnceLock<Arc<LampoGraph>>,
     score: OnceLock<Arc<Mutex<LampoScorer>>>,
     handler: OnceLock<Arc<LampoHandler>>,
+    /// LDK gossip sync for this node's graph. Kept here so the event
+    /// handler can re-query a peer when a channel becomes ready.
+    gossip_sync: OnceLock<Arc<crate::P2PGossipSync>>,
     router: OnceLock<Arc<LampoRouter>>,
     /// Shared with the event handler; see [`FundingWaitState`].
     funding_wait_state: Mutex<HashMap<ChannelId, FundingWaitState>>,
@@ -109,6 +112,7 @@ impl LampoChannelManager {
             logger,
             persister,
             handler: OnceLock::new(),
+            gossip_sync: OnceLock::new(),
             graph: OnceLock::new(),
             score: OnceLock::new(),
             router: OnceLock::new(),
@@ -176,6 +180,18 @@ impl LampoChannelManager {
         self.handler
             .set(handler)
             .unwrap_or_else(|_| panic!("handler already initialized"));
+    }
+
+    /// Called once from `LampoDaemon::listen` after the gossip sync is built.
+    pub fn set_gossip_sync(&self, gossip_sync: Arc<crate::P2PGossipSync>) {
+        let _ = self.gossip_sync.set(gossip_sync);
+    }
+
+    pub fn gossip_sync(&self) -> Arc<crate::P2PGossipSync> {
+        self.gossip_sync
+            .get()
+            .expect("gossip sync not initialized")
+            .clone()
     }
 
     pub fn handler(&self) -> Arc<LampoHandler> {
