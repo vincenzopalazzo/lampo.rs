@@ -19,7 +19,7 @@ pub mod ln;
 pub mod persistence;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
 
 use tokio::task::JoinHandle;
@@ -72,6 +72,7 @@ pub struct LampoDaemon {
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
     chain_sync: Arc<ChainSyncCoordinator>,
+    gossip_sync: OnceLock<Arc<P2PGossipSync>>,
 }
 
 impl LampoDaemon {
@@ -99,6 +100,7 @@ impl LampoDaemon {
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             chain_sync,
+            gossip_sync: OnceLock::new(),
         }
     }
 
@@ -162,6 +164,10 @@ impl LampoDaemon {
 
     pub fn channel_manager(&self) -> Arc<LampoChannelManager> {
         self.channel_manager.clone().unwrap()
+    }
+
+    pub fn gossip_sync(&self) -> Arc<P2PGossipSync> {
+        self.gossip_sync.get().cloned().unwrap()
     }
 
     pub fn offchain_manager(&self) -> Arc<OffchainManager> {
@@ -300,6 +306,7 @@ impl LampoDaemon {
             None::<Arc<LampoChainManager>>,
             self.logger.clone(),
         ));
+        let _ = self.gossip_sync.set(gossip_sync.clone());
 
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().listen();
