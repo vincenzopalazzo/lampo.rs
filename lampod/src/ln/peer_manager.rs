@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 
@@ -175,6 +175,11 @@ impl LampoPeerManager {
             None::<Arc<LampoChainManager>>,
             self.logger.clone(),
         ));
+        // One P2PGossipSync for both the peer-manager route handler and the
+        // background processor. ChannelReady re-query and reconnect probes
+        // write filters onto this instance so they actually go on the wire
+        // (issue #612).
+        channel_manager.set_gossip_sync(gossip_sync.clone());
 
         let lightning_msg_handler = MessageHandler {
             chan_handler: channel_manager.manager(),
@@ -265,6 +270,21 @@ impl LampoPeerManager {
             let shutdown = shutdown.clone();
             let store_path = peer_store_path(&self.conf);
             let dial_locks = Arc::clone(&self.outbound_dial_locks);
+            // Issue #612: a node that connected before its own public
+            // channel was announced stays RouteNotFound until the peer
+            // re-dumps gossip. Restart heals in ~1s because it re-runs
+            // P2PGossipSync::peer_connected on a live socket. If our SCID
+            // is still missing (or one-sided) after a grace period, drop
+            // that counterparty so the redial path below forces a dump.
+            // Rate-limited and capped so a healthy node does not flap.
+            // Missing foreign channels are an upstream relay hole
+            // (ldk-server#288); reconnecting cannot invent them.
+            const GOSSIP_STALL_GRACE_SECS: u64 = 15;
+            const GOSSIP_RECONNECT_INTERVAL_SECS: u64 = 30;
+            const GOSSIP_RECONNECT_MAX: u32 = 3;
+            let gossip_stall_since = AtomicU64::new(0);
+            let gossip_last_reconnect = AtomicU64::new(0);
+            let gossip_reconnects = AtomicU32::new(0);
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(10));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -274,6 +294,69 @@ impl LampoPeerManager {
                         break;
                     }
                     let known = load_peers(&store_path);
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    if chan_manager.gossip_graph_looks_stalled() {
+                        let since = gossip_stall_since.load(Ordering::Acquire);
+                        if since == 0 {
+                            gossip_stall_since.store(now, Ordering::Release);
+                            let stats = chan_manager.gossip_graph_stats();
+                            log::info!(
+                                target: "lampo-gossip",
+                                "routing graph stalled: graph_channels={} our_announced={} our_in_graph={} updated={} foreign_updated={}",
+                                stats.graph_channels,
+                                stats.our_announced,
+                                stats.our_in_graph,
+                                stats.updated,
+                                stats.foreign_updated
+                            );
+                        } else if now.saturating_sub(since) >= GOSSIP_STALL_GRACE_SECS {
+                            let n = gossip_reconnects.load(Ordering::Acquire);
+                            let last = gossip_last_reconnect.load(Ordering::Acquire);
+                            if n < GOSSIP_RECONNECT_MAX
+                                && now.saturating_sub(last) >= GOSSIP_RECONNECT_INTERVAL_SECS
+                            {
+                                let candidate =
+                                    chan_manager.manager().list_channels().into_iter().find_map(
+                                        |channel| {
+                                            let peer = channel.counterparty.node_id;
+                                            if peer_manager.peer_by_node_id(&peer).is_some()
+                                                && known.contains_key(&peer.to_string())
+                                            {
+                                                Some(peer)
+                                            } else {
+                                                None
+                                            }
+                                        },
+                                    );
+                                if let Some(peer) = candidate {
+                                    log::info!(
+                                        target: "lampo-gossip",
+                                        "graph still stalled after {}s; reconnecting `{peer}` to re-query gossip (attempt {})",
+                                        now.saturating_sub(since),
+                                        n + 1
+                                    );
+                                    peer_manager.disconnect_by_node_id(peer);
+                                    gossip_reconnects.fetch_add(1, Ordering::AcqRel);
+                                    gossip_last_reconnect.store(now, Ordering::Release);
+                                }
+                            }
+                        }
+                    } else if gossip_stall_since.swap(0, Ordering::AcqRel) != 0 {
+                        gossip_reconnects.store(0, Ordering::Release);
+                        let stats = chan_manager.gossip_graph_stats();
+                        log::info!(
+                            target: "lampo-gossip",
+                            "routing graph converged: graph_channels={} our_announced={} our_in_graph={} updated={} foreign_updated={}",
+                            stats.graph_channels,
+                            stats.our_announced,
+                            stats.our_in_graph,
+                            stats.updated,
+                            stats.foreign_updated
+                        );
+                    }
                     for channel in chan_manager.manager().list_channels() {
                         let peer = channel.counterparty.node_id;
                         if peer_manager.peer_by_node_id(&peer).is_some() {

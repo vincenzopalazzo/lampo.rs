@@ -295,12 +295,10 @@ impl LampoDaemon {
 
     pub fn listen(self: Arc<Self>) -> JoinHandle<Result<(), io::Error>> {
         log::info!(target: "lampod", "Starting lightning node version `{}`", env!("CARGO_PKG_VERSION"));
-        let gossip_sync: Arc<P2PGossipSync> = Arc::new(ldk::routing::gossip::P2PGossipSync::new(
-            self.channel_manager().graph(),
-            None::<Arc<LampoChainManager>>,
-            self.logger.clone(),
-        ));
-        self.channel_manager().set_gossip_sync(gossip_sync.clone());
+        // Same P2PGossipSync the peer manager already installed as
+        // `route_handler`. A second instance would queue gossip-query
+        // events that never reach the socket (issue #612).
+        let gossip_sync = self.channel_manager().gossip_sync();
 
         log::info!(target: "lampo", "Stating onchaind");
         let _ = self.onchain_manager().listen();

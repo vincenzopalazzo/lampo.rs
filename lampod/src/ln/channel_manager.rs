@@ -1,5 +1,5 @@
 //! Channel Manager Implementation
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -49,6 +49,62 @@ use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
+
+/// Snapshot of the routing graph used by the gossip stall probe (issue #612).
+#[derive(Debug, Clone, Copy)]
+pub struct GossipGraphStats {
+    pub graph_channels: usize,
+    pub our_announced: usize,
+    pub our_in_graph: usize,
+    pub updated: usize,
+    pub foreign_updated: usize,
+    pub stalled: bool,
+}
+
+/// Classify graph entries for the stall probe.
+///
+/// A channel is "updated" only when both directions have a `channel_update`.
+/// Announcement-only (or one-sided) entries are not routable (BOLT 7).
+///
+/// Stall means we have public ready channels whose SCID is missing from the
+/// graph or lacks both updates. A missing *foreign* channel is an upstream
+/// relay hole ([ldk-server#288](https://github.com/lightningdevkit/ldk-server/issues/288)),
+/// not something reconnecting our counterparty can invent.
+fn classify_gossip_graph<I>(our_scids: &HashSet<u64>, channels: I) -> GossipGraphStats
+where
+    I: IntoIterator<Item = (u64, bool, bool)>,
+{
+    let mut graph_channels = 0usize;
+    let mut updated = 0usize;
+    let mut foreign_updated = 0usize;
+    let mut our_in_graph = 0usize;
+    let mut our_updated = 0usize;
+    for (scid, one_to_two, two_to_one) in channels {
+        graph_channels += 1;
+        let has_update = one_to_two && two_to_one;
+        if has_update {
+            updated += 1;
+        }
+        if our_scids.contains(&scid) {
+            our_in_graph += 1;
+            if has_update {
+                our_updated += 1;
+            }
+        } else if has_update {
+            foreign_updated += 1;
+        }
+    }
+    let stalled =
+        !our_scids.is_empty() && (our_in_graph < our_scids.len() || our_updated < our_scids.len());
+    GossipGraphStats {
+        graph_channels,
+        our_announced: our_scids.len(),
+        our_in_graph,
+        updated,
+        foreign_updated,
+        stalled,
+    }
+}
 
 /// How long `open_channel` waits for the funding transaction to be broadcast
 /// before giving up. LDK reaps a stalled unfunded channel after roughly a
@@ -182,9 +238,14 @@ impl LampoChannelManager {
             .unwrap_or_else(|_| panic!("handler already initialized"));
     }
 
-    /// Called once from `LampoDaemon::listen` after the gossip sync is built.
+    /// Called once from `LampoPeerManager::init` so the same `P2PGossipSync`
+    /// is the peer-manager `route_handler` *and* the background-processor
+    /// gossip sync. A second instance would queue `GossipTimestampFilter`
+    /// events that never reach the socket (issue #612).
     pub fn set_gossip_sync(&self, gossip_sync: Arc<crate::P2PGossipSync>) {
-        let _ = self.gossip_sync.set(gossip_sync);
+        if self.gossip_sync.set(gossip_sync).is_err() {
+            log::warn!(target: "lampo-gossip", "gossip sync already initialized");
+        }
     }
 
     pub fn gossip_sync(&self) -> Arc<crate::P2PGossipSync> {
@@ -192,6 +253,38 @@ impl LampoChannelManager {
             .get()
             .expect("gossip sync not initialized")
             .clone()
+    }
+
+    /// True when we have at least one public, ready channel whose SCID is
+    /// missing from the routing graph or lacks both `channel_update`s.
+    ///
+    /// A node that connected before its own public channel was announced
+    /// stays `RouteNotFound` until the peer re-dumps gossip. Restart heals
+    /// in ~1s because it re-runs `P2PGossipSync::peer_connected` on the live
+    /// handler. The peer-manager stall probe reconnects on this local gap
+    /// (issue #612). Missing *foreign* channels are not a stall: that is
+    /// an upstream relay hole.
+    pub fn gossip_graph_looks_stalled(&self) -> bool {
+        self.gossip_graph_stats().stalled
+    }
+
+    /// Snapshot of the routing graph used by the stall probe and logs.
+    pub fn gossip_graph_stats(&self) -> GossipGraphStats {
+        let our_scids: HashSet<u64> = self
+            .manager()
+            .list_channels()
+            .into_iter()
+            .filter(|channel| channel.is_announced && channel.is_channel_ready)
+            .filter_map(|channel| channel.short_channel_id)
+            .collect();
+        let graph = self.graph();
+        let view = graph.read_only();
+        classify_gossip_graph(
+            &our_scids,
+            view.channels()
+                .unordered_iter()
+                .map(|(scid, info)| (*scid, info.one_to_two.is_some(), info.two_to_one.is_some())),
+        )
     }
 
     pub fn handler(&self) -> Arc<LampoHandler> {
@@ -778,5 +871,70 @@ impl LampoChannelManager {
             .set(channeld)
             .unwrap_or_else(|_| panic!("channel manager already initialized"));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scids(ids: &[u64]) -> HashSet<u64> {
+        ids.iter().copied().collect()
+    }
+
+    #[test]
+    fn empty_graph_is_not_stalled_without_our_channels() {
+        let stats = classify_gossip_graph(&scids(&[]), std::iter::empty());
+        assert!(!stats.stalled);
+        assert_eq!(stats.graph_channels, 0);
+    }
+
+    #[test]
+    fn our_ready_channel_missing_from_graph_is_stalled() {
+        let stats = classify_gossip_graph(&scids(&[1]), std::iter::empty());
+        assert!(stats.stalled);
+        assert_eq!(stats.our_announced, 1);
+        assert_eq!(stats.our_in_graph, 0);
+    }
+
+    #[test]
+    fn announcement_only_own_channel_is_stalled() {
+        let stats = classify_gossip_graph(&scids(&[1]), [(1, false, false)]);
+        assert!(stats.stalled);
+        assert_eq!(stats.our_in_graph, 1);
+        assert_eq!(stats.updated, 0);
+    }
+
+    #[test]
+    fn one_sided_own_channel_is_stalled() {
+        let stats = classify_gossip_graph(&scids(&[1]), [(1, true, false)]);
+        assert!(stats.stalled);
+        assert_eq!(stats.updated, 0);
+    }
+
+    #[test]
+    fn both_updates_on_own_channel_is_not_stalled() {
+        let stats = classify_gossip_graph(&scids(&[1]), [(1, true, true)]);
+        assert!(!stats.stalled);
+        assert_eq!(stats.our_in_graph, 1);
+        assert_eq!(stats.updated, 1);
+        assert_eq!(stats.foreign_updated, 0);
+    }
+
+    #[test]
+    fn missing_foreign_channel_is_not_a_local_stall() {
+        // lp2 knows c3 (ours, both updates) but not c2. That is ldk-server#288,
+        // not something reconnecting lk1 invents.
+        let stats = classify_gossip_graph(&scids(&[3]), [(3, true, true)]);
+        assert!(!stats.stalled);
+        assert_eq!(stats.foreign_updated, 0);
+    }
+
+    #[test]
+    fn foreign_updated_channel_is_counted_not_stalled() {
+        let stats = classify_gossip_graph(&scids(&[1]), [(1, true, true), (2, true, true)]);
+        assert!(!stats.stalled);
+        assert_eq!(stats.graph_channels, 2);
+        assert_eq!(stats.foreign_updated, 1);
     }
 }

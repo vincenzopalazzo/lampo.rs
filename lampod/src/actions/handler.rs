@@ -259,28 +259,37 @@ impl Handler for LampoHandler {
                 // always reach us through incremental gossip relay: a node
                 // that connected before the announcements existed stays
                 // RouteNotFound for tens of minutes (issue #612), while a
-                // restart - which re-runs `RoutingMessageHandler::
-                // peer_connected` - converges in seconds. Re-run that hook
-                // for the counterparty: it queues a fresh
-                // `GossipTimestampFilter`, so the peer re-sends the gossip
-                // table (full range for the first LDK syncs, last hour
-                // afterwards - which covers channels announced minutes ago).
-                let mut init_features = ldk::types::features::InitFeatures::empty();
-                init_features.set_gossip_queries_optional();
-                let init = ldk::ln::msgs::Init {
-                    features: init_features,
-                    networks: None,
-                    remote_network_address: None,
-                };
-                let requery = self.channel_manager.gossip_sync().peer_connected(
-                    counterparty_node_id,
-                    &init,
-                    false,
-                );
-                log::debug!(
-                    target: "lampo",
-                    "gossip re-query for `{counterparty_node_id}` after channel ready: {requery:?}"
-                );
+                // restart - which re-runs `P2PGossipSync::peer_connected`
+                // on the *live* route handler - converges in seconds.
+                // Queue a fresh `GossipTimestampFilter` for the counterparty
+                // using their real init features. If the peer ignores a
+                // second filter on the same socket, the peer-manager stall
+                // probe disconnects and redials.
+                if let Some(peer) = self
+                    .peer_manager
+                    .manager()
+                    .peer_by_node_id(&counterparty_node_id)
+                {
+                    let init = ldk::ln::msgs::Init {
+                        features: peer.init_features,
+                        networks: None,
+                        remote_network_address: None,
+                    };
+                    let requery = self.channel_manager.gossip_sync().peer_connected(
+                        counterparty_node_id,
+                        &init,
+                        peer.is_inbound_connection,
+                    );
+                    log::info!(
+                        target: "lampo-gossip",
+                        "gossip re-query for `{counterparty_node_id}` after channel ready: {requery:?}"
+                    );
+                } else {
+                    log::debug!(
+                        target: "lampo-gossip",
+                        "skip gossip re-query for `{counterparty_node_id}`: peer not connected"
+                    );
+                }
                 Ok(())
             }
             ldk::events::Event::ChannelClosed {
