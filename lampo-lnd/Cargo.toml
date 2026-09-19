@@ -15,7 +15,7 @@ hmac = "0.12"
 lampo-common = { path = "../lampo-common" }
 lampod = { path = "../lampod" }
 log = "0.4"
-pbjson = "0.7"
+pbjson = "0.9"
 pbjson-types = "0.7"
 prost = "0.13"
 rand = "0.8"
