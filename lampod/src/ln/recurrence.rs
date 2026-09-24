@@ -31,6 +31,12 @@ pub const RECURRENCE_NAMESPACE: &str = "recurring_payments";
 /// misreading old entries.
 const RECORD_VERSION: u8 = 1;
 
+/// Upper bound for payee-supplied recurrence state. LDK's own state is a
+/// fixed 56 bytes; anything far beyond that is corruption or abuse, and must
+/// never reach the u16 length prefix in [`RecurrenceSeries::encode`] (which
+/// would panic instead of erroring).
+const MAX_PREV_STATE_LEN: usize = 256;
+
 /// Daily, weekly, or monthly: the only cadences the v1 RPC accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecurrenceCadence {
@@ -253,6 +259,10 @@ impl RecurrenceSeries {
             1 => true,
             flag => error::bail!("unknown cancelled flag {flag}"),
         };
+        pos += 1;
+        if pos != buf.len() {
+            error::bail!("recurrence record has {} trailing bytes", buf.len() - pos);
+        }
         Ok(Self {
             recurrence_id,
             next_counter,
@@ -298,13 +308,24 @@ impl RecurrenceStore {
 
     /// Find the series with this in-flight payment id. Series are few
     /// (subscriptions per node), so a namespace scan is fine for v1.
+    /// Find the series with this in-flight payment id. Series are few
+    /// (subscriptions per node), so a namespace scan is fine for v1.
+    /// A single corrupt entry must not break unrelated payments, so
+    /// undecodable records are skipped with a warning.
     pub fn find_by_pending(
         &self,
         payment_id: &[u8; 32],
     ) -> error::Result<Option<(String, RecurrenceSeries)>> {
         let keys = self.persister.list(RECURRENCE_NAMESPACE, "")?;
         for key in keys {
-            if let Some(series) = self.load(&key)? {
+            let series = match self.load(&key) {
+                Ok(series) => series,
+                Err(err) => {
+                    log::warn!(target: "lampo::recurrence", "skipping corrupt series `{key}`: {err}");
+                    continue;
+                }
+            };
+            if let Some(series) = series {
                 if series.pending_payment.as_ref() == Some(payment_id) {
                     return Ok(Some((key, series)));
                 }
@@ -323,6 +344,11 @@ impl RecurrenceStore {
         next_state: Option<Vec<u8>>,
         basetime: u64,
     ) -> error::Result<Option<String>> {
+        if let Some(state) = next_state.as_ref() {
+            if state.len() > MAX_PREV_STATE_LEN {
+                error::bail!("recurrence next-state too long: {} bytes", state.len());
+            }
+        }
         let Some((key, mut series)) = self.find_by_pending(payment_id)? else {
             return Ok(None);
         };

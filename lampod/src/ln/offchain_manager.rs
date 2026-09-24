@@ -51,6 +51,10 @@ pub struct OffchainManager {
     lampo_conf: Arc<LampoConf>,
     chain_manager: Arc<LampoChainManager>,
     recurrence: RecurrenceStore,
+    /// Serializes recurring pays for this node. The check-mint-call-mark
+    /// sequence in [`Self::pay_recurring_offer`] is synchronous, so a plain
+    /// mutex suffices and is never held across an await.
+    recurrence_pay_lock: std::sync::Mutex<()>,
     /// Set once this node is configured as an often-offline async recipient,
     /// either from `async-invoice-server-paths` in the config or from a
     /// runtime [`Self::set_async_receive_paths`] call.
@@ -79,6 +83,7 @@ impl OffchainManager {
             lampo_conf,
             chain_manager,
             recurrence: RecurrenceStore::new(persister),
+            recurrence_pay_lock: std::sync::Mutex::new(()),
             async_receive_enabled: AtomicBool::new(false),
             async_payments_enabled,
         };
@@ -270,7 +275,22 @@ impl OffchainManager {
         };
 
         let key = series_key(&offer);
+        // One in-flight recurring pay per node. The guard is synchronous
+        // end to end (LDK queues the request without awaiting), so two
+        // concurrent pays can never mint the same period twice.
+        let _guard = self
+            .recurrence_pay_lock
+            .lock()
+            .map_err(|_| error::anyhow!("recurrence pay lock poisoned"))?;
         let mut series = match self.recurrence.load(&key)? {
+            Some(mut series) if series.cancelled => {
+                // A cancelled series stays cancelled, but paying again
+                // starts a fresh subscription: new id, period 0. The new
+                // relationship is unambiguous to the payee.
+                let fresh = RecurrenceSeries::new(self.keys_manager.get_secure_random_bytes());
+                self.recurrence.save(&key, &fresh)?;
+                fresh
+            }
             Some(series) => series,
             None => {
                 let fresh = RecurrenceSeries::new(self.keys_manager.get_secure_random_bytes());
@@ -278,9 +298,6 @@ impl OffchainManager {
                 fresh
             }
         };
-        if series.cancelled {
-            error::bail!("recurrence series for this offer was cancelled");
-        }
         if series.pending_payment.is_some() {
             error::bail!("a recurring payment for this offer is already in flight");
         }
@@ -288,7 +305,13 @@ impl OffchainManager {
         let recurrence_id = RecurrenceId(series.recurrence_id);
         let payment_id = PaymentId(self.keys_manager.get_secure_random_bytes());
         log::debug!(target: "lampo::offchain", "paying recurring offer period `{}` with amount `{}`msat", series.next_counter, amount);
-        self.channel_manager
+        // Mark in-flight before calling LDK: a crash between the LDK call
+        // and the post-call save must still show the payment as pending so
+        // restart does not replay the same period with stale state.
+        series.pending_payment = Some(payment_id.0);
+        self.recurrence.save(&key, &series)?;
+        if let Err(err) = self
+            .channel_manager
             .manager()
             .pay_for_recurrence(
                 &offer,
@@ -312,10 +335,16 @@ impl OffchainManager {
                     ..Default::default()
                 },
             )
-            .map_err(|err| error::anyhow!("{:?}", err))?;
+            .map_err(|err| error::anyhow!("{:?}", err))
+        {
+            // LDK refused the request, so nothing is in flight. Best
+            // effort: the pay already failed, a store error here only
+            // delays the retry.
+            series.pending_payment = None;
+            let _ = self.recurrence.save(&key, &series);
+            return Err(err);
+        }
 
-        series.pending_payment = Some(payment_id.0);
-        self.recurrence.save(&key, &series)?;
         Ok((payment_id, hex::encode(series.recurrence_id)))
     }
 
@@ -340,7 +369,13 @@ impl OffchainManager {
             error::bail!("series never paid; nothing to cancel");
         }
 
-        self.channel_manager
+        // Mark cancelled before calling LDK so a crash between the wire
+        // send and the save cannot resurrect the series on restart. The
+        // mark is reverted if LDK refuses the request.
+        series.cancelled = true;
+        self.recurrence.save(&key, &series)?;
+        if let Err(err) = self
+            .channel_manager
             .manager()
             .cancel_recurrence(
                 &offer,
@@ -351,10 +386,13 @@ impl OffchainManager {
                     prev_state: series.prev_state.clone(),
                 },
             )
-            .map_err(|err| error::anyhow!("{:?}", err))?;
+            .map_err(|err| error::anyhow!("{:?}", err))
+        {
+            series.cancelled = false;
+            let _ = self.recurrence.save(&key, &series);
+            return Err(err);
+        }
 
-        series.cancelled = true;
-        self.recurrence.save(&key, &series)?;
         Ok(hex::encode(series.recurrence_id))
     }
 

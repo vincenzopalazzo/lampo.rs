@@ -215,8 +215,14 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     };
 
     let (payment_id, recurrence_id) = if request.cancel_recurrence {
+        if request.recurrence.is_some() {
+            return Err(crate::rpc_error!(
+                "recurrence and cancel_recurrence are mutually exclusive"
+            ));
+        }
         // Cancelling sends a recurrence-cancel invoice request; no payment
-        // event follows, so answer immediately.
+        // event follows, so answer immediately. Success means the request
+        // was queued locally, not acknowledged by the payee.
         let recurrence_id = ctx
             .offchain_manager()
             .cancel_recurring_offer(&request.invoice_str)
@@ -227,7 +233,7 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
             payment_hash: None,
             value_msat: 0,
             fee_msat: 0,
-            reason: Some("recurrence cancelled".to_string()),
+            reason: Some("recurrence cancel queued".to_string()),
             payment_preimage: None,
             payer_proof: None,
             recurrence_id: Some(recurrence_id),
@@ -283,14 +289,14 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     // for the real terminal event so an in-flight payment is never reported as
     // failed merely because that deadline elapsed.
     let timeout = terminal_wait_timeout(request.timeout_secs, request.timeout.duration());
-    let mut result =
-        wait_for_payment_result(events, &payment_id, expected_value_msat, timeout).await?;
-    if let Some(recurrence_id) = recurrence_id {
-        if let Some(obj) = result.as_object_mut() {
-            obj.insert("recurrence_id".to_string(), json::json!(recurrence_id));
-        }
-    }
-    Ok(result)
+    wait_for_payment_result(
+        events,
+        &payment_id,
+        expected_value_msat,
+        timeout,
+        recurrence_id.as_deref(),
+    )
+    .await
 }
 
 fn terminal_wait_timeout(
@@ -312,6 +318,7 @@ async fn wait_for_payment_result(
     payment_id: &str,
     expected_value_msat: Option<u64>,
     timeout: Option<Duration>,
+    recurrence_id: Option<&str>,
 ) -> Result<json::Value, Error> {
     // Regular JSON-RPC calls retain a single deadline for the whole wait.
     // LND-compatible calls have no terminal deadline because their timeout only
@@ -375,7 +382,7 @@ async fn wait_for_payment_result(
                         reason: None,
                         payment_preimage,
                         payer_proof,
-                        recurrence_id: None,
+                        recurrence_id: recurrence_id.map(|id| id.to_owned()),
                     })?);
                 }
             }
@@ -423,7 +430,7 @@ async fn wait_for_payment_result(
                     reason,
                     payment_preimage,
                     payer_proof,
-                    recurrence_id: None,
+                    recurrence_id: recurrence_id.map(|id| id.to_owned()),
                 })?);
             }
             _ => {}
@@ -447,6 +454,7 @@ pub async fn json_keysend(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         &payment_id,
         Some(request.amount_msat),
         Some(request.timeout.duration()),
+        None,
     )
     .await
 }

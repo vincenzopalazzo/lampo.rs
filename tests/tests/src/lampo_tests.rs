@@ -1295,10 +1295,11 @@ pub async fn pay_recurring_offer_two_periods_then_cancel() -> error::Result<()> 
         "cancel must report the series id"
     );
 
-    // Paying after cancel must fail instead of opening a new series.
-    let after_cancel = node1
+    // Paying after cancel starts a fresh subscription: new id, period 0.
+    // The new relationship is unambiguous to the payee.
+    let resubscribed: response::PayResult = node1
         .lampod()
-        .call::<_, response::PayResult>(
+        .call(
             "pay",
             request::Pay {
                 invoice_str: offer.bolt12.clone(),
@@ -1311,10 +1312,19 @@ pub async fn pay_recurring_offer_two_periods_then_cancel() -> error::Result<()> 
                 cancel_recurrence: false,
             },
         )
-        .await;
+        .await?;
     assert!(
-        after_cancel.is_err(),
-        "pay after cancel must fail, got {after_cancel:?}"
+        matches!(resubscribed.state, response::PaymentState::Success),
+        "resubscribe must settle, got {:?}",
+        resubscribed.state
+    );
+    let resubscribed_id = resubscribed
+        .recurrence_id
+        .clone()
+        .expect("a resubscribe must expose its recurrence id");
+    assert_ne!(
+        resubscribed_id, recurrence_id,
+        "resubscribe must mint a fresh series id"
     );
 
     // A recurrence flag on a one-shot offer must fail loudly.
