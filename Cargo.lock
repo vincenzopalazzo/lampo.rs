@@ -1712,7 +1712,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.9",
  "tokio",
  "tower-service",
  "tracing",
@@ -2244,9 +2244,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-background-processor"
-version = "0.3.0-beta1"
+version = "0.3.0-rc2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f252c50b7f9710226ee8b1267d691268bb75f867c25a1bc4e769c2f4c9940598"
+checksum = "a55148fb054518f54d43a69a1336a4cb0282cc61e2972096c70ded7737a28f4e"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -2319,9 +2319,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-persister"
-version = "0.3.0-beta1"
+version = "0.3.0-rc2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94cb02eaf5891d526f2864d1c4a275d3b54c1048632564f28de28fdd6e71158d"
+checksum = "7b5774460344be534ea56147b13b98008bf29b877cc9312c92bb042abfad515d"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -2331,9 +2331,9 @@ dependencies = [
 
 [[package]]
 name = "lightning-rapid-gossip-sync"
-version = "0.3.0-beta1"
+version = "0.3.0-rc2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "467ead156664826baf44838c4e57e8014a71118ca65695c0f53d6fb702c4f405"
+checksum = "1a14894481c84f2d263d21e19f3e31048243f7b8db759166bfe6ffd2adeb0753"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -3020,7 +3020,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.0",
+ "socket2 0.5.9",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -3058,7 +3058,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2 0.5.9",
  "tracing",
  "windows-sys 0.61.2",
 ]
