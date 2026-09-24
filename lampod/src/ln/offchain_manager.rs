@@ -286,7 +286,9 @@ impl OffchainManager {
             Some(mut series) if series.cancelled => {
                 // A cancelled series stays cancelled, but paying again
                 // starts a fresh subscription: new id, period 0. The new
-                // relationship is unambiguous to the payee.
+                // relationship is unambiguous to the payee. Pending is
+                // always None here: cancel refuses in-flight payments, and
+                // nothing else writes a cancelled series.
                 let fresh = RecurrenceSeries::new(self.keys_manager.get_secure_random_bytes());
                 self.recurrence.save(&key, &fresh)?;
                 fresh
@@ -355,6 +357,29 @@ impl OffchainManager {
         let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
         let key = series_key(&offer);
         let mut series = self.recurrence.load(&key)?.ok_or(error::anyhow!(
+            "no recurrence series tracked for this offer"
+        ))?;
+        if series.cancelled {
+            error::bail!("recurrence series for this offer is already cancelled");
+        }
+        if series.pending_payment.is_some() {
+            error::bail!(
+                "a recurring payment for this offer is in flight; wait for it to settle first"
+            );
+        }
+        if series.next_counter == 0 {
+            error::bail!("series never paid; nothing to cancel");
+        }
+
+        // Same lock as the pay path: without it a concurrent pay could
+        // load the series, then save its stale copy over the cancelled
+        // mark below and resurrect the series after cancel.
+        let _guard = self
+            .recurrence_pay_lock
+            .lock()
+            .map_err(|_| error::anyhow!("recurrence pay lock poisoned"))?;
+        // Re-load under the lock; a pay may have settled while waiting.
+        series = self.recurrence.load(&key)?.ok_or(error::anyhow!(
             "no recurrence series tracked for this offer"
         ))?;
         if series.cancelled {
