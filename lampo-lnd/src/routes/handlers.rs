@@ -853,6 +853,8 @@ async fn pay_invoice(
         bolt12: None,
         timeout: Default::default(),
         timeout_secs: payment_timeout_secs(body, endpoint)?,
+        recurrence: None,
+        cancel_recurrence: false,
     };
     let value = lampod::jsonrpc::offchain::json_pay(
         &state.lampod,

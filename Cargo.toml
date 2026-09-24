@@ -35,3 +35,11 @@ lightning-persister = { version = "0.3.0-beta1", features = ["tokio"] }
 lightning-background-processor = "0.3.0-beta1"
 lightning-net-tokio = "0.3.0-beta1"
 lightning-rapid-gossip-sync = "0.3.0-beta1"
+
+# TEMPORARY (BOLT 12 recurrence v1): override the `lightning` crate with the
+# lampo fork carrying rust-lightning PR #4882, until upstream releases it.
+# Branch: lampo-bolt12-recurrence. See docs/plans/2026-09-24-bolt12-recurrence-v1.md.
+# All other lightning* crates stay on crates.io 0.3.0-beta1.
+[patch.crates-io]
+lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-bolt12-recurrence" }
+lightning-liquidity = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-bolt12-recurrence" }
