@@ -17,6 +17,10 @@ pub mod request {
     pub struct GenerateOffer {
         pub amount_msat: Option<u64>,
         pub description: Option<String>,
+        /// Optional BOLT 12 recurrence cadence: `daily`, `weekly`, or `monthly`.
+        /// When set, the offer carries optional recurrence with that period.
+        #[serde(default)]
+        pub recurrence: Option<String>,
     }
 
     #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
@@ -38,6 +42,15 @@ pub mod request {
         /// Retry deadline before an HTLC is launched, for compatible payment APIs.
         #[serde(default)]
         pub timeout_secs: Option<u64>,
+        /// Pay as a recurring payment (`daily`, `weekly`, or `monthly`).
+        /// The offer must carry recurrence with the same period. Omitted
+        /// means a one-shot `pay_for_offer`, even for recurring offers.
+        #[serde(default)]
+        pub recurrence: Option<String>,
+        /// Cancel the tracked recurrence series for this offer instead of paying.
+        /// Reuses the stored recurrence id; errors when no series is tracked.
+        #[serde(default)]
+        pub cancel_recurrence: bool,
     }
 
     #[derive(Serialize, Deserialize, Apiv2Schema)]
@@ -78,6 +91,10 @@ pub mod response {
 
     use bitcoin::{secp256k1::PublicKey, Network};
     use lightning::offers::offer::Offer as LDKOffer;
+    use lightning::offers::offer::{
+        Recurrence as LDKRecurrence, RecurrencePeriod as LDKRecurrencePeriod,
+        RecurrenceType as LDKRecurrenceType,
+    };
     use lightning::routing::router::RouteHop;
     use paperclip::actix::Apiv2Schema;
     use serde::{Deserialize, Serialize};
@@ -136,6 +153,18 @@ pub mod response {
         pub description: Option<String>,
         pub offer_paths: Vec<BlindedPath>,
         pub network: String,
+        /// Recurrence advertised by the offer, if any.
+        #[serde(default)]
+        pub recurrence: Option<RecurrenceInfo>,
+    }
+
+    /// Recurrence schedule advertised by a BOLT 12 offer.
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct RecurrenceInfo {
+        /// `optional` or `compulsory`.
+        pub recurrence_type: String,
+        /// `daily`, `weekly`, `monthly`, or the raw period (e.g. `7 days`).
+        pub cadence: String,
     }
 
     #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]
@@ -200,6 +229,29 @@ pub mod response {
                 offer_chains: chains,
                 offer_paths: paths,
                 issuer_id,
+                recurrence: offer.offer_recurrence().map(RecurrenceInfo::from),
+            }
+        }
+    }
+
+    impl From<LDKRecurrence> for RecurrenceInfo {
+        fn from(recurrence: LDKRecurrence) -> Self {
+            let recurrence_type = match recurrence.recurrence_type {
+                LDKRecurrenceType::Optional => "optional",
+                LDKRecurrenceType::Compulsory(_) => "compulsory",
+            }
+            .to_string();
+            let cadence = match recurrence.recurrence_period {
+                LDKRecurrencePeriod::Days(1) => "daily".to_string(),
+                LDKRecurrencePeriod::Days(7) => "weekly".to_string(),
+                LDKRecurrencePeriod::Months(1) => "monthly".to_string(),
+                LDKRecurrencePeriod::Days(n) => format!("{n} days"),
+                LDKRecurrencePeriod::Months(n) => format!("{n} months"),
+                LDKRecurrencePeriod::Seconds(n) => format!("{n} seconds"),
+            };
+            Self {
+                recurrence_type,
+                cadence,
             }
         }
     }
@@ -226,6 +278,10 @@ pub mod response {
         /// Bech32 encoded BOLT 12 payer proof, proving to a third party that
         /// this node paid the invoice. Only set for settled offer payments.
         pub payer_proof: Option<String>,
+        /// Hex recurrence id, set only for recurring payments. The same id
+        /// identifies every period of the series.
+        #[serde(default)]
+        pub recurrence_id: Option<String>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, Apiv2Schema, PartialEq)]

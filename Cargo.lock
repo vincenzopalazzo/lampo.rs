@@ -2226,9 +2226,8 @@ dependencies = [
 
 [[package]]
 name = "lightning"
-version = "0.3.0-beta1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "051fad04d4a4b6fd4b483528c3d61b0c76d9b70cc2f0a870147c10909350d722"
+version = "0.3.0+git"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=lampo-bolt12-recurrence#69faf94dff8aeaf8e70060551c1a5e02dc66ebf7"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -2239,7 +2238,7 @@ dependencies = [
  "lightning-invoice",
  "lightning-macros",
  "lightning-types",
- "possiblyrandom",
+ "possiblyrandom 0.2.0",
  "regex",
 ]
 
@@ -2255,7 +2254,7 @@ dependencies = [
  "lightning",
  "lightning-liquidity",
  "lightning-rapid-gossip-sync",
- "possiblyrandom",
+ "possiblyrandom 0.2.1",
 ]
 
 [[package]]
@@ -2272,9 +2271,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-invoice"
-version = "0.35.0-beta1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99e186bfc9aae7fa6fda7ac3f5d701d9ee1262407025bb7db5bc04af9593723a"
+version = "0.35.0+git"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=lampo-bolt12-recurrence#69faf94dff8aeaf8e70060551c1a5e02dc66ebf7"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -2284,9 +2282,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-liquidity"
-version = "0.3.0-beta1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f178d6e5716d442bad1441ff1d40b744b8fc9beaaf5618c547e246656739a2ec"
+version = "0.3.0+git"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=lampo-bolt12-recurrence#69faf94dff8aeaf8e70060551c1a5e02dc66ebf7"
 dependencies = [
  "bitcoin",
  "bitreq",
@@ -2301,9 +2298,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-macros"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4c717494cdc2c8bb85bee7113031248f5f6c64f8802b33c1c9e2d98e594aa71"
+version = "0.2.2+git"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=lampo-bolt12-recurrence#69faf94dff8aeaf8e70060551c1a5e02dc66ebf7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2347,9 +2343,8 @@ dependencies = [
 
 [[package]]
 name = "lightning-types"
-version = "0.4.0-beta1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e605bf5f355153e50ee9b2060dfe7640b6277e1b82929097b61b2b5d2837ee8"
+version = "0.4.0+git"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=lampo-bolt12-recurrence#69faf94dff8aeaf8e70060551c1a5e02dc66ebf7"
 dependencies = [
  "bitcoin",
 ]
@@ -2812,6 +2807,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd119ef551a50cd8939f0ff93bd062891f7b0dbb771b4a05df8a9c13aebaff68"
 dependencies = [
  "rand 0.8.5",
+]
+
+[[package]]
+name = "possiblyrandom"
+version = "0.2.0"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning.git?branch=lampo-bolt12-recurrence#69faf94dff8aeaf8e70060551c1a5e02dc66ebf7"
+dependencies = [
+ "getrandom 0.2.16",
 ]
 
 [[package]]

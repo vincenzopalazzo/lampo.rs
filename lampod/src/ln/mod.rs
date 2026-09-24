@@ -5,6 +5,7 @@ mod inventory_manager;
 mod offchain_manager;
 mod om_mailbox;
 mod peer_manager;
+mod recurrence;
 mod static_invoice_store;
 
 pub mod payer_proof;
@@ -15,4 +16,5 @@ pub use inventory_manager::LampoInventoryManager;
 pub use offchain_manager::OffchainManager;
 pub use om_mailbox::OnionMessageMailbox;
 pub use peer_manager::LampoPeerManager;
+pub use recurrence::{RecurrenceCadence, RecurrenceSeries, RecurrenceStore};
 pub use static_invoice_store::StaticInvoiceStore;

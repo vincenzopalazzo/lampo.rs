@@ -282,6 +282,8 @@ pub async fn pay_invoice_simple_case_lampo() -> error::Result<()> {
                 bolt12: None,
                 timeout: Default::default(),
                 timeout_secs: None,
+                recurrence: None,
+                cancel_recurrence: false,
             },
         )
         .await?;
@@ -315,6 +317,7 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
             "offer",
             request::GenerateOffer {
                 description: Some("making sure that we can work betwen lampo version".to_owned()),
+                recurrence: None,
                 amount_msat: Some(100_000),
             },
         )
@@ -333,6 +336,8 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
                 bolt12: None,
                 timeout: Default::default(),
                 timeout_secs: None,
+                recurrence: None,
+                cancel_recurrence: false,
             },
         )
         .await?;
@@ -382,6 +387,7 @@ pub async fn pay_offer_minimal_offer() -> error::Result<()> {
             "offer",
             request::GenerateOffer {
                 description: None,
+                recurrence: None,
                 amount_msat: None,
             },
         )
@@ -400,6 +406,8 @@ pub async fn pay_offer_minimal_offer() -> error::Result<()> {
                 bolt12: None,
                 timeout: Default::default(),
                 timeout_secs: None,
+                recurrence: None,
+                cancel_recurrence: false,
             },
         )
         .await?;
@@ -469,6 +477,8 @@ pub async fn decode_invoice() -> error::Result<()> {
                 bolt12: None,
                 timeout: Default::default(),
                 timeout_secs: None,
+                recurrence: None,
+                cancel_recurrence: false,
             },
         )
         .await?;
@@ -499,6 +509,7 @@ pub async fn decode_offer_hex() -> error::Result<()> {
             "offer",
             request::GenerateOffer {
                 description: Some("test offer for decode".to_owned()),
+                recurrence: None,
                 amount_msat: Some(100_000),
             },
         )
@@ -542,6 +553,8 @@ pub async fn decode_offer_hex() -> error::Result<()> {
                 bolt12: None,
                 timeout: Default::default(),
                 timeout_secs: None,
+                recurrence: None,
+                cancel_recurrence: false,
             },
         )
         .await?;
@@ -728,6 +741,7 @@ async fn wait_async_offer(node: &LampoTesting) -> response::Offer {
                     "offer",
                     request::GenerateOffer {
                         description: None,
+                        recurrence: None,
                         amount_msat: None,
                     },
                 )
@@ -884,6 +898,8 @@ pub async fn async_payment_held_htlc_roundtrip() -> error::Result<()> {
                 timeout: Default::default(),
                 max_fee_msat: None,
                 timeout_secs: None,
+                recurrence: None,
+                cancel_recurrence: false,
             },
         )
         .await?;
@@ -990,6 +1006,8 @@ pub async fn async_payment_offline_recipient_roundtrip() -> error::Result<()> {
                     timeout: request::PayTimeout::Fast,
                     max_fee_msat: None,
                     timeout_secs: None,
+                    recurrence: None,
+                    cancel_recurrence: false,
                 },
             )
             .await
@@ -1052,6 +1070,8 @@ pub async fn async_payment_offline_recipient_roundtrip() -> error::Result<()> {
                 timeout: Default::default(),
                 max_fee_msat: None,
                 timeout_secs: None,
+                recurrence: None,
+                cancel_recurrence: false,
             },
         )
         .await?;
@@ -1151,5 +1171,183 @@ pub async fn asyncinvoicepaths_requires_token_when_configured() -> error::Result
             },
         )
         .await?;
+    Ok(())
+}
+
+#[tokio_test_shutdown_timeout::test(10)]
+pub async fn pay_recurring_offer_two_periods_then_cancel() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let btc = node1.btc.clone();
+    let node2 = Arc::new(LampoTesting::new(btc.clone()).await?);
+
+    // There is a channel node1 -> node2
+    node1.fund_channel_with(node2.clone(), 1_000_000).await?;
+
+    let offer: response::Offer = node2
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: Some("weekly subscription".to_owned()),
+                amount_msat: Some(100_000),
+                recurrence: Some("weekly".to_owned()),
+            },
+        )
+        .await?;
+    log::info!(target: &node1.info.node_id, "recurring offer generated `{:?}`", offer);
+
+    // Decode must surface the recurrence schedule.
+    let decode: response::Decode = node1
+        .lampod()
+        .call(
+            "decode",
+            request::DecodeInvoice {
+                invoice_str: offer.bolt12.clone(),
+            },
+        )
+        .await?;
+    let response::Decode::Bolt12(info) = decode else {
+        error::bail!("expected a BOLT 12 decode, got {decode:?}");
+    };
+    let recurrence = info
+        .recurrence
+        .as_ref()
+        .expect("decode must report the offer recurrence");
+    assert_eq!(recurrence.cadence, "weekly");
+    assert_eq!(recurrence.recurrence_type, "optional");
+
+    // Period 0 starts the series and mints its id.
+    let pay0: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12.clone(),
+                amount: None,
+                max_fee_msat: None,
+                bolt12: None,
+                timeout: Default::default(),
+                timeout_secs: None,
+                recurrence: Some("weekly".to_owned()),
+                cancel_recurrence: false,
+            },
+        )
+        .await?;
+    assert!(
+        matches!(pay0.state, response::PaymentState::Success),
+        "period 0 must settle, got {:?}",
+        pay0.state
+    );
+    let recurrence_id = pay0
+        .recurrence_id
+        .clone()
+        .expect("a recurring pay must expose its recurrence id");
+
+    // Period 1 must reuse the same series id.
+    let pay1: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12.clone(),
+                amount: None,
+                max_fee_msat: None,
+                bolt12: None,
+                timeout: Default::default(),
+                timeout_secs: None,
+                recurrence: Some("weekly".to_owned()),
+                cancel_recurrence: false,
+            },
+        )
+        .await?;
+    assert!(
+        matches!(pay1.state, response::PaymentState::Success),
+        "period 1 must settle, got {:?}",
+        pay1.state
+    );
+    assert_eq!(
+        pay1.recurrence_id.as_ref(),
+        Some(&recurrence_id),
+        "period 1 must reuse the series id"
+    );
+
+    // Cancel stops the series and reports the same id.
+    let cancelled: response::PayResult = node1
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12.clone(),
+                amount: None,
+                max_fee_msat: None,
+                bolt12: None,
+                timeout: Default::default(),
+                timeout_secs: None,
+                recurrence: None,
+                cancel_recurrence: true,
+            },
+        )
+        .await?;
+    assert_eq!(
+        cancelled.recurrence_id.as_ref(),
+        Some(&recurrence_id),
+        "cancel must report the series id"
+    );
+
+    // Paying after cancel must fail instead of opening a new series.
+    let after_cancel = node1
+        .lampod()
+        .call::<_, response::PayResult>(
+            "pay",
+            request::Pay {
+                invoice_str: offer.bolt12.clone(),
+                amount: None,
+                max_fee_msat: None,
+                bolt12: None,
+                timeout: Default::default(),
+                timeout_secs: None,
+                recurrence: Some("weekly".to_owned()),
+                cancel_recurrence: false,
+            },
+        )
+        .await;
+    assert!(
+        after_cancel.is_err(),
+        "pay after cancel must fail, got {after_cancel:?}"
+    );
+
+    // A recurrence flag on a one-shot offer must fail loudly.
+    let plain_offer: response::Offer = node2
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: Some("one-shot".to_owned()),
+                amount_msat: Some(50_000),
+                recurrence: None,
+            },
+        )
+        .await?;
+    let flagged = node1
+        .lampod()
+        .call::<_, response::PayResult>(
+            "pay",
+            request::Pay {
+                invoice_str: plain_offer.bolt12,
+                amount: None,
+                max_fee_msat: None,
+                bolt12: None,
+                timeout: Default::default(),
+                timeout_secs: None,
+                recurrence: Some("weekly".to_owned()),
+                cancel_recurrence: false,
+            },
+        )
+        .await;
+    assert!(
+        flagged.is_err(),
+        "recurrence flag on a plain offer must fail, got {flagged:?}"
+    );
     Ok(())
 }

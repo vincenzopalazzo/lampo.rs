@@ -196,6 +196,7 @@ impl LampoDaemon {
             self.logger.clone(),
             self.conf.clone(),
             self.onchain_manager(),
+            self.persister.clone(),
         )?;
         self.offchain_manager = Some(Arc::new(manager));
         Ok(())
