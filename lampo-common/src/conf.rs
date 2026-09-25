@@ -79,6 +79,13 @@ pub struct LampoConf {
     pub plugin_dir: Option<String>,
     /// Remote plugin endpoints (e.g. "https://host:port").
     pub remote_plugins: Vec<String>,
+    /// Where the node keeps its state: `"fs"` (default) or `"vss"`.
+    pub storage: Option<String>,
+    /// Base URL of the selected VSS backend. Ignored by the filesystem backend.
+    pub storage_url: Option<String>,
+    /// Bearer token for a remote VSS server. Required when `storage-url` is
+    /// not a loopback address. The store id is public and is not a secret.
+    pub storage_auth_token: Option<String>,
 }
 
 impl LampoConf {
@@ -143,6 +150,9 @@ impl Default for LampoConf {
             plugins: Vec::new(),
             plugin_dir: None,
             remote_plugins: Vec::new(),
+            storage: None,
+            storage_url: None,
+            storage_auth_token: None,
         }
     }
 }
@@ -400,6 +410,10 @@ impl TryFrom<String> for LampoConf {
         let plugin_dir = conf.get_conf("plugin-dir").unwrap_or(None);
         let remote_plugins = conf.get_confs("remote-plugin");
 
+        // Parse storage fields - default to None (the filesystem store)
+        let storage = conf.get_conf("storage").unwrap_or(None);
+        let storage_url = conf.get_conf("storage-url").unwrap_or(None);
+        let storage_auth_token = conf.get_conf("storage-auth-token").unwrap_or(None);
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -434,6 +448,9 @@ impl TryFrom<String> for LampoConf {
             plugins,
             plugin_dir,
             remote_plugins,
+            storage,
+            storage_url,
+            storage_auth_token,
         })
     }
 }

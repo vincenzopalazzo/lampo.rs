@@ -48,6 +48,13 @@ pub trait LampoSigner:
     ///
     /// Default no-op for signers that source those scripts elsewhere.
     fn set_wallet(&self, _wallet: Arc<dyn WalletManager>) {}
+
+    /// Key used to encrypt remote persistence.
+    ///
+    /// Signers that support VSS must return a stable key for the node.
+    fn vss_storage_key(&self) -> Option<[u8; 32]> {
+        None
+    }
 }
 
 /// Object-safe view of an LDK channel signer, plus cloning through the box.

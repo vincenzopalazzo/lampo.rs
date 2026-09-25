@@ -8,11 +8,11 @@ use crate::bitcoin::secp256k1::PublicKey;
 use crate::ldk::chain::chainmonitor::ChainMonitor;
 use crate::ldk::chain::Filter;
 use crate::ldk::ln::channelmanager::ChannelManager;
-use crate::ldk::persister::fs_store::v1::FilesystemStore;
 use crate::ldk::routing::gossip::NetworkGraph;
 use crate::ldk::routing::router::DefaultRouter;
 use crate::ldk::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
 use crate::ldk::util::sweep::OutputSweeper;
+use crate::persist::{LampoAsyncPersistence, LampoPersistenceBackend};
 use crate::signer::{LampoChangeDestination, LampoChannelSigner, LampoSigner};
 use crate::utils::logger::LampoLogger;
 
@@ -25,7 +25,7 @@ pub type LampoChainMonitor = ChainMonitor<
     Arc<dyn BroadcasterInterface + Send + Sync>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoLogger>,
-    Arc<FilesystemStore>,
+    Arc<dyn LampoPersistenceBackend>,
     Arc<dyn LampoSigner>,
 >;
 
@@ -51,7 +51,7 @@ pub type LampoSweeper = OutputSweeper<
     Arc<LampoChangeDestination>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<dyn Filter + Send + Sync>,
-    Arc<FilesystemStore>,
+    LampoAsyncPersistence,
     Arc<LampoLogger>,
     Arc<dyn LampoSigner>,
 >;
