@@ -20,6 +20,7 @@
 //!         .await;
 //! }
 //! ```
+mod grpc;
 mod io;
 
 use std::collections::HashMap;
@@ -180,10 +181,24 @@ impl Plugin {
         self
     }
 
-    /// Start the plugin, reading from stdin and writing to stdout.
+    /// Start the plugin.
     ///
-    /// This blocks until the daemon sends a shutdown signal.
+    /// `--lampo-listen` serves gRPC on that loopback address. Without it,
+    /// the plugin reads JSON-RPC from stdin. The daemon passes the flag.
     pub async fn start(self) {
+        if let Some(addr) = grpc::listen_from_args() {
+            grpc::serve(
+                addr,
+                self.manifest,
+                self.rpc_handlers,
+                self.hook_handlers,
+                self.notify_handlers,
+                self.on_init,
+                self.init,
+            )
+            .await;
+            return;
+        }
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
         self.run(stdin, stdout).await;

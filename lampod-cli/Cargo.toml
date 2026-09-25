@@ -15,8 +15,10 @@ lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
 lampo-lnd = { path = "../lampo-lnd", optional = true }
 lampo-plugin = { path = "../lampo-plugin", features = ["grpc"] }
+tonic = { version = "0.12", features = ["transport"] }
+tokio-stream = "0.1"
 lampo-plugin-common = { path = "../lampo-plugin-common" }
-tokio = { version = "1.50.0", features = ["rt", "macros", "time"] }
+tokio = { version = "1.50.0", features = ["rt", "macros", "time", "net", "io-util"] }
 clap = { version = "4.5", features = ["derive"] }
 filelock-rs = "0.1.0-beta.2"
 log = { version = "0.4", features = ["std"] }

@@ -24,6 +24,8 @@ use tokio::sync::RwLock;
 
 #[cfg(feature = "grpc")]
 use crate::transport::grpc::{GrpcConfig, GrpcTransport};
+#[cfg(feature = "grpc")]
+use crate::transport::local::LocalGrpcTransport;
 use crate::transport::stdio::StdioTransport;
 use crate::transport::PluginTransport;
 
@@ -92,7 +94,10 @@ impl PluginManager {
 
     /// Start a local plugin from a binary path.
     ///
-    /// Performs the two-phase handshake:
+    /// A Rust plugin is spawned with `--lampo-listen` and spoken to over
+    /// gRPC on `127.0.0.1`. A script that does not take that flag stays
+    /// on stdio. Both
+    /// do the same handshake:
     /// 1. `getmanifest` — ask plugin what it can do
     /// 2. `init` — send configuration to the plugin
     pub async fn start_plugin(
@@ -102,7 +107,7 @@ impl PluginManager {
     ) -> error::Result<String> {
         log::info!(target: "plugin", "starting plugin: {}", path);
 
-        let transport = StdioTransport::new(path).await?;
+        let transport = self.open_local(path, init_config).await?;
         let handshake = async {
             // Phase 1: getmanifest
             let manifest_req = serde_json::json!({
@@ -219,7 +224,7 @@ impl PluginManager {
             name: plugin_name.clone(),
             path: path.to_string(),
             manifest,
-            transport: Box::new(transport),
+            transport,
             state: PluginState::Running,
             registered_methods: registered_methods.clone(),
         };
@@ -275,6 +280,45 @@ impl PluginManager {
 
         log::info!(target: "plugin", "plugin `{}` started successfully", plugin_name);
         Ok(plugin_name)
+    }
+
+    /// True when `path --help` mentions `--lampo-listen`.
+    ///
+    /// A shell mock does not. Those stay on stdio so the existing tests
+    /// still exercise that transport.
+    fn plugin_speaks_uds(path: &str) -> bool {
+        #[cfg(feature = "grpc")]
+        {
+            let Ok(output) = std::process::Command::new(path).arg("--help").output() else {
+                return false;
+            };
+            let text = String::from_utf8_lossy(&output.stdout);
+            let err = String::from_utf8_lossy(&output.stderr);
+            return text.contains("lampo-listen") || err.contains("lampo-listen");
+        }
+        #[cfg(not(feature = "grpc"))]
+        {
+            let _ = path;
+            false
+        }
+    }
+
+    /// gRPC when the binary accepts `--lampo-listen`, otherwise stdio.
+    ///
+    /// The socket lives next to `lampo-rpc`, so a plugin callback and a
+    /// second method on the same plugin do not share a pipe.
+    async fn open_local(
+        &self,
+        path: &str,
+        init_config: &InitConfig,
+    ) -> error::Result<Box<dyn PluginTransport>> {
+        #[cfg(feature = "grpc")]
+        if Self::plugin_speaks_uds(path) {
+            let transport = LocalGrpcTransport::spawn(path).await?;
+            return Ok(Box::new(transport));
+        }
+        let transport = StdioTransport::new(path).await?;
+        Ok(Box::new(transport))
     }
 
     /// Start a remote plugin via gRPC.
@@ -528,15 +572,24 @@ impl PluginManager {
             }
         };
 
-        let plugins = self.plugins.read().await;
+        // Clone the instances and drop the map. A hook that calls back
+        // into lampo and then plugin-stop needs plugins.write(). Holding
+        // this read across the hook waits on that write forever.
+        let plugins: Vec<(String, Arc<RwLock<PluginInstance>>)> = {
+            let plugins = self.plugins.read().await;
+            plugin_names
+                .iter()
+                .filter_map(|name| {
+                    plugins
+                        .get(name)
+                        .map(|plugin| (name.clone(), plugin.clone()))
+                })
+                .collect()
+        };
         let original_payload = payload.clone();
         let mut current_payload = payload;
 
-        for plugin_name in &plugin_names {
-            let Some(plugin) = plugins.get(plugin_name) else {
-                // Plugin was removed between index snapshot and now
-                continue;
-            };
+        for (_plugin_name, plugin) in &plugins {
             let plugin = plugin.read().await;
             if plugin.state != PluginState::Running {
                 continue;
@@ -840,6 +893,18 @@ impl ExternalHandler for PluginManager {
             log::warn!(
                 target: "plugin",
                 "plugin `{}` is not running, skipping method `{}`",
+                plugin.name, req.method
+            );
+            return Ok(None);
+        }
+        // `foo` calling `foo` waits on the handler that is already running
+        // `foo`. Fall through so a built-in of the same name can answer.
+        // A different method is forwarded: the plugin can run it beside
+        // the one that is waiting.
+        if plugin.transport.method_in_flight(&req.method) {
+            log::debug!(
+                target: "plugin",
+                "plugin `{}` is already handling `{}`, not re-entering it",
                 plugin.name, req.method
             );
             return Ok(None);
