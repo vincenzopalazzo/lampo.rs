@@ -58,27 +58,12 @@ pub struct LampoConf {
     /// `setasyncinvoicepaths`. Other RPCs stay unauthenticated (localhost
     /// plus the HTTP DNS-rebinding guard).
     pub api_token: Option<String>,
-}
-
-impl LampoConf {
-    /// Resolve the default lampo root path.
-    ///
-    /// Resolution order: `$LAMPO_HOME`, then `$HOME/.lampo`, then
-    /// `./.lampo` as a last-resort fallback. Never panics: a daemon
-    /// started from a minimal systemd unit or a container may not have
-    /// a determinable home directory.
-    /// (uses the deprecated `std::env::home_dir()` to avoid a dependency on dirs)
-    pub fn default_root_path() -> String {
-        if let Ok(path) = std::env::var("LAMPO_HOME") {
-            path
-        } else {
-            #[allow(deprecated)]
-            match std::env::home_dir() {
-                Some(path) => format!("{}/.lampo", path.to_string_lossy()),
-                None => "./.lampo".to_owned(),
-            }
-        }
-    }
+    /// Plugin binary paths to load at startup.
+    pub plugins: Vec<String>,
+    /// Directory to scan for plugin binaries.
+    pub plugin_dir: Option<String>,
+    /// Remote plugin endpoints (e.g. "https://host:port").
+    pub remote_plugins: Vec<String>,
 }
 
 impl Default for LampoConf {
@@ -116,11 +101,33 @@ impl Default for LampoConf {
             async_payments_role: None,
             async_invoice_server_paths: None,
             api_token: None,
+            plugins: Vec::new(),
+            plugin_dir: None,
+            remote_plugins: Vec::new(),
         }
     }
 }
 
 impl LampoConf {
+    /// Resolve the default lampo root path.
+    ///
+    /// Resolution order: `$LAMPO_HOME`, then `$HOME/.lampo`, then
+    /// `./.lampo` as a last-resort fallback. Never panics: a daemon
+    /// started from a minimal systemd unit or a container may not have
+    /// a determinable home directory.
+    /// (uses the deprecated `std::env::home_dir()` to avoid a dependency on dirs)
+    pub fn default_root_path() -> String {
+        if let Ok(path) = std::env::var("LAMPO_HOME") {
+            path
+        } else {
+            #[allow(deprecated)]
+            match std::env::home_dir() {
+                Some(path) => format!("{}/.lampo", path.to_string_lossy()),
+                None => "./.lampo".to_owned(),
+            }
+        }
+    }
+
     pub fn prepare_dirs(&self) -> Result<(), anyhow::Error> {
         Self::prepare_directories(&self.root_path, Some(self.network))
     }
@@ -344,6 +351,11 @@ impl TryFrom<String> for LampoConf {
                     Some(token)
                 }
             });
+        // Parse plugin paths from config
+        let plugins = conf.get_confs("plugin");
+        let plugin_dir = conf.get_conf("plugin-dir").unwrap_or(None);
+        let remote_plugins = conf.get_confs("remote-plugin");
+
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -372,6 +384,9 @@ impl TryFrom<String> for LampoConf {
             async_payments_role,
             async_invoice_server_paths,
             api_token,
+            plugins,
+            plugin_dir,
+            remote_plugins,
         })
     }
 }

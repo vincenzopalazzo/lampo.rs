@@ -21,6 +21,10 @@ use lampo_common::logger;
 use lampo_httpd::handler::HttpdHandler;
 #[cfg(feature = "lnd")]
 use lampo_lnd::{spawn as spawn_lnd_rest, LndRestConfig};
+use lampo_plugin::tls::CertStore;
+use lampo_plugin::transport::grpc::GrpcConfig;
+use lampo_plugin::PluginManager;
+use lampo_plugin_common::messages::InitConfig;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
 
@@ -212,6 +216,21 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
 
+    // Chain sync calls bitcoind during `init`, before the event handler used
+    // to be installed. Start the plugin and attach a dispatcher first, or
+    // `getblockchaininfo` fails with "chain handler not set".
+    let node_id = {
+        use lampo_common::ldk::sign::NodeSigner;
+        wallet
+            .ldk_keys()
+            .inner()
+            .get_node_id(lampo_common::ldk::sign::Recipient::Node)
+            .map(|id| id.to_string())
+            .unwrap_or_default()
+    };
+    let plugin_manager = Arc::new(start_plugins(&lampo_conf, &node_id).await?);
+    client.set_handler(plugin_manager.clone());
+
     // Do wallet syncing in the background! (`LampoDaemon::new` already shared
     // the chain-sync coordinator with the wallet.)
     wallet.listen().await?;
@@ -220,6 +239,10 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     lampod.init(client).await?;
 
     let lampod = Arc::new(lampod);
+
+    // Plugin methods before httpd, so `lampo-cli foo` hits the plugin first.
+    lampod.add_external_handler(plugin_manager.clone()).await?;
+    lampod.set_plugin_manager(plugin_manager.clone()).await?;
 
     if lampo_conf.lnd.unwrap_or(false) {
         #[cfg(feature = "lnd")]
@@ -250,11 +273,160 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     log::info!(target: "lampod-cli", "------------ Starting Server ------------");
     lampod.listen().await??;
     log::info!(target: "lampod-cli", "Shutdown complete.");
+    plugin_manager.shutdown_all().await;
     // BDK's JobScheduler keeps non-daemon threads alive after listen()
     // returns, so returning normally would leave this process (and the
     // pid flock) hung forever and block any subsequent start. Exit so the
     // OS releases the flock.
     std::process::exit(0);
+}
+
+/// Discover and start all plugins from config and CLI args.
+/// `lampo-bitcoind` next to this binary, then `target/release` / `target/debug`.
+fn bitcoind_init(conf: &LampoConf, base: &InitConfig) -> InitConfig {
+    let mut init = base.clone();
+    if let Some(url) = &conf.core_url {
+        init.options
+            .insert("core-url".into(), lampo_common::json::json!(url));
+    }
+    if let Some(user) = &conf.core_user {
+        init.options
+            .insert("core-user".into(), lampo_common::json::json!(user));
+    }
+    if let Some(pass) = &conf.core_pass {
+        init.options
+            .insert("core-pass".into(), lampo_common::json::json!(pass));
+    }
+    init
+}
+
+fn default_bitcoind_plugin() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    for candidate in [
+        dir.join("lampo-bitcoind"),
+        dir.join("../release/lampo-bitcoind"),
+        dir.join("../debug/lampo-bitcoind"),
+    ] {
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+async fn start_plugins(conf: &LampoConf, node_id: &str) -> error::Result<PluginManager> {
+    let manager = PluginManager::new();
+
+    let init_config = InitConfig {
+        lampo_dir: conf.path(),
+        network: conf.network.to_string(),
+        node_id: node_id.to_owned(),
+        options: lampo_common::json::Map::new(),
+    };
+
+    // Collect plugin paths from explicit --plugin args and plugin-dir
+    let mut plugin_paths: Vec<String> = conf.plugins.clone();
+
+    // Scan plugin directory if configured
+    if let Some(ref dir) = conf.plugin_dir {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    // Check if the file is executable (Unix)
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Ok(metadata) = path.metadata() {
+                            if metadata.permissions().mode() & 0o111 != 0 {
+                                if let Some(p) = path.to_str() {
+                                    plugin_paths.push(p.to_string());
+                                }
+                            }
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        if let Some(p) = path.to_str() {
+                            plugin_paths.push(p.to_string());
+                        }
+                    }
+                }
+            }
+        } else {
+            log::warn!(target: "plugin", "plugin directory `{}` not found", dir);
+        }
+    }
+
+    // Default chain backend. Same role as CLN's shipped plugins: present
+    // unless the operator already passed a plugin that will register the
+    // bitcoind methods.
+    if plugin_paths.is_empty() {
+        if let Some(default_plugin) = default_bitcoind_plugin() {
+            plugin_paths.push(default_plugin);
+        }
+    }
+
+    // Start each plugin. An `important` plugin (CLN's flag) aborts startup.
+    for plugin_path in &plugin_paths {
+        let plugin_init = if plugin_path.contains("lampo-bitcoind") {
+            bitcoind_init(conf, &init_config)
+        } else {
+            init_config.clone()
+        };
+        match manager.start_plugin(plugin_path, &plugin_init).await {
+            Ok(name) => {
+                log::info!(target: "lampod-cli", "plugin `{}` started", name);
+            }
+            Err(e) => {
+                log::error!(target: "lampod-cli", "failed to start plugin `{}`: {}", plugin_path, e);
+                if manager.is_important_path(plugin_path).await {
+                    error::bail!("important plugin `{plugin_path}` failed to start: {e}");
+                }
+            }
+        }
+    }
+
+    // Start remote plugins via gRPC
+    if !conf.remote_plugins.is_empty() {
+        // Initialize TLS certificates for mTLS
+        let cert_store = CertStore::new(&conf.path());
+        cert_store.ensure_initialized()?;
+
+        for endpoint in &conf.remote_plugins {
+            let grpc_config = GrpcConfig {
+                endpoint: endpoint.clone(),
+                ca_cert_pem: Some(cert_store.ca_cert_pem()?),
+                client_cert_pem: Some(cert_store.client_cert_pem()?),
+                client_key_pem: Some(cert_store.client_key_pem()?),
+            };
+            match manager.start_remote_plugin(grpc_config, &init_config).await {
+                Ok(name) => {
+                    log::info!(target: "lampod-cli", "remote plugin `{}` started", name);
+                }
+                Err(e) => {
+                    log::error!(
+                        target: "lampod-cli",
+                        "failed to start remote plugin `{}`: {}",
+                        endpoint, e
+                    );
+                }
+            }
+        }
+    }
+
+    let total = manager.list_plugins().await.len();
+    if total > 0 {
+        log::info!(
+            target: "lampod-cli",
+            "started {} plugin(s): {:?}",
+            total,
+            manager.list_plugins().await
+        );
+    }
+
+    Ok(manager)
 }
 
 pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {

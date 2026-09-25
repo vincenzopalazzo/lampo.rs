@@ -1,0 +1,33 @@
+[package]
+name = "lampo-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+grpc = ["tonic", "prost", "rcgen", "tonic-build", "protoc-bin-vendored"]
+
+[dependencies]
+lampo-common = { path = "../lampo-common" }
+lampo-plugin-common = { path = "../lampo-plugin-common" }
+
+tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "macros", "time"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = { version = "0.4", features = ["std"] }
+
+# gRPC transport (optional, behind "grpc" feature)
+tonic = { version = "0.12", features = ["tls", "transport"], optional = true }
+prost = { version = "0.13", optional = true }
+rcgen = { version = "0.13", features = ["pem", "x509-parser"], optional = true }
+
+[build-dependencies]
+# Vendored protoc so `cargo check` does not need a system `protobuf-compiler`.
+# CI (and a fresh checkout) otherwise fails in build.rs with "Could not find protoc".
+protoc-bin-vendored = { version = "3", optional = true }
+tonic-build = { version = "0.12", optional = true, features = ["prost"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
