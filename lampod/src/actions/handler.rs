@@ -35,7 +35,7 @@ use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
 use crate::ln::{
     LampoChannelManager, LampoInventoryManager, LampoPeerManager, OnionMessageMailbox,
-    StaticInvoiceStore,
+    RecurrenceStore, StaticInvoiceStore,
 };
 use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
@@ -102,6 +102,9 @@ pub struct LampoHandler {
     om_mailbox: Option<OnionMessageMailbox>,
     bump_tx_event_handler: BumpHandler,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
+    /// Tracks BOLT 12 recurrence series paid by this node. Advanced on
+    /// `PaymentSent`, cleared on `PaymentFailed`.
+    recurrence: RecurrenceStore,
     #[allow(dead_code)]
     emitter: Emitter<Event>,
     subscriber: Subscriber<Event>,
@@ -138,6 +141,7 @@ impl LampoHandler {
             },
             bump_tx_event_handler,
             external_handlers: RwLock::new(Vec::new()),
+            recurrence: RecurrenceStore::new(lampod.persister()),
             emitter,
             subscriber,
         }
@@ -690,6 +694,27 @@ impl Handler for LampoHandler {
                         log::error!(target: "lampo::handler", "storing payer proof material: {err}");
                     }
                 }
+                // A settled recurring payment advances its series: the
+                // invoice's next-state becomes the following request's
+                // prev_state. Only recurring invoices match a series, so
+                // one-shot payments are unaffected.
+                if let Some(recurrence) = record
+                    .invoice
+                    .as_ref()
+                    .and_then(|invoice| invoice.bolt12_invoice())
+                    .and_then(|bolt12| bolt12.invoice_recurrence())
+                {
+                    let next_state = recurrence
+                        .recurrence_next_state()
+                        .map(|state| state.to_vec());
+                    if let Err(err) = self.recurrence.advance(
+                        &payment_id.0,
+                        next_state,
+                        recurrence.recurrence_basetime(),
+                    ) {
+                        log::error!(target: "lampo::handler", "advancing recurrence series: {err}");
+                    }
+                }
                 Ok(())
             }
             ldk::events::Event::PaymentPathSuccessful {
@@ -719,6 +744,13 @@ impl Handler for LampoHandler {
                 reason,
             } => {
                 log::error!("payment failed: {:?} with reason: {:?}", payment_id, reason);
+
+                // A failed recurring pay frees the series so the next pay
+                // retries the same period. Best effort: the payment already
+                // failed, a store error only delays the retry.
+                if let Err(err) = self.recurrence.clear_pending(&payment_id.0) {
+                    log::error!(target: "lampo::handler", "clearing recurrence in-flight payment: {err}");
+                }
 
                 // Provide detailed failure reason based on PaymentFailureReason enum
                 let detailed_reason = match reason {

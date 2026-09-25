@@ -26,17 +26,22 @@ use lampo_common::ldk;
 use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
 use lampo_common::ldk::ln::channelmanager::{
     Bolt11InvoiceParameters, OptionalBolt11PaymentParams, OptionalOfferPaymentParams, PaymentId,
+    RecurrenceCancellationParams, RecurrencePaymentParams,
 };
 use lampo_common::ldk::ln::outbound_payment::{RecipientOnionFields, Retry};
+use lampo_common::ldk::offers::invoice_request::RecurrenceId;
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
+use lampo_common::ldk::offers::offer::{Recurrence, RecurrenceType};
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
 use lampo_common::ldk::sign::EntropySource;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
 use lampo_common::ldk::util::ser::Readable;
 
+use super::recurrence::{series_key, RecurrenceCadence, RecurrenceSeries, RecurrenceStore};
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
+use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
 pub struct OffchainManager {
@@ -45,6 +50,11 @@ pub struct OffchainManager {
     logger: Arc<LampoLogger>,
     lampo_conf: Arc<LampoConf>,
     chain_manager: Arc<LampoChainManager>,
+    recurrence: RecurrenceStore,
+    /// Serializes recurring pays for this node. The check-mint-call-mark
+    /// sequence in [`Self::pay_recurring_offer`] is synchronous, so a plain
+    /// mutex suffices and is never held across an await.
+    recurrence_pay_lock: std::sync::Mutex<()>,
     /// Set once this node is configured as an often-offline async recipient,
     /// either from `async-invoice-server-paths` in the config or from a
     /// runtime [`Self::set_async_receive_paths`] call.
@@ -62,6 +72,7 @@ impl OffchainManager {
         logger: Arc<LampoLogger>,
         lampo_conf: Arc<LampoConf>,
         chain_manager: Arc<LampoChainManager>,
+        persister: Arc<LampoPersistence>,
     ) -> error::Result<Self> {
         let async_payments_enabled =
             Arc::new(AtomicBool::new(lampo_conf.async_payments_role.is_some()));
@@ -71,6 +82,8 @@ impl OffchainManager {
             logger,
             lampo_conf,
             chain_manager,
+            recurrence: RecurrenceStore::new(persister),
+            recurrence_pay_lock: std::sync::Mutex::new(()),
             async_receive_enabled: AtomicBool::new(false),
             async_payments_enabled,
         };
@@ -224,6 +237,226 @@ impl OffchainManager {
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(payment_id)
+    }
+
+    /// Pay one period of a recurring offer, starting or continuing the series
+    /// tracked for this offer. Returns the payment id and the hex recurrence
+    /// id (stable across all periods of the series).
+    ///
+    /// The series is persisted before calling LDK, so a crash between the
+    /// two still resumes with the same recurrence id.
+    pub fn pay_recurring_offer(
+        &self,
+        offer_str: &str,
+        amount_msat: Option<u64>,
+        payer_note: Option<String>,
+        max_fee_msat: Option<u64>,
+        cadence: RecurrenceCadence,
+    ) -> error::Result<(PaymentId, String)> {
+        let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
+        let offer_recurrence = offer.offer_recurrence().ok_or(error::anyhow!(
+            "offer is not a recurring offer; drop the recurrence flag for a one-shot payment"
+        ))?;
+        if offer_recurrence.recurrence_period != cadence.to_ldk_period() {
+            error::bail!(
+                "offer recurs {:?} but pay asked for `{}`",
+                offer_recurrence.recurrence_period,
+                cadence.as_str()
+            );
+        }
+
+        // One in-flight recurring pay per node. The JSON-RPC path holds
+        // this lock across the terminal wait; other callers take it here.
+        let _guard = self
+            .recurrence_pay_lock
+            .lock()
+            .map_err(|_| error::anyhow!("recurrence pay lock poisoned"))?;
+        self.pay_recurring_offer_locked(offer_str, amount_msat, payer_note, max_fee_msat, cadence)
+    }
+
+    pub(crate) fn pay_recurring_offer_locked(
+        &self,
+        offer_str: &str,
+        amount_msat: Option<u64>,
+        payer_note: Option<String>,
+        max_fee_msat: Option<u64>,
+        cadence: RecurrenceCadence,
+    ) -> error::Result<(PaymentId, String)> {
+        let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
+        let key = series_key(&offer);
+        let amount = match offer.amount() {
+            Some(Amount::Bitcoin { amount_msats }) => amount_msats,
+            Some(_) => error::bail!(
+                "Cannot process non-Bitcoin-denominated offer value {:?}",
+                offer.amount()
+            ),
+            None => amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?,
+        };
+        let mut series = match self.recurrence.load(&key)? {
+            Some(series) if series.cancelled => {
+                // starts a fresh subscription: new id, period 0. The new
+                // relationship is unambiguous to the payee. Pending is
+                // always None here: cancel refuses in-flight payments, and
+                // nothing else writes a cancelled series.
+                let fresh = RecurrenceSeries::new(self.keys_manager.get_secure_random_bytes());
+                self.recurrence.save(&key, &fresh)?;
+                fresh
+            }
+            Some(series) => series,
+            None => {
+                let fresh = RecurrenceSeries::new(self.keys_manager.get_secure_random_bytes());
+                self.recurrence.save(&key, &fresh)?;
+                fresh
+            }
+        };
+        if series.pending_payment.is_some() {
+            error::bail!("a recurring payment for this offer is already in flight");
+        }
+
+        let recurrence_id = RecurrenceId(series.recurrence_id);
+        let payment_id = PaymentId(self.keys_manager.get_secure_random_bytes());
+        log::debug!(target: "lampo::offchain", "paying recurring offer period `{}` with amount `{}`msat", series.next_counter, amount);
+        // Mark in-flight before calling LDK: a crash between the LDK call
+        // and the post-call save must still show the payment as pending so
+        // restart does not replay the same period with stale state.
+        series.pending_payment = Some(payment_id.0);
+        self.recurrence.save(&key, &series)?;
+        if let Err(err) = self
+            .channel_manager
+            .manager()
+            .pay_for_recurrence(
+                &offer,
+                Some(amount),
+                payment_id,
+                recurrence_id,
+                RecurrencePaymentParams {
+                    counter: series.next_counter,
+                    start: series.start,
+                    prev_state: series.prev_state.clone(),
+                    quantity: None,
+                    expected_invoice_recurrence_basetime: series.expected_basetime,
+                },
+                OptionalOfferPaymentParams {
+                    payer_note,
+                    retry_strategy: Retry::Timeout(Duration::from_secs(120)),
+                    route_params_config: ldk::routing::router::RouteParametersConfig {
+                        max_total_routing_fee_msat: max_fee_msat,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .map_err(|err| error::anyhow!("{:?}", err))
+        {
+            // LDK refused the request, so nothing is in flight. Best
+            // effort: the pay already failed, a store error here only
+            // delays the retry.
+            series.pending_payment = None;
+            let _ = self.recurrence.save(&key, &series);
+            return Err(err);
+        }
+
+        Ok((payment_id, hex::encode(series.recurrence_id)))
+    }
+
+    /// Cancel the tracked recurrence series for this offer. The counter must
+    /// be nonzero, so a series that never paid has nothing to cancel.
+    /// Returns the hex recurrence id.
+    pub fn cancel_recurring_offer(&self, offer_str: &str) -> error::Result<String> {
+        let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
+        let key = series_key(&offer);
+        let mut series = self.recurrence.load(&key)?.ok_or(error::anyhow!(
+            "no recurrence series tracked for this offer"
+        ))?;
+        if series.cancelled {
+            error::bail!("recurrence series for this offer is already cancelled");
+        }
+        if series.pending_payment.is_some() {
+            error::bail!(
+                "a recurring payment for this offer is in flight; wait for it to settle first"
+            );
+        }
+        if series.next_counter == 0 {
+            error::bail!("series never paid; nothing to cancel");
+        }
+
+        // Same lock as the pay path: without it a concurrent pay could
+        // load the series, then save its stale copy over the cancelled
+        // mark below and resurrect the series after cancel.
+        let _guard = self
+            .recurrence_pay_lock
+            .lock()
+            .map_err(|_| error::anyhow!("recurrence pay lock poisoned"))?;
+        // Re-load under the lock; a pay may have settled while waiting.
+        series = self.recurrence.load(&key)?.ok_or(error::anyhow!(
+            "no recurrence series tracked for this offer"
+        ))?;
+        if series.cancelled {
+            error::bail!("recurrence series for this offer is already cancelled");
+        }
+        if series.pending_payment.is_some() {
+            error::bail!(
+                "a recurring payment for this offer is in flight; wait for it to settle first"
+            );
+        }
+        if series.next_counter == 0 {
+            error::bail!("series never paid; nothing to cancel");
+        }
+
+        // Mark cancelled before calling LDK so a crash between the wire
+        // send and the save cannot resurrect the series on restart. The
+        // mark is reverted if LDK refuses the request.
+        series.cancelled = true;
+        self.recurrence.save(&key, &series)?;
+        if let Err(err) = self
+            .channel_manager
+            .manager()
+            .cancel_recurrence(
+                &offer,
+                RecurrenceId(series.recurrence_id),
+                RecurrenceCancellationParams {
+                    counter: series.next_counter,
+                    start: series.start,
+                    prev_state: series.prev_state.clone(),
+                },
+            )
+            .map_err(|err| error::anyhow!("{:?}", err))
+        {
+            series.cancelled = false;
+            let _ = self.recurrence.save(&key, &series);
+            return Err(err);
+        }
+
+        Ok(hex::encode(series.recurrence_id))
+    }
+
+    /// Drop the in-flight mark for a recurring pay the RPC stopped waiting
+    /// on. Holds the series lock for the whole wait so a late `PaymentSent`
+    /// cannot advance the counter between the timeout and this clear.
+    /// A late `PaymentFailed` then finds nothing pending and is a no-op.
+    /// The payment may still settle in LDK; the operator retries the same
+    /// period, and a duplicate period is the payee's rejection, not a
+    /// skipped one.
+    pub fn release_recurring_pay(&self, payment_id: &[u8; 32]) -> error::Result<()> {
+        self.recurrence.clear_pending(payment_id)
+    }
+
+    /// Lock covering the recurring pay/cancel/release sequence. The JSON-RPC
+    /// waiter holds it across the terminal-event wait so a timeout release
+    /// cannot race `PaymentSent`.
+    pub fn recurrence_pay_lock(&self) -> &std::sync::Mutex<()> {
+        &self.recurrence_pay_lock
+    }
+
+    /// Build an offer-level recurrence descriptor for the `offer` RPC flag.
+    /// v1 only advertises optional recurrence: one-shot payers keep working.
+    pub fn ldk_recurrence(cadence: RecurrenceCadence) -> Recurrence {
+        Recurrence {
+            recurrence_type: RecurrenceType::Optional,
+            recurrence_period: cadence.to_ldk_period(),
+            recurrence_paywindow: None,
+            recurrence_limit: None,
+        }
     }
 
     pub fn pay_invoice(
