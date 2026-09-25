@@ -453,4 +453,35 @@ mod tests {
         buf[0] = RECORD_VERSION + 1;
         assert!(RecurrenceSeries::decode(&buf).is_err());
     }
+
+    #[test]
+    fn series_survives_store_reopen() {
+        // Simulates a node restart: the series must reload from disk with
+        // the same id, counter, and state, so the next pay continues it.
+        let dir = std::env::temp_dir().join(format!("lampo-recur-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = "deadbeef".to_owned();
+        let series = RecurrenceSeries {
+            recurrence_id: [5u8; 32],
+            next_counter: 2,
+            start: None,
+            prev_state: Some(vec![9u8; 56]),
+            expected_basetime: Some(1_700_000_000),
+            pending_payment: None,
+            cancelled: false,
+        };
+        {
+            let store = RecurrenceStore::new(Arc::new(LampoPersistence::new(dir.clone())));
+            store.save(&key, &series).unwrap();
+        }
+        {
+            let store = RecurrenceStore::new(Arc::new(LampoPersistence::new(dir.clone())));
+            let loaded = store
+                .load(&key)
+                .unwrap()
+                .expect("series must survive a store reopen");
+            assert_eq!(loaded, series);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
