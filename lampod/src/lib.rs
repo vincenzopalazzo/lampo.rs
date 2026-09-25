@@ -37,6 +37,7 @@ use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
 use lampo_common::{error, ldk};
+use lampo_plugin::PluginManager;
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
@@ -290,6 +291,15 @@ impl LampoDaemon {
             error::bail!("Initial handler is None");
         };
         handler.add_external_handler(ext_handler).await?;
+        Ok(())
+    }
+
+    /// Set the plugin manager on the handler for hook invocation and notifications.
+    pub async fn set_plugin_manager(&self, manager: Arc<PluginManager>) -> error::Result<()> {
+        let Some(ref handler) = self.handler else {
+            error::bail!("Initial handler is None");
+        };
+        handler.set_plugin_manager(manager).await;
         Ok(())
     }
 

@@ -1,6 +1,10 @@
 [workspace]
 members = [
         "lampo-common",
+        "lampo-plugin-common",
+        "lampo-plugin",
+        "lampo-plugin-sdk",
+        "lampo-bitcoind",
         "lampod",
         "lampod-cli",
         "lampo-cli",
@@ -14,6 +18,10 @@ members = [
 
 default-members = [
         "lampo-common",
+        "lampo-plugin-common",
+        "lampo-plugin",
+        "lampo-plugin-sdk",
+        "lampo-bitcoind",
         "lampod",
         "lampod-cli",
         "lampo-cli",
@@ -25,13 +33,21 @@ default-members = [
 resolver = "2"
 
 # LDK 0.3 is published to crates.io as a pre-release, so the requirement has to
-# spell out `0.3.0-rc2`: a bare `0.3` does not match pre-release versions.
+# spell out `0.3.0-beta1`: a bare `0.3` does not match pre-release versions.
 # Bump every lightning* crate together so the stack stays on one version
 # (see issue #537).
 [workspace.dependencies]
-lightning = "0.3.0-rc2"
-lightning-block-sync = "0.3.0-rc2"
-lightning-persister = { version = "0.3.0-rc2", features = ["tokio"] }
-lightning-background-processor = "0.3.0-rc2"
-lightning-net-tokio = "0.3.0-rc2"
-lightning-rapid-gossip-sync = "0.3.0-rc2"
+lightning = "0.3.0-beta1"
+lightning-block-sync = "0.3.0-beta1"
+lightning-persister = { version = "0.3.0-beta1", features = ["tokio"] }
+lightning-background-processor = "0.3.0-beta1"
+lightning-net-tokio = "0.3.0-beta1"
+lightning-rapid-gossip-sync = "0.3.0-beta1"
+
+# TEMPORARY (BOLT 12 recurrence v1): override the `lightning` crate with the
+# lampo fork carrying rust-lightning PR #4882, until upstream releases it.
+# Branch: lampo-bolt12-recurrence. See docs/plans/2026-09-24-bolt12-recurrence-v1.md.
+# All other lightning* crates stay on crates.io 0.3.0-beta1.
+[patch.crates-io]
+lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-bolt12-recurrence" }
+lightning-liquidity = { git = "https://github.com/vincenzopalazzo/rust-lightning.git", branch = "lampo-bolt12-recurrence" }

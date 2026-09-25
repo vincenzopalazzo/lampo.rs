@@ -54,6 +54,11 @@ r = random.Random('$SEED:amt:$1')
 print(int(math.exp(math.log($2) + (math.log($3)-math.log($2)) * r.random())))"
 }
 
+bcli_root() { # bitcoind RPC with no wallet in the URL
+  curl -sS --max-time 30 --user "$CORE_USER:$CORE_PASS" \
+    --data-binary "{\"jsonrpc\":\"1.0\",\"id\":1,\"method\":\"$1\",\"params\":${2:-[]}}" \
+    "$CORE_URL"
+}
 bcli() { # bitcoind RPC on the loaded `default` wallet
   curl -sS --max-time 30 --user "$CORE_USER:$CORE_PASS" \
     --data-binary "{\"jsonrpc\":\"1.0\",\"id\":1,\"method\":\"$1\",\"params\":${2:-[]}}" \
@@ -61,6 +66,25 @@ bcli() { # bitcoind RPC on the loaded `default` wallet
 }
 bcres() { bcli "$@" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(json.dumps(d.get("result") if "result" in d else d.get("error")))' 2>/dev/null; }
 mine() { local a; a=$(bcres getnewaddress | tr -d '"'); bcli generatetoaddress "[${1:-6},\"$a\"]" >/dev/null 2>&1; }
+
+# A fresh regtest often has one named wallet and no `default`, and no
+# fee estimates. Create `default`, mature some coins, and send with an
+# explicit fee rate so fund_node does not silently no-op.
+ensure_funder() {
+  local wallets
+  wallets=$(bcli_root listwallets | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ".join(d.get("result") or []))' 2>/dev/null || true)
+  case " $wallets " in
+    *" default "*) ;;
+    *) bcli_root createwallet '["default"]' >/dev/null || return 1 ;;
+  esac
+  # 101 blocks makes the coinbase mature. A second call is cheap if the
+  # wallet already has spendable coins.
+  local bal
+  bal=$(bcres getbalance | tr -d '"')
+  if ! python3 -c "import sys; sys.exit(0 if float('${bal:-0}') >= 1 else 1)"; then
+    mine 101 || return 1
+  fi
+}
 
 rpc() { curl -sS --max-time "$TMO" -X POST "http://127.0.0.1:$1/$2" -H 'content-type: application/json' -d "${3:-{\}}"; }
 jqf() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)" 2>/dev/null; }
@@ -102,7 +126,15 @@ core-url=$CORE_URL
 core-user=$CORE_USER
 core-pass=$CORE_PASS
 EOF
+  # Plugins are a CLI flag, not a conf line. The daemon also reads
+  # `plugin=` from the conf, and a path in both places starts it twice.
+  local -a plugin_args=()
+  local plugin
+  for plugin in ${LAMPO_PLUGINS:-}; do
+    plugin_args+=(--plugin "$plugin")
+  done
   setsid nohup "$BIN" --data-dir "$dir" --network regtest \
+      "${plugin_args[@]}" \
       > "$dir/mh.log" 2>&1 < /dev/null &
   disown 2>/dev/null || true
 }
@@ -114,9 +146,14 @@ wait_up() { # $1 name -> echoes node_id (relaunches: cold dirs need 2 tries)
   local n=$1 id
   for _ in $(seq 1 3); do
     for _ in $(seq 1 12); do
-      sleep 5
+      sleep 2
       id=$(rpc "$(API "$n")" getinfo | jqf 'd["node_id"]')
       [ -n "$id" ] && { echo "$id"; return 0; }
+      # First start writes wallet.dat and exits. Relaunch as soon as
+      # that process is gone instead of waiting out the whole minute.
+      if [ -z "$(node_pid "$n")" ]; then
+        break
+      fi
     done
     start_node "$n"
   done
@@ -133,10 +170,20 @@ wait_dead() { # $1 name [$2 timeout=60] -> 0 iff the process exits in time
 api_dead() { [ -z "$(rpc "$(API "$1")" getinfo | jqf 'd.get("node_id","")')" ]; }
 
 fund_node() { # $1 name $2 btc
-  local addr
+  local addr tx
+  ensure_funder || { say "funder wallet not ready"; return 1; }
   addr=$(rpc "$(API "$1")" new_addr | jqf 'd["address"]')
   [ -n "$addr" ] || { say "no address from $1"; return 1; }
-  bcres sendtoaddress "[\"$addr\", $2]" >/dev/null
+  # fee_rate is sat/vB. Regtest has no estimates, so an explicit rate is
+  # required. Conf target is omitted: bitcoind rejects both together.
+  tx=$(bcli sendtoaddress "[\"$addr\", $2, \"\", \"\", false, true, null, \"unset\", null, 1.0]" \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin)
+r=d.get("result")
+print(r if isinstance(r,str) else d.get("error"))')
+  case "$tx" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) say "funded $1 $addr $tx" ;;
+    *) say "fund $1 failed: $tx"; return 1 ;;
+  esac
   mine 6
 }
 open_channel() { # $1 from-name $2 to-name $3 to-id [$4 amount] [$5 push_msat]

@@ -29,6 +29,10 @@ use lampo_common::ldk::util::wallet_utils::{Utxo, Wallet, WalletSource};
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
 use lampo_common::utils::logger::LampoLogger;
+use lampo_plugin::PluginManager;
+use lampo_plugin_common::hooks::HookPoint;
+use lampo_plugin_common::messages::HookResponse;
+use lampo_plugin_common::topics;
 
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
@@ -105,6 +109,8 @@ pub struct LampoHandler {
     #[allow(dead_code)]
     emitter: Emitter<Event>,
     subscriber: Subscriber<Event>,
+    /// Plugin manager for hook invocation and notifications.
+    plugin_manager: RwLock<Option<Arc<PluginManager>>>,
 }
 
 impl LampoHandler {
@@ -140,6 +146,7 @@ impl LampoHandler {
             external_handlers: RwLock::new(Vec::new()),
             emitter,
             subscriber,
+            plugin_manager: RwLock::new(None),
         }
     }
 
@@ -165,6 +172,36 @@ impl LampoHandler {
             .unwrap_or(0)
     }
 
+    /// Set the plugin manager for hook invocation and notifications.
+    pub async fn set_plugin_manager(&self, manager: Arc<PluginManager>) {
+        let mut pm = self.plugin_manager.write().await;
+        *pm = Some(manager);
+    }
+
+    pub async fn plugin_manager(&self) -> Option<Arc<PluginManager>> {
+        self.plugin_manager.read().await.clone()
+    }
+
+    async fn notify_plugins(&self, topic: &str, payload: json::Value) {
+        let pm = self.plugin_manager.read().await;
+        if let Some(ref manager) = *pm {
+            manager.notify(topic, payload).await;
+        }
+    }
+
+    async fn run_hook(
+        &self,
+        hook: &HookPoint,
+        payload: json::Value,
+    ) -> error::Result<HookResponse> {
+        let pm = self.plugin_manager.read().await;
+        if let Some(ref manager) = *pm {
+            manager.run_hook(hook, payload).await
+        } else {
+            Ok(HookResponse::Continue { payload: None })
+        }
+    }
+
     /// Call any method supported by the lampod configuration. This includes
     /// a lot of handler code. This function serves as a broker pattern in some ways,
     /// but it may also function as a chain of responsibility pattern in certain cases.
@@ -183,6 +220,19 @@ impl LampoHandler {
 }
 
 impl EventHandler for LampoHandler {
+    fn call<'a>(
+        &'a self,
+        method: &'a str,
+        args: json::Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = error::Result<json::Value>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let request = Request::new(method, args);
+            let command = Command::from_req(&request)?;
+            self.react(command).await
+        })
+    }
+
     fn emit(&self, event: Event) {
         log::debug!(target: "emitter", "emit event: {:?}", event);
         self.emitter.emit(event)
@@ -227,11 +277,32 @@ impl Handler for LampoHandler {
             ldk::events::Event::OpenChannelRequest {
                 temporary_channel_id,
                 counterparty_node_id,
+                funding_satoshis,
+                channel_type,
                 ..
             } => {
-                // LDK 0.3 removed `manually_accept_inbound_channels`; inbound
-                // channels are now always surfaced here and must be accepted
-                // explicitly. Auto-accept to preserve the previous behaviour.
+                let hook_payload = json::json!({
+                    "temporary_channel_id": temporary_channel_id.to_string(),
+                    "counterparty_node_id": counterparty_node_id.to_string(),
+                    "funding_satoshis": funding_satoshis,
+                    "channel_type": format!("{:?}", channel_type),
+                });
+                if let HookResponse::Reject { message } =
+                    self.run_hook(&HookPoint::OpenChannel, hook_payload).await?
+                {
+                    log::info!(target: "plugin", "openchannel rejected by plugin: {message}");
+                    // LDK documents this as the reject path. Returning Err
+                    // only replays OpenChannelRequest.
+                    self.channel_manager
+                        .manager()
+                        .force_close_broadcasting_latest_txn(
+                            &temporary_channel_id,
+                            &counterparty_node_id,
+                            message,
+                        )
+                        .map_err(|err| error::anyhow!("{:?}", err))?;
+                    return Ok(());
+                }
                 log::info!(
                     target: "lampod",
                     "accepting inbound channel request from `{counterparty_node_id}`"
@@ -250,6 +321,15 @@ impl Handler for LampoHandler {
                 ..
             } => {
                 log::info!("channel ready with node `{counterparty_node_id}`, and channel type {channel_type}");
+                self.notify_plugins(
+                    topics::CHANNEL_READY,
+                    json::json!({
+                        "counterparty_node_id": counterparty_node_id.to_string(),
+                        "channel_id": channel_id.to_string(),
+                        "channel_type": format!("{:?}", channel_type),
+                    }),
+                )
+                .await;
                 self.emit(Event::Lightning(LightningEvent::ChannelReady {
                     counterparty_node_id,
                     channel_id,
@@ -373,6 +453,16 @@ impl Handler for LampoHandler {
 
                 let node_id = counterparty_node_id.map(|id| id.to_string());
                 let txo = channel_funding_txo.map(|txo| txo.to_string());
+                self.notify_plugins(
+                    topics::CHANNEL_CLOSED,
+                    json::json!({
+                        "channel_id": channel_id.to_string(),
+                        "counterparty_node_id": node_id.clone(),
+                        "reason": detailed_reason,
+                        "funding_utxo": txo.clone(),
+                    }),
+                )
+                .await;
                 self.emit(Event::Lightning(LightningEvent::CloseChannelEvent {
                     channel_id: channel_id.to_string(),
                     message: detailed_reason.clone(),
@@ -532,6 +622,14 @@ impl Handler for LampoHandler {
                     "channel pending with node `{}` with funding `{funding_txo}`",
                     counterparty_node_id.to_string()
                 );
+                self.notify_plugins(
+                    topics::CHANNEL_PENDING,
+                    json::json!({
+                        "counterparty_node_id": counterparty_node_id.to_string(),
+                        "funding_txo": funding_txo.to_string(),
+                    }),
+                )
+                .await;
                 self.emit(Event::Lightning(LightningEvent::ChannelPending {
                     counterparty_node_id,
                     funding_transaction: funding_txo,
@@ -576,6 +674,15 @@ impl Handler for LampoHandler {
                 purpose,
                 ..
             } => {
+                self.notify_plugins(
+                    topics::PAYMENT,
+                    json::json!({
+                        "payment_hash": payment_hash.to_string(),
+                        "amount_msat": amount_msat,
+                        "direction": "inbound",
+                    }),
+                )
+                .await;
                 let (payment_preimage, payment_secret) = match purpose {
                     ldk::events::PaymentPurpose::Bolt11InvoicePayment {
                         payment_preimage,
@@ -670,6 +777,14 @@ impl Handler for LampoHandler {
                     .get_expanded_key();
                 let payer_proof = payer_proof::build(&record, &expanded_key, payment_id);
 
+                self.notify_plugins(
+                    topics::PAYMENT,
+                    json::json!({
+                        "payment_hash": payment_hash.to_string(),
+                        "direction": "outbound",
+                    }),
+                )
+                .await;
                 self.emit(Event::Lightning(LightningEvent::PaymentReceipt {
                     payment_id: lampo_common::hex::encode(payment_id.0),
                     payment_preimage: lampo_common::hex::encode(record.preimage.0),
