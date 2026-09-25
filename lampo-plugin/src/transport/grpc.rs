@@ -37,8 +37,11 @@ pub struct GrpcConfig {
 }
 
 /// Transport that communicates with a remote plugin over gRPC.
+///
+/// The client is cloned per call. Holding one mutex across `HandleRpc`
+/// deadlocks when that handler calls another method on this plugin.
 pub struct GrpcTransport {
-    client: tokio::sync::Mutex<LampoPluginClient<Channel>>,
+    client: LampoPluginClient<Channel>,
     alive: Arc<AtomicBool>,
     endpoint: String,
 }
@@ -70,7 +73,7 @@ impl GrpcTransport {
         let client = LampoPluginClient::new(channel);
 
         Ok(Self {
-            client: tokio::sync::Mutex::new(client),
+            client,
             alive: Arc::new(AtomicBool::new(true)),
             endpoint: config.endpoint,
         })
@@ -94,7 +97,7 @@ impl PluginTransport for GrpcTransport {
         // Preserve the request id for the response envelope
         let req_id = msg.get("id").cloned().unwrap_or(serde_json::json!(null));
 
-        let mut client = self.client.lock().await;
+        let mut client = self.client.clone();
 
         match method.as_str() {
             "getmanifest" => {
@@ -186,8 +189,8 @@ impl PluginTransport for GrpcTransport {
             .to_string();
         let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
 
-        let mut client = self.client.lock().await;
-        client
+        self.client
+            .clone()
             .notify(proto::NotifyRequest {
                 topic,
                 payload_json: serde_json::to_string(&params)?,
@@ -201,8 +204,11 @@ impl PluginTransport for GrpcTransport {
     }
 
     async fn shutdown(&self) -> error::Result<()> {
-        let mut client = self.client.lock().await;
-        let _ = client.shutdown(proto::ShutdownRequest {}).await;
+        let _ = self
+            .client
+            .clone()
+            .shutdown(proto::ShutdownRequest {})
+            .await;
         self.alive.store(false, Ordering::Release);
         Ok(())
     }

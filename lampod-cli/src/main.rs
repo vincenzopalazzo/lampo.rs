@@ -228,7 +228,8 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             .map(|id| id.to_string())
             .unwrap_or_default()
     };
-    let plugin_manager = Arc::new(start_plugins(&lampo_conf, &node_id).await?);
+    let (rpc_addr, rpc_tx) = bind_plugin_host().await?;
+    let plugin_manager = Arc::new(start_plugins(&lampo_conf, &node_id, &rpc_addr).await?);
     client.set_handler(plugin_manager.clone());
 
     // Do wallet syncing in the background! (`LampoDaemon::new` already shared
@@ -239,6 +240,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     lampod.init(client).await?;
 
     let lampod = Arc::new(lampod);
+    serve_plugin_host(lampod.clone(), rpc_tx);
 
     // Plugin methods before httpd, so `lampo-cli foo` hits the plugin first.
     lampod.add_external_handler(plugin_manager.clone()).await?;
@@ -282,6 +284,70 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 }
 
 /// Discover and start all plugins from config and CLI args.
+
+/// gRPC `LampoHost` on `127.0.0.1:0`. Plugins call this instead of a
+/// second JSON-RPC socket. Returns `127.0.0.1:<port>`.
+async fn bind_plugin_host(
+) -> error::Result<(String, tokio::sync::oneshot::Sender<Arc<LampoDaemon>>)> {
+    use lampo_plugin::transport::grpc::proto::lampo_host_server::{LampoHost, LampoHostServer};
+    use lampo_plugin::transport::grpc::proto::{RpcRequest, RpcResponse};
+    use tonic::{Request, Response, Status};
+
+    struct Host {
+        lampod: Arc<LampoDaemon>,
+    }
+
+    #[tonic::async_trait]
+    impl LampoHost for Host {
+        async fn call(
+            &self,
+            request: Request<RpcRequest>,
+        ) -> Result<Response<RpcResponse>, Status> {
+            let request = request.into_inner();
+            let params = lampo_common::json::from_str(&request.params_json)
+                .unwrap_or(lampo_common::json::json!({}));
+            match self.lampod.call(&request.method, params).await {
+                Ok(result) => {
+                    let result_json = lampo_common::json::to_string(&result)
+                        .map_err(|err| Status::internal(err.to_string()))?;
+                    Ok(Response::new(RpcResponse {
+                        result_json,
+                        error_message: String::new(),
+                        error_code: 0,
+                    }))
+                }
+                Err(err) => Ok(Response::new(RpcResponse {
+                    result_json: String::new(),
+                    error_message: err.to_string(),
+                    error_code: -1,
+                })),
+            }
+        }
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    log::info!(target: "lampod-cli", "plugin host grpc `{addr}`");
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    tokio::spawn(async move {
+        let Ok(lampod) = rx.await else {
+            return;
+        };
+        let server = tonic::transport::Server::builder()
+            .add_service(LampoHostServer::new(Host { lampod }))
+            .serve_with_incoming(incoming);
+        if let Err(err) = server.await {
+            log::error!(target: "lampod-cli", "plugin host stopped: {err}");
+        }
+    });
+    Ok((addr.to_string(), tx))
+}
+
+fn serve_plugin_host(lampod: Arc<LampoDaemon>, tx: tokio::sync::oneshot::Sender<Arc<LampoDaemon>>) {
+    let _ = tx.send(lampod);
+}
+
 /// `lampo-bitcoind` next to this binary, then `target/release` / `target/debug`.
 fn bitcoind_init(conf: &LampoConf, base: &InitConfig) -> InitConfig {
     let mut init = base.clone();
@@ -315,13 +381,18 @@ fn default_bitcoind_plugin() -> Option<String> {
     None
 }
 
-async fn start_plugins(conf: &LampoConf, node_id: &str) -> error::Result<PluginManager> {
+async fn start_plugins(
+    conf: &LampoConf,
+    node_id: &str,
+    rpc_addr: &str,
+) -> error::Result<PluginManager> {
     let manager = PluginManager::new();
 
     let init_config = InitConfig {
         lampo_dir: conf.path(),
         network: conf.network.to_string(),
         node_id: node_id.to_owned(),
+        rpc_file: rpc_addr.to_string(),
         options: lampo_common::json::Map::new(),
     };
 

@@ -11,7 +11,12 @@ grpc = ["tonic", "prost", "rcgen", "tonic-build", "protoc-bin-vendored"]
 lampo-common = { path = "../lampo-common" }
 lampo-plugin-common = { path = "../lampo-plugin-common" }
 
-tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "macros", "time"] }
+tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "macros", "time", "net", "fs"] }
+tower = "0.4"
+hyper = "1"
+hyper-util = "0.1"
+http = "1"
+futures-core = "0.3"
 async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

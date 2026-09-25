@@ -6,7 +6,11 @@
 //! - `GrpcTransport`: remote plugin via gRPC+mTLS (requires `grpc` feature)
 #[cfg(feature = "grpc")]
 pub mod grpc;
+#[cfg(feature = "grpc")]
+pub mod local;
 pub mod stdio;
+#[cfg(feature = "grpc")]
+pub mod uds;
 
 use async_trait::async_trait;
 use lampo_common::error;
@@ -28,4 +32,15 @@ pub trait PluginTransport: Send + Sync {
 
     /// Check if the plugin is still alive.
     fn is_alive(&self) -> bool;
+
+    /// True when `method` is already being handled by this plugin.
+    ///
+    /// `foo` calling `foo` waits on itself. Skip that method so the
+    /// built-in handler can answer, or the call fails closed. A different
+    /// method (`yoooo`) must still be forwarded: gRPC runs it on another
+    /// task. Default is false.
+    fn method_in_flight(&self, method: &str) -> bool {
+        let _ = method;
+        false
+    }
 }

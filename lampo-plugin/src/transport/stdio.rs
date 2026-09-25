@@ -24,6 +24,12 @@ pub struct StdioTransport {
     next_id: AtomicU64,
     /// Whether the plugin process is still running.
     alive: Arc<AtomicBool>,
+    /// Method names written to stdin and not yet answered.
+    ///
+    /// The reader loop handles one request at a time, so a second call of
+    /// the same method waits on itself. A different method is also unread
+    /// until the first returns, which is why local plugins use gRPC.
+    in_flight: Arc<std::sync::Mutex<Vec<String>>>,
     /// Handle to the child process (for cleanup on drop).
     child: Arc<Mutex<Child>>,
 }
@@ -154,6 +160,7 @@ impl StdioTransport {
             pending,
             next_id: AtomicU64::new(1),
             alive,
+            in_flight: Arc::new(std::sync::Mutex::new(Vec::new())),
             child: Arc::new(Mutex::new(child)),
         })
     }
@@ -194,6 +201,14 @@ impl PluginTransport for StdioTransport {
             obj.insert("id".to_owned(), serde_json::Value::Number(id.into()));
         }
 
+        let method_name = msg
+            .get("method")
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
+        if let Ok(mut in_flight) = self.in_flight.lock() {
+            in_flight.push(method_name.clone());
+        }
         // Register a pending receiver before sending
         let (tx, rx) = oneshot::channel();
         {
@@ -222,15 +237,27 @@ impl PluginTransport for StdioTransport {
         // Wait for the response with a timeout
         let response = tokio::time::timeout(std::time::Duration::from_secs(60), rx).await;
 
+        let clear = |method_name: &str| {
+            if let Ok(mut in_flight) = self.in_flight.lock() {
+                if let Some(pos) = in_flight.iter().position(|name| name == method_name) {
+                    in_flight.remove(pos);
+                }
+            }
+        };
         match response {
-            Ok(Ok(value)) => Ok(value),
+            Ok(Ok(value)) => {
+                clear(&method_name);
+                Ok(value)
+            }
             Ok(Err(_)) => {
+                clear(&method_name);
                 // Channel dropped — clean up pending entry
                 let mut pending = self.pending.write().await;
                 pending.remove(&id);
                 error::bail!("plugin response channel dropped")
             }
             Err(_timeout) => {
+                clear(&method_name);
                 // Timeout — clean up the pending entry to avoid leak
                 let mut pending = self.pending.write().await;
                 pending.remove(&id);
@@ -296,5 +323,12 @@ impl PluginTransport for StdioTransport {
 
     fn is_alive(&self) -> bool {
         self.alive.load(Ordering::SeqCst)
+    }
+
+    fn method_in_flight(&self, method: &str) -> bool {
+        self.in_flight
+            .lock()
+            .map(|in_flight| in_flight.iter().any(|name| name == method))
+            .unwrap_or(false)
     }
 }

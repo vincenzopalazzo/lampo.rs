@@ -16,6 +16,10 @@ pub struct InitConfig {
     /// The node's public key (hex-encoded).
     #[serde(default)]
     pub node_id: String,
+    /// gRPC address of the daemon, `127.0.0.1:<port>`. A plugin calls
+    /// `LampoHost.Call` there. Empty until the daemon is listening.
+    #[serde(default)]
+    pub rpc_file: String,
     /// Resolved option values from the manifest.
     #[serde(default)]
     pub options: serde_json::Map<String, serde_json::Value>,
