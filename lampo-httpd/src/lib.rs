@@ -10,6 +10,7 @@ use actix_web::body::MessageBody;
 use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::middleware::{from_fn, Next};
 use actix_web::{App, Error, HttpResponse, HttpServer, ResponseError};
+use paperclip::actix::web::Json;
 use paperclip::actix::{self, CreatedJson};
 
 use lampo_common::error;
@@ -24,6 +25,7 @@ use commands::offchain::{
 };
 use commands::onchain::rest_new_addr;
 use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel};
+use commands::plugin::{rest_plugin_start, rest_plugin_stop};
 
 use crate::commands::offchain::rest_offer;
 
@@ -31,7 +33,7 @@ use crate::commands::offchain::rest_offer;
 pub type ResultJson<T> = std::result::Result<CreatedJson<T>, actix_web::Error>;
 
 #[derive(Debug)]
-struct JsonRPCError {
+pub(crate) struct JsonRPCError {
     code: i32,
     message: String,
     data: Option<json::Value>,
@@ -276,12 +278,51 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_funds)
             .service(rest_new_addr)
             .service(rest_stop)
+            .service(rest_plugin_start)
+            .service(rest_plugin_stop)
             .build()
+            // Outside wrap_api(): paperclip's service() requires Apiv2Operation,
+            // and a plugin response has no static schema. Typed routes above
+            // still win. `lampo-cli foo` POSTs `/foo` into the external-handler
+            // chain, where PluginManager is first.
+            .service(rest_plugin_method)
     })
     .disable_signals()
     .bind(host)?;
     server.run().await?;
     Ok(())
+}
+
+/// Forward an unknown method into `LampoDaemon::call`.
+///
+/// Typed routes (`/pay`, `/getinfo`, ...) are registered first and win.
+/// Everything else is a plugin method, or `method not found` from the
+/// handler chain. The JSON extractor is required: without
+/// `Content-Type: application/json` this would be a simple cross-origin
+/// request, same as the bodyless routes in the `post!` macro.
+///
+/// Not a paperclip operation: the response type is whatever the plugin
+/// returns, so it cannot implement `Apiv2Operation`.
+#[actix_web::post("/{method}")]
+async fn rest_plugin_method(
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+    body: Json<json::Value>,
+) -> Result<HttpResponse, actix_web::Error> {
+    let method = path.into_inner();
+    log::debug!(target: "httpd", "plugin method `{method}`");
+    match state.lampod.call(&method, body.into_inner()).await {
+        Ok(value) => Ok(HttpResponse::Created().json(value)),
+        Err(err) => {
+            log::error!(target: "httpd", "error from backend {err}");
+            Err(JsonRPCError {
+                code: -1,
+                message: err.to_string(),
+                data: None,
+            }
+            .into())
+        }
+    }
 }
 
 // this is just a hack to support swagger UI with https://paperclip-rs.github.io/paperclip/
