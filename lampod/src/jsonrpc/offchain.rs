@@ -214,7 +214,7 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
             .or(request.amount),
     };
 
-    let (payment_id, recurrence_id) = if request.cancel_recurrence {
+    if request.cancel_recurrence {
         if request.recurrence.is_some() {
             return Err(crate::rpc_error!(
                 "recurrence and cancel_recurrence are mutually exclusive"
@@ -242,13 +242,18 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
         let cadence = crate::ln::RecurrenceCadence::parse(recurrence)
             .map_err(|err| crate::rpc_error!("{err}"))?;
         log::debug!(
+            target: "lampo::offchain",
             "Paying recurring offer with bolt12 invoice: {}",
             request.invoice_str
         );
         let payer_note = request.bolt12.and_then(|x| x.payer_note);
-        let (payment_id, recurrence_id) = ctx
-            .offchain_manager()
-            .pay_recurring_offer(
+        let offchain = ctx.offchain_manager();
+        let _guard = offchain
+            .recurrence_pay_lock()
+            .lock()
+            .map_err(|err| crate::rpc_error!("recurrence pay lock poisoned: {err}"))?;
+        let (payment_id, recurrence_id) = offchain
+            .pay_recurring_offer_locked(
                 &request.invoice_str,
                 request.amount,
                 payer_note,
@@ -256,8 +261,28 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
                 cadence,
             )
             .map_err(|err| crate::rpc_error!("{err}"))?;
-        (payment_id, Some(recurrence_id))
-    } else if parsed_offer.is_ok() {
+        let payment_id_hex = hex::encode(payment_id.0);
+        let timeout = terminal_wait_timeout(request.timeout_secs, request.timeout.duration());
+        let result = wait_for_payment_result(
+            events,
+            &payment_id_hex,
+            expected_value_msat,
+            timeout,
+            Some(&recurrence_id),
+        )
+        .await;
+        drop(_guard);
+        if result.is_err() {
+            if let Err(err) = offchain.release_recurring_pay(&payment_id.0) {
+                log::error!(
+                    target: "lampo::offchain",
+                    "releasing timed-out recurrence pay `{payment_id_hex}`: {err}"
+                );
+            }
+        }
+        return result;
+    };
+    let (payment_id, recurrence_id) = if parsed_offer.is_ok() {
         log::debug!("Paying offer with bolt12 invoice: {}", request.invoice_str);
         let payer_note = request.bolt12.and_then(|x| x.payer_note);
         let payment_id = ctx.offchain_manager().pay_offer(
@@ -266,7 +291,7 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
             payer_note,
             request.max_fee_msat,
         )?;
-        (payment_id, None)
+        (payment_id, None::<String>)
     } else {
         log::debug!(
             "Paying invoice with bolt11 invoice: {}",
@@ -278,7 +303,7 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
             request.max_fee_msat,
             request.timeout_secs,
         )?;
-        (payment_id, None)
+        (payment_id, None::<String>)
     };
     // The event bus broadcasts to every subscriber, so a concurrent `pay` would
     // otherwise see this payment's result -- and now its preimage and payer
@@ -289,14 +314,15 @@ pub async fn json_pay(ctx: &LampoDaemon, request: &json::Value) -> Result<json::
     // for the real terminal event so an in-flight payment is never reported as
     // failed merely because that deadline elapsed.
     let timeout = terminal_wait_timeout(request.timeout_secs, request.timeout.duration());
-    wait_for_payment_result(
+    let result = wait_for_payment_result(
         events,
         &payment_id,
         expected_value_msat,
         timeout,
         recurrence_id.as_deref(),
     )
-    .await
+    .await;
+    result
 }
 
 fn terminal_wait_timeout(

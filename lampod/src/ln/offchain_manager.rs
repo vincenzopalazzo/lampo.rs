@@ -265,26 +265,35 @@ impl OffchainManager {
             );
         }
 
+        // One in-flight recurring pay per node. The JSON-RPC path holds
+        // this lock across the terminal wait; other callers take it here.
+        let _guard = self
+            .recurrence_pay_lock
+            .lock()
+            .map_err(|_| error::anyhow!("recurrence pay lock poisoned"))?;
+        self.pay_recurring_offer_locked(offer_str, amount_msat, payer_note, max_fee_msat, cadence)
+    }
+
+    pub(crate) fn pay_recurring_offer_locked(
+        &self,
+        offer_str: &str,
+        amount_msat: Option<u64>,
+        payer_note: Option<String>,
+        max_fee_msat: Option<u64>,
+        cadence: RecurrenceCadence,
+    ) -> error::Result<(PaymentId, String)> {
+        let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
+        let key = series_key(&offer);
         let amount = match offer.amount() {
-            Some(Amount::Bitcoin { amount_msats }) => amount_msats.clone(),
+            Some(Amount::Bitcoin { amount_msats }) => amount_msats,
             Some(_) => error::bail!(
                 "Cannot process non-Bitcoin-denominated offer value {:?}",
                 offer.amount()
             ),
             None => amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?,
         };
-
-        let key = series_key(&offer);
-        // One in-flight recurring pay per node. The guard is synchronous
-        // end to end (LDK queues the request without awaiting), so two
-        // concurrent pays can never mint the same period twice.
-        let _guard = self
-            .recurrence_pay_lock
-            .lock()
-            .map_err(|_| error::anyhow!("recurrence pay lock poisoned"))?;
         let mut series = match self.recurrence.load(&key)? {
-            Some(mut series) if series.cancelled => {
-                // A cancelled series stays cancelled, but paying again
+            Some(series) if series.cancelled => {
                 // starts a fresh subscription: new id, period 0. The new
                 // relationship is unambiguous to the payee. Pending is
                 // always None here: cancel refuses in-flight payments, and
@@ -419,6 +428,24 @@ impl OffchainManager {
         }
 
         Ok(hex::encode(series.recurrence_id))
+    }
+
+    /// Drop the in-flight mark for a recurring pay the RPC stopped waiting
+    /// on. Holds the series lock for the whole wait so a late `PaymentSent`
+    /// cannot advance the counter between the timeout and this clear.
+    /// A late `PaymentFailed` then finds nothing pending and is a no-op.
+    /// The payment may still settle in LDK; the operator retries the same
+    /// period, and a duplicate period is the payee's rejection, not a
+    /// skipped one.
+    pub fn release_recurring_pay(&self, payment_id: &[u8; 32]) -> error::Result<()> {
+        self.recurrence.clear_pending(payment_id)
+    }
+
+    /// Lock covering the recurring pay/cancel/release sequence. The JSON-RPC
+    /// waiter holds it across the terminal-event wait so a timeout release
+    /// cannot race `PaymentSent`.
+    pub fn recurrence_pay_lock(&self) -> &std::sync::Mutex<()> {
+        &self.recurrence_pay_lock
     }
 
     /// Build an offer-level recurrence descriptor for the `offer` RPC flag.
