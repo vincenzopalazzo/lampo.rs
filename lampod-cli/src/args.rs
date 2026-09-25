@@ -74,6 +74,18 @@ pub struct LampoCliArgs {
     #[arg(long = "lnd-tls-san", value_delimiter = ',')]
     pub lnd_tls_sans: Vec<String>,
 
+    /// Load a plugin from the given path (can be repeated)
+    #[arg(long = "plugin")]
+    pub plugins: Vec<String>,
+
+    /// Load all plugins from this directory
+    #[arg(long = "plugin-dir")]
+    pub plugin_dir: Option<String>,
+
+    /// Connect to a remote plugin via gRPC (e.g. https://host:port, can be repeated)
+    #[arg(long = "remote-plugin")]
+    pub remote_plugins: Vec<String>,
+
     /// Subcommand to run
     #[command(subcommand)]
     pub subcommand: Option<LampoCliSubcommand>,
@@ -138,6 +150,16 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if !self.lnd_tls_sans.is_empty() {
             conf.lnd_tls_sans = self.lnd_tls_sans;
         }
+        // Merge plugin paths from CLI args with those from config file
+        if !self.plugins.is_empty() {
+            conf.plugins.extend(self.plugins);
+        }
+        if self.plugin_dir.is_some() {
+            conf.plugin_dir = self.plugin_dir;
+        }
+        if !self.remote_plugins.is_empty() {
+            conf.remote_plugins.extend(self.remote_plugins);
+        }
         Ok(conf)
     }
 }
@@ -167,6 +189,9 @@ mod tests {
             api_port: None,
             lnd: false,
             lnd_tls_sans: Vec::new(),
+            plugins: Vec::new(),
+            plugin_dir: None,
+            remote_plugins: Vec::new(),
             subcommand: None,
         }
     }

@@ -73,6 +73,12 @@ pub struct LampoConf {
     /// Symmetric tolerance, in basis points, around each configured rate.
     /// One basis point is 0.01%. Default is 100 (1%).
     pub currency_tolerance_bps: u16,
+    /// Plugin binary paths to load at startup.
+    pub plugins: Vec<String>,
+    /// Directory to scan for plugin binaries.
+    pub plugin_dir: Option<String>,
+    /// Remote plugin endpoints (e.g. "https://host:port").
+    pub remote_plugins: Vec<String>,
 }
 
 impl LampoConf {
@@ -134,11 +140,33 @@ impl Default for LampoConf {
             api_token: None,
             currency_rates: Vec::new(),
             currency_tolerance_bps: 100,
+            plugins: Vec::new(),
+            plugin_dir: None,
+            remote_plugins: Vec::new(),
         }
     }
 }
 
 impl LampoConf {
+    /// Resolve the default lampo root path.
+    ///
+    /// Resolution order: `$LAMPO_HOME`, then `$HOME/.lampo`, then
+    /// `./.lampo` as a last-resort fallback. Never panics: a daemon
+    /// started from a minimal systemd unit or a container may not have
+    /// a determinable home directory.
+    /// (uses the deprecated `std::env::home_dir()` to avoid a dependency on dirs)
+    pub fn default_root_path() -> String {
+        if let Ok(path) = std::env::var("LAMPO_HOME") {
+            path
+        } else {
+            #[allow(deprecated)]
+            match std::env::home_dir() {
+                Some(path) => format!("{}/.lampo", path.to_string_lossy()),
+                None => "./.lampo".to_owned(),
+            }
+        }
+    }
+
     pub fn prepare_dirs(&self) -> Result<(), anyhow::Error> {
         Self::prepare_directories(&self.root_path, Some(self.network))
     }
@@ -386,6 +414,11 @@ impl TryFrom<String> for LampoConf {
                 "currency-tolerance-bps `{currency_tolerance_bps}` must be below 10000 (100%)"
             );
         }
+        // Parse plugin paths from config
+        let plugins = conf.get_confs("plugin");
+        let plugin_dir = conf.get_conf("plugin-dir").unwrap_or(None);
+        let remote_plugins = conf.get_confs("remote-plugin");
+
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -417,6 +450,9 @@ impl TryFrom<String> for LampoConf {
             api_token,
             currency_rates,
             currency_tolerance_bps,
+            plugins,
+            plugin_dir,
+            remote_plugins,
         })
     }
 }
