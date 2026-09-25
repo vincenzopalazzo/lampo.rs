@@ -195,7 +195,9 @@ impl LampoChainSync {
         log::debug!("Connecting to core at: {host}:{port}");
 
         let base_url = format!("http://{host}:{port}");
-        let rpc_credentials = base64::encode(format!("{}:{}", core_user, core_pass));
+        // Cookie files end in a newline. A CR/LF in the Basic header is an
+        // illegal curl argument (error 43) and fails every later RPC.
+        let rpc_credentials = base64::encode(format!("{}:{}", core_user.trim(), core_pass.trim()));
 
         let rpc = RpcClient::new(&rpc_credentials, base_url);
 
