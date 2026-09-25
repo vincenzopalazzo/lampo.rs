@@ -24,6 +24,12 @@ service LampoPlugin {
     rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
+/// LampoHost is the daemon. A plugin dials it to call lampo methods
+/// while a HandleRpc is still in flight. Same messages as HandleRpc.
+service LampoHost {
+    rpc Call(RpcRequest) returns (RpcResponse);
+}
+
 // --- Manifest ---
 
 message ManifestRequest {}

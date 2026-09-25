@@ -28,6 +28,29 @@ impl HttpdHandler {
 #[async_trait]
 impl ExternalHandler for HttpdHandler {
     async fn handle(&self, req: &Request<json::Value>) -> error::Result<Option<json::Value>> {
+        // Plugin methods are not HTTP routes. Posting them back to
+        // `/{method}` re-enters this process. Built-ins are the typed routes.
+        const BUILTIN: &[&str] = &[
+            "getinfo",
+            "networkchannels",
+            "funds",
+            "invoice",
+            "offer",
+            "decode",
+            "pay",
+            "keysend",
+            "asyncinvoicepaths",
+            "setasyncinvoicepaths",
+            "new_addr",
+            "connect",
+            "close",
+            "channels",
+            "fundchannel",
+            "stop",
+        ];
+        if !BUILTIN.contains(&req.method.as_str()) {
+            return Ok(None);
+        }
         let response = self
             .inner
             .call_async(TransportMethod::Post(req.method.clone()), &req.params)

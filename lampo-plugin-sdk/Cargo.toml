@@ -6,7 +6,11 @@ description = "SDK for writing lampo plugins in Rust"
 
 [dependencies]
 lampo-plugin-common = { path = "../lampo-plugin-common" }
-tokio = { version = "1", features = ["io-util", "io-std", "sync", "rt", "macros"] }
+lampo-plugin = { path = "../lampo-plugin", features = ["grpc"] }
+tokio = { version = "1", features = ["io-util", "io-std", "sync", "rt", "macros", "net", "signal"] }
+tonic = { version = "0.12", features = ["transport"] }
+futures-core = "0.3"
+tokio-stream = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = { version = "0.4", features = ["std"] }

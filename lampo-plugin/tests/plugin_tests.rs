@@ -15,6 +15,7 @@ fn test_init_config() -> InitConfig {
         lampo_dir: "/tmp/lampo-test".to_string(),
         network: "regtest".to_string(),
         node_id: "02abc123".to_string(),
+        rpc_file: String::new(),
         options: serde_json::Map::new(),
     }
 }

@@ -29,6 +29,7 @@ pub async fn json_plugin_start(
         lampo_dir: conf.path(),
         network: conf.network.to_string(),
         node_id: String::new(),
+        rpc_file: format!("{}/lampo-rpc", conf.path()),
         options: json::Map::new(),
     };
     let name = manager
