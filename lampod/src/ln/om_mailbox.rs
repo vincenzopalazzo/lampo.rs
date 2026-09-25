@@ -20,14 +20,14 @@ use lampo_common::ldk::ln::msgs::OnionMessage;
 use lampo_common::ldk::util::persist::KVStoreSync;
 use lampo_common::ldk::util::ser::{LengthReadable, Writeable};
 
-use crate::persistence::LampoPersistence;
+use lampo_common::persist::LampoPersistenceBackend;
 
 const MAILBOX_NAMESPACE: &str = "om_mailbox";
 const QUEUE_VERSION: u8 = 1;
 
 pub struct OnionMessageMailbox {
     map: Mutex<HashMap<PublicKey, VecDeque<OnionMessage>>>,
-    persister: Option<Arc<LampoPersistence>>,
+    persister: Option<Arc<dyn LampoPersistenceBackend>>,
 }
 
 impl OnionMessageMailbox {
@@ -38,10 +38,10 @@ impl OnionMessageMailbox {
         Self::with_store(None)
     }
 
-    pub fn with_store(persister: Option<Arc<LampoPersistence>>) -> Self {
+    pub fn with_store(persister: Option<Arc<dyn LampoPersistenceBackend>>) -> Self {
         let mut map = HashMap::with_capacity(Self::MAX_PEERS);
         if let Some(store) = persister.as_ref() {
-            load_queues(store, &mut map);
+            load_queues(store.as_ref(), &mut map);
         }
         Self {
             map: Mutex::new(map),
@@ -163,7 +163,10 @@ impl OnionMessageMailbox {
     }
 }
 
-fn load_queues(persister: &LampoPersistence, map: &mut HashMap<PublicKey, VecDeque<OnionMessage>>) {
+fn load_queues(
+    persister: &dyn LampoPersistenceBackend,
+    map: &mut HashMap<PublicKey, VecDeque<OnionMessage>>,
+) {
     let keys = match persister.list(MAILBOX_NAMESPACE, "") {
         Ok(keys) => keys,
         Err(err) => {
@@ -255,7 +258,7 @@ fn decode_queue(buf: &[u8]) -> Result<Vec<OnionMessage>, String> {
     Ok(messages)
 }
 
-fn drop_corrupt(persister: &LampoPersistence, key: &str, reason: &str) {
+fn drop_corrupt(persister: &dyn LampoPersistenceBackend, key: &str, reason: &str) {
     log::error!(
         target: "lampo::om-mailbox",
         "dropping corrupt mailbox `{key}`: {reason}"
@@ -272,7 +275,7 @@ fn drop_corrupt(persister: &LampoPersistence, key: &str, reason: &str) {
 mod tests {
     use super::*;
     use lampo_common::bitcoin::secp256k1::{Secp256k1, SecretKey};
-    use lampo_common::ldk::persister::fs_store::v1::FilesystemStore;
+    use lampo_common::persist::FsPersistence;
 
     fn peer(seed: u16) -> PublicKey {
         let secp = Secp256k1::new();
@@ -294,7 +297,7 @@ mod tests {
         }
     }
 
-    fn temp_store() -> (Arc<LampoPersistence>, std::path::PathBuf) {
+    fn temp_store() -> (Arc<dyn LampoPersistenceBackend>, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!(
             "lampo-om-mailbox-{}-{}",
             std::process::id(),
@@ -304,7 +307,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        (Arc::new(FilesystemStore::new(dir.clone())), dir)
+        (Arc::new(FsPersistence::new(dir.clone())), dir)
     }
 
     #[test]
@@ -368,7 +371,7 @@ mod tests {
         assert_eq!(drained[1].onion_routing_packet.hop_data[0], 8);
         // Drain removes the on-disk queue.
         let empty =
-            OnionMessageMailbox::with_store(Some(Arc::new(FilesystemStore::new(dir.clone()))));
+            OnionMessageMailbox::with_store(Some(Arc::new(FsPersistence::new(dir.clone()))));
         assert!(empty.onion_message_peer_connected(peer_a).is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }

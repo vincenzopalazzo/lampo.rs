@@ -90,7 +90,7 @@ macro_rules! mine {
     };
 }
 
-pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
+pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<lampo_httpd::RunningHttpServer> {
     let url = format!("{}:{}", lampod.conf().api_host, lampod.conf().api_port);
     let mut http_hosting = url.clone();
     if let Some(clean_url) = url.strip_prefix("http://") {
@@ -99,8 +99,7 @@ pub async fn run_httpd(lampod: Arc<LampoDaemon>) -> error::Result<()> {
         http_hosting = clean_url.to_string();
     }
     log::info!("preparing httpd api on addr `{url}`");
-    tokio::spawn(lampo_httpd::run(lampod, http_hosting, url));
-    Ok(())
+    lampo_httpd::spawn(lampod, http_hosting, url)
 }
 
 pub async fn run_lnd_rest(lampod: Arc<LampoDaemon>, port: u16) -> error::Result<(u16, String)> {
@@ -129,7 +128,12 @@ pub async fn run_lnd_rest(lampod: Arc<LampoDaemon>, port: u16) -> error::Result<
 
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
+    /// Kept so a test can signal the daemon to shut down, as `restart` does.
     daemon: Arc<LampoDaemon>,
+    /// Event-processor task. `restart` must await this after shutdown so the
+    /// old persistence lock is gone before the replacement opens the store.
+    daemon_task: Option<tokio::task::JoinHandle<Result<(), lampo_common::ldk::io::Error>>>,
+    httpd: Option<lampo_httpd::RunningHttpServer>,
     root_path: Arc<TempDir>,
     pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
@@ -231,9 +235,12 @@ impl LampoTesting {
 
         let values = btc.params.get_cookie_values().unwrap();
         lampo_conf.core_url = Some(core_url);
-        lampo_conf.core_user = values.as_ref().and_then(|v| Some(v.user.to_owned()));
-        lampo_conf.core_pass = values.and_then(|v| Some(v.password));
+        lampo_conf.core_user = values.as_ref().map(|v| v.user.trim().to_owned());
+        lampo_conf.core_pass = values.map(|v| v.password.trim().to_owned());
         lampo_conf.dev_sync = Some(true);
+        // Run the whole suite against a chosen storage backend.
+        lampo_conf.storage = std::env::var("LAMPO_TEST_STORAGE").ok();
+        lampo_conf.storage_url = std::env::var("LAMPO_TEST_STORAGE_URL").ok();
 
         lampo_conf
             .ldk_conf
@@ -248,7 +255,7 @@ impl LampoTesting {
 
         // `LampoDaemon::new` shares the coordinator with the wallet, so the
         // wallet gates its Emitter on listener sync (production startup flow).
-        let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+        let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone())?;
         wallet.clone().listen().await?;
 
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
@@ -256,14 +263,13 @@ impl LampoTesting {
         log::info!("bitcoin core added inside lampo");
 
         // run httpd and create the handler that will connect to it
-        let handler = Arc::new(HttpdHandler::new(format!(
-            "http://{}:{}",
-            lampo_conf.api_host, lampo_conf.api_port
-        ))?);
+        let rpc_url = format!("http://{}:{}", lampo_conf.api_host, lampo_conf.api_port);
+        log::info!("httpd client url `{rpc_url}`");
+        let handler = Arc::new(HttpdHandler::new(rpc_url)?);
         lampo.add_external_handler(handler.clone()).await?;
         log::info!("Handler added to lampo");
         let lampo = Arc::new(lampo);
-        run_httpd(lampo.clone()).await?;
+        let httpd = run_httpd(lampo.clone()).await?;
         log::info!("httpd started");
 
         let (lnd_port, macaroon_hex) = if enable_lnd_rest {
@@ -277,7 +283,7 @@ impl LampoTesting {
 
         // run lampo and take the handler over to run commands
         let handler = lampo.handler();
-        tokio::spawn(lampo.clone().listen());
+        let daemon_task = lampo.clone().listen();
 
         // wait that lampo starts (bounded: an infinite wait hangs the whole CI job)
         let mut ready = false;
@@ -305,6 +311,8 @@ impl LampoTesting {
         let node = Self {
             inner: handler,
             daemon: lampo,
+            daemon_task: Some(daemon_task),
+            httpd: Some(httpd),
             mnemonic,
             port: port.into(),
             wallet,
@@ -318,17 +326,126 @@ impl LampoTesting {
         Ok(node)
     }
 
+    /// Bring the node back up over the same data directory, as a process
+    /// restart would. The old daemon is signalled to shut down and dropped
+    /// before the replacement opens the store, so SQLite/Postgres writer locks
+    /// are released first.
+    pub async fn restart(mut self) -> error::Result<Self> {
+        if let Some(httpd) = self.httpd.take() {
+            httpd.stop().await?;
+        }
+        self.daemon.shutdown();
+        let daemon_task = self.daemon_task.take();
+        let mnemonic = self.mnemonic.clone();
+        let btc = self.btc.clone();
+        let root_path = Arc::clone(&self.root_path);
+        // Drop the old daemon graph (and its persistence Arc) before opening a
+        // replacement store against the same destination. The event processor
+        // is awaited first so its final persist finishes and releases the store.
+        drop(self);
+        if let Some(task) = daemon_task {
+            match tokio::time::timeout(Duration::from_secs(15), task).await {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(err))) => {
+                    log::warn!("daemon task ended with `{err}` during restart");
+                }
+                Ok(Err(err)) => {
+                    log::warn!("daemon task panicked during restart: {err}");
+                }
+                Err(_) => {
+                    log::warn!("daemon task did not exit within 15s of shutdown");
+                }
+            }
+        }
+
+        let port = port::random_free_port().unwrap();
+        let mut lampo_conf = LampoConf::new(
+            Some(root_path.path().to_string_lossy().to_string()),
+            Some(lampo_common::bitcoin::Network::Regtest),
+            Some(port.into()),
+        )?;
+        lampo_conf.api_port = port::random_free_port().unwrap().into();
+        let values = btc.params.get_cookie_values().unwrap();
+        lampo_conf.core_url = Some(btc.rpc_url());
+        lampo_conf.core_user = values.as_ref().map(|v| v.user.trim().to_owned());
+        lampo_conf.core_pass = values.map(|v| v.password.trim().to_owned());
+        lampo_conf.dev_sync = Some(true);
+        lampo_conf.storage = std::env::var("LAMPO_TEST_STORAGE").ok();
+        lampo_conf.storage_url = std::env::var("LAMPO_TEST_STORAGE_URL").ok();
+        lampo_conf
+            .ldk_conf
+            .channel_handshake_limits
+            .force_announced_channel_preference = false;
+
+        let lampo_conf = Arc::new(lampo_conf);
+        let wallet = Arc::new(BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?);
+        let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone())?;
+        wallet.clone().listen().await?;
+        let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
+        lampo.init(node).await?;
+        // The RPC methods live behind this handler; without it every call
+        // comes back as "method not found".
+        lampo
+            .add_external_handler(Arc::new(HttpdHandler::new(format!(
+                "http://{}:{}",
+                lampo_conf.api_host, lampo_conf.api_port
+            ))?))
+            .await?;
+        let lampo = Arc::new(lampo);
+        let httpd = run_httpd(lampo.clone()).await?;
+        let handler = lampo.handler();
+        let daemon_task = lampo.clone().listen();
+        while let Err(err) = handler
+            .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
+            .await
+        {
+            log::debug!("waiting for the restarted node: `{}`", err);
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
+        Ok(Self {
+            inner: handler,
+            daemon: lampo,
+            daemon_task: Some(daemon_task),
+            httpd: Some(httpd),
+            mnemonic,
+            port: port.into(),
+            wallet,
+            btc,
+            root_path,
+            info,
+            lnd_rest_port: 0,
+            lnd_admin_macaroon_hex: String::new(),
+        })
+    }
+
     async fn mine(&self, blocks: u64) -> error::Result<()> {
         let addr = self.wallet.get_onchain_address().await?;
         let addr = lampo_common::bitcoin::Address::from_str(&addr.address)
             .unwrap()
             .assume_checked();
-        // mine some bitcoin inside the lampo address
-        let _ = self
-            .btc
-            .client
-            .generate_to_address(blocks as usize, &addr)
-            .unwrap();
+        // bitcoind's cookie RPC client intermittently returns curl error 43
+        // (`CURLE_BAD_FUNCTION_ARGUMENT`) under parallel tests. The call is
+        // idempotent from the test's point of view: retry it instead of
+        // failing the suite on the first transient argument error.
+        let mut last_err = None;
+        for attempt in 1..=5 {
+            match self.btc.client.generate_to_address(blocks as usize, &addr) {
+                Ok(mined) => {
+                    last_err = None;
+                    let _ = mined;
+                    break;
+                }
+                Err(err) => {
+                    log::warn!("generate_to_address failed (attempt {attempt}/5): {err}");
+                    last_err = Some(err);
+                    tokio::time::sleep(Duration::from_millis(200 * attempt)).await;
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            error::bail!("generate_to_address failed after retries: {err}");
+        }
         self.wallet.sync().await?;
         Ok(())
     }
@@ -342,34 +459,61 @@ impl LampoTesting {
         let wallet = self.wallet.clone();
         async_wait!(async {
             log::info!("waiting for funds to be available");
-            let funds: response::Utxos = self.inner.call("funds", json::json!({})).await.unwrap();
+            // A transient bitcoind curl error surfaces here as an RPC failure.
+            // The wait already retries; do not panic the test on one bad call.
+            let funds: response::Utxos = match self.inner.call("funds", json::json!({})).await {
+                Ok(funds) => funds,
+                Err(err) => {
+                    log::warn!("funds RPC failed while waiting for coins: {err}");
+                    return Err(());
+                }
+            };
             if funds.transactions.is_empty() {
                 return Err(());
             }
 
-            let tip = wallet.wallet_tips().await.unwrap();
-            // FIXME: we do not need to fail if there is an error in this RPC call
-            // but some json error will happen so, lets skip it if we have an error.
-            let bitcoind_tip = rpc.client.get_blockchain_info();
-            if let Ok(bitcoind_tip) = bitcoind_tip {
-                log::info!("bitcoind tip: {:?}", bitcoind_tip);
-
-                if tip.to_consensus_u32() as i64 != bitcoind_tip.blocks {
-                    log::warn!(
-                        "tip mismatch: wallet tip `{}` and bitcoind tip `{}`",
-                        tip,
-                        bitcoind_tip.blocks
-                    );
-                    self.mine(1).await.unwrap();
+            let tip = match wallet.wallet_tips().await {
+                Ok(tip) => tip,
+                Err(err) => {
+                    log::warn!("wallet tip failed while waiting for coins: {err}");
                     return Err(());
                 }
+            };
+            // bitcoincore-rpc 0.19 cannot decode `getblockchaininfo` on the
+            // CI bitcoind (`softforks` is absent). That comparison is a
+            // sanity check, not a gate: skip it and keep waiting for funds.
+            match rpc.client.get_blockchain_info() {
+                Ok(bitcoind_tip) => {
+                    log::info!("bitcoind tip: {:?}", bitcoind_tip);
+                    if tip.to_consensus_u32() as i64 != bitcoind_tip.blocks {
+                        log::warn!(
+                            "tip mismatch: wallet tip `{}` and bitcoind tip `{}`",
+                            tip,
+                            bitcoind_tip.blocks
+                        );
+                        if self.mine(1).await.is_err() {
+                            return Err(());
+                        }
+                        return Err(());
+                    }
+                }
+                Err(err) => {
+                    log::debug!("skipping bitcoind tip check: {err}");
+                }
             }
-            if wallet.get_onchain_balance().await.unwrap() == 0 {
-                self.mine(1).await.unwrap();
-                return Err(());
+            match wallet.get_onchain_balance().await {
+                Ok(0) => {
+                    if self.mine(1).await.is_err() {
+                        return Err(());
+                    }
+                    Err(())
+                }
+                Ok(_) => Ok(()),
+                Err(err) => {
+                    log::warn!("balance read failed while waiting for coins: {err}");
+                    Err(())
+                }
             }
-
-            Ok(())
         });
         Ok(())
     }

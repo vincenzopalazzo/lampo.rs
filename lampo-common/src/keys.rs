@@ -65,6 +65,9 @@ impl LampoKeys {
 
 pub struct LampoKeysManager {
     pub(crate) inner: KeysManager,
+    /// Node seed. Kept so remote persistence can derive a storage key without
+    /// a second copy of the mnemonic.
+    seed: [u8; 32],
     /// Weak so the wallet can own this keys manager without a cycle.
     wallet: OnceLock<Weak<dyn WalletManager>>,
 
@@ -89,6 +92,7 @@ impl LampoKeysManager {
         let inner = KeysManager::new(seed, starting_time_secs, starting_time_nanos, false);
         Self {
             inner,
+            seed: *seed,
             wallet: OnceLock::new(),
             #[cfg(feature = "unsafe_channel_keys")]
             funding_key: None,
@@ -124,6 +128,18 @@ impl LampoKeysManager {
             Some(SecretKey::from_str(&delayed_payment_base_secret).unwrap());
         self.htlc_base_secret = Some(SecretKey::from_str(&htlc_base_secret).unwrap());
         self.shachain_seed = Some(self.inner.get_secure_random_bytes())
+    }
+
+    /// 32-byte key for encrypting a remote store.
+    ///
+    /// Derived from the node seed so a restart opens the same ciphertext
+    /// without a separate passphrase. Not a channel key and not the node id.
+    pub fn vss_storage_key(&self) -> [u8; 32] {
+        use lightning::bitcoin::hashes::{sha256, Hash, HashEngine, Hmac, HmacEngine};
+
+        let mut engine = HmacEngine::<sha256::Hash>::new(b"lampo-vss-storage-v1");
+        engine.input(&self.seed);
+        Hmac::<sha256::Hash>::from_engine(engine).to_byte_array()
     }
 
     pub fn set_wallet(&self, wallet: Arc<dyn WalletManager>) {
