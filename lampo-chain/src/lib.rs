@@ -4,7 +4,6 @@ use std::sync::{Arc, OnceLock};
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lightning_block_sync::init;
-use lightning_block_sync::rpc::RpcClient;
 use lightning_block_sync::{poll, BlockHeaderData, BlockSourceResult};
 use lightning_block_sync::{BlockSource, SpvClient};
 
@@ -156,9 +155,11 @@ impl chain::Listen for ChainListeners {
 /// Welcome in another Facede pattern implementation
 pub struct LampoChainSync {
     config: Arc<LampoConf>,
-    rpc_client: Arc<RpcClient>,
     channel_manager: OnceLock<Arc<LampoChannel>>,
     chain_monitor: OnceLock<Arc<LampoChainMonitor>>,
+    /// Plugin dispatcher. Installed before `init` so chain RPC works.
+    rpc: OnceLock<Arc<dyn lampo_common::handler::Handler>>,
+    /// Event sink (`LampoHandler`). Broadcast results are emitted here.
     handler: OnceLock<Arc<dyn lampo_common::handler::Handler>>,
     coordinator: OnceLock<Arc<ChainSyncCoordinator>>,
     wallet: OnceLock<Arc<dyn WalletManager>>,
@@ -171,9 +172,13 @@ impl LampoChainSync {
     async fn broadcast_once(
         &self,
         tx: &lampo_common::bitcoin::Transaction,
-    ) -> Result<json::Value, lightning_block_sync::rpc::RpcClientError> {
-        self.rpc_client
-            .call_method::<json::Value>("sendrawtransaction", &[serialize_hex(tx).into()])
+    ) -> error::Result<json::Value> {
+        let handler = self
+            .rpc
+            .get()
+            .ok_or_else(|| error::anyhow!("chain rpc handler not set"))?;
+        handler
+            .call("sendrawtransaction", json::json!([serialize_hex(tx)]))
             .await
     }
 
@@ -194,16 +199,14 @@ impl LampoChainSync {
         // embed the RPC credentials.
         log::debug!("Connecting to core at: {host}:{port}");
 
-        let base_url = format!("http://{host}:{port}");
-        let rpc_credentials = base64::encode(format!("{}:{}", core_user, core_pass));
-
-        let rpc = RpcClient::new(&rpc_credentials, base_url);
-
+        // Chain RPC goes through the handler to the bitcoind plugin. The URL
+        // is still validated here so a bad lampo.conf fails at startup.
+        let _ = (host, port, core_user, core_pass);
         Ok(Self {
             config: conf,
-            rpc_client: Arc::new(rpc),
             channel_manager: OnceLock::new(),
             chain_monitor: OnceLock::new(),
+            rpc: OnceLock::new(),
             handler: OnceLock::new(),
             coordinator: OnceLock::new(),
             wallet: OnceLock::new(),
@@ -272,27 +275,173 @@ impl LampoChainSync {
     }
 }
 
+async fn chain_rpc(
+    sync: &LampoChainSync,
+    method: &str,
+    params: json::Value,
+) -> Result<json::Value, lightning_block_sync::BlockSourceError> {
+    let Some(handler) = sync.rpc.get() else {
+        return Err(lightning_block_sync::BlockSourceError::persistent(
+            "chain handler not set",
+        ));
+    };
+    handler
+        .call(method, params)
+        .await
+        .map_err(lightning_block_sync::BlockSourceError::persistent)
+}
+
+fn decode_header(value: &json::Value) -> Result<BlockHeaderData, String> {
+    use lampo_common::bitcoin::block::{Header, Version};
+    use lampo_common::bitcoin::hashes::Hash;
+    use lampo_common::bitcoin::CompactTarget;
+    use std::str::FromStr;
+
+    fn field<'a>(value: &'a json::Value, name: &str) -> Result<&'a json::Value, String> {
+        value
+            .get(name)
+            .ok_or_else(|| format!("block header missing `{name}`"))
+    }
+    let version = field(value, "version")?
+        .as_i64()
+        .ok_or("version was not an int")?;
+    let prev = match value.get("previousblockhash").and_then(|v| v.as_str()) {
+        Some(hash) => BlockHash::from_str(hash).map_err(|err| err.to_string())?,
+        None => BlockHash::all_zeros(),
+    };
+    let merkle = lampo_common::bitcoin::TxMerkleNode::from_str(
+        field(value, "merkleroot")?
+            .as_str()
+            .ok_or("merkleroot was not a string")?,
+    )
+    .map_err(|err| err.to_string())?;
+    let bits = hex::decode(
+        field(value, "bits")?
+            .as_str()
+            .ok_or("bits was not a string")?,
+    )
+    .map_err(|err| err.to_string())?;
+    if bits.len() != 4 {
+        return Err("bits was not 4 bytes".to_owned());
+    }
+    let bits = u32::from_be_bytes(bits.try_into().unwrap());
+    let chainwork = hex::decode(
+        field(value, "chainwork")?
+            .as_str()
+            .ok_or("chainwork was not a string")?,
+    )
+    .map_err(|err| err.to_string())?;
+    if chainwork.len() != 32 {
+        return Err(format!(
+            "chainwork was {} bytes, expected 32",
+            chainwork.len()
+        ));
+    }
+    let mut work = [0u8; 32];
+    work.copy_from_slice(&chainwork);
+    Ok(BlockHeaderData {
+        header: Header {
+            version: Version::from_consensus(
+                i32::try_from(version).map_err(|err| err.to_string())?,
+            ),
+            prev_blockhash: prev,
+            merkle_root: merkle,
+            time: u32::try_from(
+                field(value, "time")?
+                    .as_u64()
+                    .ok_or("time was not an int")?,
+            )
+            .map_err(|err| err.to_string())?,
+            bits: CompactTarget::from_consensus(bits),
+            nonce: u32::try_from(
+                field(value, "nonce")?
+                    .as_u64()
+                    .ok_or("nonce was not an int")?,
+            )
+            .map_err(|err| err.to_string())?,
+        },
+        height: u32::try_from(
+            field(value, "height")?
+                .as_u64()
+                .ok_or("height was not an int")?,
+        )
+        .map_err(|err| err.to_string())?,
+        chainwork: lampo_common::bitcoin::Work::from_be_bytes(work),
+    })
+}
+
+fn decode_block(value: &json::Value) -> BlockSourceResult<BlockData> {
+    let hex = value.as_str().ok_or_else(|| {
+        lightning_block_sync::BlockSourceError::persistent("bitcoind plugin getblock was not hex")
+    })?;
+    let bytes = hex::decode(hex).map_err(|_| {
+        lightning_block_sync::BlockSourceError::persistent("bitcoind plugin getblock was not hex")
+    })?;
+    let block = lampo_common::bitcoin::consensus::encode::deserialize(&bytes).map_err(|_| {
+        lightning_block_sync::BlockSourceError::persistent(
+            "bitcoind plugin getblock did not decode",
+        )
+    })?;
+    Ok(BlockData::FullBlock(block))
+}
+
+fn decode_best_block(value: &json::Value) -> BlockSourceResult<(BlockHash, Option<u32>)> {
+    let hash = value
+        .get("bestblockhash")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            lightning_block_sync::BlockSourceError::persistent(
+                "bitcoind plugin getblockchaininfo missing bestblockhash",
+            )
+        })?;
+    let hash = hash.parse().map_err(|_| {
+        lightning_block_sync::BlockSourceError::persistent(
+            "bitcoind plugin bestblockhash was not a hash",
+        )
+    })?;
+    let height = value
+        .get("blocks")
+        .and_then(|v| v.as_u64())
+        .and_then(|h| u32::try_from(h).ok());
+    Ok((hash, height))
+}
+
 impl BlockSource for LampoChainSync {
     fn get_header<'a>(
         &'a self,
         header_hash: &'a BlockHash,
         height_hint: Option<u32>,
     ) -> impl std::future::Future<Output = BlockSourceResult<BlockHeaderData>> + Send + 'a {
-        async move { self.rpc_client.get_header(header_hash, height_hint).await }
+        async move {
+            let value = chain_rpc(
+                self,
+                "getblockheader",
+                json::json!([header_hash.to_string()]),
+            )
+            .await?;
+            decode_header(&value).map_err(lightning_block_sync::BlockSourceError::persistent)
+        }
     }
 
     fn get_block<'a>(
         &'a self,
         header_hash: &'a BlockHash,
     ) -> impl std::future::Future<Output = BlockSourceResult<BlockData>> + Send + 'a {
-        async move { self.rpc_client.get_block(header_hash).await }
+        async move {
+            let value =
+                chain_rpc(self, "getblock", json::json!([header_hash.to_string(), 0])).await?;
+            decode_block(&value)
+        }
     }
 
     fn get_best_block<'a>(
         &'a self,
     ) -> impl std::future::Future<Output = BlockSourceResult<(BlockHash, Option<u32>)>> + Send + 'a
     {
-        async move { self.rpc_client.get_best_block().await }
+        async move {
+            let value = chain_rpc(self, "getblockchaininfo", json::json!([])).await?;
+            decode_best_block(&value)
+        }
     }
 }
 
@@ -303,7 +452,8 @@ impl Backend for LampoChainSync {
     }
 
     async fn get_best_block(&self) -> BlockSourceResult<(BlockHash, Option<u32>)> {
-        self.rpc_client.get_best_block().await
+        let value = chain_rpc(self, "getblockchaininfo", json::json!([])).await?;
+        decode_best_block(&value)
     }
 
     async fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
@@ -365,16 +515,13 @@ impl Backend for LampoChainSync {
             return Ok(250);
         }
 
-        let resp = self
-            .rpc_client
-            .call_method::<json::Value>(
-                "estimatesmartfee",
-                &[
-                    blocks.into(),
-                    json::Value::String(mode.as_core_str().to_owned()),
-                ],
-            )
-            .await?;
+        let resp = chain_rpc(
+            self,
+            "estimatesmartfee",
+            json::json!([blocks, mode.as_core_str()]),
+        )
+        .await
+        .map_err(|err| error::anyhow!("{err:?}"))?;
         let resp: FeeRate = json::from_value(resp)?;
         if let Some(errs) = resp.errors {
             return Err(error::anyhow!("Error in fee rate estimation: {:?}", errs).into());
@@ -417,10 +564,9 @@ impl Backend for LampoChainSync {
             loaded: bool,
             mempoolminfee: f64,
         }
-        let mempool_info = self
-            .rpc_client
-            .call_method::<json::Value>("getmempoolinfo", &[])
-            .await?;
+        let mempool_info = chain_rpc(self, "getmempoolinfo", json::json!([]))
+            .await
+            .map_err(|err| error::anyhow!("{err:?}"))?;
         let mempool_info: MempoolInfo = json::from_value(mempool_info)?;
         if !mempool_info.loaded {
             log::warn!(
@@ -433,9 +579,16 @@ impl Backend for LampoChainSync {
     }
 
     fn set_handler(&self, handler: Arc<dyn lampo_common::handler::Handler>) {
-        self.handler
-            .set(handler)
-            .unwrap_or_else(|_| panic!("backend handler already set"));
+        // First caller is the plugin dispatcher (before init). Second is
+        // LampoHandler, which owns events. Do not collapse them: PluginManager
+        // emit is a no-op, and funding waits on SendRawTransaction.
+        if self.rpc.get().is_none() {
+            let _ = self.rpc.set(handler);
+            return;
+        }
+        if self.handler.set(handler).is_err() {
+            log::debug!(target: "lampo-chain", "event handler already set; keeping it");
+        }
     }
 
     fn set_channel_manager(&self, channel_manager: Arc<LampoChannel>) {
