@@ -1,6 +1,10 @@
 [workspace]
 members = [
         "lampo-common",
+        "lampo-plugin-common",
+        "lampo-plugin",
+        "lampo-plugin-sdk",
+        "lampo-bitcoind",
         "lampod",
         "lampod-cli",
         "lampo-cli",
@@ -14,6 +18,10 @@ members = [
 
 default-members = [
         "lampo-common",
+        "lampo-plugin-common",
+        "lampo-plugin",
+        "lampo-plugin-sdk",
+        "lampo-bitcoind",
         "lampod",
         "lampod-cli",
         "lampo-cli",
@@ -25,7 +33,7 @@ default-members = [
 resolver = "2"
 
 # LDK 0.3 is published to crates.io as a pre-release, so the requirement has to
-# spell out `0.3.0-rc2`: a bare `0.3` does not match pre-release versions.
+# spell out `0.3.0-beta1`: a bare `0.3` does not match pre-release versions.
 # Bump every lightning* crate together so the stack stays on one version
 # (see issue #537).
 [workspace.dependencies]
