@@ -1,0 +1,38 @@
+ts,case,verdict,detail
+2026-09-25T15:45:24+00:00,probe-R01-clean-sigint,hs,hr,invoice,1000000,Success,c4c841a30b8f81b1,0,2,1
+2026-09-25T15:45:24+00:00,R01-clean-sigint,PASS,state restored, probe OK
+2026-09-25T15:45:42+00:00,probe-R02-term-idle,hs,hr,invoice,1000000,Success,f5f30eba1e6431d0,0,2,1
+2026-09-25T15:45:42+00:00,R02-term-idle,PASS,state restored, probe OK
+2026-09-25T15:46:00+00:00,probe-R03-kill9-idle,hs,hr,invoice,1000000,Success,faa0cb557b0410bf,1,2,1
+2026-09-25T15:46:00+00:00,R03-kill9-idle,PASS,state restored, probe OK
+2026-09-25T15:46:16+00:00,R04-kill9-payer-midpay,PASS,up+identity+survivors-ready (loss mode)
+2026-09-25T15:46:17+00:00,probe-R04-after,hs,hr,invoice,1000000,Success,471851a3b049e9e4,0,2,1
+2026-09-25T15:46:17+00:00,R04-kill9-payer-midpay,PASS,recovered (restore or explained force-close)
+2026-09-25T15:47:12+00:00,R05-kill9-relay-midpay,PASS,up+identity+survivors-ready (loss mode)
+2026-09-25T15:47:13+00:00,probe-R05-after,hs,hr,invoice,1000000,Success,d4b81c4bd26d28ab,0,2,1
+2026-09-25T15:47:13+00:00,R05-kill9-relay-midpay,PASS,recovered (restore or explained force-close)
+2026-09-25T15:47:32+00:00,R06-kill9-payee-midpay,PASS,up+identity+survivors-ready (loss mode)
+2026-09-25T15:47:32+00:00,probe-R06-after,hs,hr,invoice,1000000,Success,873486f4aef562bc,0,2,1
+2026-09-25T15:47:32+00:00,R06-kill9-payee-midpay,PASS,recovered (restore or explained force-close)
+2026-09-25T15:47:56+00:00,probe-R07-chain-advanced,hs,hr,invoice,1000000,Success,512f43de7621356a,0,2,1
+2026-09-25T15:47:56+00:00,R07-chain-advanced,PASS,state restored, probe OK
+2026-09-25T15:48:15+00:00,probe-R08-all-down,hs,hr,invoice,1000000,Success,16a0f58c5170d1a3,0,2,1
+2026-09-25T15:48:15+00:00,R08-all-down,PASS,state restored, probe OK
+2026-09-25T15:48:53+00:00,R09-forceclose-while-down,PASS,up+identity+survivors-ready (loss mode)
+2026-09-25T15:49:36+00:00,probe-post-r09,hs,hr,invoice,1000000,Success,f8c64433c964cf17,0,2,1
+2026-09-25T15:49:36+00:00,r10-warm,hs,hr,invoice,1000000,Success,74c6d91311e43ab7,0,2,1
+2026-09-25T15:50:13+00:00,R10-stale-manager,PASS,force-close signature present; funds protected
+2026-09-25T15:50:57+00:00,probe-post-r10,hs,hr,invoice,1000000,Success,184c5e6f28dd01f2,1,2,1
+2026-09-25T15:50:59+00:00,R11-corrupt-manager,PASS,fail-fast
+2026-09-25T15:51:20+00:00,probe-R11-restore-after-corruption,hs,hr,invoice,1000000,Success,8ebe1dbbcd3a2816,1,2,1
+2026-09-25T15:51:20+00:00,R11-restore-after-corruption,PASS,state restored, probe OK
+2026-09-25T15:51:22+00:00,R12-missing-monitors,PASS,fail-fast
+2026-09-25T15:51:43+00:00,probe-R12-restore-after-missing,hs,hr,invoice,1000000,Success,ce9faf131c17deb5,1,2,1
+2026-09-25T15:51:43+00:00,R12-restore-after-missing,PASS,state restored, probe OK
+2026-09-25T15:51:45+00:00,R13-corrupt-monitor,PASS,fail-fast
+2026-09-25T15:52:06+00:00,probe-R13-restore-after-corrupt-monitor,hs,hr,invoice,1000000,Success,eaa7f5e46312a1a0,1,2,1
+2026-09-25T15:52:06+00:00,R13-restore-after-corrupt-monitor,PASS,state restored, probe OK
+2026-09-25T15:52:07+00:00,r14-warm,hs,hr,invoice,1000000,Success,c1ae1168f701d2f5,1,2,1
+2026-09-25T15:52:09+00:00,R14-stale-monitor,PASS,fail-fast
+2026-09-25T15:52:30+00:00,probe-R14-restore-after-stale-monitor,hs,hr,invoice,1000000,Success,3be026bdfdb18b64,1,2,1
+2026-09-25T15:52:30+00:00,R14-restore-after-stale-monitor,PASS,state restored, probe OK
