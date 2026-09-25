@@ -1,0 +1,16 @@
+.{
+    .name = .lampo_bitcoind,
+    .version = "0.1.0",
+    .fingerprint = 0x360d927f74f935b1, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .lampo_plugin_sdk = .{
+            .path = "../../plugin-sdk/zig",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
