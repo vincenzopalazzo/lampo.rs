@@ -103,6 +103,23 @@ verify_case() { # $1 tag, $2 mode(strict|loss) [$3 marks] — full I1..I5
   local tag=$1 mode=$2 marks=${3:-$(log_marks)}
   verify_up_identity  || { RC "$tag" FAIL "identity/up"; fail "$tag: node up/identity"; return 1; }
   verify_channels "$mode" || { RC "$tag" FAIL "channels($mode)"; fail "$tag: channels not restored ($mode)"; return 1; }
+  # getinfo returns before the peer is back. A ready channel with
+  # peers=0 cannot route, and the probe then fails RouteNotFound.
+  # Wait until each node has a peer for every baseline channel.
+  local ready_deadline=$(( $(date +%s) + 180 )) ready_ok=0
+  while :; do
+    ready_ok=1
+    local ready_n want peers
+    for ready_n in "${ALLNODES[@]}"; do
+      want=$(echo "${BASE_SNAP[$ready_n]:-}" | wc -w)
+      peers=$(rpc "$(API "$ready_n")" getinfo | jqf 'd.get("peers",0)')
+      [ "${peers:-0}" -ge "$want" ] || ready_ok=0
+    done
+    [ "$ready_ok" = 1 ] && break
+    [ "$(date +%s)" -gt "$ready_deadline" ] && break
+    sleep 5
+  done
+  [ "$ready_ok" = 1 ] || say "  $tag: probe anyway, peers not back"
   health_scan_since "$marks" || { RC "$tag" FAIL "health-delta"; fail "$tag: panic/corrupt in log delta"; return 1; }
   [ "$mode" = strict ] || { RC "$tag" PASS "up+identity+survivors-ready (loss mode)"; return 0; }
   mh_pay "probe-$tag" hs hr "$PROBE_AMT_MSAT" invoice \
