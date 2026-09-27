@@ -192,7 +192,16 @@ pub extern "C" fn new_lampod(conf_path: *const libc::c_char) -> *mut LampoDaemon
             return null!();
         }
     };
-    let mut lampod = LampoDaemon::new(conf.as_ref().clone(), Arc::new(wallet));
+    let mut lampod = match LampoDaemon::new(conf.as_ref().clone(), Arc::new(wallet)) {
+        Ok(lampod) => lampod,
+        Err(err) => {
+            LAST_ERR
+                .lock()
+                .unwrap()
+                .set(Some(format!("error while building the node {:?}", err)));
+            return null!();
+        }
+    };
     if let Err(err) = lampod.init(client) {
         LAST_ERR
             .lock()

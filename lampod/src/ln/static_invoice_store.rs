@@ -20,7 +20,7 @@ use lampo_common::ldk::offers::static_invoice::StaticInvoice;
 use lampo_common::ldk::util::persist::KVStoreSync;
 use lampo_common::ldk::util::ser::{LengthReadable, Readable, Writeable};
 
-use crate::persistence::LampoPersistence;
+use lampo_common::persist::LampoPersistenceBackend;
 
 /// Invoices live at `static_invoices/<hex sha256(recipient_id)>/<slot>`, e.g.
 /// `static_invoices/039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81/00001`.
@@ -83,7 +83,7 @@ fn storage_location(invoice_slot: u16, recipient_id: &[u8]) -> (String, String) 
 
 /// Rate-limited KV store for the static invoices this node serves.
 pub struct StaticInvoiceStore {
-    persister: Arc<LampoPersistence>,
+    persister: Arc<dyn LampoPersistenceBackend>,
     request_rate_limiter: Mutex<RateLimiter>,
     persist_rate_limiter: Mutex<RateLimiter>,
 }
@@ -93,7 +93,7 @@ impl StaticInvoiceStore {
     const RATE_LIMITER_REFILL_INTERVAL: Duration = Duration::from_millis(100);
     const RATE_LIMITER_MAX_IDLE: Duration = Duration::from_secs(600);
 
-    pub fn new(persister: Arc<LampoPersistence>) -> Self {
+    pub fn new(persister: Arc<dyn LampoPersistenceBackend>) -> Self {
         Self {
             persister,
             request_rate_limiter: Mutex::new(RateLimiter::new(

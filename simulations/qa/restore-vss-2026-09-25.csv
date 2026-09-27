@@ -1,0 +1,3 @@
+ts,backend,case,verdict,detail
+2026-09-25T09:02:15-07:00,vss,R1,PASS,channel survived kill -9 (1)
+2026-09-25T09:02:40-07:00,vss,R2,PASS,wiped store with init marker refused startup

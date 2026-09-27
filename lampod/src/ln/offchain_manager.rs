@@ -235,6 +235,10 @@ impl OffchainManager {
     ) -> error::Result<PaymentId> {
         // check if it is an invoice or an offer
         let invoice = self.decode_invoice(invoice_str)?;
+        // BOLT 11 invoices are single-use: LDK deduplicates by PaymentId, so the
+        // id must be the payment hash. A random id would let two concurrent
+        // `pay` calls (or a client retry while the first attempt is still
+        // running) settle the same invoice twice.
         let payment_id = PaymentId(invoice.payment_hash().0);
         // Only forward a caller-supplied amount for zero-amount invoices. For a
         // fixed-amount invoice LDK treats `amount_msat` as an overpayment, so
