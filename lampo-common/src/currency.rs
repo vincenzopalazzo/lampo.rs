@@ -7,10 +7,12 @@
 //!
 //! The fork lampo builds against
 //! (`vincenzopalazzo/rust-lightning`, `lampo/bolt12-currency-0.3`) takes the
-//! converter at the call site. [`LampoCurrencyConversion`] implements that
-//! crate's `CurrencyConversion`. It is not stored on `ChannelManager`: the
-//! rate used to publish an offer is not the rate used to pay one, and neither
-//! belongs in the channel database.
+//! converter at initiating calls, and keeps a standing
+//! `Arc<dyn CurrencyConversion>` table on `ChannelManager` for inbound and
+//! asynchronous flows (answering invoice requests, verifying received
+//! invoices). [`LampoCurrencyConversion`] implements that crate's
+//! `CurrencyConversion` and is passed in both places from the same
+//! `currency-rates` config.
 //!
 //! [rust-lightning#3833]: https://github.com/lightningdevkit/rust-lightning/pull/3833
 

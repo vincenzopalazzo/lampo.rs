@@ -32,9 +32,9 @@ resolver = "2"
 # All lightning* crates come from one git revision: the 0.3-rc2 tag plus the
 # currency-conversion commit. Mixing this lightning crate with the crates.io
 # rc2 crates builds two copies of lightning-types and the traits no longer match.
-lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e466efadb" }
-lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e466efadb" }
-lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e466efadb", features = ["tokio"] }
-lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e466efadb" }
-lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e466efadb" }
-lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e466efadb" }
+lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e8c981e71" }
+lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e8c981e71" }
+lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e8c981e71", features = ["tokio"] }
+lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e8c981e71" }
+lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e8c981e71" }
+lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "e8c981e71" }

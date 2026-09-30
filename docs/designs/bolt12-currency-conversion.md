@@ -11,9 +11,10 @@ is closed and not merged. Published `lightning` 0.3.0-rc2 still rejects
 The integration lampo builds against is
 [`vincenzopalazzo/rust-lightning` `lampo/bolt12-currency-0.3`](https://github.com/vincenzopalazzo/rust-lightning/tree/lampo/bolt12-currency-0.3),
 which is the `v0.3-rc2` tag plus the currency API. It does **not** add a
-`CurrencyConversion` type parameter to `ChannelManager`. A rate is not
-channel state, it is not persisted, and the rate used to publish an offer
-is not the rate used to pay one.
+`CurrencyConversion` type parameter to `ChannelManager` (a rate is not
+channel state and is not persisted). Initiating calls take a converter;
+inbound and asynchronous paths use a standing
+`Arc<dyn CurrencyConversion + Send + Sync>` table instead.
 
 Call sites:
 
@@ -23,6 +24,12 @@ Call sites:
   amount outside `Amount::to_msats_range` before sending an invoice request.
   Omitting the amount lets the payee price the invoice. The returned invoice
   is checked against the same converter.
+- `ChannelManager` keeps a **standing** table (no new generic parameter:
+  `Arc<dyn CurrencyConversion + Send + Sync>`) for inbound and asynchronous
+  paths — answering invoice requests, verifying received invoices. The first
+  soak proved this necessary: a call-site-only design leaves the payee with
+  `NullCurrencyConversion` and every currency invoice request is rejected
+  ("The invoice request was rejected by the recipient").
 - `pay_for_offer` is unchanged and uses `NullCurrencyConversion`.
 
 ## What lampo does

@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime};
 use lampo_common::backend::Backend;
 use lampo_common::bitcoin::{BlockHash, Transaction};
 use lampo_common::conf::LampoConf;
+use lampo_common::currency::LampoCurrencyConversion;
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::onchain::OnChainEvent;
@@ -792,6 +793,7 @@ impl LampoChannelManager {
             self.onchain.clone() as Arc<dyn BroadcasterInterface + Send + Sync>,
             self.router.get().expect("router not initialized").clone(),
             default_message_router,
+            Arc::new(LampoCurrencyConversion::from_conf(&self.conf)?),
             self.logger.clone(),
             self.conf.ldk_conf_with_async_role(),
             monitors.iter().collect(),
@@ -853,12 +855,14 @@ impl LampoChannelManager {
         let default_message_router = Arc::new(default_message_router);
 
         let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
+        let conversion = Arc::new(LampoCurrencyConversion::from_conf(&self.conf)?);
         let channeld = Arc::new(LampoArcChannelManager::new(
             self.onchain.clone(),
             self.chain_monitor(),
             self.onchain.clone(),
             network_graph,
             default_message_router.clone(),
+            conversion,
             self.logger.clone(),
             keymanagers.clone(),
             keymanagers.clone(),

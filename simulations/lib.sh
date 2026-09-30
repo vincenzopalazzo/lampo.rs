@@ -101,9 +101,20 @@ backend=core
 core-url=$CORE_URL
 core-user=$CORE_USER
 core-pass=$CORE_PASS
+${CURRENCY_RATES:+currency-rates=$CURRENCY_RATES}
+${CURRENCY_TOLERANCE_BPS:+currency-tolerance-bps=$CURRENCY_TOLERANCE_BPS}
 EOF
-  setsid nohup "$BIN" --data-dir "$dir" --network regtest \
-      > "$dir/mh.log" 2>&1 < /dev/null &
+  setsid_run() {
+    if command -v setsid >/dev/null 2>&1; then
+      setsid nohup "$BIN" --data-dir "$dir" --network regtest \
+        > "$dir/mh.log" 2>&1 < /dev/null &
+    else
+      # No setsid on macOS; plain nohup + disown detaches well enough.
+      nohup "$BIN" --data-dir "$dir" --network regtest \
+        > "$dir/mh.log" 2>&1 < /dev/null &
+    fi
+  }
+  setsid_run
   disown 2>/dev/null || true
 }
 kill9()   { local p; p=$(node_pid "$1"); [ -n "$p" ] && kill -9   "$p" 2>/dev/null; }
