@@ -34,10 +34,11 @@ use lampo_common::bitcoin::{
 };
 use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::{LampoConf, Network};
-use lampo_common::keys::LampoKeys;
+use lampo_common::keys::LampoKeysManager;
 use lampo_common::model::response::NewAddress;
 use lampo_common::model::response::Utxo;
 use lampo_common::secp256k1::SecretKey;
+use lampo_common::signer::LampoSigner;
 use lampo_common::wallet::{BlockRef, WalletManager};
 use lampo_common::{async_trait, error};
 
@@ -45,7 +46,7 @@ pub struct BDKWalletManager {
     pub wallet: StdMutex<PersistedWallet<Connection>>,
     pub wallet_db: StdMutex<Connection>,
     pub rpc: Arc<Client>,
-    pub keymanager: Arc<LampoKeys>,
+    pub keymanager: Arc<dyn LampoSigner>,
     pub network: Network,
     pub reindex_from: Option<Height>,
     pub conf: Arc<LampoConf>,
@@ -67,7 +68,7 @@ impl BDKWalletManager {
     async fn build_wallet(
         conf: Arc<LampoConf>,
         mnemonic_words: &str,
-    ) -> error::Result<(PersistedWallet<Connection>, Connection, LampoKeys)> {
+    ) -> error::Result<(PersistedWallet<Connection>, Connection, LampoKeysManager)> {
         if let Some(ref priv_key) = conf.private_key {
             log::warn!(target: "lampo-wallet", "Using a private key to create the wallet");
             let key = SecretKey::from_str(priv_key)?;
@@ -97,7 +98,7 @@ impl BDKWalletManager {
         let internal_descriptor = Bip84(xprv, KeychainKind::Internal);
         let external_descriptor = Bip84(xprv, KeychainKind::External);
 
-        let ldk_keys = LampoKeys::new(xprv.private_key.secret_bytes());
+        let ldk_keys = LampoKeysManager::from_seed(xprv.private_key.secret_bytes());
         // Create a BDK wallet structure using BIP 84 descriptor ("m/84h/1h/0h/0" and "m/84h/1h/0h/1")
         let wallet = Wallet::load()
             .descriptor(
@@ -128,18 +129,18 @@ impl BDKWalletManager {
         conf: Arc<LampoConf>,
         xprv: PrivateKey,
         channel_keys: Option<String>,
-    ) -> error::Result<(PersistedWallet<Connection>, Connection, LampoKeys)> {
+    ) -> error::Result<(PersistedWallet<Connection>, Connection, LampoKeysManager)> {
         let ldk_keys = match channel_keys {
             #[cfg(feature = "unsafe_channel_keys")]
-            Some(keys) => LampoKeys::with_channel_keys(xprv.inner.secret_bytes(), keys),
+            Some(keys) => LampoKeysManager::with_channel_keys(xprv.inner.secret_bytes(), keys),
             #[cfg(not(feature = "unsafe_channel_keys"))]
             Some(_) => {
                 log::warn!(
                     "`channel_keys` is set but this build lacks the `unsafe_channel_keys` feature; using random keys"
                 );
-                LampoKeys::new(xprv.inner.secret_bytes())
+                LampoKeysManager::from_seed(xprv.inner.secret_bytes())
             }
-            None => LampoKeys::new(xprv.inner.secret_bytes()),
+            None => LampoKeysManager::from_seed(xprv.inner.secret_bytes()),
         };
 
         let path_db = format!("{}/bdk-wallet.db", conf.path());
@@ -284,7 +285,7 @@ impl WalletManager for BDKWalletManager {
         })
     }
 
-    fn ldk_keys(&self) -> Arc<LampoKeys> {
+    fn ldk_keys(&self) -> Arc<dyn LampoSigner> {
         self.keymanager.clone()
     }
 

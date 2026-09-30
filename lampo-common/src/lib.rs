@@ -8,6 +8,7 @@ pub mod jsonrpc;
 pub mod keys;
 pub mod logger;
 pub mod model;
+pub mod signer;
 pub mod types;
 pub mod utils;
 pub mod wallet;

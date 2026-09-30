@@ -18,7 +18,6 @@ use lampo_common::handler::ExternalHandler;
 use lampo_common::handler::Handler as EventHandler;
 use lampo_common::json;
 use lampo_common::jsonrpc::Request;
-use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::chain::chaininterface::BroadcasterInterface;
 use lampo_common::ldk::events::bump_transaction::BumpTransactionEventHandler;
@@ -28,6 +27,7 @@ use lampo_common::ldk::types::payment::PaymentPreimage;
 use lampo_common::ldk::util::wallet_utils::{Utxo, Wallet, WalletSource};
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
+use lampo_common::signer::LampoSigner;
 use lampo_common::utils::logger::LampoLogger;
 
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
@@ -82,7 +82,7 @@ impl WalletSource for BumpWallet {
 type BumpHandler = BumpTransactionEventHandler<
     Arc<dyn BroadcasterInterface + Send + Sync>,
     Arc<Wallet<Arc<BumpWallet>, Arc<LampoLogger>>>,
-    Arc<LampoKeysManager>,
+    Arc<dyn LampoSigner>,
     Arc<LampoLogger>,
 >;
 
@@ -118,7 +118,7 @@ impl LampoHandler {
                 Arc::new(BumpWallet(lampod.wallet_manager())),
                 logger.clone(),
             )),
-            lampod.wallet_manager().ldk_keys().keys_manager.clone(),
+            lampod.signer(),
             logger,
         );
         Self {
@@ -666,11 +666,7 @@ impl Handler for LampoHandler {
 
                 // Build the proof from the material in hand rather than from
                 // storage, so the receipt does not depend on the write below.
-                let expanded_key = self
-                    .wallet_manager
-                    .ldk_keys()
-                    .keys_manager
-                    .get_expanded_key();
+                let expanded_key = self.channel_manager.signer().get_expanded_key();
                 let payer_proof = payer_proof::build(&record, &expanded_key, payment_id);
 
                 self.emit(Event::Lightning(LightningEvent::PaymentReceipt {

@@ -33,6 +33,7 @@ use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
+use lampo_common::signer::LampoSigner;
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
@@ -66,6 +67,7 @@ pub struct LampoDaemon {
     channel_manager: Option<Arc<LampoChannelManager>>,
     inventory_manager: Option<Arc<LampoInventoryManager>>,
     wallet_manager: Arc<dyn WalletManager>,
+    signer: Arc<dyn LampoSigner>,
     offchain_manager: Option<Arc<OffchainManager>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
@@ -75,17 +77,28 @@ pub struct LampoDaemon {
 }
 
 impl LampoDaemon {
+    /// Build a daemon signing with the wallet's own in-memory keys.
     pub fn new(config: Arc<LampoConf>, wallet_manager: Arc<dyn WalletManager>) -> Self {
+        let signer = wallet_manager.ldk_keys();
+        Self::with_signer(config, wallet_manager, signer)
+    }
+
+    /// Build a daemon with an explicit signer, e.g. a remote or validating
+    /// signer that holds the node and channel keys outside the wallet.
+    pub fn with_signer(
+        config: Arc<LampoConf>,
+        wallet_manager: Arc<dyn WalletManager>,
+        signer: Arc<dyn LampoSigner>,
+    ) -> Self {
         let root_path = config.path();
         let chain_sync = Arc::new(ChainSyncCoordinator::new());
         // Wire the wallet to the coordinator here so every daemon (CLI, tests,
         // embedders) gets consistent sync-progress reporting with no per-caller
         // setup. The backend is wired separately in `init`.
         wallet_manager.set_coordinator(chain_sync.clone());
-        wallet_manager
-            .ldk_keys()
-            .keys_manager
-            .set_wallet(wallet_manager.clone());
+        // Destination, shutdown and change scripts come from the wallet so
+        // closed-channel funds land where the node can spend them.
+        signer.set_wallet(wallet_manager.clone());
         LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
@@ -95,6 +108,7 @@ impl LampoDaemon {
             channel_manager: None,
             inventory_manager: None,
             wallet_manager,
+            signer,
             offchain_manager: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
@@ -153,6 +167,7 @@ impl LampoDaemon {
             self.logger.clone(),
             self.onchain_manager(),
             self.wallet_manager.clone(),
+            self.signer.clone(),
             self.persister.clone(),
         );
         self.channel_manager = Some(Arc::new(manager));
@@ -191,11 +206,10 @@ impl LampoDaemon {
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init offchain manager ...");
         let manager = OffchainManager::new(
-            self.wallet_manager().ldk_keys().keys_manager.clone(),
+            self.signer.clone(),
             self.channel_manager(),
             self.logger.clone(),
             self.conf.clone(),
-            self.onchain_manager(),
         )?;
         self.offchain_manager = Some(Arc::new(manager));
         Ok(())
@@ -234,6 +248,11 @@ impl LampoDaemon {
 
     pub fn wallet_manager(&self) -> Arc<dyn WalletManager> {
         self.wallet_manager.clone()
+    }
+
+    /// The signer every LDK component of this daemon uses.
+    pub fn signer(&self) -> Arc<dyn LampoSigner> {
+        self.signer.clone()
     }
 
     pub fn logger(&self) -> Arc<LampoLogger> {

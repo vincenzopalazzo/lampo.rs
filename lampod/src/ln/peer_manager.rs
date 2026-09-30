@@ -9,7 +9,6 @@ use async_trait::async_trait;
 
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
-use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::ln::peer_handler::MessageHandler;
 use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
@@ -18,6 +17,7 @@ use lampo_common::ldk::net::SocketDescriptor;
 use lampo_common::ldk::onion_message::messenger::{DefaultMessageRouter, OnionMessenger};
 use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::ldk::sign::EntropySource;
+use lampo_common::signer::LampoSigner;
 use lampo_common::types::NodeId;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph};
 
@@ -28,11 +28,11 @@ use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
 pub type LampoArcOnionMessenger<L> = OnionMessenger<
-    Arc<LampoKeysManager>,
-    Arc<LampoKeysManager>,
+    Arc<dyn LampoSigner>,
+    Arc<dyn LampoSigner>,
     Arc<L>,
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
-    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<LampoKeysManager>>>,
+    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<dyn LampoSigner>>>,
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     Arc<AsyncPaymentsHandler>,
     IgnoringMessageHandler,
@@ -46,7 +46,7 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<LampoArcOnionMessenger<L>>,
     Arc<L>,
     IgnoringMessageHandler,
-    Arc<LampoKeysManager>,
+    Arc<dyn LampoSigner>,
     IgnoringMessageHandler,
 >;
 
@@ -107,7 +107,7 @@ impl LampoPeerManager {
     pub fn init(
         &mut self,
         _onchain_manager: Arc<LampoChainManager>,
-        wallet_manager: Arc<dyn WalletManager>,
+        _wallet_manager: Arc<dyn WalletManager>,
         channel_manager: Arc<LampoChannelManager>,
         async_payments_enabled: Arc<AtomicBool>,
     ) -> error::Result<()> {
@@ -116,7 +116,7 @@ impl LampoPeerManager {
             .unwrap()
             .as_secs();
 
-        let keys = wallet_manager.ldk_keys().keys_manager.clone();
+        let keys = channel_manager.signer();
         // LDK derives every per-connection BOLT-8 noise ephemeral key from
         // these bytes, and `PeerManager::new` documents them as
         // "cryptographically secure random bytes". A constant seed makes
@@ -194,7 +194,7 @@ impl LampoPeerManager {
             current_time.try_into().unwrap(),
             &ephemeral_bytes,
             channel_manager.logger.clone(),
-            wallet_manager.ldk_keys().keys_manager.clone(),
+            keys,
         );
         self.peer_manager = Some(Arc::new(peer_manager));
         self.channel_manager = Some(channel_manager.clone());

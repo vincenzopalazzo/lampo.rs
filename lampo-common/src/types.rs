@@ -12,34 +12,32 @@ use crate::ldk::persister::fs_store::v1::FilesystemStore;
 use crate::ldk::routing::gossip::NetworkGraph;
 use crate::ldk::routing::router::DefaultRouter;
 use crate::ldk::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringFeeParameters};
-use crate::ldk::sign::InMemorySigner;
-
-use crate::keys::LampoKeysManager;
 use crate::ldk::util::sweep::OutputSweeper;
+use crate::signer::{LampoChangeDestination, LampoChannelSigner, LampoSigner};
 use crate::utils::logger::LampoLogger;
 
 pub type NodeId = PublicKey;
 pub type ChannelId = crate::ldk::ln::types::ChannelId;
 
 pub type LampoChainMonitor = ChainMonitor<
-    InMemorySigner,
+    LampoChannelSigner,
     Arc<dyn Filter + Send + Sync>,
     Arc<dyn BroadcasterInterface + Send + Sync>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoLogger>,
     Arc<FilesystemStore>,
-    Arc<LampoKeysManager>,
+    Arc<dyn LampoSigner>,
 >;
 
 pub type LampoArcChannelManager<M, L> = ChannelManager<
     Arc<M>,
     Arc<dyn BroadcasterInterface + Send + Sync>,
-    Arc<LampoKeysManager>,
-    Arc<LampoKeysManager>,
-    Arc<LampoKeysManager>,
+    Arc<dyn LampoSigner>,
+    Arc<dyn LampoSigner>,
+    Arc<dyn LampoSigner>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoRouter>,
-    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<LampoKeysManager>>>,
+    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<dyn LampoSigner>>>,
     Arc<L>,
 >;
 
@@ -50,12 +48,12 @@ pub type LampoChannel = LampoArcChannelManager<LampoChainMonitor, LampoLogger>;
 /// background processor, and notified of blocks by the chain backend.
 pub type LampoSweeper = OutputSweeper<
     Arc<dyn BroadcasterInterface + Send + Sync>,
-    Arc<LampoKeysManager>,
+    Arc<LampoChangeDestination>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<dyn Filter + Send + Sync>,
     Arc<FilesystemStore>,
     Arc<LampoLogger>,
-    Arc<LampoKeysManager>,
+    Arc<dyn LampoSigner>,
 >;
 
 pub type LampoGraph = NetworkGraph<Arc<LampoLogger>>;
@@ -63,7 +61,7 @@ pub type LampoScorer = ProbabilisticScorer<Arc<LampoGraph>, Arc<LampoLogger>>;
 pub type LampoRouter = DefaultRouter<
     Arc<LampoGraph>,
     Arc<LampoLogger>,
-    Arc<LampoKeysManager>,
+    Arc<dyn LampoSigner>,
     Arc<Mutex<LampoScorer>>,
     ProbabilisticScoringFeeParameters,
     LampoScorer,
