@@ -16,7 +16,6 @@ use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::json::de;
-use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk::block_sync::BlockSource;
 use lampo_common::ldk::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
 use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
@@ -29,7 +28,7 @@ use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
-use lampo_common::ldk::sign::{InMemorySigner, NodeSigner};
+use lampo_common::ldk::sign::NodeSigner;
 use lampo_common::ldk::util::persist::{
     read_channel_monitors, KVStoreSync, OUTPUT_SWEEPER_PERSISTENCE_KEY,
     OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE, OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
@@ -38,6 +37,7 @@ use lampo_common::ldk::util::ser::ReadableArgs;
 use lampo_common::ldk::util::sweep::OutputSweeper;
 use lampo_common::model::request;
 use lampo_common::model::response::{self, Channel, Channels};
+use lampo_common::signer::{LampoChangeDestination, LampoChannelSigner, LampoSigner};
 use lampo_common::types::LampoChannel;
 use lampo_common::types::LampoGraph;
 use lampo_common::types::LampoRouter;
@@ -127,6 +127,7 @@ enum FundingWaitState {
 pub struct LampoChannelManager {
     monitor: OnceLock<Arc<LampoChainMonitor>>,
     wallet_manager: Arc<dyn WalletManager>,
+    signer: Arc<dyn LampoSigner>,
     persister: Arc<LampoPersistence>,
     graph: OnceLock<Arc<LampoGraph>>,
     score: OnceLock<Arc<Mutex<LampoScorer>>>,
@@ -158,6 +159,7 @@ impl LampoChannelManager {
         logger: Arc<LampoLogger>,
         onchain: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
+        signer: Arc<dyn LampoSigner>,
         persister: Arc<LampoPersistence>,
     ) -> Self {
         LampoChannelManager {
@@ -166,6 +168,7 @@ impl LampoChannelManager {
             onchain,
             channeld: OnceLock::new(),
             wallet_manager,
+            signer,
             logger,
             persister,
             handler: OnceLock::new(),
@@ -302,20 +305,22 @@ impl LampoChannelManager {
         Ok(())
     }
 
-    /// Broadcaster, fee estimator, and keys manager shared by restore and
-    /// first-time sweeper construction. Spender and change destination are
-    /// the same keys manager, as in ldk-node.
+    /// Broadcaster, fee estimator, and signer shared by restore and
+    /// first-time sweeper construction. The signer is the spender; the
+    /// change destination is the same signer behind the
+    /// [`LampoChangeDestination`] adapter, since the async LDK trait cannot
+    /// sit behind `dyn LampoSigner` directly.
     fn sweeper_deps(
         &self,
     ) -> (
         Arc<dyn BroadcasterInterface + Send + Sync>,
         Arc<dyn FeeEstimator + Send + Sync>,
-        Arc<LampoKeysManager>,
+        Arc<dyn LampoSigner>,
     ) {
         (
             self.onchain.clone(),
             self.onchain.clone(),
-            self.wallet_manager.ldk_keys().keys_manager.clone(),
+            self.signer.clone(),
         )
     }
 
@@ -326,7 +331,7 @@ impl LampoChannelManager {
         bytes: Vec<u8>,
         broadcaster: Arc<dyn BroadcasterInterface + Send + Sync>,
         fee_estimator: Arc<dyn FeeEstimator + Send + Sync>,
-        keys_manager: Arc<LampoKeysManager>,
+        keys_manager: Arc<dyn LampoSigner>,
     ) -> error::Result<(BlockLocator, LampoSweeper)> {
         // ReadableArgs order: broadcaster, fee estimator, filter, spender,
         // change destination, kv store, logger.
@@ -337,7 +342,7 @@ impl LampoChannelManager {
                 fee_estimator,
                 None,
                 keys_manager.clone(),
-                keys_manager,
+                Arc::new(LampoChangeDestination::new(keys_manager)),
                 self.persister.clone(),
                 self.logger.clone(),
             ),
@@ -364,7 +369,7 @@ impl LampoChannelManager {
                     fee_estimator,
                     None,
                     keys_manager.clone(),
-                    keys_manager,
+                    Arc::new(LampoChangeDestination::new(keys_manager)),
                     self.persister.clone(),
                     self.logger.clone(),
                 );
@@ -395,7 +400,7 @@ impl LampoChannelManager {
     }
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {
-        let keys = self.wallet_manager.ldk_keys().keys_manager.clone();
+        let keys = self.signer.clone();
         ChainMonitor::new(
             // FIXME: this is needed when use esplora or electrum
             None,
@@ -449,14 +454,19 @@ impl LampoChannelManager {
         Channels { channels }
     }
 
-    pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<InMemorySigner>>> {
-        let keys = self.wallet_manager.ldk_keys().inner();
+    pub fn get_channel_monitors(&self) -> error::Result<Vec<ChannelMonitor<LampoChannelSigner>>> {
+        let keys = self.signer.clone();
         let mut monitors = read_channel_monitors(self.persister.clone(), keys.clone(), keys)?;
         let mut channel_monitors = Vec::new();
         for (_, monitor) in monitors.drain(..) {
             channel_monitors.push(monitor);
         }
         Ok(channel_monitors)
+    }
+
+    /// The signer shared by every LDK component of this node.
+    pub fn signer(&self) -> Arc<dyn LampoSigner> {
+        self.signer.clone()
     }
 
     pub fn graph(&self) -> Arc<LampoGraph> {
@@ -477,7 +487,7 @@ impl LampoChannelManager {
         DefaultRouter<
             Arc<LampoGraph>,
             Arc<LampoLogger>,
-            Arc<LampoKeysManager>,
+            Arc<dyn LampoSigner>,
             Arc<Mutex<LampoScorer>>,
             ProbabilisticScoringFeeParameters,
             LampoScorer,
@@ -502,7 +512,7 @@ impl LampoChannelManager {
                 Arc::new(DefaultRouter::new(
                     network_graph,
                     self.logger.clone(),
-                    self.wallet_manager.ldk_keys().keys_manager.clone(),
+                    self.signer.clone(),
                     scorer,
                     ProbabilisticScoringFeeParameters::default(),
                 ))
@@ -731,15 +741,12 @@ impl LampoChannelManager {
         let _ = self.network_graph();
         let monitors = self.get_channel_monitors()?;
 
-        let default_message_router = DefaultMessageRouter::new(
-            self.graph(),
-            self.wallet_manager.ldk_keys().keys_manager.clone(),
-        );
+        let default_message_router = DefaultMessageRouter::new(self.graph(), self.signer.clone());
         let default_message_router = Arc::new(default_message_router);
         let read_args = ChannelManagerReadArgs::new(
-            self.wallet_manager.ldk_keys().keys_manager.clone(),
-            self.wallet_manager.ldk_keys().keys_manager.clone(),
-            self.wallet_manager.ldk_keys().keys_manager.clone(),
+            self.signer.clone(),
+            self.signer.clone(),
+            self.signer.clone(),
             self.onchain.clone() as Arc<dyn FeeEstimator + Send + Sync>,
             self.chain_monitor(),
             self.onchain.clone() as Arc<dyn BroadcasterInterface + Send + Sync>,
@@ -803,13 +810,10 @@ impl LampoChannelManager {
 
         // network_graph() lazily initializes the graph, scorer, and router
         let network_graph = self.network_graph();
-        let default_message_router = DefaultMessageRouter::new(
-            self.graph(),
-            self.wallet_manager.ldk_keys().keys_manager.clone(),
-        );
+        let default_message_router = DefaultMessageRouter::new(self.graph(), self.signer.clone());
         let default_message_router = Arc::new(default_message_router);
 
-        let keymanagers = self.wallet_manager.ldk_keys().keys_manager.clone();
+        let keymanagers = self.signer.clone();
         let conversion = Arc::new(LampoCurrencyConversion::from_conf(&self.conf)?);
         let channeld = Arc::new(LampoArcChannelManager::new(
             self.onchain.clone(),

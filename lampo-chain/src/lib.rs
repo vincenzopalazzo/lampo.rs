@@ -653,9 +653,9 @@ mod tests {
     use lampo_common::chainsync::{ChainSyncCoordinator, SyncState};
     use lampo_common::conf::LampoConf;
     use lampo_common::error;
-    use lampo_common::keys::LampoKeys;
     use lampo_common::ldk::chain::Listen;
     use lampo_common::model::response::{NewAddress, Utxo};
+    use lampo_common::signer::LampoSigner;
     use lampo_common::wallet::{BlockRef, WalletManager};
 
     use super::{mark_initial_sync_complete, LampoChainSync, WalletChainListener};
@@ -734,7 +734,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn ldk_keys(&self) -> Arc<LampoKeys> {
+        fn ldk_keys(&self) -> Arc<dyn LampoSigner> {
             unimplemented!()
         }
 

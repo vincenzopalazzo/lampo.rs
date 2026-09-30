@@ -9,8 +9,8 @@ use crate::bitcoin::{Block, BlockHash, ScriptBuf, Transaction};
 use crate::chainsync::ChainSyncCoordinator;
 use crate::conf::LampoConf;
 use crate::error;
-use crate::keys::LampoKeys;
 use crate::model::response::{NewAddress, Utxo};
+use crate::signer::LampoSigner;
 
 /// A lightweight reference to a block (height + hash). Pure `bitcoin` types,
 /// so a chain backend and the wallet can exchange chain positions without the
@@ -35,8 +35,9 @@ pub trait WalletManager: Send + Sync {
     where
         Self: Sized;
 
-    /// Return the keys for ldk.
-    fn ldk_keys(&self) -> Arc<LampoKeys>;
+    /// The signer derived from this wallet's seed. The daemon uses it as
+    /// the default [`LampoSigner`] unless one is injected explicitly.
+    fn ldk_keys(&self) -> Arc<dyn LampoSigner>;
 
     /// return an on chain address
     async fn get_onchain_address(&self) -> error::Result<NewAddress>;

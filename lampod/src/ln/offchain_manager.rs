@@ -22,7 +22,6 @@ use lampo_common::conf::LampoConf;
 use lampo_common::currency::LampoCurrencyConversion;
 use lampo_common::error;
 use lampo_common::hex;
-use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
 use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
 use lampo_common::ldk::ln::channelmanager::{
@@ -35,17 +34,16 @@ use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
 use lampo_common::ldk::sign::EntropySource;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
 use lampo_common::ldk::util::ser::Readable;
+use lampo_common::signer::LampoSigner;
 
 use super::LampoChannelManager;
-use crate::chain::LampoChainManager;
 use crate::utils::logger::LampoLogger;
 
 pub struct OffchainManager {
     channel_manager: Arc<LampoChannelManager>,
-    keys_manager: Arc<LampoKeysManager>,
+    keys_manager: Arc<dyn LampoSigner>,
     logger: Arc<LampoLogger>,
     lampo_conf: Arc<LampoConf>,
-    chain_manager: Arc<LampoChainManager>,
     /// Set once this node is configured as an often-offline async recipient,
     /// either from `async-invoice-server-paths` in the config or from a
     /// runtime [`Self::set_async_receive_paths`] call.
@@ -58,11 +56,10 @@ pub struct OffchainManager {
 impl OffchainManager {
     // FIXME: use the build pattern here
     pub fn new(
-        keys_manager: Arc<LampoKeysManager>,
+        keys_manager: Arc<dyn LampoSigner>,
         channel_manager: Arc<LampoChannelManager>,
         logger: Arc<LampoLogger>,
         lampo_conf: Arc<LampoConf>,
-        chain_manager: Arc<LampoChainManager>,
     ) -> error::Result<Self> {
         let async_payments_enabled =
             Arc::new(AtomicBool::new(lampo_conf.async_payments_role.is_some()));
@@ -71,7 +68,6 @@ impl OffchainManager {
             keys_manager,
             logger,
             lampo_conf,
-            chain_manager,
             async_receive_enabled: AtomicBool::new(false),
             async_payments_enabled,
         };
@@ -265,14 +261,7 @@ impl OffchainManager {
     }
 
     pub fn keysend(&self, destination: pubkey, amount_msat: u64) -> error::Result<PaymentHash> {
-        let payment_preimage = PaymentPreimage(
-            self.chain_manager
-                .wallet_manager
-                .ldk_keys()
-                .keys_manager
-                .clone()
-                .get_secure_random_bytes(),
-        );
+        let payment_preimage = PaymentPreimage(self.keys_manager.get_secure_random_bytes());
         let PaymentPreimage(bytes) = payment_preimage;
         let payment_hash = PaymentHash(Sha256::hash(&bytes).to_byte_array());
         // The 40 here is the max CheckLockTimeVerify which locks the output of the transaction for a certain
