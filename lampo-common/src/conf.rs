@@ -58,6 +58,14 @@ pub struct LampoConf {
     /// `setasyncinvoicepaths`. Other RPCs stay unauthenticated (localhost
     /// plus the HTTP DNS-rebinding guard).
     pub api_token: Option<String>,
+    /// Fixed ISO 4217 rates for BOLT 12 currency-denominated offers.
+    ///
+    /// Each entry is `CODE=msats_per_minor_unit` (USD cents, JPY yen).
+    /// Comma-separated. Empty means currency offers are rejected.
+    pub currency_rates: Vec<(String, u64)>,
+    /// Symmetric tolerance, in basis points, around each configured rate.
+    /// One basis point is 0.01%. Default is 100 (1%).
+    pub currency_tolerance_bps: u16,
 }
 
 impl LampoConf {
@@ -116,6 +124,8 @@ impl Default for LampoConf {
             async_payments_role: None,
             async_invoice_server_paths: None,
             api_token: None,
+            currency_rates: Vec::new(),
+            currency_tolerance_bps: 100,
         }
     }
 }
@@ -344,6 +354,22 @@ impl TryFrom<String> for LampoConf {
                     Some(token)
                 }
             });
+        let currency_rates_raw = conf.get_conf("currency-rates").unwrap_or(None);
+        let currency_rates = parse_currency_rates(currency_rates_raw.as_deref())?;
+        let currency_tolerance_bps = conf
+            .get_conf("currency-tolerance-bps")
+            .unwrap_or(None)
+            .map(|raw| {
+                raw.parse::<u16>()
+                    .map_err(|_| anyhow::anyhow!("invalid currency-tolerance-bps `{raw}`"))
+            })
+            .transpose()?
+            .unwrap_or(100);
+        if currency_tolerance_bps >= 10_000 {
+            anyhow::bail!(
+                "currency-tolerance-bps `{currency_tolerance_bps}` must be below 10000 (100%)"
+            );
+        }
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -372,8 +398,41 @@ impl TryFrom<String> for LampoConf {
             async_payments_role,
             async_invoice_server_paths,
             api_token,
+            currency_rates,
+            currency_tolerance_bps,
         })
     }
+}
+
+fn parse_currency_rates(raw: Option<&str>) -> anyhow::Result<Vec<(String, u64)>> {
+    let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let mut rates = Vec::new();
+    for entry in raw.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let (code, rate) = entry.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!("invalid currency-rates entry `{entry}`: expected CODE=msats")
+        })?;
+        let code = code.trim().to_ascii_uppercase();
+        if code.len() != 3 || !code.bytes().all(|byte| byte.is_ascii_uppercase()) {
+            anyhow::bail!("invalid currency code `{code}`: expected 3 ASCII letters");
+        }
+        let rate = rate.trim().parse::<u64>().map_err(|_| {
+            anyhow::anyhow!("invalid currency rate for `{code}`: expected a u64 millisatoshi rate")
+        })?;
+        if rate == 0 {
+            anyhow::bail!("currency rate for `{code}` must be non-zero");
+        }
+        if rates.iter().any(|(existing, _)| existing == &code) {
+            anyhow::bail!("duplicate currency rate for `{code}`");
+        }
+        rates.push((code, rate));
+    }
+    Ok(rates)
 }
 
 impl LampoConf {
