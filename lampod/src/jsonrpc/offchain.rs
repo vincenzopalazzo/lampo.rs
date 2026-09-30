@@ -2,6 +2,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
+use lampo_common::currency::LampoCurrencyConversion;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
 use lampo_common::handler::Handler;
@@ -9,6 +10,8 @@ use lampo_common::hex;
 use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::ldk;
 use lampo_common::ldk::offers::offer;
+use lampo_common::ldk::offers::offer::Amount;
+use lampo_common::ldk::offers::offer::CurrencyCode;
 use lampo_common::ldk::util::ser::Writeable;
 use lampo_common::model::request::GenerateAsyncInvoicePaths;
 use lampo_common::model::request::GenerateInvoice;
@@ -45,10 +48,26 @@ pub async fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json
 
     // An async recipient's offer is built interactively with its static
     // invoice server; description/amount cannot be applied to it.
-    if ctx.offchain_manager().async_receive_enabled() {
-        if request.description.is_some() || request.amount_msat.is_some() {
+    if request.currency.is_some() || request.currency_amount.is_some() {
+        if request.amount_msat.is_some() {
             return Err(crate::rpc_error!(
-                "description/amount_msat cannot be set on an async receive offer; the offer is built with the static invoice server"
+                "amount_msat and currency are mutually exclusive"
+            ));
+        }
+        if request.currency.is_none() || request.currency_amount.is_none() {
+            return Err(crate::rpc_error!(
+                "currency and currency_amount must be set together"
+            ));
+        }
+    }
+
+    if ctx.offchain_manager().async_receive_enabled() {
+        if request.description.is_some()
+            || request.amount_msat.is_some()
+            || request.currency.is_some()
+        {
+            return Err(crate::rpc_error!(
+                "description/amount_msat/currency cannot be set on an async receive offer; the offer is built with the static invoice server"
             ));
         }
         let offer: response::Offer = ctx
@@ -60,8 +79,14 @@ pub async fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json
     }
 
     let manager = ctx.channel_manager().manager();
+    let conversion = LampoCurrencyConversion::from_conf(&ctx.conf())
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+
+    // Currency offers need a builder that borrowed the converter. Bitcoin
+    // offers use the same builder with a rate table that may be empty:
+    // Null-equivalent until amount() is called with Amount::Currency.
     let mut offer_builder = manager
-        .create_offer_builder()
+        .create_offer_builder_with_conversion(&conversion)
         .map_err(|err| crate::rpc_error!("{:?}", err))?;
 
     if let Some(description) = request.description {
@@ -70,6 +95,28 @@ pub async fn json_offer(ctx: &LampoDaemon, request: &json::Value) -> Result<json
 
     if let Some(amount_msat) = request.amount_msat {
         offer_builder = offer_builder.amount_msats(amount_msat);
+    }
+
+    if let (Some(currency), Some(minor_units)) = (request.currency, request.currency_amount) {
+        let code = currency.to_ascii_uppercase();
+        let iso4217_code = CurrencyCode::from_str(&code)
+            .map_err(|_| crate::rpc_error!("invalid currency code `{code}`"))?;
+        // Fail before build if the operator has no rate for this code. LDK
+        // would also reject it, but this error names the missing rate.
+        let converted = conversion
+            .convert_minor_units(&code, minor_units)
+            .map_err(|err| crate::rpc_error!("{err}"))?;
+        log::info!(
+            target: "lampod::jsonrpc::offchain",
+            "offer currency {code} minor_units={minor_units} -> {} msat (accepted {}..={})",
+            converted.amount_msats,
+            converted.minimum_msats,
+            converted.maximum_msats
+        );
+        offer_builder = offer_builder.amount(Amount::Currency {
+            iso4217_code,
+            amount: minor_units,
+        });
     }
 
     let offer: response::Offer = offer_builder

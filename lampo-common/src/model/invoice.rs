@@ -17,6 +17,17 @@ pub mod request {
     pub struct GenerateOffer {
         pub amount_msat: Option<u64>,
         pub description: Option<String>,
+        /// ISO 4217 code for a currency-denominated offer (`USD`, `EUR`).
+        ///
+        /// `currency_amount` is in minor units (USD cents, JPY yen), not the
+        /// major unit. Mutually exclusive with `amount_msat`. The node
+        /// converts it with the `currency-rates` table; it does not fetch a
+        /// live exchange rate.
+        #[serde(default)]
+        pub currency: Option<String>,
+        /// Amount in ISO 4217 minor units. Required when `currency` is set.
+        #[serde(default)]
+        pub currency_amount: Option<u64>,
     }
 
     #[derive(Debug, Serialize, Deserialize, Apiv2Schema)]

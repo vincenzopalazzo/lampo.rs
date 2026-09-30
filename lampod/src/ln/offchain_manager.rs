@@ -19,6 +19,7 @@ use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
 use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
 use lampo_common::conf::LampoConf;
+use lampo_common::currency::LampoCurrencyConversion;
 use lampo_common::error;
 use lampo_common::hex;
 use lampo_common::keys::LampoKeysManager;
@@ -191,29 +192,26 @@ impl OffchainManager {
         let payment_id = PaymentId(self.keys_manager.get_secure_random_bytes());
         let offer = Offer::from_str(offer_str).map_err(|err| error::anyhow!("{:?}", err))?;
 
+        let conversion = LampoCurrencyConversion::from_conf(&self.lampo_conf)?;
+        // An explicit amount is checked against the offer before the invoice
+        // request is sent. A currency offer with no amount lets the payee
+        // price the invoice; the returned invoice is checked against the same
+        // converter. Do not substitute a converted amount here: that would
+        // hide the currency from the payee.
         let amount = match offer.amount() {
-            Some(Amount::Bitcoin { amount_msats }) => amount_msats.clone(),
-            Some(_) => error::bail!(
-                "Cannot process non-Bitcoin-denominated offer value {:?}",
-                offer.amount()
-            ),
-            None => amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?,
+            Some(Amount::Bitcoin { .. }) | Some(Amount::Currency { .. }) => amount_msat,
+            None => Some(amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?),
         };
 
-        log::debug!(target: "lampo::offchain", "paying offer with amount `{}msat` & payer_note: `{}`", amount, payer_note.as_ref().unwrap_or(&"".to_string()));
+        log::debug!(target: "lampo::offchain", "paying offer with amount `{:?}` & payer_note: `{}`", amount, payer_note.as_ref().unwrap_or(&"".to_string()));
         self.channel_manager
             .manager()
-            .pay_for_offer(
+            .pay_for_offer_with_conversion(
                 &offer,
-                Some(amount),
+                amount,
                 payment_id,
                 OptionalOfferPaymentParams {
                     payer_note,
-                    // json_pay waits up to the RPC timeout for a terminal
-                    // event. Retry must cover that window: a 1s/10s timeout
-                    // (ldk-node can use 10s because it returns PaymentId
-                    // immediately) expires the HTLC while we are still
-                    // waiting, so the waiter never sees Success.
                     retry_strategy: Retry::Timeout(Duration::from_secs(120)),
                     route_params_config: ldk::routing::router::RouteParametersConfig {
                         max_total_routing_fee_msat: max_fee_msat,
@@ -221,6 +219,7 @@ impl OffchainManager {
                     },
                     ..Default::default()
                 },
+                &conversion,
             )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(payment_id)

@@ -316,6 +316,8 @@ pub async fn pay_offer_simple_case_lampo() -> error::Result<()> {
             request::GenerateOffer {
                 description: Some("making sure that we can work betwen lampo version".to_owned()),
                 amount_msat: Some(100_000),
+                currency: None,
+                currency_amount: None,
             },
         )
         .await?;
@@ -383,6 +385,8 @@ pub async fn pay_offer_minimal_offer() -> error::Result<()> {
             request::GenerateOffer {
                 description: None,
                 amount_msat: None,
+                currency: None,
+                currency_amount: None,
             },
         )
         .await?;
@@ -500,6 +504,8 @@ pub async fn decode_offer_hex() -> error::Result<()> {
             request::GenerateOffer {
                 description: Some("test offer for decode".to_owned()),
                 amount_msat: Some(100_000),
+                currency: None,
+                currency_amount: None,
             },
         )
         .await?;
@@ -729,6 +735,8 @@ async fn wait_async_offer(node: &LampoTesting) -> response::Offer {
                     request::GenerateOffer {
                         description: None,
                         amount_msat: None,
+                        currency: None,
+                        currency_amount: None,
                     },
                 )
                 .await
