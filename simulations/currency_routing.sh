@@ -15,11 +15,16 @@
 # out-of-tolerance explicit amounts are rejected locally, before any onion
 # message is sent.
 #
-# Regtest only (needs mining control). Ports API 8410+ / P2P 20310+, node data
-# $SIMDIR/{r,e1..e5} (lib.sh node_dir) and results in $SIMDIR/cr: disjoint from simulate.sh (810x), multihop (821x) and
-# mutinet (811x) soaks — all can run at once on the same host.
+# Regtest (mining control) or signet/mutinynet (faucet-fed, 30s blocks, no
+# mining, no reorg chaos — router bounce only). Ports API 8410+ / P2P 20310+,
+# node data $SIMDIR/{r,e1..e5} (lib.sh node_dir) and results in $SIMDIR/cr:
+# disjoint from simulate.sh (810x), multihop (821x) and mutinet (811x) soaks.
 #
-# Env: CR_ROUNDS(15) SEED(42) CHAOS_EVERY(5)
+# Signet funding: one faucet claim (1M sats) per edge that is not already
+# funded. The L402 challenge is paid via $PAY_NODE_URL (or set FAUCET_TOKEN
+# to skip the challenge). Faucet claims are the slow leg: allow ~10 min.
+#
+# Env: NETWORK(regtest) CR_ROUNDS(15) SEED(42) CHAOS_EVERY(5)
 #      CURRENCY_RATES(USD=1000,EUR=1100) CURRENCY_TOLERANCE_BPS(100)
 #      CR_CHANNEL_AMT_SATS(1000000) KEEP_GOING(0) TMO(90) (+ lib.sh env)
 #
@@ -45,7 +50,7 @@ SEED=${SEED:-42}
 CHAOS_EVERY=${CHAOS_EVERY:-5}
 CURRENCY_RATES=${CURRENCY_RATES:-USD=1000,EUR=1100}
 CURRENCY_TOLERANCE_BPS=${CURRENCY_TOLERANCE_BPS:-100}
-CR_CHANNEL_AMT_SATS=${CR_CHANNEL_AMT_SATS:-1000000}
+CR_CHANNEL_AMT_SATS=${CR_CHANNEL_AMT_SATS:-}
 API_BASE=${API_BASE:-8410}
 P2P_BASE=${P2P_BASE:-20310}
 CORE_URL=${CORE_URL:-http://127.0.0.1:18332}
@@ -53,6 +58,16 @@ CORE_USER=${CORE_USER:-testutil}
 CORE_PASS=${CORE_PASS:-testutilpassword}
 TMO=${TMO:-90}
 KEEP_GOING=${KEEP_GOING:-0}
+NETWORK=${NETWORK:-regtest}
+if [ "$NETWORK" = signet ]; then
+  CORE_URL=${CORE_URL:-http://127.0.0.1:38332}
+  CR_CHANNEL_AMT_SATS=${CR_CHANNEL_AMT_SATS:-100000}
+  PROBE_TRIES=${PROBE_TRIES:-120}
+  FAUCET=${FAUCET:-https://faucet.mutinynet.com}
+else
+  CR_CHANNEL_AMT_SATS=${CR_CHANNEL_AMT_SATS:-1000000}
+  PROBE_TRIES=${PROBE_TRIES:-40}
+fi
 
 source "$(dirname "$0")/lib.sh"
 
@@ -141,10 +156,72 @@ cr_open() { # $1 from-name $2 to-name $3 to-id — open_channel that also
   if echo "$resp" | grep -q '"code"'; then
     say "open $from->$to RPC error: $(echo "$resp" | head -c 300)"; return 1
   fi
-  for _ in $(seq 1 20); do   # funding tx in mempool BEFORE mining (race lesson)
-    sz=$(bcli getmempoolinfo | jqf 'd["result"]["size"]'); [ "${sz:-0}" -gt 0 ] 2>/dev/null && break; sleep 3
+  if [ "$NETWORK" = regtest ]; then
+    for _ in $(seq 1 20); do   # funding tx in mempool BEFORE mining (race lesson)
+      sz=$(bcli getmempoolinfo | jqf 'd["result"]["size"]'); [ "${sz:-0}" -gt 0 ] 2>/dev/null && break; sleep 3
+    done
+    mine 8
+  else
+    sleep 10  # signet: confirmations arrive on their own (~30s blocks)
+  fi
+}
+
+# --- signet funding via the mutinynet faucet (one 1M-sat claim per edge) ---
+# The hosted faucet uses L402: GET /api/l402 -> {invoice, token}; pay the
+# invoice with a node that routes on mutinynet (or set FAUCET_TOKEN to skip
+# the challenge), poll /api/l402/check until "settled", then POST /api/onchain.
+s_faucet_claim() { # $1 address -> 0 on accepted claim
+  local addr=$1
+  if [ -n "${FAUCET_TOKEN:-}" ]; then
+    local code
+    code=$(curl -s -o /tmp/faucet.out -w "%{http_code}" --max-time 30 \
+      -X POST "$FAUCET/api/onchain" -H 'content-type: application/json' \
+      -H "Authorization: Bearer $FAUCET_TOKEN" \
+      -d "{\"sats\":1000000,\"address\":\"$addr\"}")
+    say "faucet(bearer) http=$code body=$(head -c 120 /tmp/faucet.out)"
+    [ "$code" = 200 ] && return 0
+    return 1
+  fi
+  local ch inv tok st
+  ch=$(curl -s --max-time 15 "$FAUCET/api/l402") || return 1
+  inv=$(echo "$ch" | jqf 'd.get("invoice","")'); tok=$(echo "$ch" | jqf 'd.get("token","")')
+  [ -n "$inv" ] && [ -n "$tok" ] || { say "faucet: no L402 challenge"; return 1; }
+  local pres
+  pres=$(curl -sS --max-time 90 -X POST "${PAY_NODE_URL:-http://127.0.0.1:7996}/pay" \
+      -H 'content-type: application/json' -d "{\"invoice_str\":\"$inv\"}" 2>/dev/null | head -c 120)
+  echo "$pres" | grep -q '"payment_preimage"' \
+    || { say "faucet: challenge unpaid (no payer at ${PAY_NODE_URL:-http://127.0.0.1:7996}? set FAUCET_TOKEN)"; return 1; }
+  for _ in $(seq 1 12); do
+    sleep 5
+    st=$(curl -s --max-time 10 "$FAUCET/api/l402/check?token=$tok" | jqf 'd.get("status","")')
+    [ "$st" = "settled" ] && break
   done
-  mine 8
+  [ "$st" = "settled" ] || { say "faucet: L402 never settled"; return 1; }
+  local code2
+  code2=$(curl -s -o /tmp/faucet.out -w "%{http_code}" --max-time 30 \
+    -X POST "$FAUCET/api/onchain" -H 'content-type: application/json' \
+    -H "Authorization: Bearer $tok" \
+    -d "{\"sats\":1000000,\"address\":\"$addr\"}")
+  say "faucet(l402) http=$code2 body=$(head -c 120 /tmp/faucet.out)"
+  [ "$code2" = 200 ]
+}
+
+s_fund_edge() { # $1 edge: skip if funded, else one faucet claim + sync wait
+  local e=$1 f addr need=$(( CR_CHANNEL_AMT_SATS * 800 ))
+  f=$(rpc "$(API "$e")" funds \
+    | jqf 'sum(int(t["amount_msat"]) for t in d.get("transactions",[]) if int(t.get("amount_msat",0))>0)' 2>/dev/null)
+  if [ "${f:-0}" -gt "$need" ]; then say "$e already funded ($f msat)"; return 0; fi
+  addr=$(rpc "$(API "$e")" new_addr | jqf 'd["address"]')
+  [ -n "$addr" ] || { say "no address from $e"; return 1; }
+  s_faucet_claim "$addr" || return 1
+  # Wallet syncs on a ~2-min cadence; the claim needs a signet confirmation too.
+  for _ in $(seq 1 12); do
+    sleep 30
+    f=$(rpc "$(API "$e")" funds \
+      | jqf 'sum(int(t["amount_msat"]) for t in d.get("transactions",[]) if int(t.get("amount_msat",0))>0)' 2>/dev/null)
+    if [ "${f:-0}" -gt "$need" ]; then say "$e funded ($f msat)"; return 0; fi
+  done
+  say "$e funds never visible"; return 1
 }
 
 # ============================ main ====================================
@@ -153,8 +230,8 @@ mkdir -p "$CRDIR"
 echo "ts,tag,src,dst,method,currency,minor_units,exp_ref_min_max,state,preimage16,dur_s,relay_ok" > "$CSV"
 say "currency-routing soak: bin=$BIN rounds=$CR_ROUNDS seed=$SEED rates=$CURRENCY_RATES tol_bps=$CURRENCY_TOLERANCE_BPS"
 [ -x "$BIN" ] || { say "binary missing: $BIN"; exit 1; }
-bcli getblockchaininfo | jqf 'd["result"]["chain"]' | grep -q regtest \
-  || { say "bitcoind at $CORE_URL not regtest"; exit 1; }
+bcli getblockchaininfo | jqf 'd["result"]["chain"]' | grep -q "$NETWORK" \
+  || { say "bitcoind at $CORE_URL not on $NETWORK"; exit 1; }
 GUARD_PIDFILE="$CRDIR/harness.pid"
 if [ -f "$GUARD_PIDFILE" ]; then
   gp=$(cat "$GUARD_PIDFILE" 2>/dev/null)
@@ -181,6 +258,22 @@ if cr_probe e1 e2; then
   sleep 120
 else
   say "phase 2: fund edges + open star (edge -> r only, push half for return flow)"
+  if [ "$NETWORK" = signet ]; then
+    for e in "${EDGES[@]}"; do s_fund_edge "$e" || fail "faucet fund $e"; done
+    for e in "${EDGES[@]}"; do
+      cr_open "$e" r "${ID[r]}" || fail "open $e->r"
+    done
+    # Signet confirmations (~30s blocks, depth 6+) replace mining: poll long.
+    for _ in $(seq 1 40); do
+      ready=$(ready_channels e1 2>/dev/null || echo 0)
+      [ "${ready:-0}" -ge 1 ] 2>/dev/null && break
+      sleep 30
+    done
+    for _ in $(seq 1 "$PROBE_TRIES"); do cr_probe e1 e2 && break; sleep 30; done
+    cr_probe e1 e2 || fail "star never became routable"
+    say "phase 2b: announcer settle before first currency offer"
+    sleep 150
+  else
   bal=$(bcli getbalance | jqf 'd["result"]' 2>/dev/null || echo 0)
   if ! python3 -c "exit(0 if float('${bal:-0}') > 50 else 1)" 2>/dev/null; then
     say "maturing regtest coins (101 blocks) for funding"
@@ -211,10 +304,11 @@ else
     [ "${ready:-0}" -ge 1 ] 2>/dev/null && break
     sleep 15
   done
-  for _ in $(seq 1 40); do cr_probe e1 e2 && break; sleep 15; done
+  for _ in $(seq 1 "$PROBE_TRIES"); do cr_probe e1 e2 && break; sleep 15; done
   cr_probe e1 e2 || fail "star never became routable"
   say "phase 2b: announcer settle before first currency offer"
   sleep 150
+  fi
 fi
 say "star ready: all edge-edge volume forwards r"
 

@@ -89,10 +89,10 @@ collect_artifacts() { # $1 = tag
 fail() { say "FAIL: $*"; collect_artifacts "$(echo "$*" | tr ' /' '__' | head -c 40)"; [ "$KEEP_GOING" = 1 ] || exit 2; }
 
 start_node() { # $1 = name (writes conf; never deletes lampod.pid)
-  local n=$1 dir; dir=$(node_dir "$n")
-  mkdir -p "$dir/regtest"
-  cat > "$dir/regtest/lampo.conf" <<EOF
-network=regtest
+  local n=$1 dir net; dir=$(node_dir "$n"); net=${NETWORK:-regtest}
+  mkdir -p "$dir/$net"
+  cat > "$dir/$net/lampo.conf" <<EOF
+network=$net
 port=$(P2P "$n")
 announce-addr=127.0.0.1
 api-host=http://127.0.0.1
@@ -106,11 +106,11 @@ ${CURRENCY_TOLERANCE_BPS:+currency-tolerance-bps=$CURRENCY_TOLERANCE_BPS}
 EOF
   setsid_run() {
     if command -v setsid >/dev/null 2>&1; then
-      setsid nohup "$BIN" --data-dir "$dir" --network regtest \
+      setsid nohup "$BIN" --data-dir "$dir" --network "$net" \
         > "$dir/mh.log" 2>&1 < /dev/null &
     else
       # No setsid on macOS; plain nohup + disown detaches well enough.
-      nohup "$BIN" --data-dir "$dir" --network regtest \
+      nohup "$BIN" --data-dir "$dir" --network "$net" \
         > "$dir/mh.log" 2>&1 < /dev/null &
     fi
   }
