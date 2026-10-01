@@ -1,9 +1,9 @@
-use std::net::{SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
 
 use bitcoin::absolute::Height;
-use bitcoin::secp256k1::PublicKey;
 use clightningrpc_conf::{CLNConf, SyncCLNConf};
+
+use crate::extension::PersistentPeer;
 
 pub use bitcoin::Network;
 pub use lightning::util::config::UserConfig;
@@ -97,65 +97,7 @@ pub const PHOENIX_LSP_MAINNET: &str =
     "03864ef025fde8fb587d989186ce6a4a186895ee44a926bfc370e2c366597a3f8f@3.33.236.230:9735";
 
 /// A parsed `phoenix-lsp` value: the LSP node id and where to dial it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PhoenixLspPeer {
-    pub node_id: PublicKey,
-    /// Host name or IP literal, without brackets.
-    pub host: String,
-    pub port: u16,
-}
-
-impl PhoenixLspPeer {
-    /// Resolve `host:port` into socket addresses to dial.
-    pub fn socket_addrs(&self) -> anyhow::Result<Vec<SocketAddr>> {
-        let addrs: Vec<SocketAddr> = (self.host.as_str(), self.port).to_socket_addrs()?.collect();
-        if addrs.is_empty() {
-            anyhow::bail!("phoenix-lsp host `{}` did not resolve", self.host);
-        }
-        Ok(addrs)
-    }
-}
-
-impl FromStr for PhoenixLspPeer {
-    type Err = anyhow::Error;
-
-    fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        let (node_id, addr) = raw.trim().split_once('@').ok_or_else(|| {
-            anyhow::anyhow!("invalid phoenix-lsp `{raw}`: expected NODE_ID@HOST:PORT")
-        })?;
-        let node_id = PublicKey::from_str(node_id.trim())
-            .map_err(|err| anyhow::anyhow!("invalid phoenix-lsp node id `{node_id}`: {err}"))?;
-        let (host, port) = addr.rsplit_once(':').ok_or_else(|| {
-            anyhow::anyhow!("invalid phoenix-lsp address `{addr}`: expected HOST:PORT")
-        })?;
-        let port: u16 = port
-            .trim()
-            .parse()
-            .map_err(|_| anyhow::anyhow!("invalid phoenix-lsp port `{port}`"))?;
-        if port == 0 {
-            anyhow::bail!("phoenix-lsp port must be between 1 and 65535");
-        }
-        let host = host.trim().trim_start_matches('[').trim_end_matches(']');
-        if host.is_empty() {
-            anyhow::bail!("invalid phoenix-lsp address `{addr}`: empty host");
-        }
-        Ok(Self {
-            node_id,
-            host: host.to_owned(),
-            port,
-        })
-    }
-}
-
-impl std::fmt::Display for PhoenixLspPeer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.host.contains(':') {
-            write!(f, "{}@[{}]:{}", self.node_id, self.host, self.port)
-        } else {
-            write!(f, "{}@{}:{}", self.node_id, self.host, self.port)
-        }
-    }
-}
+pub type PhoenixLspPeer = PersistentPeer;
 
 impl LampoConf {
     /// Resolve the default lampo root path.
@@ -735,30 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn phoenix_lsp_peer_round_trips_and_rejects_garbage() {
-        let peer = PhoenixLspPeer::from_str(PHOENIX_LSP_TESTNET3).unwrap();
-        assert_eq!(peer.host, "13.248.222.197");
-        assert_eq!(peer.port, 9735);
-        assert_eq!(peer.to_string(), PHOENIX_LSP_TESTNET3);
-
-        let ipv6 = PhoenixLspPeer::from_str(
-            "03933884aaf1d6b108397e5efe5c86bcf2d8ca8d2f700eda99db9214fc2712b134@[::1]:9735",
-        )
-        .unwrap();
-        assert_eq!(ipv6.host, "::1");
-        assert!(ipv6.to_string().ends_with("@[::1]:9735"));
-
-        assert!(PhoenixLspPeer::from_str("nonsense").is_err());
-        assert!(PhoenixLspPeer::from_str("00@127.0.0.1:9735").is_err());
-        assert!(PhoenixLspPeer::from_str(
-            "03933884aaf1d6b108397e5efe5c86bcf2d8ca8d2f700eda99db9214fc2712b134@127.0.0.1:0"
-        )
-        .is_err());
-        assert!(PhoenixLspPeer::from_str(
-            "03933884aaf1d6b108397e5efe5c86bcf2d8ca8d2f700eda99db9214fc2712b134@127.0.0.1"
-        )
-        .is_err());
-
+    fn phoenix_lsp_peer_is_parsed_from_the_config() {
         let mut conf = LampoConf::default();
         assert!(conf.phoenix_lsp_peer().unwrap().is_none());
         conf.phoenix_lsp = Some(PHOENIX_LSP_MAINNET.to_owned());

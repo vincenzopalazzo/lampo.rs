@@ -67,6 +67,13 @@ pub enum LightningEvent {
         counterparty_node_id: Option<String>,
         funding_utxo: Option<String>,
     },
+    /// This node issued a BOLT 11 invoice. Extensions use it to tell a
+    /// payment they asked for from one they did not.
+    InvoiceIssued {
+        /// Hex payment hash.
+        payment_hash: String,
+        amount_msat: Option<u64>,
+    },
     /// The configured Phoenix LSP completed its handshake with this node.
     PhoenixLspConnected {
         counterparty_node_id: NodeId,
