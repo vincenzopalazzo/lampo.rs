@@ -208,7 +208,10 @@ health_scan_since() { # $1 = marks from log_marks
   local n marks=($1) i=0 hits m
   for n in "${ALLNODES[@]}"; do
     m=${marks[$i]:-0}; i=$((i+1))
-    hits=$(log_delta "$m" "$(node_log "$n")" | grep -hiE "panic|corrupt|invariant" | grep -v grep | head -3)
+    # "no such monitor registered" is the issue #201 restart crash: LDK
+    # logs it (and panics only in debug builds) when timer_tick updates a
+    # channel whose monitor was never loaded into the ChainMonitor.
+    hits=$(log_delta "$m" "$(node_log "$n")" | grep -hiE "panic|corrupt|invariant|no such monitor registered" | grep -v grep | head -3)
     [ -n "$hits" ] && { say "HEALTH($n): $hits"; return 1; }
   done
   return 0

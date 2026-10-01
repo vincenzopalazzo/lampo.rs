@@ -33,6 +33,7 @@
 #   I1 node_id unchanged (identity intact)         I4 probe: 2-hop payment
 #   I2 channel set == baseline (unless case closes)    Success + preimage + hops>=2
 #   I3 channels ready again within 180 s           I5 no panic|corrupt|invariant
+#                                                     |no such monitor registered
 #   I6 fail-fast cases: exit, no API, file unmodified  in the log DELTA
 #   I7 money guard (stress loop): cluster channel-balance total never
 #      drops >1% (funds vanishing) nor grows beyond the fee budget
