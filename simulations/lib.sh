@@ -150,6 +150,16 @@ fund_node() { # $1 name $2 btc
   bcres sendtoaddress "[\"$addr\", $2]" >/dev/null
   mine 6
 }
+# Actix returns fundchannel failures as {"code","message","data"}, not
+# {"error":{"message"}}. A receive-timeout used to look the same as a
+# wallet error (issue #221); callers must read this message.
+fundchannel_error() { # $1 = response body; prints the error message, empty if none
+  # Success bodies have tx/node_id and no message. Actix errors are
+  # {"code","message","data"}. A hung wait used to surface as
+  # "timed out waiting on receive operation" (issue #221).
+  echo "$1" | jqf '(d.get("message") or d.get("error",{}).get("message") or "")'
+}
+
 open_channel() { # $1 from-name $2 to-name $3 to-id [$4 amount] [$5 push_msat]
   local from=$1 to=$2 id=$3 amt=${4:-1000000} push=${5:-0} resp sz
   rpc "$(API "$from")" connect "{\"node_id\":\"$id\",\"addr\":\"127.0.0.1\",\"port\":$(P2P "$to")}" >/dev/null
@@ -158,13 +168,16 @@ open_channel() { # $1 from-name $2 to-name $3 to-id [$4 amount] [$5 push_msat]
   # behind issue #566 / PR #569.
   resp=$(TMO=150 rpc "$(API "$from")" fundchannel \
     "{\"node_id\":\"$id\",\"addr\":\"127.0.0.1\",\"port\":$(P2P "$to"),\"amount\":$amt,\"public\":true,\"push_msat\":$push}")
+  local ferr
+  ferr=$(fundchannel_error "$resp")
+  if [ -n "$ferr" ]; then
+    say "open_channel $from->$to RPC error: $(echo "$ferr" | head -c 300)"
+    return 1
+  fi
   case "$resp" in
     "{"*) : ;;
     *) say "open_channel $from->$to non-JSON: $(echo "$resp" | head -c 200)"; return 1 ;;
   esac
-  if echo "$resp" | jqf 'd.get("error",{}).get("message","")' | grep -q .; then
-    say "open_channel $from->$to RPC error: $(echo "$resp" | head -c 300)"; return 1
-  fi
   for _ in $(seq 1 20); do   # funding tx in mempool BEFORE mining (race lesson)
     sz=$(bcli getmempoolinfo | jqf 'd["result"]["size"]'); [ "${sz:-0}" -gt 0 ] 2>/dev/null && break; sleep 3
   done
