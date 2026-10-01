@@ -5,8 +5,8 @@ edition = "2021"
 description = "SDK for writing lampo plugins in Rust"
 
 [dependencies]
-lampo-plugin-common = { path = "../lampo-plugin-common" }
-lampo-plugin = { path = "../lampo-plugin", features = ["grpc"] }
+lampo-plugin-common = { path = "../../lampo-plugin-common" }
+lampo-plugin = { path = "../../lampo-plugin", features = ["grpc"] }
 tokio = { version = "1", features = ["io-util", "io-std", "sync", "rt", "macros", "net", "signal"] }
 tonic = { version = "0.12", features = ["transport"] }
 futures-core = "0.3"

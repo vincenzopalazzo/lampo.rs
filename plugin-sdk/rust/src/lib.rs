@@ -1,4 +1,6 @@
-//! Lampo Plugin SDK
+//! Lampo Plugin SDK (Rust).
+//!
+//! Zig 0.16 port of the stdio transport: `plugin-sdk/zig`.
 //!
 //! Builder-pattern API for writing lampo plugins in Rust.
 //!
