@@ -148,25 +148,6 @@ impl Default for LampoConf {
 }
 
 impl LampoConf {
-    /// Resolve the default lampo root path.
-    ///
-    /// Resolution order: `$LAMPO_HOME`, then `$HOME/.lampo`, then
-    /// `./.lampo` as a last-resort fallback. Never panics: a daemon
-    /// started from a minimal systemd unit or a container may not have
-    /// a determinable home directory.
-    /// (uses the deprecated `std::env::home_dir()` to avoid a dependency on dirs)
-    pub fn default_root_path() -> String {
-        if let Ok(path) = std::env::var("LAMPO_HOME") {
-            path
-        } else {
-            #[allow(deprecated)]
-            match std::env::home_dir() {
-                Some(path) => format!("{}/.lampo", path.to_string_lossy()),
-                None => "./.lampo".to_owned(),
-            }
-        }
-    }
-
     pub fn prepare_dirs(&self) -> Result<(), anyhow::Error> {
         Self::prepare_directories(&self.root_path, Some(self.network))
     }

@@ -185,25 +185,23 @@ impl Plugin {
 
     /// Start the plugin.
     ///
-    /// `--lampo-listen` serves gRPC on that loopback address. Without it,
-    /// the plugin reads JSON-RPC from stdin. The daemon passes the flag.
+    /// `--lampo-listen` serves gRPC on that loopback address. The daemon
+    /// always passes the flag. Without it, the process exits.
     pub async fn start(self) {
-        if let Some(addr) = grpc::listen_from_args() {
-            grpc::serve(
-                addr,
-                self.manifest,
-                self.rpc_handlers,
-                self.hook_handlers,
-                self.notify_handlers,
-                self.on_init,
-                self.init,
-            )
-            .await;
-            return;
-        }
-        let stdin = tokio::io::stdin();
-        let stdout = tokio::io::stdout();
-        self.run(stdin, stdout).await;
+        let Some(addr) = grpc::listen_from_args() else {
+            eprintln!("plugin requires --lampo-listen 127.0.0.1:0");
+            std::process::exit(1);
+        };
+        grpc::serve(
+            addr,
+            self.manifest,
+            self.rpc_handlers,
+            self.hook_handlers,
+            self.notify_handlers,
+            self.on_init,
+            self.init,
+        )
+        .await;
     }
 
     /// Run the plugin with custom I/O (for testing).

@@ -137,16 +137,21 @@ wait_up() { # $1 name -> echoes node_id
   local n=$1 idx=${1#n}
   for _ in $(seq 1 3); do
     for _ in $(seq 1 12); do
-      sleep 5
+      sleep 2
       local id; id=$(rpc "$(API "$idx")" getinfo | jqf 'd["node_id"]')
       [ -n "$id" ] && { echo "$id"; return 0; }
+      # First start writes wallet.dat and exits. Relaunch as soon as
+      # that process is gone instead of waiting out the whole minute.
+      if [ -z "$(node_pid "$n")" ]; then
+        break
+      fi
     done
     start_node "$n"   # cold dir sometimes needs a second launch
   done
   return 1
 }
 
-node_pid() { pgrep -f "lampod-cli --data-dir $SIMDIR/$1 " | head -1; }
+node_pid() { pgrep -f "lampod-cli --data-dir $SIMDIR/$1 --network" | head -1; }
 
 fund_node() { # $1 name $2 btc
   local idx=${1#n} addr
@@ -647,7 +652,7 @@ r=0
 while :; do
   r=$((r+1))
   do_round "$r"
-  if [ "$(( r % CHAOS_EVERY ))" = 0 ]; then run_chaos "$r"; fi
+  if [ "$CHAOS_EVERY" -gt 0 ] && [ "$(( r % CHAOS_EVERY ))" = 0 ]; then run_chaos "$r"; fi
   health_scan || fail "periodic health scan"
   [ "$ROUNDS" != 0 ] && [ "$r" -ge "$ROUNDS" ] && break
 done

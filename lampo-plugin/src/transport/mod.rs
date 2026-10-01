@@ -1,14 +1,12 @@
 //! Plugin transport implementations.
 //!
-//! The `PluginTransport` trait abstracts how the daemon communicates
-//! with a plugin. Implementations include:
-//! - `StdioTransport`: local subprocess via stdin/stdout
-//! - `GrpcTransport`: remote plugin via gRPC+mTLS (requires `grpc` feature)
+//! A local plugin is a gRPC server. The daemon spawns it with
+//! `--lampo-listen` and dials that loopback address. Stdio is not a
+//! plugin transport.
 #[cfg(feature = "grpc")]
 pub mod grpc;
 #[cfg(feature = "grpc")]
 pub mod local;
-pub mod stdio;
 #[cfg(feature = "grpc")]
 pub mod uds;
 
