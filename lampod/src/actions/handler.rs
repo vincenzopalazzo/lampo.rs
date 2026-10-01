@@ -38,8 +38,8 @@ use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
 use crate::ln::{
-    LampoChannelManager, LampoInventoryManager, LampoPeerManager, OnionMessageMailbox,
-    StaticInvoiceStore,
+    CustomMessageDispatcher, LampoChannelManager, LampoInventoryManager, LampoPeerManager,
+    OnionMessageMailbox, StaticInvoiceStore,
 };
 use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
@@ -104,6 +104,8 @@ pub struct LampoHandler {
     /// onion messenger was built with offline-peer interception (server
     /// role).
     om_mailbox: Option<OnionMessageMailbox>,
+    /// Vouches for fees skimmed from payments by the hop before us.
+    extensions: Arc<CustomMessageDispatcher>,
     bump_tx_event_handler: BumpHandler,
     external_handlers: RwLock<Vec<Arc<dyn ExternalHandler>>>,
     #[allow(dead_code)]
@@ -142,6 +144,7 @@ impl LampoHandler {
                 Some("server") => Some(OnionMessageMailbox::with_store(Some(lampod.persister()))),
                 _ => None,
             },
+            extensions: lampod.extensions(),
             bump_tx_event_handler,
             external_handlers: RwLock::new(Vec::new()),
             emitter,
@@ -161,6 +164,24 @@ impl LampoHandler {
 
     pub fn peer_manager(&self) -> Arc<LampoPeerManager> {
         self.peer_manager.clone()
+    }
+
+    /// The counterparty of each channel a payment's HTLC parts arrived
+    /// on, `None` for a channel we no longer know.
+    fn counterparties_for(
+        &self,
+        receiving_channel_ids: &[(lampo_common::types::ChannelId, Option<u128>)],
+    ) -> Vec<Option<lampo_common::types::NodeId>> {
+        let channels = self.channel_manager.manager().list_channels();
+        receiving_channel_ids
+            .iter()
+            .map(|(channel_id, _)| {
+                channels
+                    .iter()
+                    .find(|channel| channel.channel_id == *channel_id)
+                    .map(|channel| channel.counterparty.node_id)
+            })
+            .collect()
     }
 
     /// Messages waiting in the onion-message mailbox for `peer_node_id`.
@@ -646,11 +667,21 @@ impl Handler for LampoHandler {
                 amount_msat,
                 counterparty_skimmed_fee_msat,
                 purpose,
+                receiving_channel_ids,
                 claim_deadline,
                 payment_id: _,
                 ..
             } => {
-                match decide_payment_claim(amount_msat, counterparty_skimmed_fee_msat, &purpose) {
+                let counterparties = self.counterparties_for(&receiving_channel_ids);
+                let skim_budget_msat = self
+                    .extensions
+                    .counterparty_skim_budget_msat(&payment_hash, &counterparties);
+                match decide_payment_claim(
+                    amount_msat,
+                    counterparty_skimmed_fee_msat,
+                    &purpose,
+                    skim_budget_msat,
+                ) {
                     PaymentClaimDecision::Claim(preimage) => {
                         log::info!(
                             target: "lampo::handler",
@@ -1060,7 +1091,11 @@ enum PaymentClaimDecision {
 ///    (`counterparty_skimmed_fee_msat > 0`), so `amount_msat` no longer
 ///    covers the invoiced amount. Claiming it would hand the payer the
 ///    preimage — proof of payment — for less money than we invoiced. Such
-///    payments are failed back instead.
+///    payments are failed back instead, unless a registered extension vouches
+///    for the skim: `counterparty_skim_budget_msat` is the most the previous
+///    hops may have taken (zero unless an extension says otherwise, e.g.
+///    the funding fee of a liquidity purchase on HTLCs that all came over
+///    the LSP's channels), and a skim above it is failed back.
 /// 2. **Never panic on a missing preimage.** Invoice purposes may carry no
 ///    preimage (e.g. hash-only inbound payments created with
 ///    `create_inbound_payment_for_hash`); those cannot be claimed safely and
@@ -1069,12 +1104,16 @@ fn decide_payment_claim(
     _amount_msat: u64,
     counterparty_skimmed_fee_msat: u64,
     purpose: &ldk::events::PaymentPurpose,
+    counterparty_skim_budget_msat: u64,
 ) -> PaymentClaimDecision {
-    if counterparty_skimmed_fee_msat > 0 {
-        return PaymentClaimDecision::FailBack(
+    if counterparty_skimmed_fee_msat > counterparty_skim_budget_msat {
+        return PaymentClaimDecision::FailBack(if counterparty_skim_budget_msat == 0 {
             "payment is underpaid: the counterparty skimmed an extra fee, so the \
-             received amount does not cover the invoice",
-        );
+             received amount does not cover the invoice"
+        } else {
+            "payment is underpaid: the counterparty skimmed more than the fee an \
+             extension vouches for"
+        });
     }
     let preimage = match purpose {
         ldk::events::PaymentPurpose::Bolt11InvoicePayment {
@@ -1120,7 +1159,7 @@ mod payment_claimable_tests {
     /// carries no preimage must be failed back, not `unwrap()`ed.
     #[test]
     fn missing_preimage_is_failed_back_instead_of_panicking() {
-        let decision = decide_payment_claim(1_000_000, 0, &bolt11_purpose(None));
+        let decision = decide_payment_claim(1_000_000, 0, &bolt11_purpose(None), 0);
         assert!(
             matches!(decision, PaymentClaimDecision::FailBack(_)),
             "a missing preimage must fail the HTLC back, got {decision:?}"
@@ -1136,7 +1175,7 @@ mod payment_claimable_tests {
         // 5_000 msat: we would only ever receive 995_000 msat.
         let preimage = PaymentPreimage([0x07u8; 32]);
         let decision =
-            decide_payment_claim(995_000, 5_000, &bolt11_purpose(Some(preimage.clone())));
+            decide_payment_claim(995_000, 5_000, &bolt11_purpose(Some(preimage.clone())), 0);
         assert!(
             matches!(decision, PaymentClaimDecision::FailBack(_)),
             "an underpaid payment must be failed back, got {decision:?}"
@@ -1147,7 +1186,8 @@ mod payment_claimable_tests {
     #[test]
     fn fully_paid_payment_is_claimed() {
         let preimage = PaymentPreimage([0x07u8; 32]);
-        let decision = decide_payment_claim(1_000_000, 0, &bolt11_purpose(Some(preimage.clone())));
+        let decision =
+            decide_payment_claim(1_000_000, 0, &bolt11_purpose(Some(preimage.clone())), 0);
         assert_eq!(decision, PaymentClaimDecision::Claim(preimage));
     }
 
@@ -1160,7 +1200,38 @@ mod payment_claimable_tests {
             42_000,
             0,
             &ldk::events::PaymentPurpose::SpontaneousPayment(preimage.clone()),
+            0,
         );
         assert_eq!(decision, PaymentClaimDecision::Claim(preimage));
+    }
+
+    /// A skim within what an extension vouches for is the one legitimate
+    /// underpayment: the payment is claimed.
+    #[test]
+    fn skim_within_the_extension_budget_is_claimed() {
+        let preimage = PaymentPreimage([0x07u8; 32]);
+        let decision = decide_payment_claim(
+            97_000_000,
+            3_000_000,
+            &bolt11_purpose(Some(preimage.clone())),
+            3_000_000,
+        );
+        assert_eq!(decision, PaymentClaimDecision::Claim(preimage));
+    }
+
+    /// One msat above the vouched budget is too much.
+    #[test]
+    fn skim_above_the_extension_budget_is_failed_back() {
+        let preimage = PaymentPreimage([0x07u8; 32]);
+        let decision = decide_payment_claim(
+            96_999_999,
+            3_000_001,
+            &bolt11_purpose(Some(preimage)),
+            3_000_000,
+        );
+        assert!(
+            matches!(decision, PaymentClaimDecision::FailBack(reason) if reason.contains("extension vouches")),
+            "got {decision:?}"
+        );
     }
 }
