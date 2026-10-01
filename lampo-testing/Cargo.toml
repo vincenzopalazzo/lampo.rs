@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 lampod = { path = "../lampod" }
+lampo-phoenix = { path = "../lampo-phoenix", features = ["testing"] }
 lampo-common = { path = "../lampo-common" }
 lampo-chain = { path = "../lampo-chain" }
 lampo-plugin = { path = "../lampo-plugin" }

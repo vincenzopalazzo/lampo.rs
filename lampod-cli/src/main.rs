@@ -25,6 +25,7 @@ use lampo_plugin::tls::CertStore;
 use lampo_plugin::transport::grpc::GrpcConfig;
 use lampo_plugin::PluginManager;
 use lampo_plugin_common::messages::InitConfig;
+use lampo_phoenix::PhoenixLspHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
 
@@ -223,6 +224,8 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+    // Idle unless `phoenix-lsp` is configured.
+    lampod.add_extension(PhoenixLspHandler::from_conf(&lampo_conf)?)?;
 
     // Chain sync calls bitcoind during `init`, before the event handler used
     // to be installed. Start the plugin and attach a dispatcher first, or
