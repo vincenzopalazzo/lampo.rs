@@ -104,13 +104,21 @@ core-pass=$CORE_PASS
 ${CURRENCY_RATES:+currency-rates=$CURRENCY_RATES}
 ${CURRENCY_TOLERANCE_BPS:+currency-tolerance-bps=$CURRENCY_TOLERANCE_BPS}
 EOF
+  # Plugins are a CLI flag, not a conf line.
+  local -a plugin_args=()
+  local plugin
+  for plugin in ${LAMPO_PLUGINS:-}; do
+    plugin_args+=(--plugin "$plugin")
+  done
   setsid_run() {
     if command -v setsid >/dev/null 2>&1; then
       setsid nohup "$BIN" --data-dir "$dir" --network regtest \
+        "${plugin_args[@]}" \
         > "$dir/mh.log" 2>&1 < /dev/null &
     else
       # No setsid on macOS; plain nohup + disown detaches well enough.
       nohup "$BIN" --data-dir "$dir" --network regtest \
+        "${plugin_args[@]}" \
         > "$dir/mh.log" 2>&1 < /dev/null &
     fi
   }
