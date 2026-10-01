@@ -247,6 +247,41 @@ say "recovery cluster: hs=${ID[hs]:0:12}.. hm=${ID[hm]:0:12}.. hr=${ID[hr]:0:12}
 take_baseline; show_baseline
 marks=$(log_marks)
 
+# --- fundchannel must return the wallet error, not a receive timeout --
+# Issue #221 / #237: an open that cannot be funded used to sit on the
+# event bus until recv_timeout, and the CLI printed
+# "timed out waiting on receive operation". The RPC must come back with
+# the funding reason, and must not open a channel.
+if [ "$MATRIX" = 1 ]; then
+  say "R00 fundchannel with an amount the wallet cannot fund (issue #221)"
+  before=$(ready_channels hs)
+  resp=$(TMO=40 rpc "$(API hs)" fundchannel \
+    "{\"node_id\":\"${ID[hm]}\",\"addr\":\"127.0.0.1\",\"port\":$(P2P hm),\"amount\":50000000000,\"public\":false}")
+  msg=$(fundchannel_error "$resp")
+  say "  R00 response: $(echo "$resp" | head -c 240)"
+  case "$msg" in
+    *"timed out waiting on receive"*)
+      RC R00-fundchannel-error FAIL "still a receive timeout: $msg"
+      fail "R00: fundchannel timed out instead of returning the funding error" ;;
+    *"Insufficient funds"*|*"Failed to create funding transaction"*)
+      : ;;
+    "")
+      RC R00-fundchannel-error FAIL "empty error (body=$(echo "$resp" | head -c 160))"
+      fail "R00: fundchannel returned no error for an unfundable amount" ;;
+    *)
+      RC R00-fundchannel-error FAIL "unexpected error: $msg"
+      fail "R00: unexpected fundchannel error: $msg" ;;
+  esac
+  after=$(ready_channels hs)
+  [ "${after:-0}" = "${before:-0}" ] || {
+    RC R00-fundchannel-error FAIL "ready channels changed $before -> $after"
+    fail "R00: failed open changed the channel set"
+  }
+  # The node must still answer. A timeout used to leak the request task.
+  rpc "$(API hs)" getinfo | jqf 'd["node_id"]' | grep -q . || fail "R00: hs API dead after failed fundchannel"
+  RC R00-fundchannel-error PASS "returned funding error, channels unchanged"
+fi
+
 # --- A. process faults ------------------------------------------------
 if [ "$MATRIX" = 1 ]; then
   say "R01 clean stop (SIGINT, ctrlc handler persists) then restart hm"

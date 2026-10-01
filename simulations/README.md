@@ -8,7 +8,7 @@ The harness never touches mainnet or any production / “sacred” nodes.
 | Script | Role |
 |--------|------|
 | `lib.sh` | Shared helpers (RPC, mining, wallet sync, artifacts) |
-| `recover.sh` | Phase 1: recovery matrix + term/kill stress |
+| `recover.sh` | Phase 1: recovery matrix + term/kill stress (includes R00: unfundable `fundchannel` must return the wallet error, not a receive timeout) |
 | `simulate.sh` | Phase 2: N-node soak with chaos (reorg, restart, feespam, …) |
 | `multihop.sh` | Fixed `hs—hm—hr` multihop smoke |
 | `run-mh.sh` | Single-instance launcher (`soak` / `recover` / `stop`) |
