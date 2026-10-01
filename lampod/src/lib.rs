@@ -28,6 +28,7 @@ use tokio::task::JoinHandle;
 use lampo_common::backend::Backend;
 use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::LampoConf;
+use lampo_common::extension::{CustomMessageExtension, ExtensionContext};
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
@@ -45,7 +46,9 @@ use crate::chain::LampoChainManager;
 use crate::ln::phoenix_lsp::policy::LiquidityPolicy;
 use crate::ln::phoenix_lsp::{PhoenixLspHandler, PurchaseStore};
 use crate::ln::OffchainManager;
-use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::ln::{
+    CustomMessageDispatcher, LampoChannelManager, LampoInventoryManager, LampoPeerManager,
+};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
@@ -73,6 +76,10 @@ pub struct LampoDaemon {
     /// Client side of the Phoenix LSP protocol; idle unless `phoenix-lsp`
     /// is configured.
     phoenix_lsp: Option<Arc<PhoenixLspHandler>>,
+    /// Extensions registered before `init`, moved into the dispatcher by it.
+    extensions: Vec<Arc<dyn CustomMessageExtension>>,
+    /// Routes custom peer messages, feature bits and extension RPCs.
+    dispatcher: Option<Arc<CustomMessageDispatcher>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
@@ -103,6 +110,8 @@ impl LampoDaemon {
             wallet_manager,
             offchain_manager: None,
             phoenix_lsp: None,
+            extensions: Vec::new(),
+            dispatcher: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             chain_sync,
@@ -193,6 +202,40 @@ impl LampoDaemon {
                     "cannot create blinded paths for async recipient (no usable onion-message peers?)"
                 )
             })
+    }
+
+    /// Register a protocol extension. Must happen before [`Self::init`].
+    pub fn add_extension(
+        &mut self,
+        extension: Arc<dyn CustomMessageExtension>,
+    ) -> error::Result<()> {
+        if self.dispatcher.is_some() {
+            error::bail!("extensions must be registered before the daemon is initialized");
+        }
+        log::debug!(target: "lampod", "registering extension `{}`", extension.name());
+        self.extensions.push(extension);
+        Ok(())
+    }
+
+    fn init_extensions(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init extensions ...");
+        let extensions = std::mem::take(&mut self.extensions);
+        self.dispatcher = Some(Arc::new(CustomMessageDispatcher::new(extensions)?));
+        Ok(())
+    }
+
+    pub fn extensions(&self) -> Arc<CustomMessageDispatcher> {
+        self.dispatcher.clone().unwrap()
+    }
+
+    /// Serve an RPC method of a registered extension, `Ok(None)` when no
+    /// extension knows it.
+    pub async fn call_extension(
+        &self,
+        method: &str,
+        args: &json::Value,
+    ) -> Result<Option<json::Value>, lampo_common::jsonrpc::Error> {
+        self.extensions().rpc(method, args).await
     }
 
     /// Build the Phoenix LSP client before anything that feeds it: the
@@ -286,6 +329,7 @@ impl LampoDaemon {
 
     pub async fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         log::debug!(target: "lampod", "init lampod ...");
+        self.init_extensions()?;
         self.init_phoenix_lsp()?;
         self.init_onchaind(client.clone())?;
         self.init_channeld().await?;
@@ -311,6 +355,13 @@ impl LampoDaemon {
             let channels = self.channel_manager().accept_underpaying_htlcs_from(&lsp);
             phoenix_lsp.set_has_lsp_channel(channels > 0);
         }
+        let peer_manager = self.peer_manager();
+        self.extensions().attach(ExtensionContext {
+            channel_manager: self.channel_manager().manager(),
+            keys_manager: self.wallet_manager().ldk_keys().keys_manager.clone(),
+            events: self.handler(),
+            flush: Arc::new(move || peer_manager.process_events()),
+        });
         Ok(())
     }
 
