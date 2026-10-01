@@ -170,6 +170,14 @@ echo "phoenix offer: ${PHOENIX_OFFER:0:80}..."
 LAMPO_NODE=$(python3 -c 'import json; print(json.load(open("'"$SIMDIR/lampo-getinfo.json"'"))["node_id"])')
 echo "lampo node: $LAMPO_NODE"
 
+# Phoenix testnet3 trampoline. Compact payer offers must be introduced by a
+# public peer lampo has a channel with, not by lampo itself.
+LSP_ID=03933884aaf1d6b108397e5efe5c86bcf2d8ca8d2f700eda99db9214fc2712b134
+LSP_HOST=13.248.222.197
+LSP_PORT=9735
+echo "=== connect lampo to the ACINQ testnet3 LSP ==="
+lampo_call connect "$(printf '%s' "{\"node_id\":\"$LSP_ID\",\"addr\":\"$LSP_HOST\",\"port\":$LSP_PORT}")" | tee "$SIMDIR/lampo-connect-lsp.json"
+
 echo "=== fund lampo if the wallet is empty (needs testnet coins in bitcoind) ==="
 LAMPO_ADDR=$(lampo_call newaddr '{}' | python3 -c 'import json,sys; print(json.load(sys.stdin).get("address",""))')
 echo "lampo address: $LAMPO_ADDR"
@@ -194,7 +202,7 @@ print(json.dumps({
     "payer_note": "lampo->phoenix contact reveal",
     "reveal_contact": True,
     "contact_label": "phoenix",
-    "intro_node": "$LAMPO_NODE",
+    "intro_node": "$LSP_ID",
   },
   "timeout": "large",
 }))
