@@ -137,6 +137,23 @@ pub enum PhoenixLspMessage {
     DnsAddressResponse(DnsAddressResponse),
 }
 
+impl PhoenixLspMessage {
+    /// The message name, for logs.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::RecommendedFeerates(_) => "recommended_feerates",
+            Self::WillAddHtlc(_) => "will_add_htlc",
+            Self::WillFailHtlc(_) => "will_fail_htlc",
+            Self::WillFailMalformedHtlc(_) => "will_fail_malformed_htlc",
+            Self::CancelOnTheFlyFunding(_) => "cancel_on_the_fly_funding",
+            Self::AddFeeCredit(_) => "add_fee_credit",
+            Self::CurrentFeeCredit(_) => "current_fee_credit",
+            Self::DnsAddressRequest(_) => "dns_address_request",
+            Self::DnsAddressResponse(_) => "dns_address_response",
+        }
+    }
+}
+
 impl Type for PhoenixLspMessage {
     fn type_id(&self) -> u16 {
         match self {
