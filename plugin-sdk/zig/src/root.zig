@@ -4,9 +4,8 @@
 //! `plugin-sdk/rust`: `getmanifest`, `init`, `shutdown`, `hook/<name>`,
 //! registered RPC methods, and id-less notifications.
 //!
-//! gRPC (`--lampo-listen`) is not implemented. A plugin started with that
-//! flag disables itself so the daemon does not treat a silent process as
-//! a live transport.
+//! `--lampo-listen` serves `lampo.plugin.v1.LampoPlugin` through Zrpc.
+//! Without that flag the plugin reads JSON-RPC from stdin.
 
 const std = @import("std");
 
@@ -172,14 +171,10 @@ pub const Plugin = struct {
         self.failure_mode = mode;
     }
 
-    /// Read the daemon from stdin and write responses to stdout.
-    /// `--lampo-listen` is the gRPC transport; this SDK does not speak it.
+    /// `--lampo-listen` serves loopback gRPC. Without it, read JSON-RPC from stdin.
     pub fn run(self: *Plugin, proc: std.process.Init) !void {
-        if (hasListenFlag(proc)) {
-            std.log.err("plugin-sdk/zig does not implement --lampo-listen (gRPC); use the Rust SDK", .{});
-            return error.GrpcUnsupported;
-        }
-        try self.runIo(proc.io);
+        const grpc = @import("grpc.zig");
+        try grpc.runPlugin(self, proc);
     }
 
     pub fn runIo(self: *Plugin, io: std.Io) !void {
@@ -270,7 +265,7 @@ pub const Plugin = struct {
         return false;
     }
 
-    fn writeManifest(self: *Plugin, out: *std.Io.Writer, id: std.json.Value) !void {
+    pub fn writeManifest(self: *Plugin, out: *std.Io.Writer, id: std.json.Value) !void {
         var body: std.Io.Writer.Allocating = .init(self.allocator);
         defer body.deinit();
         var jw: std.json.Stringify = .{ .writer = &body.writer };
@@ -354,21 +349,21 @@ pub const Plugin = struct {
         try writeResult(out, id, null);
     }
 
-    fn findRpc(self: *Plugin, name: []const u8) ?RpcHandler {
+    pub fn findRpc(self: *Plugin, name: []const u8) ?RpcHandler {
         for (self.rpc_methods.items) |decl| {
             if (std.mem.eql(u8, decl.name, name)) return decl.handler;
         }
         return null;
     }
 
-    fn findHook(self: *Plugin, name: []const u8) ?HookHandler {
+    pub fn findHook(self: *Plugin, name: []const u8) ?HookHandler {
         for (self.hooks.items) |decl| {
             if (std.mem.eql(u8, decl.name, name)) return decl.handler;
         }
         return null;
     }
 
-    fn findNotify(self: *Plugin, topic: []const u8) ?NotifyHandler {
+    pub fn findNotify(self: *Plugin, topic: []const u8) ?NotifyHandler {
         for (self.subscriptions.items) |decl| {
             if (std.mem.eql(u8, decl.topic, topic) or std.mem.eql(u8, decl.topic, "*")) {
                 return decl.handler;
@@ -377,15 +372,6 @@ pub const Plugin = struct {
         return null;
     }
 };
-
-fn hasListenFlag(proc: std.process.Init) bool {
-    var it = proc.minimal.args.iterate();
-    while (it.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--lampo-listen")) return true;
-        if (std.mem.startsWith(u8, arg, "--lampo-listen=")) return true;
-    }
-    return false;
-}
 
 fn writeResult(out: *std.Io.Writer, id: std.json.Value, result: ?std.json.Value) !void {
     var jw: std.json.Stringify = .{ .writer = out };
