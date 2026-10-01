@@ -192,7 +192,8 @@ wait_wallet_synced() { # [timeout_s]
 # --- health monitor: panics / errors in node logs -------------------
 health_scan() {
   local hits
-  hits=$(grep -hniE "panic|corrupt|invariant" "$SIMDIR"/*/mh.log 2>/dev/null | grep -v "grep" | head -5)
+  # "no such monitor registered" is the issue #201 restart crash.
+  hits=$(grep -hniE "panic|corrupt|invariant|no such monitor registered" "$SIMDIR"/*/mh.log 2>/dev/null | grep -v "grep" | head -5)
   [ -n "$hits" ] && { say "HEALTH: suspicious log lines:"; echo "$hits" | tee -a "$LOG"; return 1; }
   return 0
 }
