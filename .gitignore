@@ -7,3 +7,7 @@ simulations/**/artifacts/
 
 # tools ignores
 **/__pycache__
+
+# zig
+.zig-cache/
+zig-out/

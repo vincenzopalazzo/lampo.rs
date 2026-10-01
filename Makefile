@@ -28,3 +28,12 @@ integration: default
 audit:
 	$(CC) install cargo-audit
 	$(CC) audit
+
+# Zig 0.16 plugin SDK and the bitcoind chain backend.
+# The binary name matches what lampod-cli looks up next to itself.
+zig-sdk:
+	cd plugin-sdk/zig && zig build test
+
+zig-bitcoind:
+	cd lampo-bitcoind/zig && zig build -Doptimize=ReleaseSafe
+
