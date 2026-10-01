@@ -87,4 +87,11 @@ pub enum LightningEvent {
         channel_id: ChannelId,
         txid: Option<Txid>,
     },
+    /// This node issued a BOLT 11 invoice. Extensions use it to tell a
+    /// payment they asked for from one they did not.
+    InvoiceIssued {
+        /// Hex payment hash.
+        payment_hash: String,
+        amount_msat: Option<u64>,
+    },
 }
