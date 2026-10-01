@@ -306,13 +306,10 @@ impl LampoDaemon {
         let phoenix_lsp = self.phoenix_lsp();
         phoenix_lsp.set_handler(self.handler());
         if let Some(lsp) = phoenix_lsp.lsp_node_id() {
-            let has_channel = self
-                .channel_manager()
-                .manager()
-                .list_channels()
-                .iter()
-                .any(|channel| channel.counterparty.node_id == lsp);
-            phoenix_lsp.set_has_lsp_channel(has_channel);
+            // Existing channels with the LSP must accept its funding fee
+            // on HTLCs; the claim path checks it against a purchase.
+            let channels = self.channel_manager().accept_underpaying_htlcs_from(&lsp);
+            phoenix_lsp.set_has_lsp_channel(channels > 0);
         }
         Ok(())
     }

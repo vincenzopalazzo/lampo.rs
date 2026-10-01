@@ -33,6 +33,8 @@ use lampo_common::utils::logger::LampoLogger;
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
+use crate::ln::phoenix_lsp::liquidity_ads::PaymentType;
+use crate::ln::phoenix_lsp::purchases::{max_funding_fee_msat, Purchase};
 use crate::ln::{
     LampoChannelManager, LampoInventoryManager, LampoPeerManager, OnionMessageMailbox,
     StaticInvoiceStore,
@@ -156,6 +158,31 @@ impl LampoHandler {
         self.peer_manager.clone()
     }
 
+    /// What the Phoenix LSP has to do with a claimable payment: whether
+    /// every HTLC part came over a channel with it, and the purchase (if
+    /// any) its funding fee may be charged to.
+    fn lsp_funding_context(
+        &self,
+        payment_hash: &ldk::types::payment::PaymentHash,
+        receiving_channel_ids: &[(lampo_common::types::ChannelId, Option<u128>)],
+    ) -> LspFundingContext {
+        let phoenix_lsp = self.peer_manager.phoenix_lsp();
+        let Some(lsp) = phoenix_lsp.lsp_node_id() else {
+            return LspFundingContext::default();
+        };
+        let channels = self.channel_manager.manager().list_channels();
+        let all_parts_from_lsp = !receiving_channel_ids.is_empty()
+            && receiving_channel_ids.iter().all(|(channel_id, _)| {
+                channels.iter().any(|channel| {
+                    channel.channel_id == *channel_id && channel.counterparty.node_id == lsp
+                })
+            });
+        LspFundingContext {
+            all_parts_from_lsp,
+            purchase: phoenix_lsp.purchases().find_by_payment_hash(payment_hash),
+        }
+    }
+
     /// Messages waiting in the onion-message mailbox for `peer_node_id`.
     /// Zero when this node is not a static invoice server.
     pub fn buffered_onion_messages(&self, peer_node_id: lampo_common::types::NodeId) -> usize {
@@ -258,6 +285,10 @@ impl Handler for LampoHandler {
                 let phoenix_lsp = self.peer_manager.phoenix_lsp();
                 if phoenix_lsp.is_lsp(&counterparty_node_id) {
                     phoenix_lsp.set_has_lsp_channel(true);
+                    // The LSP takes its funding fee from HTLCs on this
+                    // channel; let them through and check the fee on claim.
+                    self.channel_manager
+                        .accept_underpaying_htlcs_from(&counterparty_node_id);
                 }
                 // Public channels announced right after this moment do not
                 // always reach us through incremental gossip relay: a node
@@ -552,11 +583,18 @@ impl Handler for LampoHandler {
                 amount_msat,
                 counterparty_skimmed_fee_msat,
                 purpose,
+                receiving_channel_ids,
                 claim_deadline,
                 payment_id: _,
                 ..
             } => {
-                match decide_payment_claim(amount_msat, counterparty_skimmed_fee_msat, &purpose) {
+                let lsp_funding = self.lsp_funding_context(&payment_hash, &receiving_channel_ids);
+                match decide_payment_claim(
+                    amount_msat,
+                    counterparty_skimmed_fee_msat,
+                    &purpose,
+                    &lsp_funding,
+                ) {
                     PaymentClaimDecision::Claim(preimage) => {
                         log::info!(
                             target: "lampo::handler",
@@ -945,6 +983,16 @@ enum PaymentClaimDecision {
     FailBack(&'static str),
 }
 
+/// The Phoenix LSP side of a claimable payment, resolved by the handler
+/// before `decide_payment_claim` runs.
+#[derive(Debug, Default)]
+struct LspFundingContext {
+    /// Every HTLC part arrived over a channel with the configured LSP.
+    all_parts_from_lsp: bool,
+    /// The recorded purchase this payment hash pays the funding fee of.
+    purchase: Option<Purchase>,
+}
+
 /// Validate a `PaymentClaimable` event *before* releasing the preimage (the
 /// cryptographic proof of payment) to the channel manager.
 ///
@@ -956,7 +1004,13 @@ enum PaymentClaimDecision {
 ///    (`counterparty_skimmed_fee_msat > 0`), so `amount_msat` no longer
 ///    covers the invoiced amount. Claiming it would hand the payer the
 ///    preimage — proof of payment — for less money than we invoiced. Such
-///    payments are failed back instead.
+///    payments are failed back instead, with one exception:
+///    **a funding fee owed to the Phoenix LSP.** The skim is accepted only
+///    when every HTLC part came over a channel with the configured LSP, a
+///    recorded purchase lists this payment hash with payment type 128 or
+///    129 (a type 130 purchase allows no skim at all), and the skim is at
+///    most the purchase's mining plus service fee minus the fee credit
+///    already applied. Anything else is failed back.
 /// 2. **Never panic on a missing preimage.** Invoice purposes may carry no
 ///    preimage (e.g. hash-only inbound payments created with
 ///    `create_inbound_payment_for_hash`); those cannot be claimed safely and
@@ -965,12 +1019,36 @@ fn decide_payment_claim(
     _amount_msat: u64,
     counterparty_skimmed_fee_msat: u64,
     purpose: &ldk::events::PaymentPurpose,
+    lsp_funding: &LspFundingContext,
 ) -> PaymentClaimDecision {
     if counterparty_skimmed_fee_msat > 0 {
-        return PaymentClaimDecision::FailBack(
-            "payment is underpaid: the counterparty skimmed an extra fee, so the \
-             received amount does not cover the invoice",
-        );
+        if !lsp_funding.all_parts_from_lsp {
+            return PaymentClaimDecision::FailBack(
+                "payment is underpaid: the counterparty skimmed an extra fee, so the \
+                 received amount does not cover the invoice",
+            );
+        }
+        let Some(purchase) = lsp_funding.purchase.as_ref() else {
+            return PaymentClaimDecision::FailBack(
+                "payment is underpaid: the LSP skimmed a funding fee but no recorded \
+                 purchase lists this payment hash",
+            );
+        };
+        match PaymentType::from_bit(purchase.payment_type) {
+            PaymentType::FromFutureHtlc | PaymentType::FromFutureHtlcWithPreimage => {}
+            _ => {
+                return PaymentClaimDecision::FailBack(
+                    "payment is underpaid: the recorded purchase is not paid from future \
+                     HTLCs, so the LSP may not skim a funding fee from this one",
+                );
+            }
+        }
+        if counterparty_skimmed_fee_msat > max_funding_fee_msat(purchase) {
+            return PaymentClaimDecision::FailBack(
+                "payment is underpaid: the LSP skimmed more than the funding fee of the \
+                 recorded purchase",
+            );
+        }
     }
     let preimage = match purpose {
         ldk::events::PaymentPurpose::Bolt11InvoicePayment {
@@ -1012,11 +1090,33 @@ mod payment_claimable_tests {
         }
     }
 
+    fn no_lsp() -> LspFundingContext {
+        LspFundingContext::default()
+    }
+
+    /// A purchase of 100k sat with 1_000 + 2_500 sat of fees, 500 sat of
+    /// which fee credit already covered: 3_000_000 msat may still be skimmed.
+    fn lsp_purchase(payment_type: u32) -> LspFundingContext {
+        LspFundingContext {
+            all_parts_from_lsp: true,
+            purchase: Some(Purchase {
+                funding_txid: "ab".repeat(32),
+                amount_sat: 100_000,
+                mining_fee_sat: 1_000,
+                service_fee_sat: 2_500,
+                payment_type,
+                payment_hashes: vec!["11".repeat(32)],
+                fee_credit_used_msat: 500_000,
+                created_at: 1,
+            }),
+        }
+    }
+
     /// Regression for the P0 panic: a `PaymentClaimable` whose purpose
     /// carries no preimage must be failed back, not `unwrap()`ed.
     #[test]
     fn missing_preimage_is_failed_back_instead_of_panicking() {
-        let decision = decide_payment_claim(1_000_000, 0, &bolt11_purpose(None));
+        let decision = decide_payment_claim(1_000_000, 0, &bolt11_purpose(None), &no_lsp());
         assert!(
             matches!(decision, PaymentClaimDecision::FailBack(_)),
             "a missing preimage must fail the HTLC back, got {decision:?}"
@@ -1031,8 +1131,12 @@ mod payment_claimable_tests {
         // Invoice was for 1_000_000 msat, but the counterparty skimmed
         // 5_000 msat: we would only ever receive 995_000 msat.
         let preimage = PaymentPreimage([0x07u8; 32]);
-        let decision =
-            decide_payment_claim(995_000, 5_000, &bolt11_purpose(Some(preimage.clone())));
+        let decision = decide_payment_claim(
+            995_000,
+            5_000,
+            &bolt11_purpose(Some(preimage.clone())),
+            &no_lsp(),
+        );
         assert!(
             matches!(decision, PaymentClaimDecision::FailBack(_)),
             "an underpaid payment must be failed back, got {decision:?}"
@@ -1043,7 +1147,12 @@ mod payment_claimable_tests {
     #[test]
     fn fully_paid_payment_is_claimed() {
         let preimage = PaymentPreimage([0x07u8; 32]);
-        let decision = decide_payment_claim(1_000_000, 0, &bolt11_purpose(Some(preimage.clone())));
+        let decision = decide_payment_claim(
+            1_000_000,
+            0,
+            &bolt11_purpose(Some(preimage.clone())),
+            &no_lsp(),
+        );
         assert_eq!(decision, PaymentClaimDecision::Claim(preimage));
     }
 
@@ -1056,6 +1165,96 @@ mod payment_claimable_tests {
             42_000,
             0,
             &ldk::events::PaymentPurpose::SpontaneousPayment(preimage.clone()),
+            &no_lsp(),
+        );
+        assert_eq!(decision, PaymentClaimDecision::Claim(preimage));
+    }
+
+    /// A skim from the LSP with no purchase behind it is still underpayment.
+    #[test]
+    fn lsp_skim_without_a_purchase_is_failed_back() {
+        let preimage = PaymentPreimage([0x07u8; 32]);
+        let from_lsp = LspFundingContext {
+            all_parts_from_lsp: true,
+            purchase: None,
+        };
+        let decision =
+            decide_payment_claim(997_000, 3_000, &bolt11_purpose(Some(preimage)), &from_lsp);
+        assert!(
+            matches!(decision, PaymentClaimDecision::FailBack(reason) if reason.contains("no recorded purchase")),
+            "got {decision:?}"
+        );
+    }
+
+    /// A funding fee within the recorded purchase is the one legitimate
+    /// skim: the payment is claimed.
+    #[test]
+    fn lsp_skim_within_the_purchase_is_claimed() {
+        let preimage = PaymentPreimage([0x07u8; 32]);
+        for payment_type in [128, 129] {
+            let decision = decide_payment_claim(
+                97_000_000,
+                3_000_000,
+                &bolt11_purpose(Some(preimage.clone())),
+                &lsp_purchase(payment_type),
+            );
+            assert_eq!(
+                decision,
+                PaymentClaimDecision::Claim(preimage.clone()),
+                "payment type {payment_type}"
+            );
+        }
+        // Every part must come from the LSP, purchase or not.
+        let mut mixed = lsp_purchase(128);
+        mixed.all_parts_from_lsp = false;
+        let decision = decide_payment_claim(
+            97_000_000,
+            3_000_000,
+            &bolt11_purpose(Some(preimage)),
+            &mixed,
+        );
+        assert!(
+            matches!(decision, PaymentClaimDecision::FailBack(_)),
+            "got {decision:?}"
+        );
+    }
+
+    /// One msat above the purchase's remaining fee budget is too much.
+    #[test]
+    fn lsp_skim_above_the_purchase_is_failed_back() {
+        let preimage = PaymentPreimage([0x07u8; 32]);
+        let decision = decide_payment_claim(
+            96_999_999,
+            3_000_001,
+            &bolt11_purpose(Some(preimage)),
+            &lsp_purchase(128),
+        );
+        assert!(
+            matches!(decision, PaymentClaimDecision::FailBack(reason) if reason.contains("more than the funding fee")),
+            "got {decision:?}"
+        );
+    }
+
+    /// Payment type 130 is paid from channel balance: the HTLC must arrive
+    /// whole, so any skim is failed back, while no skim is claimed.
+    #[test]
+    fn lsp_skim_on_a_channel_balance_purchase_is_failed_back() {
+        let preimage = PaymentPreimage([0x07u8; 32]);
+        let decision = decide_payment_claim(
+            99_999_000,
+            1_000,
+            &bolt11_purpose(Some(preimage.clone())),
+            &lsp_purchase(130),
+        );
+        assert!(
+            matches!(decision, PaymentClaimDecision::FailBack(reason) if reason.contains("not paid from future HTLCs")),
+            "got {decision:?}"
+        );
+        let decision = decide_payment_claim(
+            100_000_000,
+            0,
+            &bolt11_purpose(Some(preimage.clone())),
+            &lsp_purchase(130),
         );
         assert_eq!(decision, PaymentClaimDecision::Claim(preimage));
     }

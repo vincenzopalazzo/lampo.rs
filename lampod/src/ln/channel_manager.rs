@@ -30,6 +30,7 @@ use lampo_common::ldk::routing::scoring::{
     ProbabilisticScorer, ProbabilisticScoringDecayParameters, ProbabilisticScoringFeeParameters,
 };
 use lampo_common::ldk::sign::{InMemorySigner, NodeSigner};
+use lampo_common::ldk::util::config::ChannelConfigUpdate;
 use lampo_common::ldk::util::persist::{
     read_channel_monitors, KVStoreSync, OUTPUT_SWEEPER_PERSISTENCE_KEY,
     OUTPUT_SWEEPER_PERSISTENCE_PRIMARY_NAMESPACE, OUTPUT_SWEEPER_PERSISTENCE_SECONDARY_NAMESPACE,
@@ -43,7 +44,7 @@ use lampo_common::types::LampoGraph;
 use lampo_common::types::LampoRouter;
 use lampo_common::types::LampoScorer;
 use lampo_common::types::LampoSweeper;
-use lampo_common::types::{ChannelId, LampoArcChannelManager, LampoChainMonitor};
+use lampo_common::types::{ChannelId, LampoArcChannelManager, LampoChainMonitor, NodeId};
 
 use crate::actions::handler::LampoHandler;
 use crate::async_run;
@@ -237,6 +238,43 @@ impl LampoChannelManager {
         self.handler
             .set(handler)
             .unwrap_or_else(|_| panic!("handler already initialized"));
+    }
+
+    /// Let every channel with `counterparty` deliver HTLCs whose amount is
+    /// below what the onion promised, so the previous hop can take a fee
+    /// from them. Only an LSP this node buys liquidity from should get
+    /// this; the claim path still checks the fee against a recorded
+    /// purchase before releasing a preimage. Returns how many channels
+    /// with `counterparty` exist.
+    pub fn accept_underpaying_htlcs_from(&self, counterparty: &NodeId) -> usize {
+        let update = ChannelConfigUpdate {
+            accept_underpaying_htlcs: Some(true),
+            ..Default::default()
+        };
+        let channels: Vec<ChannelId> = self
+            .manager()
+            .list_channels()
+            .into_iter()
+            .filter(|channel| channel.counterparty.node_id == *counterparty)
+            .map(|channel| channel.channel_id)
+            .collect();
+        for channel_id in &channels {
+            match self.manager().update_partial_channel_config(
+                counterparty,
+                &[*channel_id],
+                &update,
+            ) {
+                Ok(()) => log::info!(
+                    target: "lampo",
+                    "accepting underpaying HTLCs on `{channel_id}` from `{counterparty}`"
+                ),
+                Err(err) => log::warn!(
+                    target: "lampo",
+                    "cannot update the config of `{channel_id}` with `{counterparty}`: {err:?}"
+                ),
+            }
+        }
+        channels.len()
     }
 
     /// Called once from `LampoPeerManager::init` so the same `P2PGossipSync`
