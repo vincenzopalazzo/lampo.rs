@@ -595,6 +595,9 @@ name = "bitreq"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a95e202ed3a38fd87f384e6ca46ecbcba9779d3b0fae69006431f7c9e25b3f11"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "block-buffer"
@@ -1194,15 +1197,16 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "elite-rpc"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d36bc687f0c48de1fe9f88ee747255ac08284285707dc1bb2ed3908fe480b832"
+checksum = "51506159da0d9472aa9c0bd6aba093bf4973017d33c97850e27ec8df0dd02c04"
 dependencies = [
  "anyhow",
  "bitreq 0.4.0",
  "log",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

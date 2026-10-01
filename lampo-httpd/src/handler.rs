@@ -28,19 +28,11 @@ impl HttpdHandler {
 #[async_trait]
 impl ExternalHandler for HttpdHandler {
     async fn handle(&self, req: &Request<json::Value>) -> error::Result<Option<json::Value>> {
-        let method = req.method.clone();
-        let body = req.params.clone();
-        let inner = self.inner.clone();
-        let task = tokio::task::spawn_blocking(move || {
-            let result = inner.call(TransportMethod::Post(method), &body);
-            match result {
-                Ok(response) => Ok(Some(response)),
-                Err(e) => Err(e),
-            }
-        })
-        .await;
-        let task = task.map_err(|err| error::anyhow!("task error: {}", err))?;
-        task
+        let response = self
+            .inner
+            .call_async(TransportMethod::Post(req.method.clone()), &req.params)
+            .await?;
+        Ok(Some(response))
     }
 }
 
