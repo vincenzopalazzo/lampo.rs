@@ -225,18 +225,27 @@ impl LampoPeerManager {
             .clone()
             .ok_or(error::anyhow!("channel manager is None"))?;
         let alias = self.conf.alias.clone().unwrap_or_default();
-        // The address we bind to and the address we *announce* are not the
-        // same thing. Binding falls back to loopback so a node with no
-        // configured address still comes up; announcing loopback would
-        // publish an unreachable `127.0.0.1` to the gossip network, so we
-        // only announce an address the operator explicitly configured --
-        // matching `getinfo`, which reports `None` as "no advertised
-        // address".
+        // Bind and announce are different addresses, matching ldk-server /
+        // ldk-node: `listening_addresses` defaults to `None` and the node
+        // does not bind unless the operator set one. Inventing `127.0.0.1`
+        // (or `0.0.0.0`) makes a missing config look like a chosen peer
+        // address (issue #231).
+        //
+        // lampo still has a single `announce-addr`, so that host is also
+        // the listen host — the same fallback ldk-node uses when
+        // `announcement_addresses` is unset. An unset value means no
+        // listener and no gossip address. Outbound dials still run.
         let announce_addr = self.conf.announce_addr.clone();
-        let bind_host = announce_addr
-            .clone()
-            .unwrap_or_else(|| "127.0.0.1".to_string());
-        let bind_addr = format!("{bind_host}:{listen_port}");
+        let bind_addr = match p2p_bind_addr(announce_addr.as_deref(), listen_port) {
+            Some(addr) => addr,
+            None => {
+                log::info!(
+                    target: "lampo",
+                    "no announce-addr configured; not binding an LN listener and not advertising a public address"
+                );
+                return Ok(());
+            }
+        };
 
         // Bind the p2p listener eagerly, *before* detaching the accept loop.
         // The bind used to live inside the spawned task, so a failure (most
@@ -664,6 +673,25 @@ fn forget_peer(path: &std::path::Path, node_id: &NodeId) {
     write_peers(path, &peers);
 }
 
+/// `host:port` for [`std::net::TcpListener::bind`], or `None` when the
+/// operator did not configure an address.
+///
+/// ldk-node's `listening_addresses` defaults to `None`: the node starts and
+/// can dial out, but it does not bind and does not invent `127.0.0.1` or
+/// `0.0.0.0`. A configured host is bound as-is, including an explicit
+/// loopback. IPv6 literals need brackets; an already-bracketed host is left
+/// alone.
+fn p2p_bind_addr(announce_addr: Option<&str>, port: u64) -> Option<String> {
+    let host = announce_addr
+        .map(str::trim)
+        .filter(|host| !host.is_empty())?;
+    if host.contains(':') && !host.starts_with('[') {
+        Some(format!("[{host}]:{port}"))
+    } else {
+        Some(format!("{host}:{port}"))
+    }
+}
+
 fn write_peers(path: &std::path::Path, peers: &std::collections::HashMap<String, String>) {
     match lampo_common::json::to_string_pretty(peers) {
         Ok(json) => {
@@ -672,5 +700,43 @@ fn write_peers(path: &std::path::Path, peers: &std::collections::HashMap<String,
             }
         }
         Err(err) => log::warn!(target: "lampo", "failed to serialize peer store: {err}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::p2p_bind_addr;
+
+    #[test]
+    fn unset_announce_addr_does_not_bind() {
+        // Issue #231, matching ldk-node: a missing address is not
+        // `127.0.0.1` and not `0.0.0.0`. No listener.
+        assert_eq!(p2p_bind_addr(None, 9735), None);
+        assert_eq!(p2p_bind_addr(Some(""), 9735), None);
+        assert_eq!(p2p_bind_addr(Some("  "), 9735), None);
+    }
+
+    #[test]
+    fn configured_announce_addr_is_the_bind_host() {
+        // Operators (and the regtest harness) that set `announce-addr`
+        // still bind that host, including an explicit loopback. ldk-node
+        // announces `listening_addresses` when no separate announcement
+        // list is set; lampo has one address, so it is both.
+        assert_eq!(
+            p2p_bind_addr(Some("127.0.0.1"), 19735),
+            Some("127.0.0.1:19735".to_string())
+        );
+        assert_eq!(
+            p2p_bind_addr(Some("203.0.113.5"), 9735),
+            Some("203.0.113.5:9735".to_string())
+        );
+        assert_eq!(
+            p2p_bind_addr(Some("2001:db8::1"), 9735),
+            Some("[2001:db8::1]:9735".to_string())
+        );
+        assert_eq!(
+            p2p_bind_addr(Some("[2001:db8::1]"), 9735),
+            Some("[2001:db8::1]:9735".to_string())
+        );
     }
 }
