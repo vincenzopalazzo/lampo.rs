@@ -30,10 +30,19 @@ pub async fn json_fundchannel(
         crate::jsonrpc::peer_control::json_connect(ctx, &conn).await?;
     }
 
-    // FIXME: there are use case there need to be covered, like
-    // - When there is an error how we return back to the user?
-    // - In this case there is some feedback that ldk need to give us
-    // before return the message, so we should design a solution for this.
-    let resp = ctx.channel_manager().open_channel(request).await?;
+    // Surface the funding error itself. `open_channel` waits on the event
+    // bus; a fee or wallet failure used to be logged and then dropped, so
+    // this RPC returned only after the receive timed out (issues #221 / #237).
+    let resp = ctx
+        .channel_manager()
+        .open_channel(request)
+        .await
+        .map_err(|err| {
+            log::warn!(
+                target: "lampod::jsonrpc::open_channel",
+                "fundchannel failed for peer {node_id}: {err}"
+            );
+            crate::rpc_error!("{err}")
+        })?;
     Ok(json::to_value(resp)?)
 }

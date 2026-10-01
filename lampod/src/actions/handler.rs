@@ -475,7 +475,10 @@ impl Handler for LampoHandler {
                     std::result::Result::Ok(tx) => tx,
                     Err(err) => {
                         let msg = format!("Failed to create funding transaction: {err}");
-                        log::error!(target: "lampo", "{}", msg);
+                        log::error!(
+                            target: "lampo",
+                            "rejected reason=funding_tx_failed channel={temporary_channel_id} msg={msg}"
+                        );
                         abandon_temp_channel(self, &msg);
                         return Err(err);
                     }
