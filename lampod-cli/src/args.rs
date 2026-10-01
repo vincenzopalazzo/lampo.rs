@@ -6,7 +6,8 @@ use lampo_common::error;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum LampoCliSubcommand {
-    /// Create a new wallet and print the mnemonic
+    /// Create a new wallet and write the mnemonic to `wallet.dat` (mode 0600).
+    /// Refuses to overwrite an existing wallet.
     NewWallet,
 }
 
