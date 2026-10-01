@@ -23,6 +23,13 @@ pub struct LampoConf {
     pub log_file: Option<String>,
     pub log_level: String,
     pub alias: Option<String>,
+    /// Host to bind the LN listener. Not announced. Like CLN `bind-addr`.
+    /// Unset means no listener. `127.0.0.1` is valid here.
+    pub bind_addr: Option<String>,
+    /// Public address written into the node announcement. Like CLN `addr`.
+    /// Must be a public IP, a DNS name, or an `.onion` address. Loopback
+    /// and private ranges are rejected. Unset means the node does not
+    /// advertise an address.
     pub announce_addr: Option<String>,
     pub api_host: String,
     pub api_port: u64,
@@ -111,6 +118,7 @@ impl Default for LampoConf {
             log_level: "info".to_string(),
             log_file: None,
             alias: None,
+            bind_addr: None,
             announce_addr: None,
             api_host: "127.0.0.1".to_owned(),
             api_port: 7878,
@@ -304,7 +312,15 @@ impl TryFrom<String> for LampoConf {
         };
         let log_file = conf.get_conf("log-file").unwrap_or(None);
         let alias = conf.get_conf("alias").unwrap_or(None);
+        let bind_addr = conf.get_conf("bind-addr").unwrap_or(None);
         let announce_addr = conf.get_conf("announce-addr").unwrap_or(None);
+        if let Some(addr) = announce_addr.as_deref() {
+            if !is_announceable(addr) {
+                anyhow::bail!(
+                    "announce-addr `{addr}` is not a public address; use bind-addr for the listen socket and announce-addr only for a public IP, DNS name, or .onion"
+                );
+            }
+        }
         let api_host = conf.get_conf("api-host").unwrap_or(None);
         let api_port = conf.get_conf("api-port").unwrap_or(None);
         let api_host = api_host.unwrap_or("http://127.0.0.1".to_owned());
@@ -385,6 +401,7 @@ impl TryFrom<String> for LampoConf {
             log_file,
             log_level: level,
             alias,
+            bind_addr,
             announce_addr,
             api_host,
             api_port,
@@ -559,5 +576,42 @@ mod tests {
         let server_ldk = server.ldk_conf_with_async_role();
         assert!(server_ldk.enable_htlc_hold);
         assert!(server_ldk.accept_forwards_to_priv_channels);
+    }
+}
+
+/// True when `addr` may be written into a node announcement.
+///
+/// CLN does not announce `bind-addr`. Loopback, unspecified, link-local,
+/// and private ranges are not a public address. A DNS name or `.onion`
+/// is. A malformed dotted quad is not treated as a name.
+pub fn is_announceable(addr: &str) -> bool {
+    let host = addr.trim().trim_matches(|c| c == '[' || c == ']');
+    if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
+        return false;
+    }
+    if host.ends_with(".onion") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip_is_public(ip);
+    }
+    host.chars().any(|c| c.is_ascii_alphabetic())
+}
+
+fn ip_is_public(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || o[0] == 100 && (o[1] & 0b1100_0000) == 64)
+        }
+        std::net::IpAddr::V6(v6) => {
+            !(v6.is_loopback() || v6.is_unspecified() || (v6.segments()[0] & 0xfe00) == 0xfc00)
+        }
     }
 }

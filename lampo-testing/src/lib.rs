@@ -237,7 +237,7 @@ impl LampoTesting {
         // Integration tests dial `127.0.0.1:<port>`. ldk-node does not bind
         // unless a listening address is configured, and neither do we, so
         // the harness has to say where it listens. `conf_fn` may override.
-        lampo_conf.announce_addr = Some("127.0.0.1".to_owned());
+        lampo_conf.bind_addr = Some("127.0.0.1".to_owned());
 
         lampo_conf
             .ldk_conf
