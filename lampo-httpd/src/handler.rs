@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use elite_rpc::protocol::Protocol;
-use elite_rpc::transport::curl::HttpTransport;
+use elite_rpc::transport::bitreq::HttpTransport;
 use elite_rpc::transport::TransportMethod;
 use elite_rpc::EliteRPC;
 
