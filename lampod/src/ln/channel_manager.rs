@@ -577,7 +577,10 @@ impl LampoChannelManager {
         // `SendRawTransaction` (including unilateral-close / bump broadcasts)
         // or any `FundingChannelFailed` would otherwise complete or abort an
         // unrelated waiter. Close events are matched on the temporary channel
-        // id returned by `create_channel` for the same reason. Without a
+        // id returned by `create_channel` for the same reason. A funding
+        // `ChannelEvent { state: "error" }` is also terminal: that is how fee
+        // and wallet failures notify the caller, and ignoring it turns the
+        // real error into a receive timeout (issues #221 / #237). Without a
         // terminal case and an overall timeout the request task blocks on
         // `recv().await` forever, leaking its actix task, socket and event-bus
         // subscription; an unauthenticated flood of such requests exhausts the
@@ -587,66 +590,15 @@ impl LampoChannelManager {
         let mut funding_handed_to_ldk = false;
         let mut early_broadcast: Option<Transaction> = None;
         let tx: Option<Transaction> = 'wait: loop {
-            // Apply one event. `None` keeps waiting; `Some` ends the loop.
             let apply = |event: Event,
                          expected: &mut Option<lampo_common::bitcoin::Txid>,
                          handed: &mut bool,
                          early: &mut Option<Transaction>|
              -> Option<error::Result<Option<Transaction>>> {
-                match event {
-                    Event::Lightning(LightningEvent::FundingChannelEnd {
-                        temporary_channel_id,
-                        funding_transaction,
-                        ..
-                    }) if temporary_channel_id == temp_channel_id => {
-                        let txid = funding_transaction.compute_txid();
-                        *expected = Some(txid);
-                        *handed = true;
-                        // Broadcast can race ahead of this event on a fast
-                        // peer; accept a buffered matching SendRawTransaction.
-                        if early.as_ref().is_some_and(|tx| tx.compute_txid() == txid) {
-                            return Some(Ok(early.take()));
-                        }
-                        None
-                    }
-                    Event::OnChain(OnChainEvent::SendRawTransaction(tx)) => {
-                        if *expected == Some(tx.compute_txid()) {
-                            Some(Ok(Some(tx)))
-                        } else if expected.is_none() {
-                            *early = Some(tx);
-                            None
-                        } else {
-                            None
-                        }
-                    }
-                    Event::OnChain(OnChainEvent::FundingChannelFailed {
-                        temporary_channel_id: Some(channel_id),
-                        reason,
-                        ..
-                    }) if channel_id == temp_channel_id.to_string() => {
-                        Some(Err(error::anyhow!("{}", reason)))
-                    }
-                    Event::OnChain(OnChainEvent::FundingChannelFailed {
-                        txid: Some(failed_txid),
-                        reason,
-                        ..
-                    }) if *expected == Some(failed_txid) => {
-                        // Handoff already succeeded; broadcast RPC errors are
-                        // ambiguous (backend may have accepted the tx) and LDK
-                        // may still rebroadcast. Do not present this as a
-                        // safely-retryable open failure.
-                        Some(Err(error::anyhow!(
-                            "channel funding broadcast reported failure after handoff ({reason}); channel left open (broadcast may still be pending)"
-                        )))
-                    }
-                    Event::Lightning(LightningEvent::CloseChannelEvent {
-                        channel_id,
-                        message,
-                        ..
-                    }) if channel_id == temp_channel_id.to_string() => Some(Err(error::anyhow!(
-                        "channel closed before funding: {message}"
-                    ))),
-                    _ => None,
+                match apply_funding_wait_event(event, &temp_channel_id, expected, handed, early) {
+                    FundingWaitStep::Continue => None,
+                    FundingWaitStep::Done(tx) => Some(Ok(tx)),
+                    FundingWaitStep::Failed(reason) => Some(Err(error::anyhow!("{reason}"))),
                 }
             };
 
@@ -878,6 +830,97 @@ impl LampoChannelManager {
     }
 }
 
+/// Outcome of one funding-wait event.
+///
+/// `Continue` means the event belongs to some other open (or is progress
+/// that is not yet terminal). `Done` ends the wait with the funding
+/// transaction, or with `None` when the broadcast was already accepted and
+/// only the txid is known. `Failed` is the reason the caller must see —
+/// never a bare receive timeout.
+#[derive(Debug)]
+enum FundingWaitStep {
+    Continue,
+    Done(Option<Transaction>),
+    Failed(String),
+}
+
+/// Apply one bus event to an in-flight `fundchannel`.
+///
+/// `temp_channel_id` is the id `create_channel` returned. `expected_txid`
+/// is set once LDK accepts our funding transaction. `handed_off` records
+/// that acceptance so a later broadcast error is not reported as a clean
+/// retry. `early_broadcast` buffers a `SendRawTransaction` that raced ahead
+/// of `FundingChannelEnd`.
+fn apply_funding_wait_event(
+    event: Event,
+    temp_channel_id: &ChannelId,
+    expected_txid: &mut Option<lampo_common::bitcoin::Txid>,
+    handed_off: &mut bool,
+    early_broadcast: &mut Option<Transaction>,
+) -> FundingWaitStep {
+    match event {
+        Event::Lightning(LightningEvent::FundingChannelEnd {
+            temporary_channel_id,
+            funding_transaction,
+            ..
+        }) if temporary_channel_id == *temp_channel_id => {
+            let txid = funding_transaction.compute_txid();
+            *expected_txid = Some(txid);
+            *handed_off = true;
+            // Broadcast can race ahead of this event on a fast peer; accept
+            // a buffered matching SendRawTransaction.
+            if early_broadcast
+                .as_ref()
+                .is_some_and(|tx| tx.compute_txid() == txid)
+            {
+                return FundingWaitStep::Done(early_broadcast.take());
+            }
+            FundingWaitStep::Continue
+        }
+        Event::OnChain(OnChainEvent::SendRawTransaction(tx)) => {
+            if *expected_txid == Some(tx.compute_txid()) {
+                FundingWaitStep::Done(Some(tx))
+            } else if expected_txid.is_none() {
+                *early_broadcast = Some(tx);
+                FundingWaitStep::Continue
+            } else {
+                FundingWaitStep::Continue
+            }
+        }
+        Event::OnChain(OnChainEvent::FundingChannelFailed {
+            temporary_channel_id: Some(channel_id),
+            reason,
+            ..
+        }) if channel_id == temp_channel_id.to_string() => FundingWaitStep::Failed(reason),
+        Event::OnChain(OnChainEvent::FundingChannelFailed {
+            txid: Some(failed_txid),
+            reason,
+            ..
+        }) if *expected_txid == Some(failed_txid) => {
+            // Handoff already succeeded; broadcast RPC errors are ambiguous
+            // (backend may have accepted the tx) and LDK may still rebroadcast.
+            // Do not present this as a safely-retryable open failure.
+            FundingWaitStep::Failed(format!(
+                "channel funding broadcast reported failure after handoff ({reason}); channel left open (broadcast may still be pending)"
+            ))
+        }
+        Event::Lightning(LightningEvent::CloseChannelEvent {
+            channel_id,
+            message,
+            ..
+        }) if channel_id == temp_channel_id.to_string() => {
+            FundingWaitStep::Failed(format!("channel closed before funding: {message}"))
+        }
+        // Fee estimation, wallet creation, and other funding failures used
+        // to emit only this variant. Ignoring it left `fundchannel` blocked
+        // until the receive timed out (issues #221 / #237).
+        Event::Lightning(LightningEvent::ChannelEvent { state, message }) if state == "error" => {
+            FundingWaitStep::Failed(message)
+        }
+        _ => FundingWaitStep::Continue,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -940,5 +983,87 @@ mod tests {
         assert!(!stats.stalled);
         assert_eq!(stats.graph_channels, 2);
         assert_eq!(stats.foreign_updated, 1);
+    }
+
+    fn temp_id() -> ChannelId {
+        ChannelId::from_bytes([0x21; 32])
+    }
+
+    fn other_id() -> ChannelId {
+        ChannelId::from_bytes([0x22; 32])
+    }
+
+    /// Issue #221 / #237: a funding error emitted as `ChannelEvent` must end
+    /// the wait with that reason. Previously the waiter only accepted
+    /// `SendRawTransaction`, so the CLI reported a receive timeout.
+    #[test]
+    fn channel_error_event_fails_the_funding_wait() {
+        let mut expected = None;
+        let mut handed = false;
+        let mut early = None;
+        let step = apply_funding_wait_event(
+            Event::Lightning(LightningEvent::ChannelEvent {
+                state: "error".to_owned(),
+                message: "Insufficient funds".to_owned(),
+            }),
+            &temp_id(),
+            &mut expected,
+            &mut handed,
+            &mut early,
+        );
+        match step {
+            FundingWaitStep::Failed(reason) => {
+                assert!(
+                    reason.contains("Insufficient funds"),
+                    "caller must see the funding error, got {reason}"
+                );
+            }
+            other => panic!("error event must fail the wait, got {other:?}"),
+        }
+        assert!(!handed);
+    }
+
+    #[test]
+    fn unrelated_close_does_not_fail_this_open() {
+        let mut expected = None;
+        let mut handed = false;
+        let mut early = None;
+        let step = apply_funding_wait_event(
+            Event::Lightning(LightningEvent::CloseChannelEvent {
+                channel_id: other_id().to_string(),
+                message: "peer disconnected".to_owned(),
+                counterparty_node_id: None,
+                funding_utxo: None,
+            }),
+            &temp_id(),
+            &mut expected,
+            &mut handed,
+            &mut early,
+        );
+        assert!(matches!(step, FundingWaitStep::Continue));
+    }
+
+    #[test]
+    fn matching_funding_failure_returns_the_reason() {
+        let mut expected = None;
+        let mut handed = false;
+        let mut early = None;
+        let step = apply_funding_wait_event(
+            Event::OnChain(OnChainEvent::FundingChannelFailed {
+                temporary_channel_id: Some(temp_id().to_string()),
+                txid: None,
+                reason: "Failed to create funding transaction: Insufficient funds".to_owned(),
+            }),
+            &temp_id(),
+            &mut expected,
+            &mut handed,
+            &mut early,
+        );
+        match step {
+            FundingWaitStep::Failed(reason) => {
+                assert!(reason.contains("Insufficient funds"), "{reason}");
+            }
+            other => panic!("expected failure, got {other:?}"),
+        }
     }
 }
