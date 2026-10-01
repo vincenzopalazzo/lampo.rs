@@ -7,6 +7,7 @@ pub mod liquidity_ads;
 pub mod offer;
 pub mod policy;
 pub mod purchases;
+pub mod rpc;
 pub mod wire;
 
 pub use handler::PhoenixLspHandler;
