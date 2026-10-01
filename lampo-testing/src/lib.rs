@@ -30,6 +30,7 @@ use lampo_common::model::response;
 use lampo_common::types::NodeId;
 use lampo_httpd::handler::HttpdHandler;
 use lampo_lnd::LndRestConfig;
+use lampo_phoenix::PhoenixLspHandler;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -132,6 +133,7 @@ pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     daemon: Arc<LampoDaemon>,
     root_path: Arc<TempDir>,
+    phoenix: Arc<PhoenixLspHandler>,
     pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
     pub mnemonic: String,
@@ -254,6 +256,9 @@ impl LampoTesting {
         // `LampoDaemon::new` shares the coordinator with the wallet, so the
         // wallet gates its Emitter on listener sync (production startup flow).
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+        // Registered on every node, idle unless the test configures `phoenix_lsp`.
+        let phoenix = PhoenixLspHandler::from_conf(&lampo_conf)?;
+        lampo.add_extension(phoenix.clone())?;
         wallet.clone().listen().await?;
 
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
@@ -315,6 +320,7 @@ impl LampoTesting {
             wallet,
             btc,
             root_path: Arc::new(dir),
+            phoenix,
             info,
             lnd_rest_port: lnd_port,
             lnd_admin_macaroon_hex: macaroon_hex,
@@ -479,6 +485,11 @@ impl LampoTesting {
 
     pub fn daemon(&self) -> Arc<LampoDaemon> {
         self.daemon.clone()
+    }
+
+    /// The Phoenix LSP extension registered on this node.
+    pub fn phoenix(&self) -> Arc<PhoenixLspHandler> {
+        self.phoenix.clone()
     }
 
     pub fn root_path(&self) -> Arc<TempDir> {

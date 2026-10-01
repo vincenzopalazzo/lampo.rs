@@ -18,31 +18,26 @@ use std::time::Duration;
 use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
 use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
-use lampo_common::bitcoin::secp256k1::{Secp256k1, Signing, Verification};
 use lampo_common::conf::LampoConf;
 use lampo_common::currency::LampoCurrencyConversion;
 use lampo_common::error;
+use lampo_common::event::ln::LightningEvent;
+use lampo_common::event::Event;
+use lampo_common::handler::Handler;
 use lampo_common::hex;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
-use lampo_common::ldk::blinded_path::message::{
-    BlindedMessagePath, MessageContext, MessageForwardNode,
-};
+use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
 use lampo_common::ldk::ln::channelmanager::{
     Bolt11InvoiceParameters, OptionalBolt11PaymentParams, OptionalOfferPaymentParams, PaymentId,
 };
 use lampo_common::ldk::ln::outbound_payment::{RecipientOnionFields, Retry};
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
-use lampo_common::ldk::onion_message::messenger::{
-    DefaultMessageRouter, Destination, MessageRouter, OnionMessagePath,
-};
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
-use lampo_common::ldk::sign::{EntropySource, ReceiveAuthKey};
+use lampo_common::ldk::sign::EntropySource;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
 use lampo_common::ldk::util::ser::Readable;
-use lampo_common::types::LampoGraph;
-use lampo_phoenix::PhoenixLspHandler;
 
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
@@ -61,9 +56,6 @@ pub struct OffchainManager {
     /// Shared with the onion messenger: false until the operator opts in
     /// via `async-payments-role`, config paths, or `setasyncinvoicepaths`.
     async_payments_enabled: Arc<AtomicBool>,
-    /// Told about every invoice this node issues, so an LSP funding
-    /// proposal can be matched to one of them.
-    phoenix_lsp: Arc<PhoenixLspHandler>,
 }
 
 impl OffchainManager {
@@ -74,7 +66,6 @@ impl OffchainManager {
         logger: Arc<LampoLogger>,
         lampo_conf: Arc<LampoConf>,
         chain_manager: Arc<LampoChainManager>,
-        phoenix_lsp: Arc<PhoenixLspHandler>,
     ) -> error::Result<Self> {
         let async_payments_enabled =
             Arc::new(AtomicBool::new(lampo_conf.async_payments_role.is_some()));
@@ -86,7 +77,6 @@ impl OffchainManager {
             chain_manager,
             async_receive_enabled: AtomicBool::new(false),
             async_payments_enabled,
-            phoenix_lsp,
         };
         if let Some(paths_hex) = &manager.lampo_conf.async_invoice_server_paths {
             manager.set_async_receive_paths_hex(paths_hex)?;
@@ -173,31 +163,14 @@ impl OffchainManager {
                 ..Default::default()
             })
             .map_err(|err| error::anyhow!("{:?}", err))?;
-        self.phoenix_lsp.remember_invoice(
-            PaymentHash(invoice.payment_hash().0),
-            invoice.amount_milli_satoshis(),
-        );
-        Ok(invoice)
-    }
-
-    /// A BOLT 12 offer whose blinded path starts at `intro_node`. The
-    /// introduction node needs no channel with this node: an LSP publishes
-    /// the offer under a BIP 353 name and forwards invoice requests to us.
-    pub fn offer_via_introduction_node(&self, intro_node: pubkey) -> error::Result<Offer> {
-        let router = IntroductionNodeRouter {
-            inner: DefaultMessageRouter::new(
-                self.channel_manager.graph(),
-                self.keys_manager.clone(),
-            ),
-            intro_node,
-            keys_manager: self.keys_manager.clone(),
-        };
+        // Extensions learn which payment hashes this node asked to be paid.
         self.channel_manager
-            .manager()
-            .create_offer_builder_using_router(&router)
-            .map_err(|err| error::anyhow!("offer via `{intro_node}`: {err:?}"))?
-            .build()
-            .map_err(|err| error::anyhow!("build offer via `{intro_node}`: {err:?}"))
+            .handler()
+            .emit(Event::Lightning(LightningEvent::InvoiceIssued {
+                payment_hash: hex::encode(invoice.payment_hash().0),
+                amount_msat: invoice.amount_milli_satoshis(),
+            }));
+        Ok(invoice)
     }
 
     pub fn decode_invoice(&self, invoice_str: &str) -> error::Result<ldk::invoice::Bolt11Invoice> {
@@ -333,48 +306,5 @@ impl OffchainManager {
             .map_err(|err| error::anyhow!("{:?}", err))?;
         log::info!("Keysend successfully done!");
         Ok(payment_result)
-    }
-}
-
-/// Routes onion messages like the default router, but blinds every path
-/// through one fixed introduction node, whether or not it is connected or
-/// in the graph.
-struct IntroductionNodeRouter {
-    inner: DefaultMessageRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<LampoKeysManager>>,
-    intro_node: pubkey,
-    keys_manager: Arc<LampoKeysManager>,
-}
-
-impl MessageRouter for IntroductionNodeRouter {
-    fn find_path(
-        &self,
-        sender: pubkey,
-        peers: Vec<pubkey>,
-        destination: Destination,
-    ) -> Result<OnionMessagePath, ()> {
-        self.inner.find_path(sender, peers, destination)
-    }
-
-    fn create_blinded_paths<T: Signing + Verification>(
-        &self,
-        recipient: pubkey,
-        local_node_receive_key: ReceiveAuthKey,
-        context: MessageContext,
-        _peers: Vec<MessageForwardNode>,
-        secp_ctx: &Secp256k1<T>,
-    ) -> Result<Vec<BlindedMessagePath>, ()> {
-        let hop = MessageForwardNode {
-            node_id: self.intro_node,
-            short_channel_id: None,
-        };
-        Ok(vec![BlindedMessagePath::new(
-            &[hop],
-            recipient,
-            local_node_receive_key,
-            context,
-            true,
-            self.keys_manager.clone(),
-            secp_ctx,
-        )])
     }
 }

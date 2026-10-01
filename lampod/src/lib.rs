@@ -18,7 +18,6 @@ pub mod jsonrpc;
 pub mod ln;
 pub mod persistence;
 
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -39,8 +38,6 @@ use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
 use lampo_common::{error, ldk};
-use lampo_phoenix::policy::LiquidityPolicy;
-use lampo_phoenix::{PhoenixLspHandler, PurchaseStore};
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
@@ -73,9 +70,6 @@ pub struct LampoDaemon {
     inventory_manager: Option<Arc<LampoInventoryManager>>,
     wallet_manager: Arc<dyn WalletManager>,
     offchain_manager: Option<Arc<OffchainManager>>,
-    /// Client side of the Phoenix LSP protocol; idle unless `phoenix-lsp`
-    /// is configured.
-    phoenix_lsp: Option<Arc<PhoenixLspHandler>>,
     /// Extensions registered before `init`, moved into the dispatcher by it.
     extensions: Vec<Arc<dyn CustomMessageExtension>>,
     /// Routes custom peer messages, feature bits and extension RPCs.
@@ -109,7 +103,6 @@ impl LampoDaemon {
             inventory_manager: None,
             wallet_manager,
             offchain_manager: None,
-            phoenix_lsp: None,
             extensions: Vec::new(),
             dispatcher: None,
             handler: None,
@@ -238,26 +231,6 @@ impl LampoDaemon {
         self.extensions().rpc(method, args).await
     }
 
-    /// Build the Phoenix LSP client before anything that feeds it: the
-    /// offchain manager registers issued invoices with it and the peer
-    /// manager installs it as custom message handler.
-    pub fn init_phoenix_lsp(&mut self) -> error::Result<()> {
-        log::debug!(target: "lampod", "init phoenix lsp ...");
-        let purchases = Arc::new(PurchaseStore::open(Path::new(&self.conf.path()))?);
-        let handler = PhoenixLspHandler::new(
-            self.conf.phoenix_lsp_peer()?,
-            self.conf.network,
-            LiquidityPolicy::from_conf(&self.conf),
-            purchases,
-        );
-        self.phoenix_lsp = Some(Arc::new(handler));
-        Ok(())
-    }
-
-    pub fn phoenix_lsp(&self) -> Arc<PhoenixLspHandler> {
-        self.phoenix_lsp.clone().unwrap()
-    }
-
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init offchain manager ...");
         let manager = OffchainManager::new(
@@ -266,7 +239,6 @@ impl LampoDaemon {
             self.logger.clone(),
             self.conf.clone(),
             self.onchain_manager(),
-            self.phoenix_lsp(),
         )?;
         self.offchain_manager = Some(Arc::new(manager));
         Ok(())
@@ -280,7 +252,7 @@ impl LampoDaemon {
             self.wallet_manager.clone(),
             self.channel_manager(),
             self.offchain_manager().async_payments_gate(),
-            self.phoenix_lsp(),
+            self.extensions(),
         )?;
         self.peer_manager = Some(Arc::new(peer_manager));
         Ok(())
@@ -330,7 +302,6 @@ impl LampoDaemon {
     pub async fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         log::debug!(target: "lampod", "init lampod ...");
         self.init_extensions()?;
-        self.init_phoenix_lsp()?;
         self.init_onchaind(client.clone())?;
         self.init_channeld().await?;
         self.init_offchain_manager()?;
@@ -347,14 +318,6 @@ impl LampoDaemon {
             self.channel_manager().sweeper(),
         );
         self.channel_manager().set_handler(self.handler());
-        let phoenix_lsp = self.phoenix_lsp();
-        phoenix_lsp.set_handler(self.handler());
-        if let Some(lsp) = phoenix_lsp.lsp_node_id() {
-            // Existing channels with the LSP must accept its funding fee
-            // on HTLCs; the claim path checks it against a purchase.
-            let channels = self.channel_manager().accept_underpaying_htlcs_from(&lsp);
-            phoenix_lsp.set_has_lsp_channel(channels > 0);
-        }
         let peer_manager = self.peer_manager();
         self.extensions().attach(ExtensionContext {
             channel_manager: self.channel_manager().manager(),

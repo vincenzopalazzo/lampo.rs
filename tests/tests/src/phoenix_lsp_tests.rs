@@ -138,7 +138,7 @@ pub async fn phoenix_lsp_client_talks_to_its_lsp() -> error::Result<()> {
     // The LSP sends recommended_feerates through the test hook; the client
     // reports them.
     let regtest = ChainHash::using_genesis_block_const(Network::Regtest);
-    let phoenix_on_lsp = lsp.daemon().phoenix_lsp();
+    let phoenix_on_lsp = lsp.phoenix();
     phoenix_on_lsp.send_raw(
         client_id,
         PhoenixLspMessage::RecommendedFeerates(RecommendedFeerates {

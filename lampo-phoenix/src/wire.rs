@@ -26,6 +26,19 @@ pub const CURRENT_FEE_CREDIT_TYPE: u16 = 41046;
 pub const DNS_ADDRESS_REQUEST_TYPE: u16 = 35025;
 pub const DNS_ADDRESS_RESPONSE_TYPE: u16 = 35027;
 
+/// Every message type this module decodes.
+pub const MESSAGE_TYPES: [u16; 9] = [
+    RECOMMENDED_FEERATES_TYPE,
+    WILL_ADD_HTLC_TYPE,
+    WILL_FAIL_HTLC_TYPE,
+    WILL_FAIL_MALFORMED_HTLC_TYPE,
+    CANCEL_ON_THE_FLY_FUNDING_TYPE,
+    ADD_FEE_CREDIT_TYPE,
+    CURRENT_FEE_CREDIT_TYPE,
+    DNS_ADDRESS_REQUEST_TYPE,
+    DNS_ADDRESS_RESPONSE_TYPE,
+];
+
 /// Version byte, 33-byte ephemeral key, 1300-byte payload, 32-byte HMAC.
 pub const ONION_PACKET_LEN: usize = 1366;
 

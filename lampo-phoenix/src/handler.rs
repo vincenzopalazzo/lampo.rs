@@ -1,38 +1,47 @@
-//! The custom message handler installed in the peer manager: it advertises
-//! the Phoenix feature bits to the configured LSP only, parses every
-//! Phoenix message, keeps what the LSP told us, and decides (without acting)
-//! about on-the-fly funding proposals.
+//! The Phoenix LSP client as a daemon extension: it advertises the Phoenix
+//! feature bits to the configured LSP only, decodes every Phoenix message,
+//! keeps what the LSP told us, decides (without acting) about on-the-fly
+//! funding proposals, vouches for the funding fee of a recorded purchase,
+//! and serves the `phoenixlsp-*` RPCs.
 //!
-//! LDK calls into this handler while holding its own peer locks, so nothing
-//! here calls back into the peer manager; messages to send are queued and
-//! drained through `get_and_clear_pending_msg`, and the caller that queued
-//! them flushes the peer manager afterwards.
+//! Peer callbacks run while the peer manager holds its own locks, so
+//! nothing here calls back into it; messages to send are queued and the
+//! daemon drains them, and whoever queued one flushes afterwards.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 use lampo_common::bitcoin::constants::ChainHash;
 use lampo_common::bitcoin::secp256k1::PublicKey;
 use lampo_common::bitcoin::Network;
-use lampo_common::conf::PhoenixLspPeer;
+use lampo_common::conf::{LampoConf, PhoenixLspPeer};
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
+use lampo_common::extension::{
+    CustomMessageExtension, ExtensionContext, PersistentPeer, RawCustomMessage,
+};
 use lampo_common::handler::Handler;
 use lampo_common::hex;
-use lampo_common::ldk::ln::msgs::{DecodeError, Init, LightningError};
-use lampo_common::ldk::ln::peer_handler::CustomMessageHandler;
-use lampo_common::ldk::ln::wire::CustomMessageReader;
-use lampo_common::ldk::types::features::{InitFeatures, NodeFeatures};
+use lampo_common::json;
+use lampo_common::jsonrpc;
+use lampo_common::ldk;
+use lampo_common::ldk::ln::msgs::{ErrorAction, Init, LightningError};
+use lampo_common::ldk::ln::wire::Type;
+use lampo_common::ldk::types::features::InitFeatures;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
-use lampo_common::ldk::util::ser::LengthLimitedRead;
+use lampo_common::ldk::util::ser::Writeable;
+use lampo_common::types::LampoChannel;
 
-use super::liquidity_ads::WillFundRates;
-use super::policy::{LiquidityPolicy, PolicyDecision};
-use super::purchases::{unix_now, PurchaseStore};
-use super::wire::{
+use crate::channels::accept_underpaying_htlcs_from;
+use crate::liquidity_ads::{PaymentType, WillFundRates};
+use crate::policy::{LiquidityPolicy, PolicyDecision};
+use crate::purchases::{max_funding_fee_msat, unix_now, PurchaseStore};
+use crate::rpc;
+use crate::wire::{
     self, AddFeeCredit, DnsAddressRequest, PhoenixLspMessage, RecommendedFeerates, WillAddHtlc,
 };
 
@@ -155,6 +164,8 @@ struct State {
 }
 
 pub struct PhoenixLspHandler {
+    /// Handed to the task that follows node events once attached.
+    me: Weak<Self>,
     chain_hash: ChainHash,
     lsp_features: InitFeatures,
     policy: LiquidityPolicy,
@@ -163,7 +174,9 @@ pub struct PhoenixLspHandler {
     /// pays the channel creation fee.
     has_lsp_channel: AtomicBool,
     /// The event bus, bound once the daemon has built it.
-    handler: OnceLock<Arc<dyn Handler>>,
+    events: OnceLock<Arc<dyn Handler>>,
+    /// What the daemon handed us on attach.
+    context: OnceLock<ExtensionContext>,
     state: Mutex<State>,
 }
 
@@ -173,12 +186,13 @@ impl PhoenixLspHandler {
         network: Network,
         policy: LiquidityPolicy,
         purchases: Arc<PurchaseStore>,
-    ) -> Self {
+    ) -> Arc<Self> {
         match &lsp {
             Some(lsp) => log::info!(target: LOG_TARGET, "Phoenix LSP client enabled for `{lsp}`"),
             None => log::debug!(target: LOG_TARGET, "no phoenix-lsp configured; handler idle"),
         }
-        Self {
+        Arc::new_cyclic(|me| Self {
+            me: me.clone(),
             chain_hash: ChainHash::using_genesis_block_const(network),
             lsp_features: init_features_with_bits(&[
                 ZERO_RESERVE_CHANNELS_BIT,
@@ -188,7 +202,8 @@ impl PhoenixLspHandler {
             policy,
             purchases,
             has_lsp_channel: AtomicBool::new(false),
-            handler: OnceLock::new(),
+            events: OnceLock::new(),
+            context: OnceLock::new(),
             state: Mutex::new(State {
                 lsp,
                 connected: false,
@@ -200,14 +215,31 @@ impl PhoenixLspHandler {
                 issued_invoices: HashMap::new(),
                 outbound: Vec::new(),
             }),
-        }
+        })
+    }
+
+    /// The handler for `conf`, with its purchases under the network data
+    /// directory. Idle when `phoenix-lsp` is unset.
+    pub fn from_conf(conf: &LampoConf) -> error::Result<Arc<Self>> {
+        let purchases = Arc::new(PurchaseStore::open(Path::new(&conf.path()))?);
+        Ok(Self::new(
+            conf.phoenix_lsp_peer()?,
+            conf.network,
+            LiquidityPolicy::from_conf(conf),
+            purchases,
+        ))
     }
 
     /// Bind the event bus. Events emitted before this are dropped.
-    pub fn set_handler(&self, handler: Arc<dyn Handler>) {
-        if self.handler.set(handler).is_err() {
-            log::warn!(target: LOG_TARGET, "event handler already bound");
+    pub fn bind_events(&self, events: Arc<dyn Handler>) {
+        if self.events.set(events).is_err() {
+            log::warn!(target: LOG_TARGET, "event bus already bound");
         }
+    }
+
+    /// What the daemon handed us on attach, if attached.
+    pub fn context(&self) -> Option<&ExtensionContext> {
+        self.context.get()
     }
 
     pub fn purchases(&self) -> &PurchaseStore {
@@ -311,6 +343,35 @@ impl PhoenixLspHandler {
         self.lock().lsp = Some(peer);
     }
 
+    /// The funding fee the LSP may take from a payment with `payment_hash`:
+    /// non-zero only when every HTLC part came over a channel with the LSP
+    /// and a recorded purchase paid from future HTLCs lists the hash.
+    pub fn skim_budget_msat(
+        &self,
+        payment_hash: &PaymentHash,
+        counterparties: &[Option<PublicKey>],
+    ) -> u64 {
+        let Some(lsp) = self.lsp_node_id() else {
+            return 0;
+        };
+        if counterparties.is_empty()
+            || counterparties
+                .iter()
+                .any(|counterparty| *counterparty != Some(lsp))
+        {
+            return 0;
+        }
+        let Some(purchase) = self.purchases.find_by_payment_hash(payment_hash) else {
+            return 0;
+        };
+        match PaymentType::from_bit(purchase.payment_type) {
+            PaymentType::FromFutureHtlc | PaymentType::FromFutureHtlcWithPreimage => {
+                max_funding_fee_msat(&purchase)
+            }
+            _ => 0,
+        }
+    }
+
     fn queue_to_lsp(&self, msg: PhoenixLspMessage) -> error::Result<()> {
         let mut state = self.lock();
         let Some(lsp) = state.lsp.as_ref() else {
@@ -332,8 +393,8 @@ impl PhoenixLspHandler {
     }
 
     fn emit(&self, event: LightningEvent) {
-        match self.handler.get() {
-            Some(handler) => handler.emit(Event::Lightning(event)),
+        match self.events.get() {
+            Some(events) => events.emit(Event::Lightning(event)),
             None => log::debug!(target: LOG_TARGET, "no event bus yet, dropping {event:?}"),
         }
     }
@@ -419,34 +480,9 @@ impl PhoenixLspHandler {
         drop(state);
         self.emit(event);
     }
-}
 
-impl CustomMessageReader for PhoenixLspHandler {
-    type CustomMessage = PhoenixLspMessage;
-
-    fn read<R: LengthLimitedRead>(
-        &self,
-        message_type: u16,
-        buffer: &mut R,
-    ) -> Result<Option<Self::CustomMessage>, DecodeError> {
-        wire::read(message_type, buffer)
-    }
-}
-
-impl CustomMessageHandler for PhoenixLspHandler {
-    fn handle_custom_message(
-        &self,
-        msg: PhoenixLspMessage,
-        sender_node_id: PublicKey,
-    ) -> Result<(), LightningError> {
-        if !self.is_lsp(&sender_node_id) {
-            log::warn!(
-                target: LOG_TARGET,
-                "dropping {} from `{sender_node_id}`: not the configured Phoenix LSP",
-                msg.name()
-            );
-            return Ok(());
-        }
+    /// A decoded message from the LSP.
+    fn handle(&self, msg: PhoenixLspMessage, sender_node_id: PublicKey) {
         match msg {
             PhoenixLspMessage::RecommendedFeerates(feerates) => {
                 if self.chain_matches(feerates.chain_hash, "recommended_feerates") {
@@ -520,66 +556,171 @@ impl CustomMessageHandler for PhoenixLspHandler {
                 );
             }
         }
-        Ok(())
     }
 
-    fn get_and_clear_pending_msg(&self) -> Vec<(PublicKey, PhoenixLspMessage)> {
-        std::mem::take(&mut self.lock().outbound)
-    }
-
-    fn peer_disconnected(&self, their_node_id: PublicKey) {
-        let mut state = self.lock();
-        if state
-            .lsp
-            .as_ref()
-            .is_some_and(|lsp| lsp.node_id == their_node_id)
-        {
-            log::info!(target: LOG_TARGET, "Phoenix LSP `{their_node_id}` disconnected");
-            state.connected = false;
+    /// Node events the client reacts to: invoices it issued, payments it
+    /// claimed, and a channel with the LSP becoming ready.
+    fn on_node_event(&self, event: Event, channel_manager: &LampoChannel) {
+        match event {
+            Event::Lightning(LightningEvent::InvoiceIssued {
+                payment_hash,
+                amount_msat,
+            }) => match hex::decode(&payment_hash)
+                .ok()
+                .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            {
+                Some(hash) => self.remember_invoice(PaymentHash(hash), amount_msat),
+                None => {
+                    log::warn!(target: LOG_TARGET, "ignoring invoice with hash `{payment_hash}`")
+                }
+            },
+            Event::RawLDK(ldk::events::Event::PaymentClaimed { payment_hash, .. }) => {
+                self.forget_invoice(&payment_hash);
+            }
+            Event::RawLDK(ldk::events::Event::ChannelReady {
+                counterparty_node_id,
+                ..
+            }) if self.is_lsp(&counterparty_node_id) => {
+                self.set_has_lsp_channel(true);
+                // The LSP takes its funding fee from HTLCs on this channel;
+                // let them through and check the fee on claim.
+                accept_underpaying_htlcs_from(channel_manager, &counterparty_node_id);
+            }
+            _ => {}
         }
     }
+}
 
-    fn peer_connected(
-        &self,
-        their_node_id: PublicKey,
-        msg: &Init,
-        _inbound: bool,
-    ) -> Result<(), ()> {
-        let mut state = self.lock();
-        if !state
-            .lsp
-            .as_ref()
-            .is_some_and(|lsp| lsp.node_id == their_node_id)
-        {
-            return Ok(());
-        }
-        let on_the_fly_funding = supports_feature(&msg.features, ON_THE_FLY_FUNDING_BIT - 1);
-        let funding_fee_credit = supports_feature(&msg.features, FUNDING_FEE_CREDIT_BIT - 1);
-        log::info!(
-            target: LOG_TARGET,
-            "Phoenix LSP `{their_node_id}` connected (on_the_fly_funding={on_the_fly_funding}, funding_fee_credit={funding_fee_credit})"
-        );
-        state.connected = true;
-        state.lsp_init_features = Some(msg.features.clone());
-        drop(state);
-        self.emit(LightningEvent::PhoenixLspConnected {
-            counterparty_node_id: their_node_id,
-            on_the_fly_funding,
-            funding_fee_credit,
-        });
-        Ok(())
+#[lampo_common::async_trait]
+impl CustomMessageExtension for PhoenixLspHandler {
+    fn name(&self) -> &'static str {
+        LOG_TARGET
     }
 
-    fn provided_node_features(&self) -> NodeFeatures {
-        NodeFeatures::empty()
+    fn message_types(&self) -> Vec<u16> {
+        wire::MESSAGE_TYPES.to_vec()
     }
 
-    fn provided_init_features(&self, their_node_id: PublicKey) -> InitFeatures {
-        if self.is_lsp(&their_node_id) {
+    fn init_features(&self, peer: &PublicKey) -> InitFeatures {
+        if self.is_lsp(peer) {
             self.lsp_features.clone()
         } else {
             InitFeatures::empty()
         }
+    }
+
+    fn persistent_peers(&self) -> Vec<PersistentPeer> {
+        self.lsp_peer().into_iter().collect()
+    }
+
+    fn handle_message(
+        &self,
+        msg: RawCustomMessage,
+        sender: PublicKey,
+    ) -> Result<(), LightningError> {
+        let decoded =
+            wire::read(msg.type_id, &mut &msg.payload[..]).map_err(|err| LightningError {
+                err: format!(
+                    "invalid Phoenix message {} from `{sender}`: {err:?}",
+                    msg.type_id
+                ),
+                action: ErrorAction::DisconnectPeer { msg: None },
+            })?;
+        let Some(decoded) = decoded else {
+            log::debug!(target: LOG_TARGET, "ignoring message type {}: not ours", msg.type_id);
+            return Ok(());
+        };
+        if !self.is_lsp(&sender) {
+            log::warn!(
+                target: LOG_TARGET,
+                "dropping {} from `{sender}`: not the configured Phoenix LSP",
+                decoded.name()
+            );
+            return Ok(());
+        }
+        self.handle(decoded, sender);
+        Ok(())
+    }
+
+    fn drain_outbound(&self) -> Vec<(PublicKey, RawCustomMessage)> {
+        std::mem::take(&mut self.lock().outbound)
+            .into_iter()
+            .map(|(peer, msg)| {
+                let raw = RawCustomMessage {
+                    type_id: msg.type_id(),
+                    payload: msg.encode(),
+                };
+                (peer, raw)
+            })
+            .collect()
+    }
+
+    fn peer_connected(&self, peer: PublicKey, init: &Init, _inbound: bool) {
+        let mut state = self.lock();
+        if !state.lsp.as_ref().is_some_and(|lsp| lsp.node_id == peer) {
+            return;
+        }
+        let on_the_fly_funding = supports_feature(&init.features, ON_THE_FLY_FUNDING_BIT - 1);
+        let funding_fee_credit = supports_feature(&init.features, FUNDING_FEE_CREDIT_BIT - 1);
+        log::info!(
+            target: LOG_TARGET,
+            "Phoenix LSP `{peer}` connected (on_the_fly_funding={on_the_fly_funding}, funding_fee_credit={funding_fee_credit})"
+        );
+        state.connected = true;
+        state.lsp_init_features = Some(init.features.clone());
+        drop(state);
+        self.emit(LightningEvent::PhoenixLspConnected {
+            counterparty_node_id: peer,
+            on_the_fly_funding,
+            funding_fee_credit,
+        });
+    }
+
+    fn peer_disconnected(&self, peer: PublicKey) {
+        let mut state = self.lock();
+        if state.lsp.as_ref().is_some_and(|lsp| lsp.node_id == peer) {
+            log::info!(target: LOG_TARGET, "Phoenix LSP `{peer}` disconnected");
+            state.connected = false;
+        }
+    }
+
+    fn attach(&self, context: ExtensionContext) {
+        self.bind_events(context.events.clone());
+        if let Some(lsp) = self.lsp_node_id() {
+            // Existing channels with the LSP must accept its funding fee on
+            // HTLCs; the claim path checks it against a purchase.
+            let channels = accept_underpaying_htlcs_from(&context.channel_manager, &lsp);
+            self.set_has_lsp_channel(channels > 0);
+        }
+        if self.context.set(context.clone()).is_err() {
+            log::warn!(target: LOG_TARGET, "already attached to a node");
+            return;
+        }
+        let Some(me) = self.me.upgrade() else {
+            return;
+        };
+        let mut events = context.events.events();
+        tokio::spawn(async move {
+            while let Some(event) = events.recv().await {
+                me.on_node_event(event, &context.channel_manager);
+            }
+        });
+    }
+
+    fn counterparty_skim_budget_msat(
+        &self,
+        payment_hash: &PaymentHash,
+        counterparties: &[Option<PublicKey>],
+    ) -> u64 {
+        self.skim_budget_msat(payment_hash, counterparties)
+    }
+
+    async fn rpc(
+        &self,
+        method: &str,
+        args: &json::Value,
+    ) -> Result<Option<json::Value>, jsonrpc::Error> {
+        rpc::dispatch(self, method, args).await
     }
 }
 
@@ -591,9 +732,14 @@ mod tests {
     use lampo_common::event::{Emitter, Subscriber};
     use lampo_common::ldk::types::payment::PaymentPreimage;
 
-    use super::super::liquidity_ads::{FundingRate, PaymentType};
-    use super::super::policy::RejectReason;
-    use super::super::wire::{CancelOnTheFlyFunding, CurrentFeeCredit, DnsAddressResponse};
+    use crate::liquidity_ads::{FundingRate, PaymentType};
+    use crate::policy::RejectReason;
+    use crate::purchases::Purchase;
+    use crate::wire::{
+        CancelOnTheFlyFunding, CurrentFeeCredit, DnsAddressResponse, ADD_FEE_CREDIT_TYPE,
+        DNS_ADDRESS_REQUEST_TYPE,
+    };
+
     use super::*;
 
     const LSP: &str =
@@ -615,11 +761,15 @@ mod tests {
         }
     }
 
+    /// A directory of its own per handler, so parallel tests never share a
+    /// purchases file.
     fn scratch_dir(name: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "lampo-phoenix-{name}-{}-{}",
+            "lampo-phoenix-{name}-{}-{}-{}",
             std::process::id(),
-            unix_now()
+            unix_now(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -637,7 +787,7 @@ mod tests {
     fn make_handler(
         lsp: Option<&str>,
         policy: LiquidityPolicy,
-    ) -> (PhoenixLspHandler, UnboundedReceiver<Event>) {
+    ) -> (Arc<PhoenixLspHandler>, UnboundedReceiver<Event>) {
         let purchases = Arc::new(PurchaseStore::open(&scratch_dir("handler")).unwrap());
         let handler = PhoenixLspHandler::new(
             lsp.map(|raw| PhoenixLspPeer::from_str(raw).unwrap()),
@@ -651,7 +801,7 @@ mod tests {
             emitter,
         });
         let events = bus.events();
-        handler.set_handler(bus);
+        handler.bind_events(bus);
         (handler, events)
     }
 
@@ -667,13 +817,24 @@ mod tests {
         ChainHash::using_genesis_block_const(Network::Regtest)
     }
 
+    fn raw(msg: PhoenixLspMessage) -> RawCustomMessage {
+        RawCustomMessage {
+            type_id: msg.type_id(),
+            payload: msg.encode(),
+        }
+    }
+
+    fn deliver(handler: &PhoenixLspHandler, msg: PhoenixLspMessage, from: PublicKey) {
+        handler.handle_message(raw(msg), from).unwrap();
+    }
+
     fn connect(handler: &PhoenixLspHandler, node_id: PublicKey, bits: &[usize]) {
         let init = Init {
             features: init_features_with_bits(bits),
             networks: None,
             remote_network_address: None,
         };
-        handler.peer_connected(node_id, &init, false).unwrap();
+        handler.peer_connected(node_id, &init, false);
     }
 
     fn feerates() -> PhoenixLspMessage {
@@ -714,21 +875,24 @@ mod tests {
     }
 
     #[test]
-    fn advertises_bits_to_the_lsp_only() {
+    fn advertises_bits_and_owns_its_types() {
         let (handler, _events) = make_handler(Some(LSP), policy());
         assert_eq!(
-            feature_bits(&handler.provided_init_features(lsp_id())),
+            feature_bits(&handler.init_features(&lsp_id())),
             vec![129, 561, 563]
         );
-        assert!(handler
-            .provided_init_features(other_id())
-            .le_flags()
-            .is_empty());
-        assert_eq!(handler.provided_node_features(), NodeFeatures::empty());
+        assert!(handler.init_features(&other_id()).le_flags().is_empty());
+        assert_eq!(handler.message_types(), wire::MESSAGE_TYPES.to_vec());
+        assert_eq!(handler.name(), "phoenix-lsp");
+        assert_eq!(
+            handler.persistent_peers(),
+            vec![PhoenixLspPeer::from_str(LSP).unwrap()]
+        );
 
         let (idle, _events) = make_handler(None, policy());
-        assert!(idle.provided_init_features(lsp_id()).le_flags().is_empty());
+        assert!(idle.init_features(&lsp_id()).le_flags().is_empty());
         assert!(!idle.is_lsp(&lsp_id()));
+        assert!(idle.persistent_peers().is_empty());
     }
 
     #[test]
@@ -754,16 +918,15 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         }
 
-        handler.handle_custom_message(feerates(), lsp_id()).unwrap();
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::CurrentFeeCredit(CurrentFeeCredit {
-                    chain_hash: regtest(),
-                    amount_msat: 1_234,
-                }),
-                lsp_id(),
-            )
-            .unwrap();
+        deliver(&handler, feerates(), lsp_id());
+        deliver(
+            &handler,
+            PhoenixLspMessage::CurrentFeeCredit(CurrentFeeCredit {
+                chain_hash: regtest(),
+                amount_msat: 1_234,
+            }),
+            lsp_id(),
+        );
         let snapshot = handler.snapshot();
         assert_eq!(snapshot.feerates.unwrap().funding_feerate, 1_000);
         assert_eq!(snapshot.fee_credit_msat, 1_234);
@@ -773,15 +936,14 @@ mod tests {
         );
 
         // Another chain is ignored.
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::CurrentFeeCredit(CurrentFeeCredit {
-                    chain_hash: ChainHash::using_genesis_block_const(Network::Bitcoin),
-                    amount_msat: 9,
-                }),
-                lsp_id(),
-            )
-            .unwrap();
+        deliver(
+            &handler,
+            PhoenixLspMessage::CurrentFeeCredit(CurrentFeeCredit {
+                chain_hash: ChainHash::using_genesis_block_const(Network::Bitcoin),
+                amount_msat: 9,
+            }),
+            lsp_id(),
+        );
         assert_eq!(handler.snapshot().fee_credit_msat, 1_234);
 
         handler.peer_disconnected(lsp_id());
@@ -789,22 +951,26 @@ mod tests {
     }
 
     #[test]
-    fn drops_messages_from_other_peers() {
+    fn drops_messages_from_other_peers_and_malformed_ones_disconnect() {
         let (handler, mut events) = make_handler(Some(LSP), policy());
         connect(&handler, lsp_id(), &[561]);
         let _ = events.try_recv();
-        handler
-            .handle_custom_message(feerates(), other_id())
-            .unwrap();
+        deliver(&handler, feerates(), other_id());
         assert!(handler.snapshot().feerates.is_none());
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::WillAddHtlc(proposal(PaymentHash([1; 32]), 1)),
-                other_id(),
-            )
-            .unwrap();
+        deliver(
+            &handler,
+            PhoenixLspMessage::WillAddHtlc(proposal(PaymentHash([1; 32]), 1)),
+            other_id(),
+        );
         assert!(handler.snapshot().pending.is_empty());
         assert!(events.try_recv().is_err());
+
+        let truncated = RawCustomMessage {
+            type_id: wire::WILL_ADD_HTLC_TYPE,
+            payload: vec![0; 10],
+        };
+        let err = handler.handle_message(truncated, lsp_id()).unwrap_err();
+        assert!(matches!(err.action, ErrorAction::DisconnectPeer { .. }));
     }
 
     #[test]
@@ -815,12 +981,11 @@ mod tests {
         let hash = PaymentHash([0x33; 32]);
 
         // Unknown hash: not one of our invoices.
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000)),
-                lsp_id(),
-            )
-            .unwrap();
+        deliver(
+            &handler,
+            PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000)),
+            lsp_id(),
+        );
         let pending = handler.snapshot().pending;
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].decision, WillAddHtlcDecision::UnknownPaymentHash);
@@ -840,30 +1005,25 @@ mod tests {
             }
             other => panic!("unexpected {other:?}"),
         }
-        assert!(
-            handler.get_and_clear_pending_msg().is_empty(),
-            "no reply is sent"
-        );
+        assert!(handler.drain_outbound().is_empty(), "no reply is sent");
 
         // Our invoice, but nothing to price it with yet.
         handler.remember_invoice(hash, Some(1_000_000_000));
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000_000_000)),
-                lsp_id(),
-            )
-            .unwrap();
+        deliver(
+            &handler,
+            PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000_000_000)),
+            lsp_id(),
+        );
         assert_eq!(
             handler.snapshot().pending[0].decision,
             WillAddHtlcDecision::MissingFeerates
         );
-        handler.handle_custom_message(feerates(), lsp_id()).unwrap();
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000_000_000)),
-                lsp_id(),
-            )
-            .unwrap();
+        deliver(&handler, feerates(), lsp_id());
+        deliver(
+            &handler,
+            PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000_000_000)),
+            lsp_id(),
+        );
         assert_eq!(
             handler.snapshot().pending[0].decision,
             WillAddHtlcDecision::MissingFundingRates
@@ -882,24 +1042,22 @@ mod tests {
             }],
             payment_types: vec![PaymentType::FromFutureHtlc],
         });
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000_000_000)),
-                lsp_id(),
-            )
-            .unwrap();
+        deliver(
+            &handler,
+            PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000_000_000)),
+            lsp_id(),
+        );
         assert_eq!(
             handler.snapshot().pending[0].decision,
             WillAddHtlcDecision::Policy(PolicyDecision::Accept)
         );
         // A small payment cannot pay 4_400 sat of fees.
         handler.remember_invoice(hash, Some(1_000));
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000)),
-                lsp_id(),
-            )
-            .unwrap();
+        deliver(
+            &handler,
+            PhoenixLspMessage::WillAddHtlc(proposal(hash, 1_000)),
+            lsp_id(),
+        );
         assert!(matches!(
             handler.snapshot().pending[0].decision,
             WillAddHtlcDecision::Policy(PolicyDecision::Reject(RejectReason::OverFeeCredit { .. }))
@@ -907,16 +1065,15 @@ mod tests {
 
         // A cancel from the LSP clears the proposal and is surfaced.
         while events.try_recv().is_ok() {}
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::CancelOnTheFlyFunding(CancelOnTheFlyFunding {
-                    channel_id: lampo_common::ldk::ln::types::ChannelId([0x66; 32]),
-                    payment_hashes: vec![hash],
-                    reason: b"too slow".to_vec(),
-                }),
-                lsp_id(),
-            )
-            .unwrap();
+        deliver(
+            &handler,
+            PhoenixLspMessage::CancelOnTheFlyFunding(CancelOnTheFlyFunding {
+                channel_id: lampo_common::ldk::ln::types::ChannelId([0x66; 32]),
+                payment_hashes: vec![hash],
+                reason: b"too slow".to_vec(),
+            }),
+            lsp_id(),
+        );
         assert!(handler.snapshot().pending.is_empty());
         match events.try_recv().unwrap() {
             Event::Lightning(LightningEvent::PhoenixLspFundingCancelled {
@@ -946,25 +1103,21 @@ mod tests {
         handler
             .send_add_fee_credit(PaymentPreimage([0x77; 32]))
             .unwrap();
-        let queued = handler.get_and_clear_pending_msg();
+        let queued = handler.drain_outbound();
         assert_eq!(queued.len(), 2);
         assert_eq!(queued[0].0, lsp_id());
-        assert!(matches!(
-            queued[0].1,
-            PhoenixLspMessage::DnsAddressRequest(_)
-        ));
-        assert!(matches!(queued[1].1, PhoenixLspMessage::AddFeeCredit(_)));
-        assert!(handler.get_and_clear_pending_msg().is_empty());
+        assert_eq!(queued[0].1.type_id, DNS_ADDRESS_REQUEST_TYPE);
+        assert_eq!(queued[1].1.type_id, ADD_FEE_CREDIT_TYPE);
+        assert!(handler.drain_outbound().is_empty());
 
-        handler
-            .handle_custom_message(
-                PhoenixLspMessage::DnsAddressResponse(DnsAddressResponse {
-                    chain_hash: regtest(),
-                    address: "alice@phoenix.io".to_owned(),
-                }),
-                lsp_id(),
-            )
-            .unwrap();
+        deliver(
+            &handler,
+            PhoenixLspMessage::DnsAddressResponse(DnsAddressResponse {
+                chain_hash: regtest(),
+                address: "alice@phoenix.io".to_owned(),
+            }),
+            lsp_id(),
+        );
         match events.try_recv().unwrap() {
             Event::Lightning(LightningEvent::PhoenixLspDnsAddress { address }) => {
                 assert_eq!(address, "alice@phoenix.io");
@@ -976,5 +1129,65 @@ mod tests {
         assert!(idle
             .send_add_fee_credit(PaymentPreimage([0x77; 32]))
             .is_err());
+    }
+
+    /// A purchase of 100k sat with 1_000 + 2_500 sat of fees, 500 sat of
+    /// which fee credit already covered: 3_000_000 msat may still be skimmed.
+    /// `secret` is the payment hash, or the preimage for payment type 129.
+    fn record_purchase(handler: &PhoenixLspHandler, payment_type: u32, secret: [u8; 32]) {
+        handler
+            .purchases()
+            .upsert(Purchase {
+                funding_txid: "ab".repeat(32),
+                amount_sat: 100_000,
+                mining_fee_sat: 1_000,
+                service_fee_sat: 2_500,
+                payment_type,
+                payment_hashes: vec![hex::encode(secret)],
+                fee_credit_used_msat: 500_000,
+                created_at: 1,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn vouches_for_the_funding_fee_of_a_recorded_purchase_only() {
+        use lampo_common::bitcoin::hashes::{sha256, Hash};
+
+        let (handler, _events) = make_handler(Some(LSP), policy());
+        let preimage = [0x42; 32];
+        let hash = PaymentHash(sha256::Hash::hash(&preimage).to_byte_array());
+        let from_lsp = [Some(lsp_id()), Some(lsp_id())];
+
+        // No purchase: nothing is vouched for.
+        assert_eq!(handler.skim_budget_msat(&hash, &from_lsp), 0);
+
+        // Type 128 lists the hash, type 129 the preimage.
+        for (payment_type, secret) in [(128, hash.0), (129, preimage)] {
+            record_purchase(&handler, payment_type, secret);
+            assert_eq!(
+                handler.skim_budget_msat(&hash, &from_lsp),
+                3_000_000,
+                "payment type {payment_type}"
+            );
+        }
+        // Every part must come over a channel with the LSP.
+        assert_eq!(
+            handler.skim_budget_msat(&hash, &[Some(lsp_id()), Some(other_id())]),
+            0
+        );
+        assert_eq!(handler.skim_budget_msat(&hash, &[Some(lsp_id()), None]), 0);
+        assert_eq!(handler.skim_budget_msat(&hash, &[]), 0);
+        // Another payment hash is not covered.
+        assert_eq!(
+            handler.skim_budget_msat(&PaymentHash([0x12; 32]), &from_lsp),
+            0
+        );
+        // Payment type 130 is paid from channel balance: no skim allowed.
+        record_purchase(&handler, 130, hash.0);
+        assert_eq!(handler.skim_budget_msat(&hash, &from_lsp), 0);
+
+        let (idle, _events) = make_handler(None, policy());
+        assert_eq!(idle.skim_budget_msat(&hash, &from_lsp), 0);
     }
 }

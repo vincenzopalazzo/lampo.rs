@@ -13,6 +13,7 @@ lampo-common = { path = "../lampo-common" }
 lampo-chain = { path = "../lampo-chain" }
 lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
+lampo-phoenix = { path = "../lampo-phoenix" }
 lampo-lnd = { path = "../lampo-lnd", optional = true }
 tokio = { version = "1.50.0", features = ["rt", "macros", "time"] }
 clap = { version = "4.5", features = ["derive"] }

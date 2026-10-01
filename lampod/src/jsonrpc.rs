@@ -5,4 +5,3 @@ pub mod offchain;
 pub mod onchain;
 pub mod open_channel;
 pub mod peer_control;
-pub mod phoenix_lsp;

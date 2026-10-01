@@ -21,6 +21,7 @@ use lampo_common::logger;
 use lampo_httpd::handler::HttpdHandler;
 #[cfg(feature = "lnd")]
 use lampo_lnd::{spawn as spawn_lnd_rest, LndRestConfig};
+use lampo_phoenix::PhoenixLspHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
 
@@ -211,6 +212,8 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
 
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+    // Idle unless `phoenix-lsp` is configured.
+    lampod.add_extension(PhoenixLspHandler::from_conf(&lampo_conf)?)?;
 
     // Do wallet syncing in the background! (`LampoDaemon::new` already shared
     // the chain-sync coordinator with the wallet.)

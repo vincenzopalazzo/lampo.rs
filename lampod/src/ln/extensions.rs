@@ -12,7 +12,6 @@ use lampo_common::extension::{
 };
 use lampo_common::json;
 use lampo_common::jsonrpc;
-use lampo_common::ldk::io::Read;
 use lampo_common::ldk::ln::msgs::{DecodeError, Init, LightningError};
 use lampo_common::ldk::ln::peer_handler::CustomMessageHandler;
 use lampo_common::ldk::ln::wire::CustomMessageReader;
