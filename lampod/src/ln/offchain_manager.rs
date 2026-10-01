@@ -42,8 +42,8 @@ use lampo_common::ldk::sign::{EntropySource, ReceiveAuthKey};
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
 use lampo_common::ldk::util::ser::Readable;
 use lampo_common::types::LampoGraph;
+use lampo_phoenix::PhoenixLspHandler;
 
-use super::phoenix_lsp::PhoenixLspHandler;
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
 use crate::utils::logger::LampoLogger;

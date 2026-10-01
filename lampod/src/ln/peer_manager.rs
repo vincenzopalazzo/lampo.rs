@@ -20,11 +20,11 @@ use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::ldk::sign::EntropySource;
 use lampo_common::types::NodeId;
 use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph};
+use lampo_phoenix::PhoenixLspHandler;
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::async_payments::AsyncPaymentsHandler;
-use crate::ln::phoenix_lsp::PhoenixLspHandler;
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 

@@ -18,12 +18,12 @@ use lampo_common::ldk::blinded_path::IntroductionNode;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::model::{request, response};
 use lampo_common::types::NodeId;
-use lampo_testing::prelude::*;
-use lampo_testing::{async_wait, LampoTesting};
-use lampod::ln::phoenix_lsp::handler::has_feature_bit;
-use lampod::ln::phoenix_lsp::wire::{
+use lampo_phoenix::handler::has_feature_bit;
+use lampo_phoenix::wire::{
     DnsAddressResponse, FeerateRange, PhoenixLspMessage, RecommendedFeerates,
 };
+use lampo_testing::prelude::*;
+use lampo_testing::{async_wait, LampoTesting};
 
 use crate::init;
 

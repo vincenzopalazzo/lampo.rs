@@ -8,12 +8,9 @@ edition = "2021"
 [dependencies]
 tokio = { version = "^1.50.0", features = ["rt-multi-thread", "parking_lot", "macros", "time"] }
 lampo-common = { path = "../lampo-common" }
+lampo-phoenix = { path = "../lampo-phoenix" }
 log = "0.4.17"
 time = "0.3.43"
 futures = "0.3.28"
 once_cell = "1.21.1"
 async-trait = "0.1.89"
-
-[features]
-# Test hooks on the Phoenix LSP handler; enabled by lampo-testing.
-testing = []

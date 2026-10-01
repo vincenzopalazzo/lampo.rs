@@ -3,6 +3,7 @@ pub mod prelude {
     pub use clightning_testing::prelude::btc::Node as BtcNode;
     pub use clightning_testing::prelude::*;
     pub use clightning_testing::*;
+    pub use lampo_phoenix;
     pub use lampod;
     pub use lampod::async_run;
 }

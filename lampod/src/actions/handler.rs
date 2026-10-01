@@ -29,12 +29,12 @@ use lampo_common::ldk::util::wallet_utils::{Utxo, Wallet, WalletSource};
 use lampo_common::model::response::PaymentHop;
 use lampo_common::model::response::PaymentState;
 use lampo_common::utils::logger::LampoLogger;
+use lampo_phoenix::liquidity_ads::PaymentType;
+use lampo_phoenix::purchases::{max_funding_fee_msat, Purchase};
 
 use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
-use crate::ln::phoenix_lsp::liquidity_ads::PaymentType;
-use crate::ln::phoenix_lsp::purchases::{max_funding_fee_msat, Purchase};
 use crate::ln::{
     LampoChannelManager, LampoInventoryManager, LampoPeerManager, OnionMessageMailbox,
     StaticInvoiceStore,

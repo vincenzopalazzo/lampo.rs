@@ -11,13 +11,13 @@ use lampo_common::ldk::util::ser::Writeable;
 use lampo_common::model::request::{PhoenixLspDnsAddress, PhoenixLspRecordPurchase};
 use lampo_common::model::response;
 
-use crate::ln::phoenix_lsp::handler::{
+use crate::LampoDaemon;
+use lampo_phoenix::handler::{
     feature_bits, supports_feature, FUNDING_FEE_CREDIT_BIT, ON_THE_FLY_FUNDING_BIT,
     ZERO_RESERVE_CHANNELS_BIT,
 };
-use crate::ln::phoenix_lsp::liquidity_ads::PaymentType;
-use crate::ln::phoenix_lsp::purchases::{unix_now, Purchase};
-use crate::LampoDaemon;
+use lampo_phoenix::liquidity_ads::PaymentType;
+use lampo_phoenix::purchases::{unix_now, Purchase};
 
 /// How long `phoenixlsp-dnsaddress` waits for the LSP's answer.
 const DNS_ADDRESS_TIMEOUT: Duration = Duration::from_secs(30);

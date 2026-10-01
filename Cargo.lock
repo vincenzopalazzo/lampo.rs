@@ -107,7 +107,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "mio 1.0.3",
- "socket2 0.6.0",
+ "socket2",
  "tokio",
  "tracing",
 ]
@@ -189,7 +189,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "smallvec",
- "socket2 0.6.0",
+ "socket2",
  "time",
  "tracing",
  "url",
@@ -1692,7 +1692,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2",
  "tokio",
  "tower-service",
  "tracing",
@@ -2095,6 +2095,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lampo-phoenix"
+version = "0.0.1"
+dependencies = [
+ "lampo-common",
+ "log",
+]
+
+[[package]]
 name = "lampo-testing"
 version = "0.1.0"
 dependencies = [
@@ -2106,6 +2114,7 @@ dependencies = [
  "lampo-common",
  "lampo-httpd",
  "lampo-lnd",
+ "lampo-phoenix",
  "lampod",
  "log",
  "port-selector",
@@ -2121,6 +2130,7 @@ dependencies = [
  "async-trait",
  "futures",
  "lampo-common",
+ "lampo-phoenix",
  "log",
  "once_cell",
  "time",
@@ -2968,7 +2978,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.0",
+ "socket2",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -3006,7 +3016,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -3786,7 +3796,7 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.6.0",
+ "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]

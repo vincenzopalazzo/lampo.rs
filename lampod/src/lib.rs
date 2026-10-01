@@ -39,12 +39,12 @@ use lampo_common::types::LampoGraph;
 use lampo_common::utils;
 use lampo_common::wallet::WalletManager;
 use lampo_common::{error, ldk};
+use lampo_phoenix::policy::LiquidityPolicy;
+use lampo_phoenix::{PhoenixLspHandler, PurchaseStore};
 
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
-use crate::ln::phoenix_lsp::policy::LiquidityPolicy;
-use crate::ln::phoenix_lsp::{PhoenixLspHandler, PurchaseStore};
 use crate::ln::OffchainManager;
 use crate::ln::{
     CustomMessageDispatcher, LampoChannelManager, LampoInventoryManager, LampoPeerManager,
