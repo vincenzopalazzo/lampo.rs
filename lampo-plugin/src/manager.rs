@@ -105,9 +105,19 @@ impl PluginManager {
         path: &str,
         init_config: &InitConfig,
     ) -> error::Result<String> {
+        self.start_plugin_with_args(path, &[], init_config).await
+    }
+
+    /// `extra_args` are the flags after `--` in the plugin conf line.
+    pub async fn start_plugin_with_args(
+        &self,
+        path: &str,
+        extra_args: &[String],
+        init_config: &InitConfig,
+    ) -> error::Result<String> {
         log::info!(target: "plugin", "starting plugin: {}", path);
 
-        let transport = self.open_local(path, init_config).await?;
+        let transport = self.open_local(path, init_config, extra_args).await?;
         let handshake = async {
             // Phase 1: getmanifest
             let manifest_req = serde_json::json!({
@@ -311,12 +321,14 @@ impl PluginManager {
         &self,
         path: &str,
         init_config: &InitConfig,
+        extra_args: &[String],
     ) -> error::Result<Box<dyn PluginTransport>> {
         #[cfg(feature = "grpc")]
         if Self::plugin_speaks_uds(path) {
-            let transport = LocalGrpcTransport::spawn(path).await?;
+            let transport = LocalGrpcTransport::spawn(path, extra_args).await?;
             return Ok(Box::new(transport));
         }
+        let _ = extra_args;
         let transport = StdioTransport::new(path).await?;
         Ok(Box::new(transport))
     }

@@ -30,10 +30,11 @@ pub struct LocalGrpcTransport {
 impl LocalGrpcTransport {
     /// Spawn `plugin_path --lampo-listen 127.0.0.1:0`. The plugin prints
     /// `lampo-listen <addr>` and the daemon dials that. Loopback only.
-    pub async fn spawn(plugin_path: &str) -> error::Result<Self> {
+    pub async fn spawn(plugin_path: &str, extra_args: &[String]) -> error::Result<Self> {
         let mut child = Command::new(plugin_path)
             .arg("--lampo-listen")
             .arg("127.0.0.1:0")
+            .args(extra_args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())

@@ -103,7 +103,9 @@ async fn create_new_wallet(
     words_path: &str,
 ) -> error::Result<Arc<dyn WalletManager>> {
     let (wallet, mnemonic) = match client.kind() {
-        lampo_common::backend::BackendKind::Core => {
+        lampo_common::backend::BackendKind::Core
+        | lampo_common::backend::BackendKind::Esplora
+        | lampo_common::backend::BackendKind::Electrum => {
             BDKWalletManager::new(lampo_conf.clone()).await?
         }
     };
@@ -159,7 +161,9 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             // Load the mnemonic from the file
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
             let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
+                lampo_common::backend::BackendKind::Core
+        | lampo_common::backend::BackendKind::Esplora
+        | lampo_common::backend::BackendKind::Electrum => {
                     BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
@@ -173,7 +177,9 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             )?;
             // FIXME: make some sanity check about the mnemonic string
             let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
+                lampo_common::backend::BackendKind::Core
+        | lampo_common::backend::BackendKind::Esplora
+        | lampo_common::backend::BackendKind::Electrum => {
                     // SAFETY: It is safe to unwrap the mnemonic because we check it
                     // before.
                     BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
@@ -188,7 +194,9 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             log::warn!("Loading from existing wallet");
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
             let wallet = match client.kind() {
-                lampo_common::backend::BackendKind::Core => {
+                lampo_common::backend::BackendKind::Core
+        | lampo_common::backend::BackendKind::Esplora
+        | lampo_common::backend::BackendKind::Electrum => {
                     BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
@@ -351,6 +359,10 @@ fn serve_plugin_host(lampod: Arc<LampoDaemon>, tx: tokio::sync::oneshot::Sender<
 /// `lampo-bitcoind` next to this binary, then `target/release` / `target/debug`.
 fn bitcoind_init(conf: &LampoConf, base: &InitConfig) -> InitConfig {
     let mut init = base.clone();
+    init.options
+        .insert("network".into(), lampo_common::json::json!(conf.network.to_string()));
+    init.options
+        .insert("port".into(), lampo_common::json::json!(conf.port));
     if let Some(url) = &conf.core_url {
         init.options
             .insert("core-url".into(), lampo_common::json::json!(url));
@@ -364,6 +376,19 @@ fn bitcoind_init(conf: &LampoConf, base: &InitConfig) -> InitConfig {
             .insert("core-pass".into(), lampo_common::json::json!(pass));
     }
     init
+}
+
+
+/// `plugin=/path/folgore-lampo -- --mempool-space-url https://...`
+/// The path is the binary. Everything after `--` is forwarded.
+fn split_plugin(raw: &str) -> (String, Vec<String>) {
+    let mut parts = raw.split(" -- ");
+    let bin = parts.next().unwrap_or(raw).trim().to_owned();
+    let args = parts
+        .next()
+        .map(|rest| rest.split_whitespace().map(str::to_owned).collect())
+        .unwrap_or_default();
+    (bin, args)
 }
 
 fn default_bitcoind_plugin() -> Option<String> {
@@ -446,7 +471,8 @@ async fn start_plugins(
         } else {
             init_config.clone()
         };
-        match manager.start_plugin(plugin_path, &plugin_init).await {
+        let (plugin_bin, plugin_args) = split_plugin(plugin_path);
+        match manager.start_plugin_with_args(&plugin_bin, &plugin_args, &plugin_init).await {
             Ok(name) => {
                 log::info!(target: "lampod-cli", "plugin `{}` started", name);
             }
