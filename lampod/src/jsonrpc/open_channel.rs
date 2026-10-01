@@ -11,6 +11,14 @@ pub async fn json_fundchannel(
     request: &json::Value,
 ) -> Result<json::Value, Error> {
     log::info!("call for `openchannel` with request {:?}", request);
+    // Issue #111: a peer that is ahead of an IBD bitcoind makes funding
+    // impossible. Refuse before `create_channel` so we do not leave a
+    // temporary channel that can never confirm.
+    if ctx.chain_sync().backend_syncing() {
+        return Err(crate::rpc_error!(
+            "bitcoind is still syncing; refusing to fund a channel until the backend catches up"
+        ));
+    }
     let request: request::OpenChannel = json::from_value(request.clone())?;
 
     // LDK's `create_channel()` doesn't check if you are currently connected
