@@ -24,6 +24,7 @@ use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph}
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::async_payments::AsyncPaymentsHandler;
+use crate::ln::phoenix_lsp::PhoenixLspHandler;
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
@@ -45,7 +46,7 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, Arc<T>, Arc<L>>>,
     Arc<LampoArcOnionMessenger<L>>,
     Arc<L>,
-    IgnoringMessageHandler,
+    Arc<PhoenixLspHandler>,
     Arc<LampoKeysManager>,
     IgnoringMessageHandler,
 >;
@@ -71,6 +72,8 @@ pub struct LampoPeerManager {
     conf: LampoConf,
     logger: Arc<LampoLogger>,
     onion_messenger: Option<Arc<LampoArcOnionMessenger<LampoLogger>>>,
+    /// The Phoenix LSP client installed as custom message handler.
+    phoenix_lsp: Option<Arc<PhoenixLspHandler>>,
     /// Caps concurrent outbound dials started through `connect` (see
     /// [`MAX_CONCURRENT_DIALS`]).
     dial_permits: Arc<tokio::sync::Semaphore>,
@@ -87,6 +90,7 @@ impl LampoPeerManager {
             logger,
             channel_manager: None,
             onion_messenger: None,
+            phoenix_lsp: None,
             dial_permits: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_DIALS)),
             outbound_dial_locks: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -104,12 +108,17 @@ impl LampoPeerManager {
         self.onion_messenger.clone().unwrap()
     }
 
+    pub fn phoenix_lsp(&self) -> Arc<PhoenixLspHandler> {
+        self.phoenix_lsp.clone().unwrap()
+    }
+
     pub fn init(
         &mut self,
         _onchain_manager: Arc<LampoChainManager>,
         wallet_manager: Arc<dyn WalletManager>,
         channel_manager: Arc<LampoChannelManager>,
         async_payments_enabled: Arc<AtomicBool>,
+        phoenix_lsp: Arc<PhoenixLspHandler>,
     ) -> error::Result<()> {
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -185,7 +194,7 @@ impl LampoPeerManager {
             chan_handler: channel_manager.manager(),
             onion_message_handler: onion_messenger.clone(),
             route_handler: gossip_sync,
-            custom_message_handler: IgnoringMessageHandler {},
+            custom_message_handler: phoenix_lsp.clone(),
             send_only_message_handler: IgnoringMessageHandler {},
         };
 
@@ -199,7 +208,81 @@ impl LampoPeerManager {
         self.peer_manager = Some(Arc::new(peer_manager));
         self.channel_manager = Some(channel_manager.clone());
         self.onion_messenger = Some(onion_messenger);
+        self.phoenix_lsp = Some(phoenix_lsp);
         Ok(())
+    }
+
+    /// Flush queued custom messages (and anything else pending) to the
+    /// sockets now instead of at the background processor's next tick.
+    /// Must not be called from inside an LDK callback.
+    pub fn process_events(&self) {
+        self.manager().process_events();
+    }
+
+    /// Dial the configured Phoenix LSP at startup and redial it whenever it
+    /// is gone. The LSP has no channel with this node at first, so the
+    /// channel-peer reconnect loop would never bring it back; and that loop
+    /// only runs when a listener is bound, while an LSP client needs no
+    /// listener at all.
+    fn spawn_phoenix_lsp_keepalive(
+        &self,
+        peer_manager: Arc<InnerLampoPeerManager>,
+        shutdown: Arc<AtomicBool>,
+    ) {
+        let Some(lsp) = self.phoenix_lsp().lsp_peer() else {
+            return;
+        };
+        let dial_locks = Arc::clone(&self.outbound_dial_locks);
+        let store_path = peer_store_path(&self.conf);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                if shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                if peer_manager.peer_by_node_id(&lsp.node_id).is_some() {
+                    continue;
+                }
+                let hosts = match lsp.socket_addrs() {
+                    Ok(hosts) => hosts,
+                    Err(err) => {
+                        log::warn!(target: "phoenix-lsp", "cannot resolve the Phoenix LSP address: {err}");
+                        continue;
+                    }
+                };
+                for host in hosts {
+                    log::info!(
+                        target: "phoenix-lsp",
+                        "connecting to the Phoenix LSP `{}` at `{host}`",
+                        lsp.node_id
+                    );
+                    let node_lock = OutboundDialLockGuard::acquire(&dial_locks, lsp.node_id);
+                    let _node_guard = node_lock.lock.lock().await;
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        dial(peer_manager.clone(), lsp.node_id, host),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {
+                            remember_peer(&store_path, &lsp.node_id, &host);
+                            break;
+                        }
+                        Ok(Err(err)) => {
+                            log::warn!(target: "phoenix-lsp", "Phoenix LSP dial failed: {err}");
+                        }
+                        Err(_) => {
+                            log::warn!(target: "phoenix-lsp", "Phoenix LSP dial to `{host}` timed out");
+                            if peer_manager.peer_by_node_id(&lsp.node_id).is_none() {
+                                peer_manager.disconnect_by_node_id(lsp.node_id);
+                            }
+                        }
+                    }
+                }
+            }
+        });
     }
 
     /// Run the peer manager event loop without requiring an explicit shutdown flag.
@@ -236,6 +319,7 @@ impl LampoPeerManager {
         // `announcement_addresses` is unset. An unset value means no
         // listener and no gossip address. Outbound dials still run.
         let announce_addr = self.conf.announce_addr.clone();
+        self.spawn_phoenix_lsp_keepalive(peer_manager.clone(), shutdown.clone());
         let bind_addr = match p2p_bind_addr(announce_addr.as_deref(), listen_port) {
             Some(addr) => addr,
             None => {

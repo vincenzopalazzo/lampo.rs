@@ -36,6 +36,7 @@ use lampo_common::ldk::sign::EntropySource;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
 use lampo_common::ldk::util::ser::Readable;
 
+use super::phoenix_lsp::PhoenixLspHandler;
 use super::LampoChannelManager;
 use crate::chain::LampoChainManager;
 use crate::utils::logger::LampoLogger;
@@ -53,6 +54,9 @@ pub struct OffchainManager {
     /// Shared with the onion messenger: false until the operator opts in
     /// via `async-payments-role`, config paths, or `setasyncinvoicepaths`.
     async_payments_enabled: Arc<AtomicBool>,
+    /// Told about every invoice this node issues, so an LSP funding
+    /// proposal can be matched to one of them.
+    phoenix_lsp: Arc<PhoenixLspHandler>,
 }
 
 impl OffchainManager {
@@ -63,6 +67,7 @@ impl OffchainManager {
         logger: Arc<LampoLogger>,
         lampo_conf: Arc<LampoConf>,
         chain_manager: Arc<LampoChainManager>,
+        phoenix_lsp: Arc<PhoenixLspHandler>,
     ) -> error::Result<Self> {
         let async_payments_enabled =
             Arc::new(AtomicBool::new(lampo_conf.async_payments_role.is_some()));
@@ -74,6 +79,7 @@ impl OffchainManager {
             chain_manager,
             async_receive_enabled: AtomicBool::new(false),
             async_payments_enabled,
+            phoenix_lsp,
         };
         if let Some(paths_hex) = &manager.lampo_conf.async_invoice_server_paths {
             manager.set_async_receive_paths_hex(paths_hex)?;
@@ -160,6 +166,10 @@ impl OffchainManager {
                 ..Default::default()
             })
             .map_err(|err| error::anyhow!("{:?}", err))?;
+        self.phoenix_lsp.remember_invoice(
+            PaymentHash(invoice.payment_hash().0),
+            invoice.amount_milli_satoshis(),
+        );
         Ok(invoice)
     }
 

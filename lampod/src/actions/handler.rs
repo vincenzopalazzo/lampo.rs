@@ -255,6 +255,10 @@ impl Handler for LampoHandler {
                     channel_id,
                     channel_type,
                 }));
+                let phoenix_lsp = self.peer_manager.phoenix_lsp();
+                if phoenix_lsp.is_lsp(&counterparty_node_id) {
+                    phoenix_lsp.set_has_lsp_channel(true);
+                }
                 // Public channels announced right after this moment do not
                 // always reach us through incremental gossip relay: a node
                 // that connected before the announcements existed stays
@@ -579,6 +583,9 @@ impl Handler for LampoHandler {
                 purpose,
                 ..
             } => {
+                self.peer_manager
+                    .phoenix_lsp()
+                    .forget_invoice(&payment_hash);
                 let (payment_preimage, payment_secret) = match purpose {
                     ldk::events::PaymentPurpose::Bolt11InvoicePayment {
                         payment_preimage,

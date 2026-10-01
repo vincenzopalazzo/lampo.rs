@@ -18,6 +18,7 @@ pub mod jsonrpc;
 pub mod ln;
 pub mod persistence;
 
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -41,6 +42,8 @@ use lampo_common::{error, ldk};
 use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
+use crate::ln::phoenix_lsp::policy::LiquidityPolicy;
+use crate::ln::phoenix_lsp::{PhoenixLspHandler, PurchaseStore};
 use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
 use crate::persistence::LampoPersistence;
@@ -67,6 +70,9 @@ pub struct LampoDaemon {
     inventory_manager: Option<Arc<LampoInventoryManager>>,
     wallet_manager: Arc<dyn WalletManager>,
     offchain_manager: Option<Arc<OffchainManager>>,
+    /// Client side of the Phoenix LSP protocol; idle unless `phoenix-lsp`
+    /// is configured.
+    phoenix_lsp: Option<Arc<PhoenixLspHandler>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
@@ -96,6 +102,7 @@ impl LampoDaemon {
             inventory_manager: None,
             wallet_manager,
             offchain_manager: None,
+            phoenix_lsp: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             chain_sync,
@@ -188,6 +195,26 @@ impl LampoDaemon {
             })
     }
 
+    /// Build the Phoenix LSP client before anything that feeds it: the
+    /// offchain manager registers issued invoices with it and the peer
+    /// manager installs it as custom message handler.
+    pub fn init_phoenix_lsp(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init phoenix lsp ...");
+        let purchases = Arc::new(PurchaseStore::open(Path::new(&self.conf.path()))?);
+        let handler = PhoenixLspHandler::new(
+            self.conf.phoenix_lsp_peer()?,
+            self.conf.network,
+            LiquidityPolicy::from_conf(&self.conf),
+            purchases,
+        );
+        self.phoenix_lsp = Some(Arc::new(handler));
+        Ok(())
+    }
+
+    pub fn phoenix_lsp(&self) -> Arc<PhoenixLspHandler> {
+        self.phoenix_lsp.clone().unwrap()
+    }
+
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init offchain manager ...");
         let manager = OffchainManager::new(
@@ -196,6 +223,7 @@ impl LampoDaemon {
             self.logger.clone(),
             self.conf.clone(),
             self.onchain_manager(),
+            self.phoenix_lsp(),
         )?;
         self.offchain_manager = Some(Arc::new(manager));
         Ok(())
@@ -209,6 +237,7 @@ impl LampoDaemon {
             self.wallet_manager.clone(),
             self.channel_manager(),
             self.offchain_manager().async_payments_gate(),
+            self.phoenix_lsp(),
         )?;
         self.peer_manager = Some(Arc::new(peer_manager));
         Ok(())
@@ -257,6 +286,7 @@ impl LampoDaemon {
 
     pub async fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         log::debug!(target: "lampod", "init lampod ...");
+        self.init_phoenix_lsp()?;
         self.init_onchaind(client.clone())?;
         self.init_channeld().await?;
         self.init_offchain_manager()?;
@@ -273,6 +303,17 @@ impl LampoDaemon {
             self.channel_manager().sweeper(),
         );
         self.channel_manager().set_handler(self.handler());
+        let phoenix_lsp = self.phoenix_lsp();
+        phoenix_lsp.set_handler(self.handler());
+        if let Some(lsp) = phoenix_lsp.lsp_node_id() {
+            let has_channel = self
+                .channel_manager()
+                .manager()
+                .list_channels()
+                .iter()
+                .any(|channel| channel.counterparty.node_id == lsp);
+            phoenix_lsp.set_has_lsp_channel(has_channel);
+        }
         Ok(())
     }
 
