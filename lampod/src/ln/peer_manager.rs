@@ -235,8 +235,13 @@ impl LampoPeerManager {
         // the listen host — the same fallback ldk-node uses when
         // `announcement_addresses` is unset. An unset value means no
         // listener and no gossip address. Outbound dials still run.
+        // CLN splits these. `bind-addr` is the listen socket and is not
+        // announced. `announce-addr` is the public address in the node
+        // announcement. A missing bind falls back to a public announce
+        // host so an old config that only set `announce-addr` still listens.
         let announce_addr = self.conf.announce_addr.clone();
-        let bind_addr = match p2p_bind_addr(announce_addr.as_deref(), listen_port) {
+        let listen_host = self.conf.bind_addr.clone().or(announce_addr.clone());
+        let bind_addr = match p2p_bind_addr(listen_host.as_deref(), listen_port) {
             Some(addr) => addr,
             None => {
                 log::info!(
@@ -419,7 +424,10 @@ impl LampoPeerManager {
             // listener is up and only when an address was configured, so a
             // failed bind never leaves it refreshing an unreachable
             // endpoint. Mirrors ldk-node, which keeps the two separate.
-            if let Some(announce_host) = announce_addr.clone() {
+            if let Some(announce_host) = announce_addr
+                .clone()
+                .filter(|addr| lampo_common::conf::is_announceable(addr))
+            {
                 let socket_addr = format!("{announce_host}:{listen_port}");
                 let peer_manager = peer_manager.clone();
                 let chan_manager = chan_manager.clone();
@@ -714,6 +722,19 @@ mod tests {
         assert_eq!(p2p_bind_addr(None, 9735), None);
         assert_eq!(p2p_bind_addr(Some(""), 9735), None);
         assert_eq!(p2p_bind_addr(Some("  "), 9735), None);
+    }
+
+    #[test]
+    fn loopback_is_not_announced() {
+        assert!(!lampo_common::conf::is_announceable("127.0.0.1"));
+        assert!(!lampo_common::conf::is_announceable("0.0.0.0"));
+        assert!(!lampo_common::conf::is_announceable("10.0.0.1"));
+        assert!(!lampo_common::conf::is_announceable("192.168.178.39"));
+        assert!(lampo_common::conf::is_announceable("1.1.1.1"));
+        assert!(lampo_common::conf::is_announceable("node.example.com"));
+        assert!(lampo_common::conf::is_announceable(
+            "abcdefghijklmnopqrstuvwxyz234567.onion"
+        ));
     }
 
     #[test]

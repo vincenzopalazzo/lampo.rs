@@ -94,7 +94,7 @@ start_node() { # $1 = name (writes conf; never deletes lampod.pid)
   cat > "$dir/regtest/lampo.conf" <<EOF
 network=regtest
 port=$(P2P "$n")
-announce-addr=127.0.0.1
+bind-addr=127.0.0.1
 api-host=http://127.0.0.1
 api-port=$(API "$n")
 backend=core
