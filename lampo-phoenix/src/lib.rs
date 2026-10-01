@@ -2,4 +2,7 @@
 //! liquidity ads, packaged as a daemon extension. Nothing here opens,
 //! splices or funds a channel yet.
 pub mod liquidity_ads;
+pub mod purchases;
 pub mod wire;
+
+pub use purchases::PurchaseStore;
