@@ -113,8 +113,23 @@ core-user=$CORE_USER
 core-pass=$CORE_PASS
 EOF
   # Do NOT remove lampod.pid (see header comment).
-  setsid nohup "$BIN" --data-dir "$dir" --network regtest \
-      > "$dir/mh.log" 2>&1 < /dev/null &
+  # Plugins are a CLI flag. `path -- --flag value` is one LAMPO_PLUGINS
+  # entry; the daemon splits on ` -- `.
+  local -a plugin_args=()
+  local plugin
+  for plugin in ${LAMPO_PLUGINS:-}; do
+    plugin_args+=(--plugin "$plugin")
+  done
+  # macOS has no setsid. nohup plus a background job is enough here.
+  if command -v setsid >/dev/null 2>&1; then
+    setsid nohup "$BIN" --data-dir "$dir" --network regtest \
+        "${plugin_args[@]}" \
+        > "$dir/mh.log" 2>&1 < /dev/null &
+  else
+    nohup "$BIN" --data-dir "$dir" --network regtest \
+        "${plugin_args[@]}" \
+        > "$dir/mh.log" 2>&1 < /dev/null &
+  fi
   disown 2>/dev/null || true
 }
 

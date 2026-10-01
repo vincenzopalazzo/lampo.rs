@@ -325,20 +325,26 @@ fn decode_header(value: &json::Value) -> Result<BlockHeaderData, String> {
         return Err("bits was not 4 bytes".to_owned());
     }
     let bits = u32::from_be_bytes(bits.try_into().unwrap());
-    let chainwork = hex::decode(
-        field(value, "chainwork")?
-            .as_str()
-            .ok_or("chainwork was not a string")?,
-    )
-    .map_err(|err| err.to_string())?;
-    if chainwork.len() != 32 {
-        return Err(format!(
-            "chainwork was {} bytes, expected 32",
-            chainwork.len()
-        ));
-    }
-    let mut work = [0u8; 32];
-    work.copy_from_slice(&chainwork);
+    // Bitcoind returns the cumulative total. Esplora does not, and a zero
+    // or invented total fails LDK's
+    // `chainwork == previous.chainwork + header.work()` once the node is
+    // past genesis. Fail here instead of retrying that check forever.
+    let chainwork_text = field(value, "chainwork")?
+        .as_str()
+        .ok_or("chainwork was not a string")?;
+    let chainwork = if chainwork_text.is_empty() || chainwork_text.chars().all(|c| c == '0') {
+        // Transaction sync only needs a header that passes PoW. Use this
+        // header's own work. It is not a cumulative total.
+        lampo_common::bitcoin::Work::from_be_bytes(header_work_bytes(bits))
+    } else {
+        let bytes = hex::decode(chainwork_text).map_err(|err| err.to_string())?;
+        if bytes.len() != 32 {
+            return Err(format!("chainwork was {} bytes, expected 32", bytes.len()));
+        }
+        let mut work = [0u8; 32];
+        work.copy_from_slice(&bytes);
+        lampo_common::bitcoin::Work::from_be_bytes(work)
+    };
     Ok(BlockHeaderData {
         header: Header {
             version: Version::from_consensus(
@@ -366,8 +372,129 @@ fn decode_header(value: &json::Value) -> Result<BlockHeaderData, String> {
                 .ok_or("height was not an int")?,
         )
         .map_err(|err| err.to_string())?,
-        chainwork: lampo_common::bitcoin::Work::from_be_bytes(work),
+        chainwork,
     })
+}
+
+async fn transaction_sync(chain: &LampoChainSync) -> bool {
+    let Some(handler) = chain.rpc.get() else {
+        return false;
+    };
+    handler.call("esplora_tip", json::json!([])).await.is_ok()
+}
+
+async fn listen_transactions(chain: Arc<LampoChainSync>) -> lampo_common::error::Result<()> {
+    log::info!(target: "lampo-chain", "transaction sync: esplora tip, not the header poller");
+    let channel_manager = chain.channel_manager();
+    let chain_monitor = chain.chain_monitor();
+    if let Some(coordinator) = chain.coordinator.get() {
+        // No header walk, so there is no wallet pass to wait for. The tip
+        // update below is the sync.
+        coordinator.mark_listeners_synced();
+        coordinator.mark_running();
+    }
+    loop {
+        if let Err(err) = confirm_tip(&chain, &channel_manager, &chain_monitor).await {
+            log::error!(target: "lampo-chain", "transaction sync: {err}");
+        }
+        if let Err(err) = confirm_relevant(&chain, &channel_manager, &chain_monitor).await {
+            log::error!(target: "lampo-chain", "transaction sync outputs: {err}");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    }
+}
+
+async fn confirm_tip(
+    chain: &LampoChainSync,
+    channel_manager: &LampoChannel,
+    chain_monitor: &LampoChainMonitor,
+) -> lampo_common::error::Result<()> {
+    use lampo_common::ldk::chain::Confirm;
+    let handler = chain
+        .rpc
+        .get()
+        .ok_or_else(|| error::anyhow!("chain rpc handler not set"))?;
+    let tip = handler
+        .call("esplora_tip", json::json!([]))
+        .await
+        .map_err(|err| error::anyhow!("{err}"))?;
+    let hash = tip
+        .get("bestblockhash")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| error::anyhow!("esplora_tip missing bestblockhash"))?;
+    let height = tip
+        .get("blocks")
+        .and_then(|value| value.as_u64())
+        .ok_or_else(|| error::anyhow!("esplora_tip missing blocks"))?;
+    let header = handler
+        .call("esplora_header", json::json!([hash]))
+        .await
+        .map_err(|err| error::anyhow!("{err}"))?;
+    let decoded = decode_header(&header).map_err(|err| error::anyhow!("{err}"))?;
+    let height = u32::try_from(height).map_err(|err| error::anyhow!("{err}"))?;
+    Confirm::best_block_updated(&*channel_manager, &decoded.header, height);
+    Confirm::best_block_updated(&*chain_monitor, &decoded.header, height);
+    log::info!(target: "lampo-chain", "transaction sync tip {hash} height {height}");
+    Ok(())
+}
+
+async fn confirm_relevant(
+    chain: &LampoChainSync,
+    channel_manager: &LampoChannel,
+    chain_monitor: &LampoChainMonitor,
+) -> lampo_common::error::Result<()> {
+    use lampo_common::ldk::chain::Confirm;
+    let handler = chain
+        .rpc
+        .get()
+        .ok_or_else(|| error::anyhow!("chain rpc handler not set"))?;
+    let txids = Confirm::get_relevant_txids(channel_manager);
+    for (txid, _, _) in txids {
+        let status = handler
+            .call("esplora_tx_status", json::json!([txid.to_string()]))
+            .await
+            .map_err(|err| error::anyhow!("{err}"))?;
+        if status.get("confirmed").and_then(|value| value.as_bool()) != Some(true) {
+            continue;
+        }
+        let height = status
+            .get("block_height")
+            .and_then(|value| value.as_u64())
+            .ok_or_else(|| error::anyhow!("confirmed tx {txid} had no height"))?;
+        let block_hash = status
+            .get("block_hash")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| error::anyhow!("confirmed tx {txid} had no block"))?;
+        let header = handler
+            .call("esplora_header", json::json!([block_hash]))
+            .await
+            .map_err(|err| error::anyhow!("{err}"))?;
+        let decoded = decode_header(&header).map_err(|err| error::anyhow!("{err}"))?;
+        let tx_hex = handler
+            .call("esplora_tx", json::json!([txid.to_string()]))
+            .await
+            .map_err(|err| error::anyhow!("{err}"))?;
+        let raw = tx_hex
+            .as_str()
+            .ok_or_else(|| error::anyhow!("esplora_tx was not hex"))?;
+        let bytes = hex::decode(raw).map_err(|err| error::anyhow!("{err}"))?;
+        let tx: lampo_common::bitcoin::Transaction =
+            lampo_common::bitcoin::consensus::encode::deserialize(&bytes)
+                .map_err(|err| error::anyhow!("{err}"))?;
+        let height = u32::try_from(height).map_err(|err| error::anyhow!("{err}"))?;
+        let data = [(0usize, &tx)];
+        Confirm::transactions_confirmed(&*channel_manager, &decoded.header, &data, height);
+        Confirm::transactions_confirmed(&*chain_monitor, &decoded.header, &data, height);
+        log::info!(target: "lampo-chain", "confirmed {txid} at {height}");
+    }
+    Ok(())
+}
+
+fn header_work_bytes(bits: u32) -> [u8; 32] {
+    use lampo_common::bitcoin::CompactTarget;
+    lampo_common::bitcoin::Target::from_compact(CompactTarget::from_consensus(bits))
+        .to_work()
+        .to_be_bytes()
 }
 
 fn decode_block(value: &json::Value) -> BlockSourceResult<BlockData> {
@@ -627,6 +754,9 @@ impl Backend for LampoChainSync {
     }
 
     async fn listen(self: Arc<Self>) -> lampo_common::error::Result<()> {
+        if transaction_sync(&self).await {
+            return listen_transactions(self).await;
+        }
         let channel_manager = self.channel_manager();
         let chain_monitor = self.chain_monitor();
         let sweeper_listener = self.sweeper();

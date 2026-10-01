@@ -27,9 +27,24 @@ pub enum TxResult {
     Discarded,
 }
 
-/// Backend kind supported by the lampo
+/// Backend kind supported by the lampo.
+///
+/// `Core` is a header source: bitcoind returns cumulative chainwork, so
+/// chain sync uses `lightning-block-sync`. `Esplora` and `Electrum` are
+/// transaction sources, the same split ldk-node makes. They confirm watched
+/// outputs and must not be driven through the header poller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendKind {
     Core,
+    Esplora,
+    Electrum,
+}
+
+impl BackendKind {
+    /// Header polling needs cumulative chainwork. Only bitcoind has it.
+    pub fn polls_headers(self) -> bool {
+        matches!(self, Self::Core)
+    }
 }
 
 /// bitcoind `estimatesmartfee` estimate mode. Matches ldk-node.
