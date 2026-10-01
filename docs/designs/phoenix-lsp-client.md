@@ -11,6 +11,34 @@ The LSP speaks the BOLTs plus the draft bLIPs 34 (`recommended_feerates`),
 request, and liquidity ads from BOLT PR 1153 with the 2024 TLV numbering.
 The wire formats follow lightning-kmp 1.13.2, which is what the LSP runs.
 
+## Where it lives
+
+The client is the `lampo-phoenix` crate, registered with the daemon as an
+extension; `lampod` itself knows nothing about Phoenix.
+
+- `lampo-common` defines the extension contract (`extension.rs`): an
+  extension owns custom peer message types carried as raw bytes,
+  advertises init feature bits per peer, names peers to keep connected,
+  handles and queues messages, vouches for a fee a counterparty skims from
+  a payment, and serves RPC methods. It receives a context with the
+  channel manager, the node keys, the event bus and a flush callback. The
+  Phoenix config keys, events and RPC models stay in `lampo-common` as
+  part of the shared vocabulary.
+- `lampod` installs one custom message handler, the dispatcher, in the
+  peer manager slot. LDK's reader trait is generic over its buffer, so the
+  handler cannot be a trait object; the dispatcher reads the bytes and
+  hands them to whichever extension owns the type id. It also ORs the
+  extensions' feature bits, merges their outboxes, dials their persistent
+  peers, asks them for a skim budget before claiming an underpaid payment,
+  and routes RPC methods no typed route knows to them through a
+  `/{method}` catch-all in `lampo-httpd`.
+- `lampo-phoenix` implements the contract. It reacts to node events
+  instead of being called by the daemon: `InvoiceIssued` to remember
+  invoices, `PaymentClaimed` to forget them, and `ChannelReady` with the
+  LSP to flip `accept_underpaying_htlcs` on that channel.
+- `lampod-cli` and the test harness build the handler from the config and
+  register it before `init`, the way the wallet backend is wired.
+
 ## Configuration
 
 | Key | Meaning |
@@ -51,6 +79,9 @@ and mainnet
 
 ## RPCs
 
+Served by the extension through the daemon's `/{method}` catch-all, so
+`lampo-cli phoenixlsp-info` works without a dedicated route.
+
 - `phoenixlsp-info`: configured, node id and address, connected, the
   LSP's feature bits, the feerates, the fee credit, the pending
   proposals with their decision, and the purchases.
@@ -60,9 +91,6 @@ and mainnet
 - `phoenixlsp-recordpurchase`: admin entry of a purchase with every
   field explicit. It exists so claiming a funded HTLC can be tested
   before the node can buy liquidity itself.
-
-`lampo-cli` forwards any method, so `lampo-cli phoenixlsp-info` works
-without a dedicated command.
 
 ## Claiming an HTLC that carries a funding fee
 
