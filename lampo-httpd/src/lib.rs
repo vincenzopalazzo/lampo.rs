@@ -17,6 +17,7 @@ use lampo_common::json;
 use lampod::LampoDaemon;
 
 use commands::daemon::rest_stop;
+use commands::extension::rest_extension;
 use commands::inventory::{rest_funds, rest_getinfo, rest_networkchannels};
 use commands::offchain::{
     rest_asyncinvoicepaths, rest_decode, rest_invoice, rest_keysend, rest_pay,
@@ -282,6 +283,7 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_phoenixlsp_dnsaddress)
             .service(rest_phoenixlsp_recordpurchase)
             .service(rest_stop)
+            .service(rest_extension)
             .build()
     })
     .disable_signals()
