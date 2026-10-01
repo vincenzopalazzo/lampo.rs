@@ -18,23 +18,30 @@ use std::time::Duration;
 use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
 use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
+use lampo_common::bitcoin::secp256k1::{Secp256k1, Signing, Verification};
 use lampo_common::conf::LampoConf;
 use lampo_common::currency::LampoCurrencyConversion;
 use lampo_common::error;
 use lampo_common::hex;
 use lampo_common::keys::LampoKeysManager;
 use lampo_common::ldk;
-use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
+use lampo_common::ldk::blinded_path::message::{
+    BlindedMessagePath, MessageContext, MessageForwardNode,
+};
 use lampo_common::ldk::ln::channelmanager::{
     Bolt11InvoiceParameters, OptionalBolt11PaymentParams, OptionalOfferPaymentParams, PaymentId,
 };
 use lampo_common::ldk::ln::outbound_payment::{RecipientOnionFields, Retry};
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
+use lampo_common::ldk::onion_message::messenger::{
+    DefaultMessageRouter, Destination, MessageRouter, OnionMessagePath,
+};
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
-use lampo_common::ldk::sign::EntropySource;
+use lampo_common::ldk::sign::{EntropySource, ReceiveAuthKey};
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
 use lampo_common::ldk::util::ser::Readable;
+use lampo_common::types::LampoGraph;
 
 use super::phoenix_lsp::PhoenixLspHandler;
 use super::LampoChannelManager;
@@ -173,6 +180,26 @@ impl OffchainManager {
         Ok(invoice)
     }
 
+    /// A BOLT 12 offer whose blinded path starts at `intro_node`. The
+    /// introduction node needs no channel with this node: an LSP publishes
+    /// the offer under a BIP 353 name and forwards invoice requests to us.
+    pub fn offer_via_introduction_node(&self, intro_node: pubkey) -> error::Result<Offer> {
+        let router = IntroductionNodeRouter {
+            inner: DefaultMessageRouter::new(
+                self.channel_manager.graph(),
+                self.keys_manager.clone(),
+            ),
+            intro_node,
+            keys_manager: self.keys_manager.clone(),
+        };
+        self.channel_manager
+            .manager()
+            .create_offer_builder_using_router(&router)
+            .map_err(|err| error::anyhow!("offer via `{intro_node}`: {err:?}"))?
+            .build()
+            .map_err(|err| error::anyhow!("build offer via `{intro_node}`: {err:?}"))
+    }
+
     pub fn decode_invoice(&self, invoice_str: &str) -> error::Result<ldk::invoice::Bolt11Invoice> {
         // FIXME: we should be able to `?` on the error right?
         let invoice = invoice_str
@@ -306,5 +333,48 @@ impl OffchainManager {
             .map_err(|err| error::anyhow!("{:?}", err))?;
         log::info!("Keysend successfully done!");
         Ok(payment_result)
+    }
+}
+
+/// Routes onion messages like the default router, but blinds every path
+/// through one fixed introduction node, whether or not it is connected or
+/// in the graph.
+struct IntroductionNodeRouter {
+    inner: DefaultMessageRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<LampoKeysManager>>,
+    intro_node: pubkey,
+    keys_manager: Arc<LampoKeysManager>,
+}
+
+impl MessageRouter for IntroductionNodeRouter {
+    fn find_path(
+        &self,
+        sender: pubkey,
+        peers: Vec<pubkey>,
+        destination: Destination,
+    ) -> Result<OnionMessagePath, ()> {
+        self.inner.find_path(sender, peers, destination)
+    }
+
+    fn create_blinded_paths<T: Signing + Verification>(
+        &self,
+        recipient: pubkey,
+        local_node_receive_key: ReceiveAuthKey,
+        context: MessageContext,
+        _peers: Vec<MessageForwardNode>,
+        secp_ctx: &Secp256k1<T>,
+    ) -> Result<Vec<BlindedMessagePath>, ()> {
+        let hop = MessageForwardNode {
+            node_id: self.intro_node,
+            short_channel_id: None,
+        };
+        Ok(vec![BlindedMessagePath::new(
+            &[hop],
+            recipient,
+            local_node_receive_key,
+            context,
+            true,
+            self.keys_manager.clone(),
+            secp_ctx,
+        )])
     }
 }

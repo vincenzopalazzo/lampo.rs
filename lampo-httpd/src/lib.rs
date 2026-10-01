@@ -24,6 +24,9 @@ use commands::offchain::{
 };
 use commands::onchain::rest_new_addr;
 use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel};
+use commands::phoenix_lsp::{
+    rest_phoenixlsp_dnsaddress, rest_phoenixlsp_info, rest_phoenixlsp_recordpurchase,
+};
 
 use crate::commands::offchain::rest_offer;
 
@@ -275,6 +278,9 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(rest_setasyncinvoicepaths)
             .service(rest_funds)
             .service(rest_new_addr)
+            .service(rest_phoenixlsp_info)
+            .service(rest_phoenixlsp_dnsaddress)
+            .service(rest_phoenixlsp_recordpurchase)
             .service(rest_stop)
             .build()
     })
@@ -330,9 +336,16 @@ async fn swagger_api(data: web::Data<AppState>) -> HttpResponseWrapper {
 #[macro_export]
 macro_rules! post {
     ($name:ident, response: $res_ty:ty) => {
+        $crate::post!(@route $name, $name, response: $res_ty);
+    };
+    // `path` for method names that are not identifiers, e.g. `phoenixlsp-info`.
+    ($name:ident, path: $path:literal, response: $res_ty:ty) => {
+        $crate::post!(@route $name, $path, response: $res_ty);
+    };
+    (@route $name:ident, $path:tt, response: $res_ty:ty) => {
         paste! {
             #[actix::api_v2_operation]
-            #[actix::post($name)]
+            #[actix::post($path)]
             pub async fn [<rest_$name>](
                 state: web::Data<AppState>,
                 // Even though the backend takes no input, require a JSON body.
@@ -359,9 +372,15 @@ macro_rules! post {
         }
     };
     ($name:ident, request: $req_ty:ty, response: $res_ty:ty) => {
+        $crate::post!(@route $name, $name, request: $req_ty, response: $res_ty);
+    };
+    ($name:ident, path: $path:literal, request: $req_ty:ty, response: $res_ty:ty) => {
+        $crate::post!(@route $name, $path, request: $req_ty, response: $res_ty);
+    };
+    (@route $name:ident, $path:tt, request: $req_ty:ty, response: $res_ty:ty) => {
         paste! {
             #[actix::api_v2_operation]
-            #[actix::post($name)]
+            #[actix::post($path)]
             pub async fn [<rest_$name>](
                 state: web::Data<AppState>,
                 body: Json<json::Value>,

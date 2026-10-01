@@ -68,7 +68,7 @@ pub fn has_feature_bit(features: &InitFeatures, bit: usize) -> bool {
 }
 
 /// Whether the required or the optional bit of a feature pair is set.
-fn supports_feature(features: &InitFeatures, required_bit: usize) -> bool {
+pub fn supports_feature(features: &InitFeatures, required_bit: usize) -> bool {
     has_feature_bit(features, required_bit) || has_feature_bit(features, required_bit + 1)
 }
 
