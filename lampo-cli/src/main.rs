@@ -2,7 +2,7 @@ mod args;
 
 use std::process::exit;
 
-use elite_rpc::transport::curl::HttpTransport;
+use elite_rpc::transport::bitreq::HttpTransport;
 use elite_rpc::transport::TransportMethod;
 use elite_rpc::EliteRPC;
 use radicle_term as term;
