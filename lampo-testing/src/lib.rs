@@ -234,6 +234,10 @@ impl LampoTesting {
         lampo_conf.core_user = values.as_ref().and_then(|v| Some(v.user.to_owned()));
         lampo_conf.core_pass = values.and_then(|v| Some(v.password));
         lampo_conf.dev_sync = Some(true);
+        // Integration tests dial `127.0.0.1:<port>`. ldk-node does not bind
+        // unless a listening address is configured, and neither do we, so
+        // the harness has to say where it listens. `conf_fn` may override.
+        lampo_conf.announce_addr = Some("127.0.0.1".to_owned());
 
         lampo_conf
             .ldk_conf
