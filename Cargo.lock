@@ -2364,6 +2364,7 @@ version = "0.0.1"
 dependencies = [
  "lampo-common",
  "log",
+ "tokio",
 ]
 
 [[package]]
