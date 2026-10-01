@@ -24,6 +24,7 @@ use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph}
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::async_payments::AsyncPaymentsHandler;
+use crate::ln::CustomMessageDispatcher;
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
@@ -45,7 +46,7 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, Arc<T>, Arc<L>>>,
     Arc<LampoArcOnionMessenger<L>>,
     Arc<L>,
-    IgnoringMessageHandler,
+    Arc<CustomMessageDispatcher>,
     Arc<dyn LampoSigner>,
     IgnoringMessageHandler,
 >;
@@ -71,6 +72,8 @@ pub struct LampoPeerManager {
     conf: LampoConf,
     logger: Arc<LampoLogger>,
     onion_messenger: Option<Arc<LampoArcOnionMessenger<LampoLogger>>>,
+    /// Routes custom peer messages to the registered extensions.
+    extensions: Option<Arc<CustomMessageDispatcher>>,
     /// Caps concurrent outbound dials started through `connect` (see
     /// [`MAX_CONCURRENT_DIALS`]).
     dial_permits: Arc<tokio::sync::Semaphore>,
@@ -87,6 +90,7 @@ impl LampoPeerManager {
             logger,
             channel_manager: None,
             onion_messenger: None,
+            extensions: None,
             dial_permits: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_DIALS)),
             outbound_dial_locks: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -104,12 +108,17 @@ impl LampoPeerManager {
         self.onion_messenger.clone().unwrap()
     }
 
+    pub fn extensions(&self) -> Arc<CustomMessageDispatcher> {
+        self.extensions.clone().unwrap()
+    }
+
     pub fn init(
         &mut self,
         _onchain_manager: Arc<LampoChainManager>,
         _wallet_manager: Arc<dyn WalletManager>,
         channel_manager: Arc<LampoChannelManager>,
         async_payments_enabled: Arc<AtomicBool>,
+        extensions: Arc<CustomMessageDispatcher>,
     ) -> error::Result<()> {
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -185,7 +194,7 @@ impl LampoPeerManager {
             chan_handler: channel_manager.manager(),
             onion_message_handler: onion_messenger.clone(),
             route_handler: gossip_sync,
-            custom_message_handler: IgnoringMessageHandler {},
+            custom_message_handler: extensions.clone(),
             send_only_message_handler: IgnoringMessageHandler {},
         };
 
@@ -199,7 +208,84 @@ impl LampoPeerManager {
         self.peer_manager = Some(Arc::new(peer_manager));
         self.channel_manager = Some(channel_manager.clone());
         self.onion_messenger = Some(onion_messenger);
+        self.extensions = Some(extensions);
         Ok(())
+    }
+
+    /// Flush queued custom messages (and anything else pending) to the
+    /// sockets now instead of at the background processor's next tick.
+    /// Must not be called from inside an LDK callback.
+    pub fn process_events(&self) {
+        self.manager().process_events();
+    }
+
+    /// Dial the peers the extensions want kept connected at startup and
+    /// redial them whenever they are gone. An LSP has no channel with a
+    /// new node, so the channel-peer reconnect loop would never bring it
+    /// back; and that loop only runs when a listener is bound, while a
+    /// client needs no listener at all.
+    fn spawn_persistent_peer_keepalive(
+        &self,
+        peer_manager: Arc<InnerLampoPeerManager>,
+        shutdown: Arc<AtomicBool>,
+    ) {
+        let peers = self.extensions().persistent_peers();
+        if peers.is_empty() {
+            return;
+        }
+        let dial_locks = Arc::clone(&self.outbound_dial_locks);
+        let store_path = peer_store_path(&self.conf);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                if shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                for peer in &peers {
+                    if peer_manager.peer_by_node_id(&peer.node_id).is_some() {
+                        continue;
+                    }
+                    let hosts = match peer.socket_addrs() {
+                        Ok(hosts) => hosts,
+                        Err(err) => {
+                            log::warn!(target: "lampo", "cannot resolve persistent peer `{peer}`: {err}");
+                            continue;
+                        }
+                    };
+                    for host in hosts {
+                        log::info!(
+                            target: "lampo",
+                            "connecting to persistent peer `{}` at `{host}`",
+                            peer.node_id
+                        );
+                        let node_lock = OutboundDialLockGuard::acquire(&dial_locks, peer.node_id);
+                        let _node_guard = node_lock.lock.lock().await;
+                        match tokio::time::timeout(
+                            Duration::from_secs(5),
+                            dial(peer_manager.clone(), peer.node_id, host),
+                        )
+                        .await
+                        {
+                            Ok(Ok(())) => {
+                                remember_peer(&store_path, &peer.node_id, &host);
+                                break;
+                            }
+                            Ok(Err(err)) => {
+                                log::warn!(target: "lampo", "dial to persistent peer `{}` failed: {err}", peer.node_id);
+                            }
+                            Err(_) => {
+                                log::warn!(target: "lampo", "dial to persistent peer `{}` at `{host}` timed out", peer.node_id);
+                                if peer_manager.peer_by_node_id(&peer.node_id).is_none() {
+                                    peer_manager.disconnect_by_node_id(peer.node_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
     }
 
     /// Run the peer manager event loop without requiring an explicit shutdown flag.
@@ -240,6 +326,7 @@ impl LampoPeerManager {
         // announcement. A missing bind falls back to a public announce
         // host so an old config that only set `announce-addr` still listens.
         let announce_addr = self.conf.announce_addr.clone();
+        self.spawn_persistent_peer_keepalive(peer_manager.clone(), shutdown.clone());
         let listen_host = self.conf.bind_addr.clone().or(announce_addr.clone());
         let bind_addr = match p2p_bind_addr(listen_host.as_deref(), listen_port) {
             Some(addr) => addr,
