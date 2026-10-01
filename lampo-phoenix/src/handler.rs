@@ -26,6 +26,8 @@ use lampo_common::extension::{
 };
 use lampo_common::handler::Handler;
 use lampo_common::hex;
+use lampo_common::json;
+use lampo_common::jsonrpc;
 use lampo_common::ldk;
 use lampo_common::ldk::ln::msgs::{ErrorAction, Init, LightningError};
 use lampo_common::ldk::ln::wire::Type;
@@ -38,6 +40,7 @@ use crate::channels::accept_underpaying_htlcs_from;
 use crate::liquidity_ads::{PaymentType, WillFundRates};
 use crate::policy::{LiquidityPolicy, PolicyDecision};
 use crate::purchases::{max_funding_fee_msat, unix_now, PurchaseStore};
+use crate::rpc;
 use crate::wire::{
     self, AddFeeCredit, DnsAddressRequest, PhoenixLspMessage, RecommendedFeerates, WillAddHtlc,
 };
@@ -710,6 +713,14 @@ impl CustomMessageExtension for PhoenixLspHandler {
         counterparties: &[Option<PublicKey>],
     ) -> u64 {
         self.skim_budget_msat(payment_hash, counterparties)
+    }
+
+    async fn rpc(
+        &self,
+        method: &str,
+        args: &json::Value,
+    ) -> Result<Option<json::Value>, jsonrpc::Error> {
+        rpc::dispatch(self, method, args).await
     }
 }
 
