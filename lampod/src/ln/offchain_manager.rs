@@ -21,6 +21,9 @@ use lampo_common::bitcoin::secp256k1::PublicKey as pubkey;
 use lampo_common::conf::LampoConf;
 use lampo_common::currency::LampoCurrencyConversion;
 use lampo_common::error;
+use lampo_common::event::ln::LightningEvent;
+use lampo_common::event::Event;
+use lampo_common::handler::Handler;
 use lampo_common::hex;
 use lampo_common::ldk;
 use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
@@ -156,6 +159,13 @@ impl OffchainManager {
                 ..Default::default()
             })
             .map_err(|err| error::anyhow!("{:?}", err))?;
+        // Extensions learn which payment hashes this node asked to be paid.
+        self.channel_manager
+            .handler()
+            .emit(Event::Lightning(LightningEvent::InvoiceIssued {
+                payment_hash: hex::encode(invoice.payment_hash().0),
+                amount_msat: invoice.amount_milli_satoshis(),
+            }));
         Ok(invoice)
     }
 
