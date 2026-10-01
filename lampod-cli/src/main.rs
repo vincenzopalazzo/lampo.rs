@@ -231,7 +231,6 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
         use lampo_common::ldk::sign::NodeSigner;
         wallet
             .ldk_keys()
-            .inner()
             .get_node_id(lampo_common::ldk::sign::Recipient::Node)
             .map(|id| id.to_string())
             .unwrap_or_default()

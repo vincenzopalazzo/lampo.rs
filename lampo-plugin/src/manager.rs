@@ -26,7 +26,7 @@ use tokio::sync::RwLock;
 use crate::transport::grpc::{GrpcConfig, GrpcTransport};
 #[cfg(feature = "grpc")]
 use crate::transport::local::LocalGrpcTransport;
-use crate::transport::stdio::StdioTransport;
+
 use crate::transport::PluginTransport;
 
 /// State of a running plugin.
@@ -292,44 +292,14 @@ impl PluginManager {
         Ok(plugin_name)
     }
 
-    /// True when `path --help` mentions `--lampo-listen`.
-    ///
-    /// A shell mock does not. Those stay on stdio so the existing tests
-    /// still exercise that transport.
-    fn plugin_speaks_uds(path: &str) -> bool {
-        #[cfg(feature = "grpc")]
-        {
-            let Ok(output) = std::process::Command::new(path).arg("--help").output() else {
-                return false;
-            };
-            let text = String::from_utf8_lossy(&output.stdout);
-            let err = String::from_utf8_lossy(&output.stderr);
-            return text.contains("lampo-listen") || err.contains("lampo-listen");
-        }
-        #[cfg(not(feature = "grpc"))]
-        {
-            let _ = path;
-            false
-        }
-    }
-
-    /// gRPC when the binary accepts `--lampo-listen`, otherwise stdio.
-    ///
-    /// The socket lives next to `lampo-rpc`, so a plugin callback and a
-    /// second method on the same plugin do not share a pipe.
+    /// Spawn the plugin as a gRPC server. Stdio is not a plugin transport.
     async fn open_local(
         &self,
         path: &str,
-        init_config: &InitConfig,
+        _init_config: &InitConfig,
         extra_args: &[String],
     ) -> error::Result<Box<dyn PluginTransport>> {
-        #[cfg(feature = "grpc")]
-        if Self::plugin_speaks_uds(path) {
-            let transport = LocalGrpcTransport::spawn(path, extra_args).await?;
-            return Ok(Box::new(transport));
-        }
-        let _ = extra_args;
-        let transport = StdioTransport::new(path).await?;
+        let transport = LocalGrpcTransport::spawn(path, extra_args).await?;
         Ok(Box::new(transport))
     }
 

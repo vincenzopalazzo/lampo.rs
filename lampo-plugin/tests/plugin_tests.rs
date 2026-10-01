@@ -1,6 +1,5 @@
 //! Integration tests for the lampo plugin system.
 use lampo_plugin::manager::PluginManager;
-use lampo_plugin::transport::stdio::StdioTransport;
 use lampo_plugin::transport::PluginTransport;
 use lampo_plugin_common::hooks::HookPoint;
 use lampo_plugin_common::messages::{HookResponse, InitConfig};
@@ -20,57 +19,6 @@ fn test_init_config() -> InitConfig {
     }
 }
 
-#[tokio::test]
-async fn test_stdio_transport_lifecycle() {
-    let path = mock_plugin_path();
-    let transport = StdioTransport::new(&path).await.unwrap();
-    assert!(transport.is_alive());
-
-    // Send getmanifest
-    let req = serde_json::json!({
-        "method": "getmanifest",
-        "params": {},
-        "jsonrpc": "2.0"
-    });
-    let resp = transport.request(req).await.unwrap();
-    assert!(resp.get("result").is_some());
-
-    let result = resp.get("result").unwrap();
-    let methods = result.get("rpc_methods").unwrap().as_array().unwrap();
-    assert_eq!(methods.len(), 1);
-    assert_eq!(methods[0].get("name").unwrap().as_str().unwrap(), "hello");
-
-    // Send init
-    let init_req = serde_json::json!({
-        "method": "init",
-        "params": {
-            "lampo_dir": "/tmp/test",
-            "network": "regtest",
-            "node_id": "",
-            "options": {}
-        },
-        "jsonrpc": "2.0"
-    });
-    let init_resp = transport.request(init_req).await.unwrap();
-    assert!(init_resp.get("result").is_some());
-
-    // Call the hello method
-    let hello_req = serde_json::json!({
-        "method": "hello",
-        "params": {},
-        "jsonrpc": "2.0"
-    });
-    let hello_resp = transport.request(hello_req).await.unwrap();
-    let result = hello_resp.get("result").unwrap();
-    assert_eq!(
-        result.get("message").unwrap().as_str().unwrap(),
-        "hello from plugin!"
-    );
-
-    // Shutdown
-    transport.shutdown().await.unwrap();
-    assert!(!transport.is_alive());
-}
 
 #[tokio::test]
 async fn test_plugin_manager_start_and_route() {

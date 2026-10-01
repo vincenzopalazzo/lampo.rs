@@ -1,4 +1,4 @@
-//! Bitcoind chain backend, written as a lampo plugin in Zig.
+//! Bitcoind chain backend, written as a lampo plugin in Zig 0.16.
 //!
 //! The daemon spawns this binary and sends `core-url`, `core-user`, and
 //! `core-pass` in `init`. Chain sync then calls the RPC methods below
