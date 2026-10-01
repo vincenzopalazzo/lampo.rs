@@ -8,6 +8,7 @@ mod new_addr;
 mod on_chain;
 mod open_channel;
 mod pay_timeout;
+mod phoenix_lsp;
 
 pub use connect::Connect;
 pub use getinfo::GetInfo;
@@ -24,6 +25,7 @@ pub mod request {
     pub use crate::model::on_chain::request::*;
     pub use crate::model::open_channel::request::*;
     pub use crate::model::pay_timeout::PayTimeout;
+    pub use crate::model::phoenix_lsp::request::*;
 }
 
 pub mod response {
@@ -36,4 +38,5 @@ pub mod response {
     pub use crate::model::new_addr::response::*;
     pub use crate::model::on_chain::response::*;
     pub use crate::model::open_channel::response::*;
+    pub use crate::model::phoenix_lsp::response::*;
 }
