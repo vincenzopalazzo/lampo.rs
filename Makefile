@@ -29,11 +29,12 @@ audit:
 	$(CC) install cargo-audit
 	$(CC) audit
 
-# Zig 0.16 plugin SDK and the bitcoind chain backend.
+# Zig plugin SDK. Needs the pin in plugin-sdk/zig/.zigversion, not brew zig.
 # The binary name matches what lampod-cli looks up next to itself.
+ZIG ?= zig
 zig-sdk:
-	cd plugin-sdk/zig && zig build test
+	cd plugin-sdk/zig && $(ZIG) build test
 
 zig-bitcoind:
-	cd lampo-bitcoind/zig && zig build -Doptimize=ReleaseSafe
+	cd lampo-bitcoind/zig && $(ZIG) build -Doptimize=ReleaseSafe
 

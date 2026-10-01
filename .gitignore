@@ -11,3 +11,5 @@ simulations/**/artifacts/
 # zig
 .zig-cache/
 zig-out/
+
+zig-pkg/

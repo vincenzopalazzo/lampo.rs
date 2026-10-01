@@ -1,8 +1,14 @@
 .{
     .name = .lampo_plugin_sdk,
     .version = "0.1.0",
+    .dependencies = .{
+        .zrpc = .{
+            .url = "git+https://github.com/blue-blaze/Zrpc#56874d7e3c13622e43f46d043cdb543290bc9d23",
+            .hash = "zrpc-0.1.0-3ybGj3oVGQDLcbhXVtguFggnjuc-SseYberdf1oF63hg",
+        },
+    },
     .fingerprint = 0x482080fb2475ca81, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0-dev.1476+91a29d707",
     .paths = .{
         "build.zig",
         "build.zig.zon",
