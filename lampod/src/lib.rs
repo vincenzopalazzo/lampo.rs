@@ -27,6 +27,7 @@ use tokio::task::JoinHandle;
 use lampo_common::backend::Backend;
 use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::LampoConf;
+use lampo_common::extension::{CustomMessageExtension, ExtensionContext};
 use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
@@ -44,7 +45,9 @@ use crate::actions::handler::LampoHandler;
 use crate::actions::Handler;
 use crate::chain::LampoChainManager;
 use crate::ln::OffchainManager;
-use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
+use crate::ln::{
+    CustomMessageDispatcher, LampoChannelManager, LampoInventoryManager, LampoPeerManager,
+};
 use crate::persistence::LampoPersistence;
 use crate::utils::logger::LampoLogger;
 
@@ -70,6 +73,10 @@ pub struct LampoDaemon {
     wallet_manager: Arc<dyn WalletManager>,
     signer: Arc<dyn LampoSigner>,
     offchain_manager: Option<Arc<OffchainManager>>,
+    /// Extensions registered before `init`, moved into the dispatcher by it.
+    extensions: Vec<Arc<dyn CustomMessageExtension>>,
+    /// Routes custom peer messages, feature bits and extension RPCs.
+    dispatcher: Option<Arc<CustomMessageDispatcher>>,
     logger: Arc<LampoLogger>,
     persister: Arc<LampoPersistence>,
     handler: Option<Arc<LampoHandler>>,
@@ -111,6 +118,8 @@ impl LampoDaemon {
             wallet_manager,
             signer,
             offchain_manager: None,
+            extensions: Vec::new(),
+            dispatcher: None,
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             chain_sync,
@@ -204,6 +213,40 @@ impl LampoDaemon {
             })
     }
 
+    /// Register a protocol extension. Must happen before [`Self::init`].
+    pub fn add_extension(
+        &mut self,
+        extension: Arc<dyn CustomMessageExtension>,
+    ) -> error::Result<()> {
+        if self.dispatcher.is_some() {
+            error::bail!("extensions must be registered before the daemon is initialized");
+        }
+        log::debug!(target: "lampod", "registering extension `{}`", extension.name());
+        self.extensions.push(extension);
+        Ok(())
+    }
+
+    fn init_extensions(&mut self) -> error::Result<()> {
+        log::debug!(target: "lampod", "init extensions ...");
+        let extensions = std::mem::take(&mut self.extensions);
+        self.dispatcher = Some(Arc::new(CustomMessageDispatcher::new(extensions)?));
+        Ok(())
+    }
+
+    pub fn extensions(&self) -> Arc<CustomMessageDispatcher> {
+        self.dispatcher.clone().unwrap()
+    }
+
+    /// Serve an RPC method of a registered extension, `Ok(None)` when no
+    /// extension knows it.
+    pub async fn call_extension(
+        &self,
+        method: &str,
+        args: &json::Value,
+    ) -> Result<Option<json::Value>, lampo_common::jsonrpc::Error> {
+        self.extensions().rpc(method, args).await
+    }
+
     pub fn init_offchain_manager(&mut self) -> error::Result<()> {
         log::debug!(target: "lampod", "init offchain manager ...");
         let manager = OffchainManager::new(
@@ -224,6 +267,7 @@ impl LampoDaemon {
             self.wallet_manager.clone(),
             self.channel_manager(),
             self.offchain_manager().async_payments_gate(),
+            self.extensions(),
         )?;
         self.peer_manager = Some(Arc::new(peer_manager));
         Ok(())
@@ -277,6 +321,7 @@ impl LampoDaemon {
 
     pub async fn init(&mut self, client: Arc<dyn Backend>) -> error::Result<()> {
         log::debug!(target: "lampod", "init lampod ...");
+        self.init_extensions()?;
         self.init_onchaind(client.clone())?;
         self.init_channeld().await?;
         self.init_offchain_manager()?;
@@ -293,6 +338,13 @@ impl LampoDaemon {
             self.channel_manager().sweeper(),
         );
         self.channel_manager().set_handler(self.handler());
+        let peer_manager = self.peer_manager();
+        self.extensions().attach(ExtensionContext {
+            channel_manager: self.channel_manager().manager(),
+            signer: self.signer(),
+            events: self.handler(),
+            flush: Arc::new(move || peer_manager.process_events()),
+        });
         Ok(())
     }
 
