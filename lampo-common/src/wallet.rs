@@ -79,6 +79,14 @@ pub trait WalletManager: Send + Sync {
     /// embeddable. The critical section is a short BDK apply + persist.
     fn apply_block(&self, block: &Block, height: u32) -> error::Result<()>;
 
+    /// Move the wallet's checkpoint to `block` without scanning anything
+    /// below it. A chain backend that cannot walk blocks from genesis (an
+    /// esplora-style plugin) uses it to start a fresh wallet at its
+    /// birthday or at the tip. Default: unsupported.
+    fn set_checkpoint(&self, _block: BlockRef) -> error::Result<()> {
+        error::bail!("set_checkpoint is not supported by this wallet")
+    }
+
     /// Inject the chain-sync coordinator so the wallet can gate its scan on
     /// the LDK listener sync and report scan progress. Default no-op; the
     /// gate stays inactive until a coordinator is set. Pure lampo-common type

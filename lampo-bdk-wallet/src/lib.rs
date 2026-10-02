@@ -546,6 +546,33 @@ impl WalletManager for BDKWalletManager {
         self.apply_block_inner(block, height, connected_to)
     }
 
+    fn set_checkpoint(&self, block: BlockRef) -> error::Result<()> {
+        let mut wallet = self.wallet.lock().unwrap();
+        let tip = wallet.latest_checkpoint();
+        if block.height <= tip.height() {
+            error::bail!(
+                "checkpoint {} is not above the wallet tip {}",
+                block.height,
+                tip.height()
+            );
+        }
+        let new_tip = tip.insert(BlockId {
+            height: block.height,
+            hash: block.hash,
+        });
+        wallet.apply_update(bdk_wallet::Update {
+            chain: Some(new_tip),
+            ..Default::default()
+        })?;
+        let mut wallet_db = self.wallet_db.lock().unwrap();
+        wallet.persist(&mut wallet_db)?;
+        if let Some(coordinator) = self.coordinator.get() {
+            coordinator.set_wallet_scan_height(block.height);
+        }
+        log::info!(target: "lampo-wallet", "wallet checkpoint moved to height {}", block.height);
+        Ok(())
+    }
+
     async fn listen(self: Arc<Self>) -> error::Result<()> {
         let sched = JobScheduler::new().await?;
         // Do not call `shutdown_on_ctrl_c` here: lampod-cli owns the process

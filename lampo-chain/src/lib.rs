@@ -18,7 +18,7 @@ use lampo_common::json;
 use lampo_common::ldk::chain;
 use lampo_common::serde::Deserialize;
 use lampo_common::types::{LampoChainMonitor, LampoChannel, LampoSweeper};
-use lampo_common::wallet::WalletManager;
+use lampo_common::wallet::{BlockRef, WalletManager};
 
 /// Adapts the on-chain wallet to LDK's [`chain::Listen`] so it can ride the
 /// same `synchronize_listeners` pass as the channel manager and chain monitor
@@ -394,8 +394,13 @@ async fn listen_transactions(chain: Arc<LampoChainSync>) -> lampo_common::error:
         coordinator.mark_running();
     }
     loop {
-        if let Err(err) = confirm_tip(&chain, &channel_manager, &chain_monitor).await {
-            log::error!(target: "lampo-chain", "transaction sync: {err}");
+        match confirm_tip(&chain, &channel_manager, &chain_monitor).await {
+            Ok((hash, height)) => {
+                if let Err(err) = sync_wallet(&chain, hash, height).await {
+                    log::error!(target: "lampo-chain", "transaction sync wallet: {err}");
+                }
+            }
+            Err(err) => log::error!(target: "lampo-chain", "transaction sync: {err}"),
         }
         if let Err(err) = confirm_relevant(&chain, &channel_manager, &chain_monitor).await {
             log::error!(target: "lampo-chain", "transaction sync outputs: {err}");
@@ -404,11 +409,114 @@ async fn listen_transactions(chain: Arc<LampoChainSync>) -> lampo_common::error:
     }
 }
 
+/// Blocks the on-chain wallet catches up per pass. Each pass walks headers
+/// back from the tip to find the hashes, so a wallet far behind catches up
+/// in slices rather than in one long pass.
+const WALLET_BLOCKS_PER_PASS: u32 = 200;
+
+/// Keep the on-chain wallet in step with the tip when there is no header
+/// walk to ride on. A wallet still at genesis has nothing to find below its
+/// birthday (`reindex`, or the tip), so it jumps there; after that every new
+/// block is fetched and applied, which is how the wallet learns of deposits.
+async fn sync_wallet(
+    chain: &LampoChainSync,
+    tip_hash: lampo_common::bitcoin::BlockHash,
+    tip_height: u32,
+) -> lampo_common::error::Result<()> {
+    let Some(wallet) = chain.wallet() else {
+        return Ok(());
+    };
+    let handler = chain
+        .rpc
+        .get()
+        .ok_or_else(|| error::anyhow!("chain rpc handler not set"))?;
+    let best = wallet.current_best_block()?;
+    if best.height >= tip_height {
+        return Ok(());
+    }
+    if best.height == 0 {
+        let birthday = chain
+            .config
+            .reindex
+            .map(|height| height.to_consensus_u32())
+            .unwrap_or(tip_height)
+            .min(tip_height);
+        if chain.config.fast_sync == Some(false) && chain.config.reindex.is_none() {
+            log::warn!(
+                target: "lampo-chain",
+                "fast-sync=false has no effect with transaction sync: the wallet starts at the tip; set reindex for a birthday"
+            );
+        }
+        let hash = hash_at_height(handler, tip_hash, tip_height, birthday).await?;
+        wallet.set_checkpoint(BlockRef {
+            height: birthday,
+            hash,
+        })?;
+        return Ok(());
+    }
+    let from = best.height + 1;
+    let to = tip_height.min(best.height + WALLET_BLOCKS_PER_PASS);
+    let mut hash = hash_at_height(handler, tip_hash, tip_height, to).await?;
+    let mut hashes = Vec::with_capacity((to - from + 1) as usize);
+    for height in (from..=to).rev() {
+        hashes.push((height, hash));
+        if height > from {
+            hash = prev_block_hash(handler, hash).await?;
+        }
+    }
+    for (height, hash) in hashes.into_iter().rev() {
+        let raw = handler
+            .call("getblock", json::json!([hash.to_string(), 0]))
+            .await
+            .map_err(|err| error::anyhow!("{err}"))?;
+        let raw = raw
+            .as_str()
+            .ok_or_else(|| error::anyhow!("getblock {hash} was not hex"))?;
+        let bytes = hex::decode(raw).map_err(|err| error::anyhow!("{err}"))?;
+        let block: lampo_common::bitcoin::Block =
+            lampo_common::bitcoin::consensus::encode::deserialize(&bytes)
+                .map_err(|err| error::anyhow!("{err}"))?;
+        wallet.apply_block(&block, height)?;
+    }
+    log::info!(target: "lampo-chain", "on-chain wallet caught up to height {to} of {tip_height}");
+    Ok(())
+}
+
+/// The hash of the block at `height`, found by walking headers back from
+/// the tip. Esplora-style backends answer by hash only.
+async fn hash_at_height(
+    handler: &Arc<dyn lampo_common::handler::Handler>,
+    tip_hash: lampo_common::bitcoin::BlockHash,
+    tip_height: u32,
+    height: u32,
+) -> lampo_common::error::Result<lampo_common::bitcoin::BlockHash> {
+    if height > tip_height {
+        error::bail!("height {height} is above the tip {tip_height}");
+    }
+    let mut hash = tip_hash;
+    for _ in height..tip_height {
+        hash = prev_block_hash(handler, hash).await?;
+    }
+    Ok(hash)
+}
+
+async fn prev_block_hash(
+    handler: &Arc<dyn lampo_common::handler::Handler>,
+    hash: lampo_common::bitcoin::BlockHash,
+) -> lampo_common::error::Result<lampo_common::bitcoin::BlockHash> {
+    let header = handler
+        .call("esplora_header", json::json!([hash.to_string()]))
+        .await
+        .map_err(|err| error::anyhow!("{err}"))?;
+    let decoded = decode_header(&header).map_err(|err| error::anyhow!("{err}"))?;
+    Ok(decoded.header.prev_blockhash)
+}
+
 async fn confirm_tip(
     chain: &LampoChainSync,
     channel_manager: &LampoChannel,
     chain_monitor: &LampoChainMonitor,
-) -> lampo_common::error::Result<()> {
+) -> lampo_common::error::Result<(lampo_common::bitcoin::BlockHash, u32)> {
     use lampo_common::ldk::chain::Confirm;
     let handler = chain
         .rpc
@@ -435,7 +543,7 @@ async fn confirm_tip(
     Confirm::best_block_updated(&*channel_manager, &decoded.header, height);
     Confirm::best_block_updated(&*chain_monitor, &decoded.header, height);
     log::info!(target: "lampo-chain", "transaction sync tip {hash} height {height}");
-    Ok(())
+    Ok((decoded.header.block_hash(), height))
 }
 
 async fn confirm_relevant(
