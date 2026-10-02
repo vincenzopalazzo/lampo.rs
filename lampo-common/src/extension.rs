@@ -157,7 +157,13 @@ pub trait CustomMessageExtension: Send + Sync {
         Vec::new()
     }
 
-    fn peer_connected(&self, _peer: PublicKey, _init: &Init, _inbound: bool) {}
+    /// A peer completed its handshake; `init` is what it sent. `Err(())`
+    /// disconnects the peer at once (LDK's own semantics, e.g. because it
+    /// lacks a feature this extension cannot do without), in which case
+    /// [`Self::peer_disconnected`] is not called for it.
+    fn peer_connected(&self, _peer: PublicKey, _init: &Init, _inbound: bool) -> Result<(), ()> {
+        Ok(())
+    }
 
     fn peer_disconnected(&self, _peer: PublicKey) {}
 
