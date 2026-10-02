@@ -43,7 +43,7 @@ A good report should include, when possible:
   (e.g. loss of funds, key exfiltration, remote crash, privacy leak).
 - Steps to reproduce it, a proof of concept, or an exploit script.
 - The affected component (e.g. `lampod`, `lampo-common`, `lampo-bdk-wallet`,
-  `lampo-httpd`, `lampo-c-ffi`) and the commit you tested against.
+  `lampo-httpd`) and the commit you tested against.
 - Any suggested mitigation or fix, if you have one.
 
 ## What to Expect

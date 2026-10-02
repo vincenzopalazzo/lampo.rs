@@ -13,7 +13,7 @@ When reviewing pull requests, ensure all commits follow these standards:
 
 #### Examples
 ✅ Good: `Add support for .gif files`
-✅ Good: `tests: Modernize CLN integration tests`
+✅ Good: `tests: Modernize LDK integration tests`
 ❌ Bad: `Adding support for .gif files` (wrong verb form)
 ❌ Bad: `add support for .gif files` (not capitalized)
 ❌ Bad: `Add support for .gif files.` (has period)
