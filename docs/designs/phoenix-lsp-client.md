@@ -40,7 +40,9 @@ extension; `lampod` itself knows nothing about Phoenix.
   invoices, `PaymentClaimed` to forget them, and `ChannelReady` with the
   LSP to flip `accept_underpaying_htlcs` on that channel.
 - `lampod-cli` and the test harness build the handler from the config and
-  register it before `init`, the way the wallet backend is wired.
+  register it before `init`, the way the wallet backend is wired. Both
+  do so behind a `phoenix` cargo feature: on by default for
+  `lampod-cli`, enabled by the integration tests for the harness.
 
 ## Configuration
 
