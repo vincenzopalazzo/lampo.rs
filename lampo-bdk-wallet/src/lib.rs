@@ -649,22 +649,32 @@ impl WalletManager for BDKWalletManager {
                 let height = height.to_consensus_u32();
                 if height > wallet_tip.height() {
                     // Insert a checkpoint into the wallet to avoid scanning the entire chain.
-                    let hash = rpc_client.get_block_hash(height as u64)?;
-                    let block = BlockId { height, hash };
-                    let new_tip = wallet_tip.insert(block);
-                    let update = bdk_wallet::Update {
-                        chain: Some(new_tip),
-                        ..Default::default()
-                    };
-                    wallet.apply_update(update)?;
-                    // Persist the jump so it survives a restart before the
-                    // first tail block is applied.
-                    let mut wallet_db = self.wallet_db.lock().unwrap();
-                    wallet.persist(&mut wallet_db)?;
-                    if let Some(coordinator) = self.coordinator.get() {
-                        coordinator.set_wallet_scan_height(height);
+                    // Without a reachable core (an esplora-style plugin backend) the
+                    // chain sync places the checkpoint instead, through
+                    // `set_checkpoint`, so a failure here is not fatal.
+                    match rpc_client.get_block_hash(height as u64) {
+                        Ok(hash) => {
+                            let block = BlockId { height, hash };
+                            let new_tip = wallet_tip.insert(block);
+                            let update = bdk_wallet::Update {
+                                chain: Some(new_tip),
+                                ..Default::default()
+                            };
+                            wallet.apply_update(update)?;
+                            // Persist the jump so it survives a restart before the
+                            // first tail block is applied.
+                            let mut wallet_db = self.wallet_db.lock().unwrap();
+                            wallet.persist(&mut wallet_db)?;
+                            if let Some(coordinator) = self.coordinator.get() {
+                                coordinator.set_wallet_scan_height(height);
+                            }
+                            log::info!(target: "lampo-wallet", "Fast-forwarded empty wallet checkpoint to height {height}");
+                        }
+                        Err(err) => log::warn!(
+                            target: "lampo-wallet",
+                            "cannot fetch the hash of block {height} from core: {err}; leaving the checkpoint to the chain sync"
+                        ),
                     }
-                    log::info!(target: "lampo-wallet", "Fast-forwarded empty wallet checkpoint to height {height}");
                 } else if height < wallet_tip.height() {
                     // Rescan from an earlier height: find the nearest wallet
                     // checkpoint at or below the requested height and roll
