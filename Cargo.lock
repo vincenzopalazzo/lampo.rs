@@ -2189,6 +2189,7 @@ dependencies = [
  "lampo-common",
  "lampo-httpd",
  "lampo-lnd",
+ "lampo-vls",
  "lampod",
  "log",
  "port-selector",

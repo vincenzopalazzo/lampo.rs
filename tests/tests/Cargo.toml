@@ -3,6 +3,10 @@ name = "tests"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Run the VLS-backed node tests; needs VLSD_EXE and REMOTE_HSMD_SOCKET_EXE.
+vls = ["lampo-testing/vls"]
+
 [dependencies]
 lampo-common = { path = "../../lampo-common" }
 lampo-testing = { path = "../../lampo-testing" }

@@ -7,6 +7,12 @@ pub mod prelude {
     pub use lampod::async_run;
 }
 
+#[cfg(feature = "vls")]
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Child;
+#[cfg(feature = "vls")]
+use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +35,8 @@ use lampo_common::model::response;
 use lampo_common::types::NodeId;
 use lampo_httpd::handler::HttpdHandler;
 use lampo_lnd::LndRestConfig;
+#[cfg(feature = "vls")]
+use lampo_vls::{VlsSigner, VlsSignerConfig};
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -127,8 +135,111 @@ pub async fn run_lnd_rest(lampod: Arc<LampoDaemon>, port: u16) -> error::Result<
     error::bail!("timed out waiting for LND REST admin.macaroon at {admin_path}")
 }
 
+/// Paths to the VLS binaries a VLS-backed test node needs. Read from
+/// `VLSD_EXE` and `REMOTE_HSMD_SOCKET_EXE`.
+#[derive(Clone, Debug)]
+pub struct VlsBinaries {
+    pub vlsd: PathBuf,
+    pub proxy: PathBuf,
+}
+
+impl VlsBinaries {
+    pub fn from_env() -> Option<Self> {
+        let vlsd = std::env::var_os("VLSD_EXE")?;
+        let proxy = std::env::var_os("REMOTE_HSMD_SOCKET_EXE")?;
+        Some(Self {
+            vlsd: PathBuf::from(vlsd),
+            proxy: PathBuf::from(proxy),
+        })
+    }
+}
+
+/// A spawned `vlsd`, killed when the node that owns it is dropped.
+pub struct VlsdProcess(Child);
+
+impl Drop for VlsdProcess {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Start `vlsd` for a node and hand back the connected [`VlsSigner`].
+///
+/// The wallet's keychain xpubs go into the signer allowlist so closes and
+/// sweeps to wallet addresses pass policy; payments are auto-approved since
+/// lampo does not preapprove invoices yet.
+#[cfg(feature = "vls")]
+async fn start_vls(
+    bins: &VlsBinaries,
+    root: &Path,
+    conf: &LampoConf,
+    wallet: &BDKWalletManager,
+) -> error::Result<(Arc<VlsSigner>, VlsdProcess)> {
+    let port = port::random_free_port().unwrap();
+    let vls_dir = root.join("vls");
+    fs::create_dir_all(&vls_dir)?;
+    let xpub = wallet
+        .account_xpub()
+        .ok_or_else(|| error::anyhow!("the bdk wallet has no account xpub to allowlist"))?;
+    let allowlist = vls_dir.join("allowlist");
+    fs::write(
+        &allowlist,
+        lampo_vls::wallet_allowlist(&xpub).join("\n") + "\n",
+    )?;
+    let log = fs::File::create(vls_dir.join("vlsd.log"))?;
+    let vlsd = Command::new(&bins.vlsd)
+        .args(["--network", "regtest", "--datadir"])
+        .arg(&vls_dir)
+        .arg("--connect")
+        .arg(format!("http://127.0.0.1:{port}"))
+        .env("REMOTE_SIGNER_ALLOWLIST", &allowlist)
+        .env("VLS_AUTOAPPROVE", "1")
+        .env("RUST_LOG", "info")
+        .stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .spawn()?;
+    log::info!(
+        "vlsd started (pid {}), dialing the proxy on {port}",
+        vlsd.id()
+    );
+
+    let mut vls_conf = conf.clone();
+    vls_conf.signer = Some("vls".to_owned());
+    vls_conf.vls_proxy_bin = Some(bins.proxy.to_string_lossy().into_owned());
+    vls_conf.vls_port = Some(port);
+    let config = VlsSignerConfig::from_conf(&vls_conf)?;
+    let signer = tokio::task::spawn_blocking(move || VlsSigner::spawn(config)).await??;
+    Ok((signer, VlsdProcess(vlsd)))
+}
+
+/// Build a daemon whose keys live in a freshly started `vlsd`.
+#[cfg(feature = "vls")]
+async fn vls_daemon(
+    bins: &VlsBinaries,
+    root: &Path,
+    conf: Arc<LampoConf>,
+    wallet: Arc<BDKWalletManager>,
+) -> error::Result<(LampoDaemon, VlsdProcess)> {
+    let (signer, vlsd) = start_vls(bins, root, &conf, &wallet).await?;
+    Ok((LampoDaemon::with_signer(conf, wallet, signer), vlsd))
+}
+
+#[cfg(not(feature = "vls"))]
+async fn vls_daemon(
+    _bins: &VlsBinaries,
+    _root: &Path,
+    _conf: Arc<LampoConf>,
+    _wallet: Arc<BDKWalletManager>,
+) -> error::Result<(LampoDaemon, VlsdProcess)> {
+    error::bail!("lampo-testing built without the `vls` feature")
+}
+
 pub struct LampoTesting {
     inner: Arc<LampoHandler>,
+    /// `vlsd` for a VLS-backed node; killed on drop.
+    vlsd: Option<VlsdProcess>,
     daemon: Arc<LampoDaemon>,
     root_path: Arc<TempDir>,
     pub port: u64,
@@ -143,6 +254,21 @@ pub struct LampoTesting {
 impl LampoTesting {
     pub async fn tmp() -> error::Result<Self> {
         Self::tmp_with(|_| {}).await
+    }
+
+    /// Like [`Self::tmp`], but the node's keys live in `vlsd`.
+    #[cfg(feature = "vls")]
+    pub async fn tmp_with_vls(bins: VlsBinaries) -> error::Result<Self> {
+        let mut conf = Conf::default();
+        conf.wallet = None;
+        let conf = Arc::new(conf);
+        Self::with_conf_inner(conf, false, Some(bins), |_| {}).await
+    }
+
+    /// Like [`Self::new`], but the node's keys live in `vlsd`.
+    #[cfg(feature = "vls")]
+    pub async fn new_with_vls(btc: Arc<BtcNode>, bins: VlsBinaries) -> error::Result<Self> {
+        Self::new_inner(btc, false, Some(bins), |_| {}).await
     }
 
     /// Like [`Self::tmp`], but `conf_fn` may adjust the [`LampoConf`] before
@@ -162,23 +288,24 @@ impl LampoTesting {
         let mut conf = Conf::default();
         conf.wallet = None;
         let conf = Arc::new(conf);
-        Self::with_conf_inner(conf, true, |_| {}).await
+        Self::with_conf_inner(conf, true, None, |_| {}).await
     }
 
     pub async fn with_conf(conf: Arc<Conf<'static>>) -> error::Result<Self> {
-        Self::with_conf_inner(conf, false, |_| {}).await
+        Self::with_conf_inner(conf, false, None, |_| {}).await
     }
 
     pub async fn with_conf_and(
         conf: Arc<Conf<'static>>,
         conf_fn: impl FnOnce(&mut LampoConf),
     ) -> error::Result<Self> {
-        Self::with_conf_inner(conf, false, conf_fn).await
+        Self::with_conf_inner(conf, false, None, conf_fn).await
     }
 
     async fn with_conf_inner(
         conf: Arc<Conf<'static>>,
         enable_lnd_rest: bool,
+        vls: Option<VlsBinaries>,
         conf_fn: impl FnOnce(&mut LampoConf),
     ) -> error::Result<Self> {
         let conf_clone = conf.clone();
@@ -192,11 +319,11 @@ impl LampoTesting {
         })
         .await??;
         let btc = Arc::new(btc);
-        Self::new_inner(btc, enable_lnd_rest, conf_fn).await
+        Self::new_inner(btc, enable_lnd_rest, vls, conf_fn).await
     }
 
     pub async fn new(btc: Arc<BtcNode>) -> error::Result<Self> {
-        Self::new_inner(btc, false, |_| {}).await
+        Self::new_inner(btc, false, None, |_| {}).await
     }
 
     /// Like [`Self::new`], but `conf_fn` may adjust the [`LampoConf`] before
@@ -205,12 +332,13 @@ impl LampoTesting {
         btc: Arc<BtcNode>,
         conf_fn: impl FnOnce(&mut LampoConf),
     ) -> error::Result<Self> {
-        Self::new_inner(btc, false, conf_fn).await
+        Self::new_inner(btc, false, None, conf_fn).await
     }
 
     async fn new_inner(
         btc: Arc<BtcNode>,
         enable_lnd_rest: bool,
+        vls: Option<VlsBinaries>,
         conf_fn: impl FnOnce(&mut LampoConf),
     ) -> error::Result<Self> {
         let dir = tempfile::tempdir()?;
@@ -252,7 +380,14 @@ impl LampoTesting {
 
         // `LampoDaemon::new` shares the coordinator with the wallet, so the
         // wallet gates its Emitter on listener sync (production startup flow).
-        let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+        let (mut lampo, vlsd) = match vls {
+            Some(bins) => {
+                let (daemon, vlsd) =
+                    vls_daemon(&bins, dir.path(), lampo_conf.clone(), wallet.clone()).await?;
+                (daemon, Some(vlsd))
+            }
+            None => (LampoDaemon::new(lampo_conf.clone(), wallet.clone()), None),
+        };
         wallet.clone().listen().await?;
 
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
@@ -308,6 +443,7 @@ impl LampoTesting {
         log::info!("ready `{:#?}` for integration testing!", info);
         let node = Self {
             inner: handler,
+            vlsd,
             daemon: lampo,
             mnemonic,
             port: port.into(),
@@ -320,6 +456,11 @@ impl LampoTesting {
         };
         node.fund_wallet(102).await?;
         Ok(node)
+    }
+
+    /// Whether this node's keys live in an external VLS signer.
+    pub fn uses_vls(&self) -> bool {
+        self.vlsd.is_some()
     }
 
     async fn mine(&self, blocks: u64) -> error::Result<()> {

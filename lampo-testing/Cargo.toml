@@ -3,11 +3,16 @@ name = "lampo-testing"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# VLS-backed test nodes (`tmp_with_vls`, `new_with_vls`).
+vls = ["dep:lampo-vls"]
+
 [dependencies]
 lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 lampo-chain = { path = "../lampo-chain" }
 lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
+lampo-vls = { path = "../lampo-vls", optional = true }
 lampo-httpd = { path = "../lampo-httpd" }
 lampo-lnd = { path = "../lampo-lnd" }
 
