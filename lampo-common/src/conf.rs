@@ -3,8 +3,6 @@ use std::str::FromStr;
 use bitcoin::absolute::Height;
 use clightningrpc_conf::{CLNConf, SyncCLNConf};
 
-use crate::extension::PersistentPeer;
-
 pub use bitcoin::Network;
 pub use lightning::util::config::UserConfig;
 
@@ -81,36 +79,7 @@ pub struct LampoConf {
     pub plugin_dir: Option<String>,
     /// Remote plugin endpoints (e.g. "https://host:port").
     pub remote_plugins: Vec<String>,
-    /// ACINQ Phoenix LSP this node is a client of, as `NODE_ID@HOST:PORT`.
-    /// The literal `default` selects ACINQ's testnet3 or mainnet node for
-    /// the configured network. Unset (the default) leaves the Phoenix
-    /// handler installed but idle: no feature bits, every message dropped.
-    pub phoenix_lsp: Option<String>,
-    /// Inbound liquidity to request from the Phoenix LSP when a payment does
-    /// not fit, in sat. Unset disables the liquidity policy: every
-    /// on-the-fly funding proposal is rejected. Decision only, nothing is
-    /// purchased yet.
-    pub phoenix_auto_liquidity: Option<u64>,
-    /// Maximum fee credit the Phoenix LSP may hold for this node, in sat.
-    /// Default 0: a payment too small to pay its own funding fee is rejected.
-    pub phoenix_max_fee_credit: u64,
-    /// Maximum funding fee (mining plus service) relative to the amount
-    /// received, in basis points. Default 250 (2.5%).
-    pub phoenix_max_relative_fee_bps: u16,
-    /// Maximum mining fee of a funding transaction, in sat. Unset rejects
-    /// every on-the-fly funding proposal once `phoenix-auto-liquidity` is set.
-    pub phoenix_max_mining_fee: Option<u64>,
 }
-
-/// ACINQ's testnet3 Phoenix LSP, selected by `phoenix-lsp=default`.
-pub const PHOENIX_LSP_TESTNET3: &str =
-    "03933884aaf1d6b108397e5efe5c86bcf2d8ca8d2f700eda99db9214fc2712b134@13.248.222.197:9735";
-/// ACINQ's mainnet Phoenix LSP, selected by `phoenix-lsp=default`.
-pub const PHOENIX_LSP_MAINNET: &str =
-    "03864ef025fde8fb587d989186ce6a4a186895ee44a926bfc370e2c366597a3f8f@3.33.236.230:9735";
-
-/// A parsed `phoenix-lsp` value: the LSP node id and where to dial it.
-pub type PhoenixLspPeer = PersistentPeer;
 
 impl LampoConf {
     /// Resolve the default lampo root path.
@@ -174,11 +143,6 @@ impl Default for LampoConf {
             plugins: Vec::new(),
             plugin_dir: None,
             remote_plugins: Vec::new(),
-            phoenix_lsp: None,
-            phoenix_auto_liquidity: None,
-            phoenix_max_fee_credit: 0,
-            phoenix_max_relative_fee_bps: 250,
-            phoenix_max_mining_fee: None,
         }
     }
 }
@@ -436,27 +400,6 @@ impl TryFrom<String> for LampoConf {
         let plugin_dir = conf.get_conf("plugin-dir").unwrap_or(None);
         let remote_plugins = conf.get_confs("remote-plugin");
 
-        let phoenix_lsp = conf
-            .get_conf("phoenix-lsp")
-            .unwrap_or(None)
-            .map(|raw| resolve_phoenix_lsp(&raw, network))
-            .transpose()?;
-        let phoenix_auto_liquidity = parse_u64_key(&conf, "phoenix-auto-liquidity")?;
-        let phoenix_max_fee_credit = parse_u64_key(&conf, "phoenix-max-fee-credit")?.unwrap_or(0);
-        let phoenix_max_relative_fee_bps = parse_u64_key(&conf, "phoenix-max-relative-fee-bps")?
-            .map(|bps| {
-                u16::try_from(bps)
-                    .ok()
-                    .filter(|bps| *bps < 10_000)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "phoenix-max-relative-fee-bps `{bps}` must be below 10000 (100%)"
-                        )
-                    })
-            })
-            .transpose()?
-            .unwrap_or(250);
-        let phoenix_max_mining_fee = parse_u64_key(&conf, "phoenix-max-mining-fee")?;
         Ok(Self {
             inner: Some(conf),
             root_path,
@@ -491,43 +434,8 @@ impl TryFrom<String> for LampoConf {
             plugins,
             plugin_dir,
             remote_plugins,
-            phoenix_lsp,
-            phoenix_auto_liquidity,
-            phoenix_max_fee_credit,
-            phoenix_max_relative_fee_bps,
-            phoenix_max_mining_fee,
         })
     }
-}
-
-/// Read an optional unsigned integer key, in the unit the key documents.
-fn parse_u64_key(conf: &CLNConf, key: &str) -> anyhow::Result<Option<u64>> {
-    conf.get_conf(key)
-        .unwrap_or(None)
-        .map(|raw| {
-            raw.trim()
-                .parse::<u64>()
-                .map_err(|_| anyhow::anyhow!("invalid {key} `{raw}`: expected an integer"))
-        })
-        .transpose()
-}
-
-/// Turn a raw `phoenix-lsp` value into its canonical `NODE_ID@HOST:PORT`
-/// form, expanding `default` to ACINQ's node for `network`.
-fn resolve_phoenix_lsp(raw: &str, network: Network) -> anyhow::Result<String> {
-    let raw = raw.trim();
-    let raw = if raw == "default" {
-        match network {
-            Network::Bitcoin => PHOENIX_LSP_MAINNET,
-            Network::Testnet => PHOENIX_LSP_TESTNET3,
-            _ => anyhow::bail!(
-                "phoenix-lsp=default has no ACINQ node on `{network}`: set NODE_ID@HOST:PORT explicitly"
-            ),
-        }
-    } else {
-        raw
-    };
-    Ok(PhoenixLspPeer::from_str(raw)?.to_string())
 }
 
 fn parse_currency_rates(raw: Option<&str>) -> anyhow::Result<Vec<(String, u64)>> {
@@ -597,15 +505,6 @@ impl LampoConf {
         conf
     }
 
-    /// The configured Phoenix LSP, if any. The stored string was validated
-    /// at parse time, so a failure here means it was edited afterwards.
-    pub fn phoenix_lsp_peer(&self) -> anyhow::Result<Option<PhoenixLspPeer>> {
-        self.phoenix_lsp
-            .as_deref()
-            .map(PhoenixLspPeer::from_str)
-            .transpose()
-    }
-
     pub fn get_values(&self, key: &str) -> Option<Vec<String>> {
         self.inner.as_ref().map(|conf| conf.get_confs(key))
     }
@@ -620,6 +519,27 @@ impl LampoConf {
             return Ok(None);
         };
         Ok(Some(value))
+    }
+
+    /// A key the daemon itself does not parse, for extensions that read
+    /// their own keys from the same file. `Ok(None)` when no file was
+    /// loaded, so a bare `LampoConf` (tests, embedders) is never an error.
+    pub fn get_extension_value(&self, key: &str) -> anyhow::Result<Option<String>> {
+        if self.inner.is_none() {
+            return Ok(None);
+        }
+        self.get_value(key)
+    }
+
+    /// Set a raw key as if it had been read from the file, for tests and
+    /// embedders that configure extensions without writing one. Fails on a
+    /// value already present under `key`.
+    pub fn set_extension_value(&mut self, key: &str, value: &str) -> anyhow::Result<()> {
+        let path = format!("{}/lampo.conf", self.path());
+        self.inner
+            .get_or_insert_with(|| CLNConf::new(path, false))
+            .add_conf(key, value)
+            .map_err(|err| anyhow::anyhow!("cannot set `{key}`: {err:?}"))
     }
 
     pub fn set_network(&mut self, network: &str) -> anyhow::Result<()> {
@@ -697,30 +617,16 @@ mod tests {
     }
 
     #[test]
-    fn phoenix_lsp_default_follows_the_network() {
-        assert_eq!(
-            resolve_phoenix_lsp("default", Network::Bitcoin).unwrap(),
-            PHOENIX_LSP_MAINNET
-        );
-        assert_eq!(
-            resolve_phoenix_lsp(" default ", Network::Testnet).unwrap(),
-            PHOENIX_LSP_TESTNET3
-        );
-        assert!(resolve_phoenix_lsp("default", Network::Regtest).is_err());
-        assert!(resolve_phoenix_lsp("default", Network::Signet).is_err());
-    }
-
-    #[test]
-    fn phoenix_lsp_peer_is_parsed_from_the_config() {
+    fn extension_values_default_to_none_and_can_be_set() {
         let mut conf = LampoConf::default();
-        assert!(conf.phoenix_lsp_peer().unwrap().is_none());
-        conf.phoenix_lsp = Some(PHOENIX_LSP_MAINNET.to_owned());
+        assert_eq!(conf.get_extension_value("phoenix-lsp").unwrap(), None);
+        conf.set_extension_value("phoenix-lsp", "default").unwrap();
         assert_eq!(
-            conf.phoenix_lsp_peer().unwrap().unwrap().node_id,
-            PhoenixLspPeer::from_str(PHOENIX_LSP_MAINNET)
-                .unwrap()
-                .node_id
+            conf.get_extension_value("phoenix-lsp").unwrap().as_deref(),
+            Some("default")
         );
+        // The daemon's own keys are untouched.
+        assert!(conf.async_payments_role.is_none());
     }
 }
 

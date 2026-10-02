@@ -2,6 +2,7 @@
 //! liquidity ads, packaged as a daemon extension. Nothing here opens,
 //! splices or funds a channel yet.
 pub mod channels;
+pub mod conf;
 pub mod events;
 pub mod handler;
 pub mod liquidity_ads;
