@@ -10,6 +10,7 @@ use lampo_common::error;
 use lampo_common::extension::{
     CustomMessageExtension, ExtensionContext, PersistentPeer, RawCustomMessage,
 };
+use lampo_common::handler::ExternalHandler;
 use lampo_common::json;
 use lampo_common::jsonrpc;
 use lampo_common::ldk::ln::msgs::{DecodeError, Init, LightningError};
@@ -86,6 +87,21 @@ impl CustomMessageDispatcher {
             }
         }
         Ok(None)
+    }
+}
+
+/// Extension RPCs answer in-process calls (`LampoDaemon::call`, the test
+/// harness) as well as the HTTP catch-all, so a method is served the same
+/// way whichever door it comes through.
+#[lampo_common::async_trait]
+impl ExternalHandler for CustomMessageDispatcher {
+    async fn handle(
+        &self,
+        req: &jsonrpc::Request<json::Value>,
+    ) -> error::Result<Option<json::Value>> {
+        self.rpc(&req.method, &req.params)
+            .await
+            .map_err(|err| error::anyhow!("{err}"))
     }
 }
 
@@ -347,6 +363,23 @@ mod tests {
             Some(json::json!({ "from": "b" }))
         );
         assert_eq!(dispatcher.rpc("c", &args).await.unwrap(), None);
+
+        // The same methods answer the in-process handler chain.
+        let request = jsonrpc::Request {
+            method: "a".to_owned(),
+            params: args.clone(),
+            id: None,
+            jsonrpc: "2.0".to_owned(),
+        };
+        assert_eq!(
+            dispatcher.handle(&request).await.unwrap(),
+            Some(json::json!({ "from": "a" }))
+        );
+        let unknown = jsonrpc::Request {
+            method: "c".to_owned(),
+            ..request
+        };
+        assert_eq!(dispatcher.handle(&unknown).await.unwrap(), None);
     }
 
     fn empty_init() -> Init {
