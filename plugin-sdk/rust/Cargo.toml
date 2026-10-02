@@ -15,6 +15,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = { version = "0.4", features = ["std"] }
 
+[[example]]
+name = "lampo-bitcoind"
+path = "examples/bitcoind.rs"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 env_logger = "0.11"

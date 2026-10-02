@@ -162,8 +162,8 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
             let wallet = match client.kind() {
                 lampo_common::backend::BackendKind::Core
-        | lampo_common::backend::BackendKind::Esplora
-        | lampo_common::backend::BackendKind::Electrum => {
+                | lampo_common::backend::BackendKind::Esplora
+                | lampo_common::backend::BackendKind::Electrum => {
                     BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
@@ -178,8 +178,8 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             // FIXME: make some sanity check about the mnemonic string
             let wallet = match client.kind() {
                 lampo_common::backend::BackendKind::Core
-        | lampo_common::backend::BackendKind::Esplora
-        | lampo_common::backend::BackendKind::Electrum => {
+                | lampo_common::backend::BackendKind::Esplora
+                | lampo_common::backend::BackendKind::Electrum => {
                     // SAFETY: It is safe to unwrap the mnemonic because we check it
                     // before.
                     BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
@@ -195,8 +195,8 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
             let mnemonic = load_words_from_file(format!("{}/wallet.dat", words_path))?;
             let wallet = match client.kind() {
                 lampo_common::backend::BackendKind::Core
-        | lampo_common::backend::BackendKind::Esplora
-        | lampo_common::backend::BackendKind::Electrum => {
+                | lampo_common::backend::BackendKind::Esplora
+                | lampo_common::backend::BackendKind::Electrum => {
                     BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?
                 }
             };
@@ -358,8 +358,10 @@ fn serve_plugin_host(lampod: Arc<LampoDaemon>, tx: tokio::sync::oneshot::Sender<
 /// `lampo-bitcoind` next to this binary, then `target/release` / `target/debug`.
 fn bitcoind_init(conf: &LampoConf, base: &InitConfig) -> InitConfig {
     let mut init = base.clone();
-    init.options
-        .insert("network".into(), lampo_common::json::json!(conf.network.to_string()));
+    init.options.insert(
+        "network".into(),
+        lampo_common::json::json!(conf.network.to_string()),
+    );
     init.options
         .insert("port".into(), lampo_common::json::json!(conf.port));
     if let Some(url) = &conf.core_url {
@@ -376,7 +378,6 @@ fn bitcoind_init(conf: &LampoConf, base: &InitConfig) -> InitConfig {
     }
     init
 }
-
 
 /// `plugin=/path/folgore-lampo -- --mempool-space-url https://...`
 /// The path is the binary. Everything after `--` is forwarded.
@@ -471,7 +472,10 @@ async fn start_plugins(
             init_config.clone()
         };
         let (plugin_bin, plugin_args) = split_plugin(plugin_path);
-        match manager.start_plugin_with_args(&plugin_bin, &plugin_args, &plugin_init).await {
+        match manager
+            .start_plugin_with_args(&plugin_bin, &plugin_args, &plugin_init)
+            .await
+        {
             Ok(name) => {
                 log::info!(target: "lampod-cli", "plugin `{}` started", name);
             }
