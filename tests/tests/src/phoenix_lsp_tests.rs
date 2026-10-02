@@ -1,6 +1,7 @@
 //! Two Lampo nodes where node `lsp` plays the ACINQ Phoenix LSP for node
 //! `client`: the client dials it at startup, advertises the Phoenix feature
-//! bits to it alone, shows what the LSP sends in `phoenixlsp-info`, and
+//! bits (561 and 563, never 129) to it alone, shows what the LSP sends in
+//! `phoenixlsp-info`, and
 //! completes a `dns_address_request` round trip answered from a test hook.
 use std::str::FromStr;
 use std::time::Duration;
@@ -33,7 +34,7 @@ const ZERO_RESERVE_CHANNELS: usize = 129;
 fn advertises_phoenix_bits(features: &lampo_common::ldk::types::features::InitFeatures) -> bool {
     has_feature_bit(features, ON_THE_FLY_FUNDING)
         && has_feature_bit(features, FUNDING_FEE_CREDIT)
-        && has_feature_bit(features, ZERO_RESERVE_CHANNELS)
+        && !has_feature_bit(features, ZERO_RESERVE_CHANNELS)
 }
 
 fn mentions_phoenix_bits(features: &lampo_common::ldk::types::features::InitFeatures) -> bool {

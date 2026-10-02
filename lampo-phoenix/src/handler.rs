@@ -50,7 +50,11 @@ use crate::wire::{
 pub const ON_THE_FLY_FUNDING_BIT: usize = 561;
 /// Optional `funding_fee_credit`, advertised to the LSP only.
 pub const FUNDING_FEE_CREDIT_BIT: usize = 563;
-/// Optional `zero_reserve_channels`, advertised to the LSP only.
+/// Optional `zero_reserve_channels`. Read from the LSP's init, never
+/// advertised: ACINQ's testnet3 LSP stops answering (no
+/// `recommended_feerates`, no pong) a peer whose init carries it, while the
+/// same peer with bits 561 and 563 alone is served normally (observed
+/// 2026-10-02 against `03933884...@13.248.222.197`).
 pub const ZERO_RESERVE_CHANNELS_BIT: usize = 129;
 
 const LOG_TARGET: &str = "phoenix-lsp";
@@ -196,7 +200,6 @@ impl PhoenixLspHandler {
             me: me.clone(),
             chain_hash: ChainHash::using_genesis_block_const(network),
             lsp_features: init_features_with_bits(&[
-                ZERO_RESERVE_CHANNELS_BIT,
                 ON_THE_FLY_FUNDING_BIT,
                 FUNDING_FEE_CREDIT_BIT,
             ]),
@@ -891,7 +894,7 @@ mod tests {
         let (handler, _events) = make_handler(Some(LSP), policy());
         assert_eq!(
             feature_bits(&handler.init_features(&lsp_id())),
-            vec![129, 561, 563]
+            vec![561, 563]
         );
         assert!(handler.init_features(&other_id()).le_flags().is_empty());
         assert_eq!(handler.message_types(), wire::MESSAGE_TYPES.to_vec());
