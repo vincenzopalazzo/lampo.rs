@@ -79,6 +79,12 @@ pub trait WalletManager: Send + Sync {
     /// embeddable. The critical section is a short BDK apply + persist.
     fn apply_block(&self, block: &Block, height: u32) -> error::Result<()>;
 
+    /// The hash the wallet holds for `height`, if it has a checkpoint
+    /// there. Lets a chain backend find the fork point after a reorg.
+    fn checkpoint_hash(&self, _height: u32) -> error::Result<Option<BlockHash>> {
+        Ok(None)
+    }
+
     /// Move the wallet's checkpoint to `block` without scanning anything
     /// below it. A chain backend that cannot walk blocks from genesis (an
     /// esplora-style plugin) uses it to start a fresh wallet at its

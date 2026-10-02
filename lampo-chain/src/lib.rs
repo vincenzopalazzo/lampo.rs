@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::Event;
@@ -10,7 +11,7 @@ use lightning_block_sync::{BlockSource, SpvClient};
 use lampo_common::async_trait;
 use lampo_common::backend::{Backend, BlockData};
 use lampo_common::bitcoin::consensus::encode::serialize_hex;
-use lampo_common::bitcoin::{Block, BlockHash};
+use lampo_common::bitcoin::{Block, BlockHash, OutPoint, ScriptBuf, Txid};
 use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
@@ -166,6 +167,19 @@ pub struct LampoChainSync {
     /// The output sweeper, registered as an ongoing chain listener with the
     /// best block its persisted state was last synced to.
     sweeper: OnceLock<(chain::BlockLocator, Arc<LampoSweeper>)>,
+    /// What LDK asked to watch (`chain::Filter`), polled by the transaction
+    /// sync; a header walk never needs it.
+    watched: Mutex<Watched>,
+    /// Transactions the transaction sync already reported confirmed, with
+    /// the block it reported, so a pass neither repeats itself nor misses a
+    /// reorg.
+    reported: Mutex<HashMap<Txid, BlockHash>>,
+}
+
+#[derive(Default)]
+struct Watched {
+    txs: HashMap<Txid, ScriptBuf>,
+    outputs: HashMap<OutPoint, ScriptBuf>,
 }
 
 impl LampoChainSync {
@@ -211,6 +225,8 @@ impl LampoChainSync {
             coordinator: OnceLock::new(),
             wallet: OnceLock::new(),
             sweeper: OnceLock::new(),
+            watched: Mutex::new(Watched::default()),
+            reported: Mutex::new(HashMap::new()),
         })
     }
 
@@ -394,6 +410,11 @@ async fn listen_transactions(chain: Arc<LampoChainSync>) -> lampo_common::error:
         coordinator.mark_running();
     }
     loop {
+        // Confirmations first, then the tip: LDK counts a transaction's
+        // depth from the tip it is told about after the confirmation.
+        if let Err(err) = confirm_relevant(&chain, &channel_manager, &chain_monitor).await {
+            log::error!(target: "lampo-chain", "transaction sync outputs: {err}");
+        }
         match confirm_tip(&chain, &channel_manager, &chain_monitor).await {
             Ok((hash, height)) => {
                 if let Err(err) = sync_wallet(&chain, hash, height).await {
@@ -401,9 +422,6 @@ async fn listen_transactions(chain: Arc<LampoChainSync>) -> lampo_common::error:
                 }
             }
             Err(err) => log::error!(target: "lampo-chain", "transaction sync: {err}"),
-        }
-        if let Err(err) = confirm_relevant(&chain, &channel_manager, &chain_monitor).await {
-            log::error!(target: "lampo-chain", "transaction sync outputs: {err}");
         }
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
     }
@@ -413,11 +431,16 @@ async fn listen_transactions(chain: Arc<LampoChainSync>) -> lampo_common::error:
 /// back from the tip to find the hashes, so a wallet far behind catches up
 /// in slices rather than in one long pass.
 const WALLET_BLOCKS_PER_PASS: u32 = 200;
+/// How far below the wallet's best block a common ancestor is looked for
+/// after a reorg before giving up.
+const WALLET_MAX_REORG_DEPTH: u32 = 144;
 
 /// Keep the on-chain wallet in step with the tip when there is no header
 /// walk to ride on. A wallet still at genesis has nothing to find below its
 /// birthday (`reindex`, or the tip), so it jumps there; after that every new
 /// block is fetched and applied, which is how the wallet learns of deposits.
+/// Headers are walked back from the tip until a block the wallet also has,
+/// so a reorg replays from the fork rather than failing to connect.
 async fn sync_wallet(
     chain: &LampoChainSync,
     tip_hash: lampo_common::bitcoin::BlockHash,
@@ -431,9 +454,6 @@ async fn sync_wallet(
         .get()
         .ok_or_else(|| error::anyhow!("chain rpc handler not set"))?;
     let best = wallet.current_best_block()?;
-    if best.height >= tip_height {
-        return Ok(());
-    }
     if best.height == 0 {
         let birthday = chain
             .config
@@ -454,17 +474,43 @@ async fn sync_wallet(
         })?;
         return Ok(());
     }
-    let from = best.height + 1;
-    let to = tip_height.min(best.height + WALLET_BLOCKS_PER_PASS);
-    let mut hash = hash_at_height(handler, tip_hash, tip_height, to).await?;
-    let mut hashes = Vec::with_capacity((to - from + 1) as usize);
-    for height in (from..=to).rev() {
-        hashes.push((height, hash));
-        if height > from {
-            hash = prev_block_hash(handler, hash).await?;
-        }
+    if best.height == tip_height && best.hash == tip_hash {
+        return Ok(());
     }
+    // Walk back from the tip to the newest block the wallet also has.
+    let mut hashes = vec![(tip_height, tip_hash)];
+    let (mut height, mut hash) = (tip_height, tip_hash);
+    let fork = loop {
+        if height <= best.height {
+            if wallet.checkpoint_hash(height)? == Some(hash) {
+                break height;
+            }
+            if best.height - height >= WALLET_MAX_REORG_DEPTH {
+                error::bail!(
+                    "no block in common with the wallet within {WALLET_MAX_REORG_DEPTH} blocks below {}",
+                    best.height
+                );
+            }
+        }
+        if height == 0 {
+            break 0;
+        }
+        hash = prev_block_hash(handler, hash).await?;
+        height -= 1;
+        hashes.push((height, hash));
+    };
+    if fork < best.height {
+        log::warn!(
+            target: "lampo-chain",
+            "reorg: the wallet's blocks above {fork} are gone (it was at {}); replaying from the fork",
+            best.height
+        );
+    }
+    let to = tip_height.min(fork + WALLET_BLOCKS_PER_PASS);
     for (height, hash) in hashes.into_iter().rev() {
+        if height <= fork || height > to {
+            continue;
+        }
         let raw = handler
             .call("getblock", json::json!([hash.to_string(), 0]))
             .await
@@ -546,6 +592,9 @@ async fn confirm_tip(
     Ok((decoded.header.block_hash(), height))
 }
 
+/// Tell LDK about every watched or previously confirmed transaction that
+/// is confirmed, or no longer is. Watched outputs are checked for a
+/// confirmed spend, whose transaction is then confirmed the same way.
 async fn confirm_relevant(
     chain: &LampoChainSync,
     channel_manager: &LampoChannel,
@@ -556,13 +605,57 @@ async fn confirm_relevant(
         .rpc
         .get()
         .ok_or_else(|| error::anyhow!("chain rpc handler not set"))?;
-    let txids = Confirm::get_relevant_txids(channel_manager);
-    for (txid, _, _) in txids {
+    let mut candidates: Vec<Txid> = Vec::new();
+    for (txid, _, _) in Confirm::get_relevant_txids(channel_manager)
+        .into_iter()
+        .chain(Confirm::get_relevant_txids(chain_monitor))
+    {
+        candidates.push(txid);
+    }
+    let (watched_txs, watched_outputs) = {
+        let watched = chain.watched.lock().unwrap();
+        (
+            watched.txs.keys().copied().collect::<Vec<_>>(),
+            watched.outputs.keys().copied().collect::<Vec<_>>(),
+        )
+    };
+    candidates.extend(watched_txs);
+    for outpoint in watched_outputs {
+        let spend = handler
+            .call(
+                "esplora_output",
+                json::json!([outpoint.txid.to_string(), outpoint.vout]),
+            )
+            .await
+            .map_err(|err| error::anyhow!("{err}"))?;
+        if spend.get("spent").and_then(|value| value.as_bool()) != Some(true) {
+            continue;
+        }
+        if let Some(txid) = spend
+            .get("txid")
+            .and_then(|value| value.as_str())
+            .and_then(|txid| txid.parse::<Txid>().ok())
+        {
+            candidates.push(txid);
+        }
+    }
+    candidates.sort();
+    candidates.dedup();
+
+    for txid in candidates {
         let status = handler
             .call("esplora_tx_status", json::json!([txid.to_string()]))
             .await
             .map_err(|err| error::anyhow!("{err}"))?;
-        if status.get("confirmed").and_then(|value| value.as_bool()) != Some(true) {
+        let confirmed = status.get("confirmed").and_then(|value| value.as_bool()) == Some(true);
+        let reported = chain.reported.lock().unwrap().get(&txid).copied();
+        if !confirmed {
+            if reported.is_some() {
+                Confirm::transaction_unconfirmed(channel_manager, &txid);
+                Confirm::transaction_unconfirmed(chain_monitor, &txid);
+                chain.reported.lock().unwrap().remove(&txid);
+                log::info!(target: "lampo-chain", "{txid} is no longer confirmed");
+            }
             continue;
         }
         let height = status
@@ -573,8 +666,17 @@ async fn confirm_relevant(
             .get("block_hash")
             .and_then(|value| value.as_str())
             .ok_or_else(|| error::anyhow!("confirmed tx {txid} had no block"))?;
+        let block_hash: BlockHash = block_hash.parse().map_err(|err| error::anyhow!("{err}"))?;
+        if reported == Some(block_hash) {
+            continue;
+        }
+        if reported.is_some() {
+            // Confirmed again in another block: a reorg moved it.
+            Confirm::transaction_unconfirmed(channel_manager, &txid);
+            Confirm::transaction_unconfirmed(chain_monitor, &txid);
+        }
         let header = handler
-            .call("esplora_header", json::json!([block_hash]))
+            .call("esplora_header", json::json!([block_hash.to_string()]))
             .await
             .map_err(|err| error::anyhow!("{err}"))?;
         let decoded = decode_header(&header).map_err(|err| error::anyhow!("{err}"))?;
@@ -589,13 +691,47 @@ async fn confirm_relevant(
         let tx: lampo_common::bitcoin::Transaction =
             lampo_common::bitcoin::consensus::encode::deserialize(&bytes)
                 .map_err(|err| error::anyhow!("{err}"))?;
+        let index = tx_index_in_block(handler, &txid).await.unwrap_or_else(|err| {
+            log::debug!(target: "lampo-chain", "no merkle proof for {txid}: {err}; using index 0");
+            0
+        });
         let height = u32::try_from(height).map_err(|err| error::anyhow!("{err}"))?;
-        let data = [(0usize, &tx)];
-        Confirm::transactions_confirmed(&*channel_manager, &decoded.header, &data, height);
-        Confirm::transactions_confirmed(&*chain_monitor, &decoded.header, &data, height);
+        let data = [(index, &tx)];
+        Confirm::transactions_confirmed(channel_manager, &decoded.header, &data, height);
+        Confirm::transactions_confirmed(chain_monitor, &decoded.header, &data, height);
+        chain.reported.lock().unwrap().insert(txid, block_hash);
         log::info!(target: "lampo-chain", "confirmed {txid} at {height}");
     }
     Ok(())
+}
+
+/// The position of `txid` in its block, from the esplora merkle proof.
+async fn tx_index_in_block(
+    handler: &Arc<dyn lampo_common::handler::Handler>,
+    txid: &Txid,
+) -> lampo_common::error::Result<usize> {
+    use lampo_common::bitcoin::merkle_tree::MerkleBlock;
+    let proof = handler
+        .call("esplora_merkle", json::json!([txid.to_string()]))
+        .await
+        .map_err(|err| error::anyhow!("{err}"))?;
+    let raw = proof
+        .as_str()
+        .ok_or_else(|| error::anyhow!("esplora_merkle was not hex"))?;
+    let bytes = hex::decode(raw).map_err(|err| error::anyhow!("{err}"))?;
+    let block: MerkleBlock = lampo_common::bitcoin::consensus::encode::deserialize(&bytes)
+        .map_err(|err| error::anyhow!("{err}"))?;
+    let mut matches = Vec::new();
+    let mut indexes = Vec::new();
+    block
+        .extract_matches(&mut matches, &mut indexes)
+        .map_err(|err| error::anyhow!("{err:?}"))?;
+    matches
+        .iter()
+        .position(|matched| matched == txid)
+        .and_then(|at| indexes.get(at).copied())
+        .map(|index| index as usize)
+        .ok_or_else(|| error::anyhow!("{txid} not in its merkle proof"))
 }
 
 fn header_work_bytes(bits: u32) -> [u8; 32] {
@@ -689,6 +825,20 @@ impl Backend for LampoChainSync {
     async fn get_best_block(&self) -> BlockSourceResult<(BlockHash, Option<u32>)> {
         let value = chain_rpc(self, "getblockchaininfo", json::json!([])).await?;
         decode_best_block(&value)
+    }
+
+    fn watch_tx(&self, txid: Txid, script: ScriptBuf) {
+        log::debug!(target: "lampo-chain", "watching transaction {txid}");
+        self.watched.lock().unwrap().txs.insert(txid, script);
+    }
+
+    fn watch_output(&self, outpoint: OutPoint, script: ScriptBuf) {
+        log::debug!(target: "lampo-chain", "watching output {outpoint}");
+        self.watched
+            .lock()
+            .unwrap()
+            .outputs
+            .insert(outpoint, script);
     }
 
     async fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {

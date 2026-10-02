@@ -141,6 +141,15 @@ pub trait Backend: Send + Sync {
 
     async fn get_utxo_by_txid(&self, txid: &Txid, script: &Script) -> error::Result<TxResult>;
 
+    /// LDK asked to watch `txid` (`chain::Filter::register_tx`). A backend
+    /// without a header walk polls it for confirmation. Default: ignored,
+    /// which is right for a backend that feeds whole blocks.
+    fn watch_tx(&self, _txid: Txid, _script: bitcoin::ScriptBuf) {}
+
+    /// LDK asked to watch spends of `outpoint`
+    /// (`chain::Filter::register_output`). Default: ignored.
+    fn watch_output(&self, _outpoint: bitcoin::OutPoint, _script: bitcoin::ScriptBuf) {}
+
     fn set_handler(&self, _: Arc<dyn Handler>) {}
 
     fn set_channel_manager(&self, _: Arc<LampoChannel>) {}

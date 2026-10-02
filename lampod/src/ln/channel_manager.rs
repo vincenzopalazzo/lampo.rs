@@ -402,8 +402,9 @@ impl LampoChannelManager {
     fn build_channel_monitor(&self) -> LampoChainMonitor {
         let keys = self.signer.clone();
         ChainMonitor::new(
-            // FIXME: this is needed when use esplora or electrum
-            None,
+            // Watched transactions and outputs; only a transaction-sync
+            // backend (esplora-style plugin) acts on them.
+            Some(self.onchain.clone()),
             self.onchain.clone(),
             self.logger.clone(),
             self.onchain.clone(),
