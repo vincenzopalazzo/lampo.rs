@@ -4,8 +4,7 @@
 
 use std::fmt;
 
-use lampo_common::conf::LampoConf;
-
+use super::conf::PhoenixConf;
 use super::liquidity_ads::Fees;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,12 +57,12 @@ pub enum PolicyDecision {
 }
 
 impl LiquidityPolicy {
-    pub fn from_conf(conf: &LampoConf) -> Self {
+    pub fn from_conf(conf: &PhoenixConf) -> Self {
         Self {
-            auto_liquidity_sat: conf.phoenix_auto_liquidity,
-            max_fee_credit_sat: conf.phoenix_max_fee_credit,
-            max_relative_fee_bps: conf.phoenix_max_relative_fee_bps,
-            max_mining_fee_sat: conf.phoenix_max_mining_fee,
+            auto_liquidity_sat: conf.auto_liquidity_sat,
+            max_fee_credit_sat: conf.max_fee_credit_sat,
+            max_relative_fee_bps: conf.max_relative_fee_bps,
+            max_mining_fee_sat: conf.max_mining_fee_sat,
         }
     }
 

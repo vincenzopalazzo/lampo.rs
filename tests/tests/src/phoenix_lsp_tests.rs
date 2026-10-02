@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use lampo_common::bitcoin::constants::ChainHash;
 use lampo_common::bitcoin::Network;
-use lampo_common::conf::PhoenixLspPeer;
 use lampo_common::error;
 use lampo_common::handler::Handler;
 use lampo_common::hex;
@@ -16,6 +15,7 @@ use lampo_common::ldk::blinded_path::IntroductionNode;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::model::{request, response};
 use lampo_common::types::NodeId;
+use lampo_phoenix::conf::PhoenixLspPeer;
 use lampo_phoenix::events::PhoenixLspEvent;
 use lampo_phoenix::handler::has_feature_bit;
 use lampo_phoenix::wire::{
@@ -49,7 +49,7 @@ pub async fn phoenix_lsp_client_talks_to_its_lsp() -> error::Result<()> {
     let lsp_id = NodeId::from_str(&lsp.info.node_id)?;
     let lsp_peer = format!("{}@127.0.0.1:{}", lsp.info.node_id, lsp.port);
     let client = LampoTesting::new_with(lsp.btc.clone(), move |conf| {
-        conf.phoenix_lsp = Some(lsp_peer);
+        conf.set_extension_value("phoenix-lsp", &lsp_peer).unwrap();
     })
     .await?;
     let client_id = NodeId::from_str(&client.info.node_id)?;

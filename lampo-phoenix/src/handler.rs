@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use lampo_common::bitcoin::constants::ChainHash;
 use lampo_common::bitcoin::secp256k1::PublicKey;
 use lampo_common::bitcoin::Network;
-use lampo_common::conf::{LampoConf, PhoenixLspPeer};
+use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
 use lampo_common::event::Event;
@@ -37,6 +37,7 @@ use lampo_common::ldk::util::ser::Writeable;
 use lampo_common::types::LampoChannel;
 
 use crate::channels::accept_underpaying_htlcs_from;
+use crate::conf::{PhoenixConf, PhoenixLspPeer};
 use crate::events::PhoenixLspEvent;
 use crate::liquidity_ads::{PaymentType, WillFundRates};
 use crate::policy::{LiquidityPolicy, PolicyDecision};
@@ -223,10 +224,11 @@ impl PhoenixLspHandler {
     /// directory. Idle when `phoenix-lsp` is unset.
     pub fn from_conf(conf: &LampoConf) -> error::Result<Arc<Self>> {
         let purchases = Arc::new(PurchaseStore::open(Path::new(&conf.path()))?);
+        let phoenix = PhoenixConf::from_lampo_conf(conf)?;
         Ok(Self::new(
-            conf.phoenix_lsp_peer()?,
+            phoenix.lsp.clone(),
             conf.network,
-            LiquidityPolicy::from_conf(conf),
+            LiquidityPolicy::from_conf(&phoenix),
             purchases,
         ))
     }
