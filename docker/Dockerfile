@@ -46,6 +46,7 @@ RUN apt-get -qq update && \
     xsltproc \
     pipx \
     jq \
+    protobuf-compiler \
     zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
@@ -78,5 +79,16 @@ RUN git config --global user.name "John Doe" && \
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN echo 'source $HOME/.cargo/env' >> $HOME/.bashrc
+
+# VLS signer test binaries (vlsd + remote_hsmd_socket), pinned to v1.0.0-rc.1.
+# `make check-vls` runs the lampo_vls_tests against these; the tests fail if
+# VLSD_EXE/REMOTE_HSMD_SOCKET_EXE are unset.
+ENV VLS_VERSION=v1.0.0-rc.1
+RUN git clone --depth 1 --branch $VLS_VERSION https://gitlab.com/lightning-signer/validating-lightning-signer.git /tmp/vls && \
+    cd /tmp/vls && cargo build --release --bin vlsd --bin remote_hsmd_socket && \
+    mv /tmp/vls/target/release/vlsd /tmp/vls/target/release/remote_hsmd_socket /usr/local/bin/ && \
+    rm -rf /tmp/vls
+ENV VLSD_EXE=/usr/local/bin/vlsd
+ENV REMOTE_HSMD_SOCKET_EXE=/usr/local/bin/remote_hsmd_socket
 
 CMD ["./docker/entrypoint.sh"]

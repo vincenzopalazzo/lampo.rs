@@ -79,7 +79,10 @@ jobs:
       - name: Ensure a single LDK (lightning*) version
         run: |
           set -euo pipefail
-          tree=$(cargo tree --workspace --duplicates --edges normal)
+          # lampo-vls is excluded on purpose: its `vls-protocol` dependency
+          # carries VLS's own `lightning 0.2.x`, isolated behind the `vls`
+          # feature. No type of that crate reaches lampo's LDK stack.
+          tree=$(cargo tree --workspace --exclude lampo-vls --duplicates --edges normal)
           dupes=$(printf '%s\n' "$tree" | grep -E '^lightning[a-z-]* v' | sort -u || true)
           if [ -n "$dupes" ]; then
             echo "::error::Multiple versions of LDK (lightning*) crates detected:"

@@ -4,6 +4,8 @@ pub mod lampo_cln_tests;
 pub mod lampo_lnd_tests;
 #[cfg(test)]
 pub mod lampo_tests;
+#[cfg(all(test, feature = "vls"))]
+pub mod lampo_vls_tests;
 #[cfg(test)]
 mod utils;
 

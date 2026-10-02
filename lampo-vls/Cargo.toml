@@ -1,0 +1,21 @@
+[package]
+name = "lampo-vls"
+version = "0.0.1"
+edition = "2021"
+description = "Validating Lightning Signer backend for lampo over the CLN hsmd wire protocol"
+
+[dependencies]
+lampo-common = { path = "../lampo-common" }
+# Message definitions only. This pulls `vls-core` and with it a second
+# `lightning` (0.2.x) into the graph; no type of that crate crosses into
+# lampo, the wire structs are `bitcoin` and `serde_bolt` types. See
+# docs/designs/vls-hsmd-signer.md.
+vls-protocol = "1.0.0-rc.1"
+libc = "0.2"
+log = "0.4"
+hex = "0.4"
+
+[features]
+# Forwarded so the erased signer's `unsafe_sign_holder_commitment` forwarding
+# exists whenever lampo-common enables LDK's test utils.
+unsafe_channel_keys = ["lampo-common/unsafe_channel_keys"]

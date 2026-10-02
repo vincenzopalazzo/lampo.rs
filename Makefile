@@ -12,7 +12,14 @@ fmt:
 	# $(CC) clippy --workspace
 
 check:
-	$(CC) test --all -- --show-output
+	$(CC) test --workspace --exclude lampo-vls -- --show-output
+
+# Same suite pieces with the Validating Lightning Signer backend: the
+# lampo-vls unit tests and the VLS-backed node tests, which need
+# VLSD_EXE and REMOTE_HSMD_SOCKET_EXE.
+check-vls:
+	$(CC) test -p lampo-vls
+	$(CC) test -p tests --features vls lampo_vls_tests -- --show-output --test-threads=1
 
 clean:
 	$(CC) clean

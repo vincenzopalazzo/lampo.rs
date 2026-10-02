@@ -73,6 +73,14 @@ pub struct LampoConf {
     /// Symmetric tolerance, in basis points, around each configured rate.
     /// One basis point is 0.01%. Default is 100 (1%).
     pub currency_tolerance_bps: u16,
+    /// Which signer holds the node and channel keys: `in-memory` (default,
+    /// derived from the wallet seed) or `vls` (a Validating Lightning
+    /// Signer reached through `remote_hsmd_socket`).
+    pub signer: Option<String>,
+    /// Path to the `remote_hsmd_socket` binary when `signer=vls`.
+    pub vls_proxy_bin: Option<String>,
+    /// Port the proxy listens on for `vlsd`; defaults to 7701.
+    pub vls_port: Option<u16>,
 }
 
 impl LampoConf {
@@ -134,6 +142,9 @@ impl Default for LampoConf {
             api_token: None,
             currency_rates: Vec::new(),
             currency_tolerance_bps: 100,
+            signer: None,
+            vls_proxy_bin: None,
+            vls_port: None,
         }
     }
 }
@@ -359,6 +370,19 @@ impl TryFrom<String> for LampoConf {
         }
         let async_invoice_server_paths =
             conf.get_conf("async-invoice-server-paths").unwrap_or(None);
+        let signer = conf.get_conf("signer").unwrap_or(None);
+        if let Some(signer) = signer.as_deref() {
+            if signer != "in-memory" && signer != "vls" {
+                anyhow::bail!("invalid signer `{signer}`: expected `in-memory` or `vls`");
+            }
+        }
+        let vls_proxy_bin = conf.get_conf("vls-proxy-bin").unwrap_or(None);
+        let vls_port = conf
+            .get_conf("vls-port")
+            .unwrap_or(None)
+            .map(|port| port.parse::<u16>())
+            .transpose()
+            .map_err(|err| anyhow::anyhow!("invalid vls-port: {err}"))?;
         let api_token = conf
             .get_conf("api-token")
             .unwrap_or(None)
@@ -417,6 +441,9 @@ impl TryFrom<String> for LampoConf {
             api_token,
             currency_rates,
             currency_tolerance_bps,
+            signer,
+            vls_proxy_bin,
+            vls_port,
         })
     }
 }

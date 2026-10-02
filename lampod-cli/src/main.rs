@@ -210,7 +210,10 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let wallet = Arc::new(wallet);
 
     log::debug!(target: "lampod-cli", "wallet created with success");
-    let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+    let mut lampod = match lampo_conf.signer.as_deref() {
+        Some("vls") => vls_daemon(lampo_conf.clone(), wallet.clone()).await?,
+        _ => LampoDaemon::new(lampo_conf.clone(), wallet.clone()),
+    };
 
     // Do wallet syncing in the background! (`LampoDaemon::new` already shared
     // the chain-sync coordinator with the wallet.)
@@ -380,4 +383,29 @@ mod tests {
             mode & 0o777
         );
     }
+}
+
+/// Build the daemon with keys held by a Validating Lightning Signer.
+#[cfg(feature = "vls")]
+async fn vls_daemon(
+    conf: Arc<LampoConf>,
+    wallet: Arc<dyn WalletManager>,
+) -> error::Result<LampoDaemon> {
+    log::warn!(
+        target: "lampod-cli",
+        "signer=vls is experimental: penalty and counterparty HTLC claims are not \
+         implemented yet, see docs/designs/vls-hsmd-signer.md"
+    );
+    let config = lampo_vls::VlsSignerConfig::from_conf(&conf)?;
+    // Blocks until vlsd connects to the proxy; keep the runtime free.
+    let signer = tokio::task::spawn_blocking(move || lampo_vls::VlsSigner::spawn(config)).await??;
+    Ok(LampoDaemon::with_signer(conf, wallet, signer))
+}
+
+#[cfg(not(feature = "vls"))]
+async fn vls_daemon(
+    _conf: Arc<LampoConf>,
+    _wallet: Arc<dyn WalletManager>,
+) -> error::Result<LampoDaemon> {
+    error::bail!("`signer=vls` needs lampod-cli built with `--features vls`")
 }
