@@ -339,6 +339,9 @@ impl LampoDaemon {
         );
         self.channel_manager().set_handler(self.handler());
         let peer_manager = self.peer_manager();
+        // Extension RPCs resolve in-process too, ahead of any plugin or the
+        // HTTP handler an embedder adds later.
+        self.add_external_handler(self.extensions()).await?;
         self.extensions().attach(ExtensionContext {
             channel_manager: self.channel_manager().manager(),
             signer: self.signer(),
