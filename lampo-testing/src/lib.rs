@@ -232,7 +232,14 @@ impl LampoTesting {
             Some(lampo_common::bitcoin::Network::Regtest),
             Some(port.into()),
         )?;
-        lampo_conf.api_port = port::random_free_port().unwrap().into();
+        // Neither port is bound yet, so the second pick can repeat the
+        // first; an API request would then hit the p2p listener and the
+        // node never looks ready. Pick again until they differ.
+        let mut api_port = port::random_free_port().unwrap();
+        while api_port == port {
+            api_port = port::random_free_port().unwrap();
+        }
+        lampo_conf.api_port = api_port.into();
         log::info!("listening on port `{}`", lampo_conf.api_port);
         let core_url = btc.rpc_url();
 
