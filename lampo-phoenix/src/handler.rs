@@ -10,7 +10,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
@@ -41,7 +40,7 @@ use crate::conf::{PhoenixConf, PhoenixLspPeer};
 use crate::events::PhoenixLspEvent;
 use crate::liquidity_ads::{PaymentType, WillFundRates};
 use crate::policy::{LiquidityPolicy, PolicyDecision};
-use crate::purchases::{max_funding_fee_msat, unix_now, PurchaseStore};
+use crate::purchases::{max_funding_fee_msat, unix_now, PurchaseStore, Store};
 use crate::rpc;
 use crate::wire::{
     self, AddFeeCredit, DnsAddressRequest, PhoenixLspMessage, RecommendedFeerates, WillAddHtlc,
@@ -220,10 +219,10 @@ impl PhoenixLspHandler {
         })
     }
 
-    /// The handler for `conf`, with its purchases under the network data
-    /// directory. Idle when `phoenix-lsp` is unset.
-    pub fn from_conf(conf: &LampoConf) -> error::Result<Arc<Self>> {
-        let purchases = Arc::new(PurchaseStore::open(Path::new(&conf.path()))?);
+    /// The handler for `conf`, with its purchases in `store`, the node's
+    /// persister. Idle when `phoenix-lsp` is unset.
+    pub fn from_conf(conf: &LampoConf, store: Store) -> error::Result<Arc<Self>> {
+        let purchases = Arc::new(PurchaseStore::open(store)?);
         let phoenix = PhoenixConf::from_lampo_conf(conf)?;
         Ok(Self::new(
             phoenix.lsp.clone(),
@@ -735,6 +734,7 @@ mod tests {
 
     use lampo_common::chan::UnboundedReceiver;
     use lampo_common::event::{Emitter, Subscriber};
+    use lampo_common::ldk::persister::fs_store::v1::FilesystemStore;
     use lampo_common::ldk::types::payment::PaymentPreimage;
 
     use crate::liquidity_ads::{FundingRate, PaymentType};
@@ -793,7 +793,8 @@ mod tests {
         lsp: Option<&str>,
         policy: LiquidityPolicy,
     ) -> (Arc<PhoenixLspHandler>, UnboundedReceiver<Event>) {
-        let purchases = Arc::new(PurchaseStore::open(&scratch_dir("handler")).unwrap());
+        let store = Arc::new(FilesystemStore::new(scratch_dir("handler")));
+        let purchases = Arc::new(PurchaseStore::open(store).unwrap());
         let handler = PhoenixLspHandler::new(
             lsp.map(|raw| PhoenixLspPeer::from_str(raw).unwrap()),
             Network::Regtest,

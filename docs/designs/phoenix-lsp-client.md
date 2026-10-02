@@ -76,9 +76,9 @@ and mainnet
 - Decides what the liquidity policy makes of each `will_add_htlc` and
   logs it at `info` under the `phoenix-lsp` target. It does not reply:
   the LSP fails the upstream HTLC after a delay on its own.
-- Records liquidity purchases in `phoenix_purchases.json` under the
-  network data directory and uses them to accept the funding fee the
-  LSP takes from a later HTLC.
+- Records liquidity purchases in the node's persister, next to LDK's
+  own data, under `phoenix_lsp/purchases/<funding txid>`, and uses
+  them to accept the funding fee the LSP takes from a later HTLC.
 
 ## RPCs
 

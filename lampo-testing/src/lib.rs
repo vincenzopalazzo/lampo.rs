@@ -258,7 +258,7 @@ impl LampoTesting {
         // wallet gates its Emitter on listener sync (production startup flow).
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
         // Registered on every node, idle unless the test configures `phoenix_lsp`.
-        let phoenix = PhoenixLspHandler::from_conf(&lampo_conf)?;
+        let phoenix = PhoenixLspHandler::from_conf(&lampo_conf, lampo.persister())?;
         lampo.add_extension(phoenix.clone())?;
         wallet.clone().listen().await?;
 

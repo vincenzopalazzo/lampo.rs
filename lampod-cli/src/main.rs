@@ -225,7 +225,10 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     log::debug!(target: "lampod-cli", "wallet created with success");
     let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
     // Idle unless `phoenix-lsp` is configured.
-    lampod.add_extension(PhoenixLspHandler::from_conf(&lampo_conf)?)?;
+    lampod.add_extension(PhoenixLspHandler::from_conf(
+        &lampo_conf,
+        lampod.persister(),
+    )?)?;
 
     // Chain sync calls bitcoind during `init`, before the event handler used
     // to be installed. Start the plugin and attach a dispatcher first, or
