@@ -18,6 +18,7 @@ use tempfile::TempDir;
 
 use lampo_bdk_wallet::BDKWalletManager;
 use lampo_chain::LampoChainSync;
+use lampo_common::backend::Backend;
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
@@ -256,6 +257,10 @@ impl LampoTesting {
         wallet.clone().listen().await?;
 
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
+        // Chain RPC is the bitcoind plugin, same as lampod-cli. The daemon
+        // handler does not speak getblockchaininfo.
+        let plugin = start_bitcoind_plugin(&lampo_conf).await?;
+        node.set_handler(plugin);
         lampo.init(node.clone()).await?;
         log::info!("bitcoin core added inside lampo");
 
@@ -483,4 +488,43 @@ impl LampoTesting {
     pub fn root_path(&self) -> Arc<TempDir> {
         self.root_path.clone()
     }
+}
+
+async fn start_bitcoind_plugin(
+    conf: &LampoConf,
+) -> error::Result<Arc<lampo_plugin::PluginManager>> {
+    use lampo_plugin::PluginManager;
+    use lampo_plugin_common::messages::InitConfig;
+
+    let plugin_path = std::env::var("LAMPO_BITCOIND").unwrap_or_else(|_| {
+        format!(
+            "{}/target/debug/examples/lampo-bitcoind",
+            env!("CARGO_MANIFEST_DIR").trim_end_matches("/lampo-testing")
+        )
+    });
+    let manager = PluginManager::new();
+    let init = InitConfig {
+        lampo_dir: conf.path(),
+        network: conf.network.to_string(),
+        node_id: String::new(),
+        rpc_file: String::new(),
+        options: {
+            let mut options = lampo_common::json::Map::new();
+            if let Some(url) = &conf.core_url {
+                options.insert("core-url".into(), lampo_common::json::json!(url));
+            }
+            if let Some(user) = &conf.core_user {
+                options.insert("core-user".into(), lampo_common::json::json!(user));
+            }
+            if let Some(pass) = &conf.core_pass {
+                options.insert("core-pass".into(), lampo_common::json::json!(pass));
+            }
+            options
+        },
+    };
+    manager
+        .start_plugin(&plugin_path, &init)
+        .await
+        .map_err(|err| error::anyhow!("bitcoind plugin `{plugin_path}`: {err}"))?;
+    Ok(Arc::new(manager))
 }

@@ -24,6 +24,7 @@ fn test_manifest_roundtrip() {
         }],
         dynamic: true,
         failure_mode: FailureMode::FailOpen,
+        important: false,
     };
 
     let json = serde_json::to_string(&manifest).unwrap();
@@ -64,6 +65,7 @@ fn test_init_config_serialization() {
         lampo_dir: "/home/user/.lampo/testnet".to_string(),
         network: "testnet".to_string(),
         node_id: "02abcdef".to_string(),
+        rpc_file: String::new(),
         options: serde_json::Map::new(),
     };
     let json = serde_json::to_string(&config).unwrap();
