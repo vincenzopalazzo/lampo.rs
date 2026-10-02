@@ -3,6 +3,7 @@ pub mod prelude {
     pub use clightning_testing::prelude::btc::Node as BtcNode;
     pub use clightning_testing::prelude::*;
     pub use clightning_testing::*;
+    #[cfg(feature = "phoenix")]
     pub use lampo_phoenix;
     pub use lampod;
     pub use lampod::async_run;
@@ -31,6 +32,7 @@ use lampo_common::model::response;
 use lampo_common::types::NodeId;
 use lampo_httpd::handler::HttpdHandler;
 use lampo_lnd::LndRestConfig;
+#[cfg(feature = "phoenix")]
 use lampo_phoenix::PhoenixLspHandler;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
@@ -134,6 +136,7 @@ pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     daemon: Arc<LampoDaemon>,
     root_path: Arc<TempDir>,
+    #[cfg(feature = "phoenix")]
     phoenix: Arc<PhoenixLspHandler>,
     pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
@@ -257,8 +260,10 @@ impl LampoTesting {
         // `LampoDaemon::new` shares the coordinator with the wallet, so the
         // wallet gates its Emitter on listener sync (production startup flow).
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
-        // Registered on every node, idle unless the test configures `phoenix_lsp`.
+        // Registered on every node, idle unless the test sets `phoenix-lsp`.
+        #[cfg(feature = "phoenix")]
         let phoenix = PhoenixLspHandler::from_conf(&lampo_conf, lampo.persister())?;
+        #[cfg(feature = "phoenix")]
         lampo.add_extension(phoenix.clone())?;
         wallet.clone().listen().await?;
 
@@ -325,6 +330,7 @@ impl LampoTesting {
             wallet,
             btc,
             root_path: Arc::new(dir),
+            #[cfg(feature = "phoenix")]
             phoenix,
             info,
             lnd_rest_port: lnd_port,
@@ -493,6 +499,7 @@ impl LampoTesting {
     }
 
     /// The Phoenix LSP extension registered on this node.
+    #[cfg(feature = "phoenix")]
     pub fn phoenix(&self) -> Arc<PhoenixLspHandler> {
         self.phoenix.clone()
     }

@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 lampod = { path = "../lampod" }
-lampo-phoenix = { path = "../lampo-phoenix", features = ["testing"] }
+lampo-phoenix = { path = "../lampo-phoenix", features = ["testing"], optional = true }
 lampo-common = { path = "../lampo-common" }
 lampo-chain = { path = "../lampo-chain" }
 lampo-plugin = { path = "../lampo-plugin" }
@@ -23,3 +23,7 @@ anyhow = "1.0.102"
 tokio = { version = "1.50.0", features = ["process", "time", "fs", "rt-multi-thread"] }
 hex = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[features]
+# Register the Phoenix LSP extension on every test node, with its test hooks.
+phoenix = ["dep:lampo-phoenix"]
