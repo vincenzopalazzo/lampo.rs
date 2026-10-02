@@ -15,7 +15,10 @@ use bdk_wallet::chain::BlockId;
 use bdk_wallet::descriptor::template::Bip84;
 use bdk_wallet::keys::bip39::Mnemonic;
 use bdk_wallet::keys::bip39::{Language, WordCount};
-use bdk_wallet::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
+use bdk_wallet::keys::{
+    DerivableKey, DescriptorPublicKey, ExtendedKey, GeneratableKey, GeneratedKey,
+};
+use bdk_wallet::miniscript::ForEachKey;
 use bdk_wallet::rusqlite::Connection;
 use bdk_wallet::{KeychainKind, PersistedWallet, SignOptions, Wallet};
 use tokio::sync::mpsc::unbounded_channel;
@@ -26,6 +29,7 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::bip32::Xpriv;
+use lampo_common::bitcoin::bip32::Xpub;
 use lampo_common::bitcoin::blockdata::locktime::absolute::LockTime;
 use lampo_common::bitcoin::psbt::Psbt;
 use lampo_common::bitcoin::PrivateKey;
@@ -307,6 +311,35 @@ impl WalletManager for BDKWalletManager {
 
     fn is_mine(&self, script: &ScriptBuf) -> bool {
         self.wallet.lock().unwrap().is_mine(script.clone())
+    }
+
+    fn account_xpub(&self) -> Option<Xpub> {
+        // The BIP84 template yields `wpkh([fp/84'/1'/0']tpub.../0/*)`, so the
+        // descriptor's xkey is the account-level key both keychains hang off.
+        let wallet = self.wallet.lock().unwrap();
+        let mut xpub = None;
+        wallet
+            .public_descriptor(KeychainKind::External)
+            .for_each_key(|key| {
+                if let DescriptorPublicKey::XPub(key) = key {
+                    xpub = Some(key.xkey);
+                }
+                true
+            });
+        xpub
+    }
+
+    fn script_derivation(&self, script: &ScriptBuf) -> Option<(u32, u32)> {
+        let wallet = self.wallet.lock().unwrap();
+        wallet
+            .derivation_of_spk(script.clone())
+            .map(|(keychain, index)| {
+                let keychain = match keychain {
+                    KeychainKind::External => 0,
+                    KeychainKind::Internal => 1,
+                };
+                (keychain, index)
+            })
     }
 
     fn confirmed_utxos(&self) -> error::Result<Vec<(OutPoint, TxOut)>> {

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::bitcoin::absolute::Height;
+use crate::bitcoin::bip32::Xpub;
 use crate::bitcoin::psbt::Psbt;
 use crate::bitcoin::{Amount, FeeRate, OutPoint, TxOut, Txid};
 use crate::bitcoin::{Block, BlockHash, ScriptBuf, Transaction};
@@ -101,6 +102,20 @@ pub trait WalletManager: Send + Sync {
     /// Whether `script` is a revealed address of this wallet.
     fn is_mine(&self, _script: &ScriptBuf) -> bool {
         false
+    }
+
+    /// The account-level extended public key this wallet derives its
+    /// addresses from, if it has one. An external signer allowlists it so
+    /// closes and sweeps may pay to wallet-owned scripts.
+    fn account_xpub(&self) -> Option<Xpub> {
+        None
+    }
+
+    /// `(keychain, index)` of a revealed wallet script, relative to
+    /// [`Self::account_xpub`] (`0` external, `1` internal). `None` when the
+    /// script is not this wallet's.
+    fn script_derivation(&self, _script: &ScriptBuf) -> Option<(u32, u32)> {
+        None
     }
 
     /// Confirmed, spendable UTXOs this wallet can sign (anchor CPFP).

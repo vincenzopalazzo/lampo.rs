@@ -107,7 +107,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "mio 1.0.3",
- "socket2 0.6.0",
+ "socket2",
  "tokio",
  "tracing",
 ]
@@ -189,7 +189,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "smallvec",
- "socket2 0.6.0",
+ "socket2",
  "time",
  "tracing",
  "url",
@@ -325,6 +325,12 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
+name = "as-any"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0f477b951e452a0b6b4a10b53ccd569042d1d01729b519e02074a9c0958a063"
 
 [[package]]
 name = "async-trait"
@@ -488,6 +494,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitcoin-consensus-derive"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d664058fbe866bd6e8e01a003eb8cdbce5f8c7bb0835621d7443b2b45a4031d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
+]
+
+[[package]]
 name = "bitcoin-internals"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -507,6 +524,17 @@ name = "bitcoin-io"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b47c4ab7a93edb0c7198c5535ed9b52b63095f4e9b45279c6736cec4b856baf"
+
+[[package]]
+name = "bitcoin-push-decoder"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6386f1296021ac5d1a5ed9869595940fa7696dfe868198b1b71ec2c82db59343"
+dependencies = [
+ "bitcoin",
+ "hex",
+ "log",
+]
 
 [[package]]
 name = "bitcoin-units"
@@ -615,6 +643,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
+]
+
+[[package]]
+name = "bolt-derive"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c8cbe333b12e11cf3b8b9eb41d861d12715bec7510bda293800b5ea80f99b9"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]
@@ -729,6 +768,12 @@ dependencies = [
  "chrono",
  "phf",
 ]
+
+[[package]]
+name = "chunked-buffer"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa622bd314835eb026b776af471344d0dba94705c937900656a31d0407e53689"
 
 [[package]]
 name = "clap"
@@ -1038,8 +1083,18 @@ version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
 dependencies = [
- "darling_core",
- "darling_macro",
+ "darling_core 0.20.11",
+ "darling_macro 0.20.11",
+]
+
+[[package]]
+name = "darling"
+version = "0.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cdf337090841a411e2a7f3deb9187445851f91b309c0c0a29e05f74a00a48c0"
+dependencies = [
+ "darling_core 0.21.3",
+ "darling_macro 0.21.3",
 ]
 
 [[package]]
@@ -1057,12 +1112,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling_core"
+version = "0.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1247195ecd7e3c85f83c8d2a366e4210d588e802133e1e355180a9870b517ea4"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "strsim",
+ "syn 2.0.100",
+]
+
+[[package]]
 name = "darling_macro"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
- "darling_core",
+ "darling_core 0.20.11",
+ "quote",
+ "syn 2.0.100",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
+dependencies = [
+ "darling_core 0.21.3",
  "quote",
  "syn 2.0.100",
 ]
@@ -1091,7 +1171,7 @@ version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8"
 dependencies = [
- "darling",
+ "darling 0.20.11",
  "proc-macro2",
  "quote",
  "syn 2.0.100",
@@ -1500,6 +1580,9 @@ name = "hashbrown"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
+dependencies = [
+ "ahash",
+]
 
 [[package]]
 name = "hashbrown"
@@ -1692,7 +1775,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2",
  "tokio",
  "tower-service",
  "tracing",
@@ -2033,7 +2116,7 @@ dependencies = [
  "clightningrpc-conf",
  "colored",
  "hex",
- "lightning",
+ "lightning 0.3.0-rc2",
  "lightning-background-processor",
  "lightning-block-sync",
  "lightning-net-tokio",
@@ -2115,6 +2198,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lampo-vls"
+version = "0.0.1"
+dependencies = [
+ "hex",
+ "lampo-common",
+ "libc",
+ "log",
+ "vls-protocol",
+]
+
+[[package]]
 name = "lampod"
 version = "0.0.1"
 dependencies = [
@@ -2139,6 +2233,7 @@ dependencies = [
  "lampo-common",
  "lampo-httpd",
  "lampo-lnd",
+ "lampo-vls",
  "lampod",
  "log",
  "radicle-term",
@@ -2206,6 +2301,23 @@ dependencies = [
 
 [[package]]
 name = "lightning"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a8c4111946d048fecc72245a2ecacf28cde4390bcc946b010f544c6ac2b2d8b"
+dependencies = [
+ "bech32",
+ "bitcoin",
+ "dnssec-prover",
+ "hashbrown 0.13.2",
+ "libm",
+ "lightning-invoice 0.34.1",
+ "lightning-macros 0.2.1",
+ "lightning-types 0.3.5",
+ "possiblyrandom 0.2.1",
+]
+
+[[package]]
+name = "lightning"
 version = "0.3.0-rc2"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
 dependencies = [
@@ -2215,10 +2327,10 @@ dependencies = [
  "dnssec-prover",
  "hashbrown 0.13.2",
  "libm",
- "lightning-invoice",
- "lightning-macros",
- "lightning-types",
- "possiblyrandom",
+ "lightning-invoice 0.35.0-rc2",
+ "lightning-macros 0.2.2+git",
+ "lightning-types 0.4.0-rc2",
+ "possiblyrandom 0.2.0",
  "regex",
 ]
 
@@ -2230,10 +2342,10 @@ dependencies = [
  "bitcoin",
  "bitcoin-io",
  "bitcoin_hashes 0.14.0",
- "lightning",
+ "lightning 0.3.0-rc2",
  "lightning-liquidity",
  "lightning-rapid-gossip-sync",
- "possiblyrandom",
+ "possiblyrandom 0.2.0",
 ]
 
 [[package]]
@@ -2243,8 +2355,19 @@ source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8
 dependencies = [
  "bitcoin",
  "bitreq 0.3.7",
- "lightning",
+ "lightning 0.3.0-rc2",
  "serde_json",
+]
+
+[[package]]
+name = "lightning-invoice"
+version = "0.34.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d83bd798e04ab9eecc8bbef1fa17d3808859bcdc0406bd16c55d51c8834444"
+dependencies = [
+ "bech32",
+ "bitcoin",
+ "lightning-types 0.3.5",
 ]
 
 [[package]]
@@ -2254,7 +2377,7 @@ source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8
 dependencies = [
  "bech32",
  "bitcoin",
- "lightning-types",
+ "lightning-types 0.4.0-rc2",
  "serde",
 ]
 
@@ -2266,12 +2389,23 @@ dependencies = [
  "bitcoin",
  "bitreq 0.3.7",
  "chrono",
- "lightning",
- "lightning-invoice",
- "lightning-macros",
- "lightning-types",
+ "lightning 0.3.0-rc2",
+ "lightning-invoice 0.35.0-rc2",
+ "lightning-macros 0.2.2+git",
+ "lightning-types 0.4.0-rc2",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lightning-macros"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4c717494cdc2c8bb85bee7113031248f5f6c64f8802b33c1c9e2d98e594aa71"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]
@@ -2290,7 +2424,7 @@ version = "0.3.0-rc2"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
 dependencies = [
  "bitcoin",
- "lightning",
+ "lightning 0.3.0-rc2",
  "tokio",
 ]
 
@@ -2300,7 +2434,7 @@ version = "0.3.0-rc2"
 source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
 dependencies = [
  "bitcoin",
- "lightning",
+ "lightning 0.3.0-rc2",
  "tokio",
  "windows-sys 0.48.0",
 ]
@@ -2313,7 +2447,16 @@ dependencies = [
  "bitcoin",
  "bitcoin-io",
  "bitcoin_hashes 0.14.0",
- "lightning",
+ "lightning 0.3.0-rc2",
+]
+
+[[package]]
+name = "lightning-types"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c77c676d4a34cceb2ae3756916e446b4d17f9430a24107e099981f0f9aec77e6"
+dependencies = [
+ "bitcoin",
 ]
 
 [[package]]
@@ -2775,6 +2918,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "possiblyrandom"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c564dbf654befd49035528299f1208a40508f6e07efb11c163444e304e4484f"
+dependencies = [
+ "getrandom 0.2.16",
+]
+
+[[package]]
 name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2968,7 +3120,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.0",
+ "socket2",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -3006,7 +3158,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -3377,6 +3529,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_bolt"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8db02c046447759ef62beeede660c4b7abae023a961bd5a8935aa7d4207edd1a"
+dependencies = [
+ "bitcoin",
+ "bitcoin-consensus-derive",
+ "chunked-buffer",
+ "hex",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3398,14 +3562,15 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.143"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d401abef1d108fbd9cbaebc3e46611f4b1021f714a0597a71f41ee463f5f4a5a"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "itoa",
  "memchr",
- "ryu",
  "serde",
+ "serde_core",
+ "zmij",
 ]
 
 [[package]]
@@ -3418,6 +3583,33 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_with"
+version = "3.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "381b283ce7bc6b476d903296fb59d0d36633652b633b27f64db4fb46dcbfc3b9"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "serde_core",
+ "serde_json",
+ "serde_with_macros",
+ "time",
+]
+
+[[package]]
+name = "serde_with_macros"
+version = "3.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6d4e30573c8cb306ed6ab1dca8423eec9a463ea0e155f45399455e0368b27e0"
+dependencies = [
+ "darling 0.21.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]
@@ -3786,7 +3978,7 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.6.0",
+ "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]
@@ -3953,6 +4145,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "txoo"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9a947ef834df674b09aa786d18133904e9b388b8e7b29eb565a505aa949078a"
+dependencies = [
+ "bitcoin",
+ "bytes",
+ "log",
+ "serde",
+ "serde_bolt",
+]
+
+[[package]]
 name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4067,6 +4272,72 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vls-common"
+version = "1.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36fac44a73a2a5bed8e2d0f15ababd9458519198b5d7b14184be835dd360e5f7"
+dependencies = [
+ "bitcoin",
+ "hex",
+]
+
+[[package]]
+name = "vls-core"
+version = "1.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaa636ceeba6b0b4196a9da47ea307c2ff5859dd4773e8c2589748a4a74a8648"
+dependencies = [
+ "ahash",
+ "anyhow",
+ "bitcoin",
+ "bitcoin-consensus-derive",
+ "bitcoin-push-decoder",
+ "bolt-derive",
+ "hashbrown 0.13.2",
+ "hex",
+ "itertools 0.10.5",
+ "lightning 0.2.6",
+ "lightning-invoice 0.34.1",
+ "log",
+ "scopeguard",
+ "serde",
+ "serde_bolt",
+ "serde_derive",
+ "serde_with",
+ "tracing",
+ "txoo",
+ "vls-common",
+ "vls-policy-derive",
+]
+
+[[package]]
+name = "vls-policy-derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7062171f04cbf46b8f913b702759486cf62fbdc6e714edef12c29a3455774dcc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
+]
+
+[[package]]
+name = "vls-protocol"
+version = "1.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d189e6c7a46d20fb8424eff40943c1dada2dfc0df47681b6da3e4dd00fa4800f"
+dependencies = [
+ "as-any",
+ "bitcoin-consensus-derive",
+ "bolt-derive",
+ "hex",
+ "log",
+ "serde_bolt",
+ "txoo",
+ "vls-core",
+]
 
 [[package]]
 name = "want"
@@ -4596,6 +4867,12 @@ dependencies = [
  "quote",
  "syn 2.0.100",
 ]
+
+[[package]]
+name = "zmij"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "zstd"

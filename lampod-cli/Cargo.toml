@@ -6,12 +6,15 @@ edition = "2021"
 [features]
 default = []
 lnd = ["dep:lampo-lnd"]
+# Validating Lightning Signer backend (`signer=vls`).
+vls = ["dep:lampo-vls"]
 
 [dependencies]
 lampod = { path = "../lampod" }
 lampo-common = { path = "../lampo-common" }
 lampo-chain = { path = "../lampo-chain" }
 lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
+lampo-vls = { path = "../lampo-vls", optional = true }
 lampo-httpd = { path = "../lampo-httpd" }
 lampo-lnd = { path = "../lampo-lnd", optional = true }
 tokio = { version = "1.50.0", features = ["rt", "macros", "time"] }

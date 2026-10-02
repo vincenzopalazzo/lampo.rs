@@ -9,7 +9,10 @@ members = [
         "lampo-testing",
         "tests/tests",
         "lampo-chain",
-        "lampo-bdk-wallet"
+        "lampo-bdk-wallet",
+        # Not a default member: it pulls `lightning 0.2.x` through
+        # `vls-protocol`, so it is only built with the `vls` feature.
+        "lampo-vls"
 ]
 
 default-members = [
