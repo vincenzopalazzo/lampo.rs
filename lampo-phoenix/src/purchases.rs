@@ -1,11 +1,11 @@
 //! Liquidity purchases this node owes the Phoenix LSP a funding fee for.
 //!
-//! Kept as `phoenix_purchases.json` in the network data directory, one
-//! record per funding transaction. The claim path looks a purchase up by
-//! payment hash to decide whether a skimmed funding fee is legitimate.
+//! Kept in the node's persister under `phoenix_lsp/purchases/<funding txid>`,
+//! one JSON record per funding transaction, next to LDK's own data. The
+//! claim path looks a purchase up by payment hash to decide whether a
+//! skimmed funding fee is legitimate.
 
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lampo_common::bitcoin::hashes::sha256::Hash as Sha256;
@@ -13,12 +13,18 @@ use lampo_common::bitcoin::hashes::Hash;
 use lampo_common::error;
 use lampo_common::hex;
 use lampo_common::json;
+use lampo_common::ldk::io::ErrorKind;
 use lampo_common::ldk::types::payment::PaymentHash;
+use lampo_common::ldk::util::persist::KVStoreSync;
 pub use lampo_common::model::response::PhoenixLspPurchase as Purchase;
 
 use super::liquidity_ads::PaymentType;
 
-const PURCHASES_FILE: &str = "phoenix_purchases.json";
+const PRIMARY_NAMESPACE: &str = "phoenix_lsp";
+const SECONDARY_NAMESPACE: &str = "purchases";
+
+/// The node's key-value persister, shared with LDK.
+pub type Store = Arc<dyn KVStoreSync + Send + Sync>;
 
 /// Unix seconds now, for `created_at`.
 pub fn unix_now() -> u64 {
@@ -58,21 +64,27 @@ pub fn max_funding_fee_msat(purchase: &Purchase) -> u64 {
 }
 
 pub struct PurchaseStore {
-    path: PathBuf,
+    store: Store,
     inner: Mutex<Vec<Purchase>>,
 }
 
 impl PurchaseStore {
-    pub fn open(data_dir: &Path) -> error::Result<Self> {
-        let path = data_dir.join(PURCHASES_FILE);
-        let purchases = if path.exists() {
-            let raw = std::fs::read_to_string(&path)?;
-            json::from_str(&raw)?
-        } else {
-            Vec::new()
+    /// Load every purchase from `store`.
+    pub fn open(store: Store) -> error::Result<Self> {
+        let keys = match store.list(PRIMARY_NAMESPACE, SECONDARY_NAMESPACE) {
+            Ok(keys) => keys,
+            Err(err) if err.kind() == ErrorKind::NotFound => Vec::new(),
+            Err(err) => return Err(err.into()),
         };
+        let mut purchases = Vec::with_capacity(keys.len());
+        for key in keys {
+            let raw = store.read(PRIMARY_NAMESPACE, SECONDARY_NAMESPACE, &key)?;
+            let purchase: Purchase = json::from_slice(&raw)
+                .map_err(|err| error::anyhow!("purchase `{key}` cannot be decoded: {err}"))?;
+            purchases.push(purchase);
+        }
         Ok(Self {
-            path,
+            store,
             inner: Mutex::new(purchases),
         })
     }
@@ -82,17 +94,29 @@ impl PurchaseStore {
     }
 
     /// Insert `purchase`, replacing any record with the same funding txid.
-    pub fn upsert(&self, purchase: Purchase) -> error::Result<()> {
+    /// The txid is the key, so it must be 32 hex bytes; it is stored
+    /// lowercased.
+    pub fn upsert(&self, mut purchase: Purchase) -> error::Result<()> {
+        let key = purchase.funding_txid.trim().to_ascii_lowercase();
+        if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            error::bail!(
+                "invalid funding txid `{}`: expected 32 hex bytes",
+                purchase.funding_txid
+            );
+        }
+        purchase.funding_txid = key.clone();
+        let raw = json::to_vec(&purchase)?;
         let mut purchases = self.lock();
-        match purchases.iter_mut().find(|existing| {
-            existing
-                .funding_txid
-                .eq_ignore_ascii_case(&purchase.funding_txid)
-        }) {
+        self.store
+            .write(PRIMARY_NAMESPACE, SECONDARY_NAMESPACE, &key, raw)?;
+        match purchases
+            .iter_mut()
+            .find(|existing| existing.funding_txid == key)
+        {
             Some(existing) => *existing = purchase,
             None => purchases.push(purchase),
         }
-        self.persist(&purchases)
+        Ok(())
     }
 
     pub fn find_by_payment_hash(&self, payment_hash: &PaymentHash) -> Option<Purchase> {
@@ -106,15 +130,6 @@ impl PurchaseStore {
         self.inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    fn persist(&self, purchases: &[Purchase]) -> error::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let raw = json::to_string_pretty(purchases)?;
-        std::fs::write(&self.path, raw)?;
-        Ok(())
     }
 }
 
@@ -157,7 +172,7 @@ mod tests {
     }
 
     /// A fresh directory under the system temp dir; removed by the caller.
-    fn scratch_dir(name: &str) -> PathBuf {
+    fn scratch_dir(name: &str) -> std::path::PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| elapsed.as_nanos())
@@ -171,27 +186,40 @@ mod tests {
     }
 
     #[test]
-    fn store_round_trips_through_the_file() {
+    fn store_round_trips_through_the_persister() {
+        use lampo_common::ldk::persister::fs_store::v1::FilesystemStore;
+
         let dir = scratch_dir("purchases");
+        let persister: Store = Arc::new(FilesystemStore::new(dir.clone()));
         let hash = PaymentHash([0x07; 32]);
         {
-            let store = PurchaseStore::open(&dir).unwrap();
+            let store = PurchaseStore::open(persister.clone()).unwrap();
             assert!(store.list().is_empty());
             store
                 .upsert(purchase(128, vec![hex::encode(hash.0)]))
                 .unwrap();
             let mut updated = purchase(130, vec![hex::encode(hash.0)]);
             updated.amount_sat = 200_000;
+            updated.funding_txid = "AB".repeat(32);
             store.upsert(updated).unwrap();
             assert_eq!(store.list().len(), 1, "same txid replaces the record");
             assert_eq!(store.list()[0].amount_sat, 200_000);
+            assert_eq!(store.list()[0].funding_txid, "ab".repeat(32));
+
+            let mut bad = purchase(128, Vec::new());
+            bad.funding_txid = "not a txid".to_owned();
+            assert!(store.upsert(bad).is_err());
         }
-        let store = PurchaseStore::open(&dir).unwrap();
+        let store = PurchaseStore::open(persister.clone()).unwrap();
         let found = store.find_by_payment_hash(&hash).unwrap();
         assert_eq!(found.payment_type, 130);
         assert!(store
             .find_by_payment_hash(&PaymentHash([0x08; 32]))
             .is_none());
+        assert_eq!(
+            persister.list("phoenix_lsp", "purchases").unwrap(),
+            vec!["ab".repeat(32)]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
