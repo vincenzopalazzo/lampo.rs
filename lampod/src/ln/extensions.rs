@@ -138,16 +138,32 @@ impl CustomMessageHandler for CustomMessageDispatcher {
         }
     }
 
+    /// Every extension sees the peer; one refusing it disconnects it.
     fn peer_connected(
         &self,
         their_node_id: PublicKey,
         msg: &Init,
         inbound: bool,
     ) -> Result<(), ()> {
+        let mut refused = false;
         for extension in &self.extensions {
-            extension.peer_connected(their_node_id, msg, inbound);
+            if extension
+                .peer_connected(their_node_id, msg, inbound)
+                .is_err()
+            {
+                log::warn!(
+                    target: "lampo",
+                    "extension `{}` refuses peer `{their_node_id}`; disconnecting it",
+                    extension.name()
+                );
+                refused = true;
+            }
         }
-        Ok(())
+        if refused {
+            Err(())
+        } else {
+            Ok(())
+        }
     }
 
     fn provided_node_features(&self) -> NodeFeatures {
@@ -179,6 +195,8 @@ mod tests {
         name: &'static str,
         types: Vec<u16>,
         bit: usize,
+        /// Refuse every peer in `peer_connected`.
+        refuse_peers: bool,
         seen: Mutex<Vec<RawCustomMessage>>,
         outbox: Mutex<Vec<(PublicKey, RawCustomMessage)>>,
     }
@@ -189,6 +207,7 @@ mod tests {
                 name,
                 types,
                 bit,
+                refuse_peers: false,
                 seen: Mutex::new(Vec::new()),
                 outbox: Mutex::new(Vec::new()),
             })
@@ -223,6 +242,14 @@ mod tests {
 
         fn drain_outbound(&self) -> Vec<(PublicKey, RawCustomMessage)> {
             std::mem::take(&mut self.outbox.lock().unwrap())
+        }
+
+        fn peer_connected(&self, _peer: PublicKey, _init: &Init, _inbound: bool) -> Result<(), ()> {
+            if self.refuse_peers {
+                Err(())
+            } else {
+                Ok(())
+            }
         }
 
         fn counterparty_skim_budget_msat(
@@ -296,6 +323,17 @@ mod tests {
             .peer_connected(peer(), &empty_init(), false)
             .is_ok());
         dispatcher.peer_disconnected(peer());
+    }
+
+    #[test]
+    fn one_extension_refusing_a_peer_disconnects_it() {
+        let a = Echo::new("a", vec![41041], 300);
+        let mut b = Echo::new("b", vec![35025], 303);
+        Arc::get_mut(&mut b).unwrap().refuse_peers = true;
+        let dispatcher = CustomMessageDispatcher::new(vec![a, b]).unwrap();
+        assert!(dispatcher
+            .peer_connected(peer(), &empty_init(), true)
+            .is_err());
     }
 
     #[tokio::test]

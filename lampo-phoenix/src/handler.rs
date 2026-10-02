@@ -655,10 +655,11 @@ impl CustomMessageExtension for PhoenixLspHandler {
             .collect()
     }
 
-    fn peer_connected(&self, peer: PublicKey, init: &Init, _inbound: bool) {
+    /// Every peer is welcome; only the LSP is recorded.
+    fn peer_connected(&self, peer: PublicKey, init: &Init, _inbound: bool) -> Result<(), ()> {
         let mut state = self.lock();
         if !state.lsp.as_ref().is_some_and(|lsp| lsp.node_id == peer) {
-            return;
+            return Ok(());
         }
         let on_the_fly_funding = supports_feature(&init.features, ON_THE_FLY_FUNDING_BIT - 1);
         let funding_fee_credit = supports_feature(&init.features, FUNDING_FEE_CREDIT_BIT - 1);
@@ -674,6 +675,7 @@ impl CustomMessageExtension for PhoenixLspHandler {
             on_the_fly_funding,
             funding_fee_credit,
         });
+        Ok(())
     }
 
     fn peer_disconnected(&self, peer: PublicKey) {
@@ -834,7 +836,7 @@ mod tests {
             networks: None,
             remote_network_address: None,
         };
-        handler.peer_connected(node_id, &init, false);
+        handler.peer_connected(node_id, &init, false).unwrap();
     }
 
     fn feerates() -> PhoenixLspMessage {
