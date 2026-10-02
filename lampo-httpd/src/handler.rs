@@ -47,6 +47,8 @@ impl ExternalHandler for HttpdHandler {
             "channels",
             "peers",
             "fundchannel",
+            "listcontacts",
+            "addcontact",
             "stop",
         ];
         if !BUILTIN.contains(&req.method.as_str()) {
