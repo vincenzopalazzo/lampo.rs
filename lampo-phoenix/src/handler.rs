@@ -37,6 +37,7 @@ use lampo_common::ldk::util::ser::Writeable;
 use lampo_common::types::LampoChannel;
 
 use crate::channels::accept_underpaying_htlcs_from;
+use crate::events::PhoenixLspEvent;
 use crate::liquidity_ads::{PaymentType, WillFundRates};
 use crate::policy::{LiquidityPolicy, PolicyDecision};
 use crate::purchases::{max_funding_fee_msat, unix_now, PurchaseStore};
@@ -392,9 +393,9 @@ impl PhoenixLspHandler {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn emit(&self, event: LightningEvent) {
+    fn emit(&self, event: PhoenixLspEvent) {
         match self.events.get() {
-            Some(events) => events.emit(Event::Lightning(event)),
+            Some(events) => events.emit(event.into_event()),
             None => log::debug!(target: LOG_TARGET, "no event bus yet, dropping {event:?}"),
         }
     }
@@ -462,7 +463,7 @@ impl PhoenixLspHandler {
             );
             state.pending.clear();
         }
-        let event = LightningEvent::PhoenixLspWillAddHtlc {
+        let event = PhoenixLspEvent::WillAddHtlc {
             id: hex::encode(msg.id),
             amount_msat: msg.amount_msat,
             payment_hash: hex::encode(msg.payment_hash.0),
@@ -517,7 +518,7 @@ impl PhoenixLspHandler {
                 self.lock().pending.retain(|_, pending| {
                     !cancel.payment_hashes.contains(&pending.msg.payment_hash)
                 });
-                self.emit(LightningEvent::PhoenixLspFundingCancelled {
+                self.emit(PhoenixLspEvent::FundingCancelled {
                     channel_id: cancel.channel_id.to_string(),
                     payment_hashes: cancel
                         .payment_hashes
@@ -530,7 +531,7 @@ impl PhoenixLspHandler {
             PhoenixLspMessage::DnsAddressResponse(response) => {
                 if self.chain_matches(response.chain_hash, "dns_address_response") {
                     log::info!(target: LOG_TARGET, "LSP published address `{}`", response.address);
-                    self.emit(LightningEvent::PhoenixLspDnsAddress {
+                    self.emit(PhoenixLspEvent::DnsAddress {
                         address: response.address,
                     });
                 }
@@ -539,7 +540,7 @@ impl PhoenixLspHandler {
                 // Lampo is not an LSP; surface it so a test hook can answer.
                 if self.chain_matches(request.chain_hash, "dns_address_request") {
                     log::debug!(target: LOG_TARGET, "dns_address_request from `{sender_node_id}` (not served)");
-                    self.emit(LightningEvent::PhoenixLspDnsAddressRequest {
+                    self.emit(PhoenixLspEvent::DnsAddressRequest {
                         counterparty_node_id: sender_node_id,
                         offer: hex::encode(request.offer),
                         language: request.language,
@@ -670,7 +671,7 @@ impl CustomMessageExtension for PhoenixLspHandler {
         state.connected = true;
         state.lsp_init_features = Some(init.features.clone());
         drop(state);
-        self.emit(LightningEvent::PhoenixLspConnected {
+        self.emit(PhoenixLspEvent::Connected {
             counterparty_node_id: peer,
             on_the_fly_funding,
             funding_fee_credit,
@@ -839,6 +840,12 @@ mod tests {
         handler.peer_connected(node_id, &init, false).unwrap();
     }
 
+    /// The next event on the bus, which must be a Phoenix one.
+    fn phoenix_event(events: &mut UnboundedReceiver<Event>) -> PhoenixLspEvent {
+        let event = events.try_recv().unwrap();
+        PhoenixLspEvent::from_event(&event).unwrap_or_else(|| panic!("unexpected {event:?}"))
+    }
+
     fn feerates() -> PhoenixLspMessage {
         PhoenixLspMessage::RecommendedFeerates(RecommendedFeerates {
             chain_hash: regtest(),
@@ -907,12 +914,12 @@ mod tests {
 
         connect(&handler, lsp_id(), &[560, 563]);
         assert!(handler.is_connected());
-        match events.try_recv().unwrap() {
-            Event::Lightning(LightningEvent::PhoenixLspConnected {
+        match phoenix_event(&mut events) {
+            PhoenixLspEvent::Connected {
                 counterparty_node_id,
                 on_the_fly_funding,
                 funding_fee_credit,
-            }) => {
+            } => {
                 assert_eq!(counterparty_node_id, lsp_id());
                 assert!(on_the_fly_funding);
                 assert!(funding_fee_credit);
@@ -991,14 +998,14 @@ mod tests {
         let pending = handler.snapshot().pending;
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].decision, WillAddHtlcDecision::UnknownPaymentHash);
-        match events.try_recv().unwrap() {
-            Event::Lightning(LightningEvent::PhoenixLspWillAddHtlc {
+        match phoenix_event(&mut events) {
+            PhoenixLspEvent::WillAddHtlc {
                 id,
                 amount_msat,
                 payment_hash,
                 cltv_expiry,
                 decision,
-            }) => {
+            } => {
                 assert_eq!(id, "22".repeat(32));
                 assert_eq!(amount_msat, 1_000);
                 assert_eq!(payment_hash, "33".repeat(32));
@@ -1077,12 +1084,12 @@ mod tests {
             lsp_id(),
         );
         assert!(handler.snapshot().pending.is_empty());
-        match events.try_recv().unwrap() {
-            Event::Lightning(LightningEvent::PhoenixLspFundingCancelled {
+        match phoenix_event(&mut events) {
+            PhoenixLspEvent::FundingCancelled {
                 payment_hashes,
                 reason,
                 ..
-            }) => {
+            } => {
                 assert_eq!(payment_hashes, vec!["33".repeat(32)]);
                 assert_eq!(reason, "too slow");
             }
@@ -1120,8 +1127,8 @@ mod tests {
             }),
             lsp_id(),
         );
-        match events.try_recv().unwrap() {
-            Event::Lightning(LightningEvent::PhoenixLspDnsAddress { address }) => {
+        match phoenix_event(&mut events) {
+            PhoenixLspEvent::DnsAddress { address } => {
                 assert_eq!(address, "alice@phoenix.io");
             }
             other => panic!("unexpected {other:?}"),

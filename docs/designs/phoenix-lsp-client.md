@@ -21,9 +21,11 @@ extension; `lampod` itself knows nothing about Phoenix.
   advertises init feature bits per peer, names peers to keep connected,
   handles and queues messages, vouches for a fee a counterparty skims from
   a payment, and serves RPC methods. It receives a context with the
-  channel manager, the node keys, the event bus and a flush callback. The
-  Phoenix config keys, events and RPC models stay in `lampo-common` as
-  part of the shared vocabulary.
+  channel manager, the node keys, the event bus and a flush callback. An
+  extension reports through one generic `LightningEvent::Extension`
+  (its name, a `kind` and a JSON payload); the typed payloads live with
+  the extension. The Phoenix config keys and RPC models stay in
+  `lampo-common` as part of the shared vocabulary.
 - `lampod` installs one custom message handler, the dispatcher, in the
   peer manager slot. LDK's reader trait is generic over its buffer, so the
   handler cannot be a trait object; the dispatcher reads the bytes and

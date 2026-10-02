@@ -9,8 +9,6 @@ use lampo_common::bitcoin::constants::ChainHash;
 use lampo_common::bitcoin::Network;
 use lampo_common::conf::PhoenixLspPeer;
 use lampo_common::error;
-use lampo_common::event::ln::LightningEvent;
-use lampo_common::event::Event;
 use lampo_common::handler::Handler;
 use lampo_common::hex;
 use lampo_common::json;
@@ -18,6 +16,7 @@ use lampo_common::ldk::blinded_path::IntroductionNode;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::model::{request, response};
 use lampo_common::types::NodeId;
+use lampo_phoenix::events::PhoenixLspEvent;
 use lampo_phoenix::handler::has_feature_bit;
 use lampo_phoenix::wire::{
     DnsAddressResponse, FeerateRange, PhoenixLspMessage, RecommendedFeerates,
@@ -201,11 +200,11 @@ pub async fn phoenix_lsp_client_talks_to_its_lsp() -> error::Result<()> {
         let event = tokio::time::timeout(Duration::from_secs(30), lsp_events.recv())
             .await?
             .ok_or_else(|| error::anyhow!("event bus closed"))?;
-        if let Event::Lightning(LightningEvent::PhoenixLspDnsAddressRequest {
+        if let Some(PhoenixLspEvent::DnsAddressRequest {
             counterparty_node_id,
             offer,
             language,
-        }) = event
+        }) = PhoenixLspEvent::from_event(&event)
         {
             assert_eq!(counterparty_node_id, client_id);
             break (offer, language);

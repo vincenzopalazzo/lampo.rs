@@ -3,8 +3,6 @@
 
 use std::time::Duration;
 
-use lampo_common::event::ln::LightningEvent;
-use lampo_common::event::Event;
 use lampo_common::hex;
 use lampo_common::json;
 use lampo_common::jsonrpc::{Error, RpcError};
@@ -12,6 +10,7 @@ use lampo_common::ldk::util::ser::Writeable;
 use lampo_common::model::request::{PhoenixLspDnsAddress, PhoenixLspRecordPurchase};
 use lampo_common::model::response;
 
+use crate::events::PhoenixLspEvent;
 use crate::handler::{
     feature_bits, supports_feature, PhoenixLspHandler, FUNDING_FEE_CREDIT_BIT,
     ON_THE_FLY_FUNDING_BIT, ZERO_RESERVE_CHANNELS_BIT,
@@ -154,7 +153,7 @@ async fn dns_address(
                 ))
             })?
             .ok_or_else(|| rpc_error("event bus closed while waiting for the LSP".to_owned()))?;
-        if let Event::Lightning(LightningEvent::PhoenixLspDnsAddress { address }) = event {
+        if let Some(PhoenixLspEvent::DnsAddress { address }) = PhoenixLspEvent::from_event(&event) {
             return Ok(json::to_value(response::PhoenixLspDnsAddress { address })?);
         }
     }
