@@ -76,11 +76,7 @@ Then you can query the node with the following command:
 }
 ```
 
-### To run integration tests with core lightning:
-
-Make sure you have compiled core-lightning in developer mode. The installation guide can be found [here](https://docs.corelightning.org/docs/installation).
-
-Integration tests can be run using the following command:
+### To run integration tests:
 
 ```
 make integration

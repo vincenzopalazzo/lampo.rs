@@ -67,12 +67,7 @@ RUN echo "eval \"\$(register-python-argcomplete pipx)\"" >> ~/.bashrc
 RUN pipx install poetry
 
 RUN git config --global user.name "John Doe" && \
-	git config --global user.email johndoe@example.com && \
-	git clone https://github.com/ElementsProject/lightning.git && \
-    cd lightning && git checkout v25.02.2 && \
-    poetry install --no-root && \
-    poetry run ./configure --disable-rust && \
-    poetry run make -j$(nproc) install
+	git config --global user.email johndoe@example.com
 
 # Install Rust
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
