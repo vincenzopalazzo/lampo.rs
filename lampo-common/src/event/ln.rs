@@ -1,6 +1,7 @@
 use lightning::types::features::ChannelTypeFeatures;
 
 use crate::bitcoin::{OutPoint, Transaction};
+use crate::json;
 use crate::model::response::{PaymentHop, PaymentState};
 use crate::types::{ChannelId, NodeId};
 
@@ -74,46 +75,14 @@ pub enum LightningEvent {
         payment_hash: String,
         amount_msat: Option<u64>,
     },
-    /// The configured Phoenix LSP completed its handshake with this node.
-    PhoenixLspConnected {
-        counterparty_node_id: NodeId,
-        /// The LSP advertised on-the-fly funding (bit 560 or 561).
-        on_the_fly_funding: bool,
-        /// The LSP advertised funding fee credit (bit 562 or 563).
-        funding_fee_credit: bool,
-    },
-    /// The Phoenix LSP proposed an HTLC that needs liquidity
-    /// (`will_add_htlc`). Nothing is funded yet: the liquidity policy only
-    /// decided, and `decision` says what it decided.
-    PhoenixLspWillAddHtlc {
-        /// Hex id of the proposal.
-        id: String,
-        amount_msat: u64,
-        /// Hex payment hash.
-        payment_hash: String,
-        cltv_expiry: u32,
-        decision: String,
-    },
-    /// The Phoenix LSP gave up on funding (`cancel_on_the_fly_funding`).
-    PhoenixLspFundingCancelled {
-        /// Hex channel id.
-        channel_id: String,
-        /// Hex payment hashes.
-        payment_hashes: Vec<String>,
-        reason: String,
-    },
-    /// The Phoenix LSP answered a `dns_address_request`.
-    PhoenixLspDnsAddress {
-        /// The BIP 353 address, `user@domain`.
-        address: String,
-    },
-    /// A peer this node treats as its Phoenix LSP asked for a BIP 353
-    /// address (`dns_address_request`). Lampo is not an LSP and does not
-    /// answer; integration tests reply from a hook.
-    PhoenixLspDnsAddressRequest {
-        counterparty_node_id: NodeId,
-        /// Hex offer TLV stream.
-        offer: String,
-        language: String,
+    /// Something a protocol extension reports. The daemon does not know
+    /// the extensions' vocabularies: `extension` is the extension's name,
+    /// `kind` what happened, and `payload` the details as the extension
+    /// serializes them. Subscribers that care decode `payload` with the
+    /// extension's own types.
+    Extension {
+        extension: String,
+        kind: String,
+        payload: json::Value,
     },
 }
