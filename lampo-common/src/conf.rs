@@ -521,6 +521,27 @@ impl LampoConf {
         Ok(Some(value))
     }
 
+    /// A key the daemon itself does not parse, for extensions that read
+    /// their own keys from the same file. `Ok(None)` when no file was
+    /// loaded, so a bare `LampoConf` (tests, embedders) is never an error.
+    pub fn get_extension_value(&self, key: &str) -> anyhow::Result<Option<String>> {
+        if self.inner.is_none() {
+            return Ok(None);
+        }
+        self.get_value(key)
+    }
+
+    /// Set a raw key as if it had been read from the file, for tests and
+    /// embedders that configure extensions without writing one. Fails on a
+    /// value already present under `key`.
+    pub fn set_extension_value(&mut self, key: &str, value: &str) -> anyhow::Result<()> {
+        let path = format!("{}/lampo.conf", self.path());
+        self.inner
+            .get_or_insert_with(|| CLNConf::new(path, false))
+            .add_conf(key, value)
+            .map_err(|err| anyhow::anyhow!("cannot set `{key}`: {err:?}"))
+    }
+
     pub fn set_network(&mut self, network: &str) -> anyhow::Result<()> {
         self.network = Network::from_str(network)?;
         Ok(())
@@ -593,6 +614,19 @@ mod tests {
         let server_ldk = server.ldk_conf_with_async_role();
         assert!(server_ldk.enable_htlc_hold);
         assert!(server_ldk.accept_forwards_to_priv_channels);
+    }
+
+    #[test]
+    fn extension_values_default_to_none_and_can_be_set() {
+        let mut conf = LampoConf::default();
+        assert_eq!(conf.get_extension_value("phoenix-lsp").unwrap(), None);
+        conf.set_extension_value("phoenix-lsp", "default").unwrap();
+        assert_eq!(
+            conf.get_extension_value("phoenix-lsp").unwrap().as_deref(),
+            Some("default")
+        );
+        // The daemon's own keys are untouched.
+        assert!(conf.async_payments_role.is_none());
     }
 }
 

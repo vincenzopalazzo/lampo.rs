@@ -3,6 +3,8 @@ pub mod lampo_lnd_tests;
 #[cfg(test)]
 pub mod lampo_tests;
 #[cfg(test)]
+pub mod phoenix_lsp_tests;
+#[cfg(test)]
 mod utils;
 
 #[cfg(test)]

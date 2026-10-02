@@ -2349,6 +2349,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lampo-phoenix"
+version = "0.0.1"
+dependencies = [
+ "lampo-common",
+ "log",
+ "tokio",
+]
+
+[[package]]
 name = "lampo-plugin"
 version = "0.1.0"
 dependencies = [
@@ -2410,6 +2419,7 @@ dependencies = [
  "lampo-common",
  "lampo-httpd",
  "lampo-lnd",
+ "lampo-phoenix",
  "lampo-plugin",
  "lampo-plugin-common",
  "lampo-plugin-sdk",
@@ -2448,6 +2458,7 @@ dependencies = [
  "lampo-common",
  "lampo-httpd",
  "lampo-lnd",
+ "lampo-phoenix",
  "lampo-plugin",
  "lampo-plugin-common",
  "lampod",
