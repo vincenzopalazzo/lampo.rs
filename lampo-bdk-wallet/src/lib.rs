@@ -31,6 +31,7 @@ use lampo_common::bitcoin::bip32::Xpriv;
 use lampo_common::bitcoin::blockdata::locktime::absolute::LockTime;
 use lampo_common::bitcoin::constants::WITNESS_SCALE_FACTOR;
 use lampo_common::bitcoin::psbt::{self, Psbt};
+use lampo_common::bitcoin::BlockHash;
 use lampo_common::bitcoin::PrivateKey;
 use lampo_common::bitcoin::{
     Amount, Block, FeeRate, OutPoint, ScriptBuf, Transaction, TxOut, Txid, Weight,
@@ -667,6 +668,14 @@ impl WalletManager for BDKWalletManager {
             hash: block.header.prev_blockhash,
         };
         self.apply_block_inner(block, height, connected_to)
+    }
+
+    fn checkpoint_hash(&self, height: u32) -> error::Result<Option<BlockHash>> {
+        let wallet = self.wallet.lock().unwrap();
+        Ok(wallet
+            .latest_checkpoint()
+            .get(height)
+            .map(|checkpoint| checkpoint.hash()))
     }
 
     fn set_checkpoint(&self, block: BlockRef) -> error::Result<()> {
