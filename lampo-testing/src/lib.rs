@@ -3,6 +3,8 @@ pub mod prelude {
     pub use clightning_testing::prelude::btc::Node as BtcNode;
     pub use clightning_testing::prelude::*;
     pub use clightning_testing::*;
+    #[cfg(feature = "phoenix")]
+    pub use lampo_phoenix;
     pub use lampod;
     pub use lampod::async_run;
 }
@@ -30,6 +32,8 @@ use lampo_common::model::response;
 use lampo_common::types::NodeId;
 use lampo_httpd::handler::HttpdHandler;
 use lampo_lnd::LndRestConfig;
+#[cfg(feature = "phoenix")]
+use lampo_phoenix::PhoenixLspHandler;
 use lampod::actions::handler::LampoHandler;
 use lampod::chain::WalletManager;
 use lampod::LampoDaemon;
@@ -132,6 +136,8 @@ pub struct LampoTesting {
     inner: Arc<LampoHandler>,
     daemon: Arc<LampoDaemon>,
     root_path: Arc<TempDir>,
+    #[cfg(feature = "phoenix")]
+    phoenix: Arc<PhoenixLspHandler>,
     pub port: u64,
     pub wallet: Arc<dyn WalletManager>,
     pub mnemonic: String,
@@ -226,7 +232,14 @@ impl LampoTesting {
             Some(lampo_common::bitcoin::Network::Regtest),
             Some(port.into()),
         )?;
-        lampo_conf.api_port = port::random_free_port().unwrap().into();
+        // Neither port is bound yet, so the second pick can repeat the
+        // first; an API request would then hit the p2p listener and the
+        // node never looks ready. Pick again until they differ.
+        let mut api_port = port::random_free_port().unwrap();
+        while api_port == port {
+            api_port = port::random_free_port().unwrap();
+        }
+        lampo_conf.api_port = api_port.into();
         log::info!("listening on port `{}`", lampo_conf.api_port);
         let core_url = btc.rpc_url();
 
@@ -254,6 +267,11 @@ impl LampoTesting {
         // `LampoDaemon::new` shares the coordinator with the wallet, so the
         // wallet gates its Emitter on listener sync (production startup flow).
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+        // Registered on every node, idle unless the test sets `phoenix-lsp`.
+        #[cfg(feature = "phoenix")]
+        let phoenix = PhoenixLspHandler::from_conf(&lampo_conf, lampo.persister())?;
+        #[cfg(feature = "phoenix")]
+        lampo.add_extension(phoenix.clone())?;
         wallet.clone().listen().await?;
 
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
@@ -319,6 +337,8 @@ impl LampoTesting {
             wallet,
             btc,
             root_path: Arc::new(dir),
+            #[cfg(feature = "phoenix")]
+            phoenix,
             info,
             lnd_rest_port: lnd_port,
             lnd_admin_macaroon_hex: macaroon_hex,
@@ -483,6 +503,12 @@ impl LampoTesting {
 
     pub fn daemon(&self) -> Arc<LampoDaemon> {
         self.daemon.clone()
+    }
+
+    /// The Phoenix LSP extension registered on this node.
+    #[cfg(feature = "phoenix")]
+    pub fn phoenix(&self) -> Arc<PhoenixLspHandler> {
+        self.phoenix.clone()
     }
 
     pub fn root_path(&self) -> Arc<TempDir> {

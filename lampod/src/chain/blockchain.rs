@@ -13,6 +13,7 @@ use lampo_common::error;
 use lampo_common::ldk::chain::chaininterface::{
     BroadcasterInterface, ConfirmationTarget, FeeEstimator, TransactionType,
 };
+use lampo_common::ldk::chain::{Filter, WatchedOutput};
 use lampo_common::ldk::routing::utxo::UtxoLookup;
 use lampo_common::ldk::util::wakers::Notifier;
 use lampo_common::wallet::WalletManager;
@@ -274,6 +275,22 @@ impl BroadcasterInterface for LampoChainManager {
                 backend.brodcast_tx(&tx).await;
             });
         }
+    }
+}
+
+/// LDK registers the transactions and outputs it needs confirmations for.
+/// A backend that walks headers ignores them; a transaction-sync backend
+/// (esplora-style plugin) polls them.
+impl Filter for LampoChainManager {
+    fn register_tx(&self, txid: &bitcoin::Txid, script_pubkey: &bitcoin::Script) {
+        self.backend.watch_tx(*txid, script_pubkey.to_owned());
+    }
+
+    fn register_output(&self, output: WatchedOutput) {
+        self.backend.watch_output(
+            output.outpoint.into_bitcoin_outpoint(),
+            output.script_pubkey,
+        );
     }
 }
 

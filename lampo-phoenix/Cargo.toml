@@ -1,0 +1,14 @@
+[package]
+name = "lampo-phoenix"
+version = "0.0.1"
+edition = "2021"
+description = "Client side of the ACINQ Phoenix LSP protocol for lampo"
+
+[dependencies]
+lampo-common = { path = "../lampo-common" }
+log = "0.4.17"
+tokio = { version = "^1.50.0", features = ["rt", "time"] }
+
+[features]
+# Test hooks on the handler; enabled by lampo-testing.
+testing = []

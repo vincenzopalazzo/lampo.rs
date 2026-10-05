@@ -1,6 +1,7 @@
 //! Lampo Channel Manager
 mod async_payments;
 mod channel_manager;
+mod extensions;
 mod inventory_manager;
 mod offchain_manager;
 mod om_mailbox;
@@ -11,6 +12,7 @@ pub mod payer_proof;
 pub mod peer_event;
 
 pub use channel_manager::LampoChannelManager;
+pub use extensions::CustomMessageDispatcher;
 pub use inventory_manager::LampoInventoryManager;
 pub use offchain_manager::OffchainManager;
 pub use om_mailbox::OnionMessageMailbox;

@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
+default = ["phoenix"]
 lnd = ["dep:lampo-lnd"]
+# The Phoenix LSP client extension; on by default, off for a leaner node.
+phoenix = ["dep:lampo-phoenix"]
 
 [dependencies]
 lampod = { path = "../lampod" }
@@ -13,6 +15,7 @@ lampo-common = { path = "../lampo-common" }
 lampo-chain = { path = "../lampo-chain" }
 lampo-bdk-wallet = { path = "../lampo-bdk-wallet" }
 lampo-httpd = { path = "../lampo-httpd" }
+lampo-phoenix = { path = "../lampo-phoenix", optional = true }
 lampo-lnd = { path = "../lampo-lnd", optional = true }
 lampo-plugin = { path = "../lampo-plugin", features = ["grpc"] }
 tonic = { version = "0.12", features = ["transport"] }

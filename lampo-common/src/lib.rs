@@ -3,6 +3,7 @@ pub mod chainsync;
 pub mod conf;
 pub mod currency;
 pub mod event;
+pub mod extension;
 pub mod handler;
 pub mod jsonrpc;
 pub mod keys;

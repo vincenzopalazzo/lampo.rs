@@ -15,6 +15,7 @@ The harness never touches mainnet or any production / “sacred” nodes.
 | `ship.sh` | Optional: git-bundle deploy to a remote build host |
 | `interop.sh` / `ldk-deploy.sh` | lampo ↔ LDK-Server interop (optional) |
 | `mutinet.sh` | mutinynet signet soak (optional) |
+| `phoenix-lsp-testnet.sh` | testnet3 interop: lampo ↔ ACINQ Phoenix LSP ↔ phoenixd, pay both ways (optional, needs the folgore lampo plugin and phoenixd) |
 | `simln/` | SimLN activity templates (optional) |
 
 ## Sacred rules
