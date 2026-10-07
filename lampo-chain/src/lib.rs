@@ -291,10 +291,11 @@ async fn chain_rpc(
         .map_err(lightning_block_sync::BlockSourceError::persistent)
 }
 
-fn decode_header(value: &json::Value) -> Result<BlockHeaderData, String> {
-    use lampo_common::bitcoin::block::{Header, Version};
+/// Decodes a `getblockheader` response. `raw` is the serialized header, when the source can
+/// give one; otherwise the header is rebuilt from the JSON fields, which only covers the 80 byte form.
+fn decode_header(value: &json::Value, raw: Option<&str>) -> Result<BlockHeaderData, String> {
+    use lampo_common::bitcoin::block::Header;
     use lampo_common::bitcoin::hashes::Hash;
-    use lampo_common::bitcoin::CompactTarget;
     use std::str::FromStr;
 
     fn field<'a>(value: &'a json::Value, name: &str) -> Result<&'a json::Value, String> {
@@ -345,27 +346,44 @@ fn decode_header(value: &json::Value) -> Result<BlockHeaderData, String> {
         work.copy_from_slice(&bytes);
         lampo_common::bitcoin::Work::from_be_bytes(work)
     };
+    let header: Header = match raw {
+        Some(raw) => {
+            let bytes = hex::decode(raw).map_err(|err| err.to_string())?;
+            lampo_common::bitcoin::consensus::encode::deserialize(&bytes)
+                .map_err(|err| err.to_string())?
+        }
+        None => {
+            let mut bytes = Vec::with_capacity(80);
+            bytes.extend_from_slice(
+                &i32::try_from(version)
+                    .map_err(|err| err.to_string())?
+                    .to_le_bytes(),
+            );
+            bytes.extend_from_slice(prev.as_byte_array());
+            bytes.extend_from_slice(merkle.as_byte_array());
+            let time = field(value, "time")?
+                .as_u64()
+                .ok_or("time was not an int")?;
+            bytes.extend_from_slice(
+                &u32::try_from(time)
+                    .map_err(|err| err.to_string())?
+                    .to_le_bytes(),
+            );
+            bytes.extend_from_slice(&bits.to_le_bytes());
+            let nonce = field(value, "nonce")?
+                .as_u64()
+                .ok_or("nonce was not an int")?;
+            bytes.extend_from_slice(
+                &u32::try_from(nonce)
+                    .map_err(|err| err.to_string())?
+                    .to_le_bytes(),
+            );
+            lampo_common::bitcoin::consensus::encode::deserialize(&bytes)
+                .map_err(|err| err.to_string())?
+        }
+    };
     Ok(BlockHeaderData {
-        header: Header {
-            version: Version::from_consensus(
-                i32::try_from(version).map_err(|err| err.to_string())?,
-            ),
-            prev_blockhash: prev,
-            merkle_root: merkle,
-            time: u32::try_from(
-                field(value, "time")?
-                    .as_u64()
-                    .ok_or("time was not an int")?,
-            )
-            .map_err(|err| err.to_string())?,
-            bits: CompactTarget::from_consensus(bits),
-            nonce: u32::try_from(
-                field(value, "nonce")?
-                    .as_u64()
-                    .ok_or("nonce was not an int")?,
-            )
-            .map_err(|err| err.to_string())?,
-        },
+        header,
         height: u32::try_from(
             field(value, "height")?
                 .as_u64()
@@ -430,7 +448,7 @@ async fn confirm_tip(
         .call("esplora_header", json::json!([hash]))
         .await
         .map_err(|err| error::anyhow!("{err}"))?;
-    let decoded = decode_header(&header).map_err(|err| error::anyhow!("{err}"))?;
+    let decoded = decode_header(&header, None).map_err(|err| error::anyhow!("{err}"))?;
     let height = u32::try_from(height).map_err(|err| error::anyhow!("{err}"))?;
     Confirm::best_block_updated(&*channel_manager, &decoded.header, height);
     Confirm::best_block_updated(&*chain_monitor, &decoded.header, height);
@@ -469,7 +487,7 @@ async fn confirm_relevant(
             .call("esplora_header", json::json!([block_hash]))
             .await
             .map_err(|err| error::anyhow!("{err}"))?;
-        let decoded = decode_header(&header).map_err(|err| error::anyhow!("{err}"))?;
+        let decoded = decode_header(&header, None).map_err(|err| error::anyhow!("{err}"))?;
         let tx_hex = handler
             .call("esplora_tx", json::json!([txid.to_string()]))
             .await
@@ -546,7 +564,14 @@ impl BlockSource for LampoChainSync {
                 json::json!([header_hash.to_string()]),
             )
             .await?;
-            decode_header(&value).map_err(lightning_block_sync::BlockSourceError::persistent)
+            let raw = chain_rpc(
+                self,
+                "getblockheader",
+                json::json!([header_hash.to_string(), false]),
+            )
+            .await?;
+            decode_header(&value, raw.as_str())
+                .map_err(lightning_block_sync::BlockSourceError::persistent)
         }
     }
 
