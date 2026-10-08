@@ -372,7 +372,20 @@ impl WalletManager for BDKWalletManager {
         if !wallet.sign(&mut psbt, opts.clone())? {
             error::bail!("wallet not able to sing the psbt {psbt}");
         }
-        Ok(psbt.extract_tx()?)
+        let transaction = psbt.extract_tx()?;
+        // Record the spend before the caller broadcasts it. `funds` and the
+        // next `create_transaction` both read `list_unspent`, which still
+        // lists a coin as confirmed until the wallet sees the spending tx.
+        // A second `fundchannel` in that window used to select the same
+        // coin; bitcoind then rejected the broadcast with
+        // `bad-txns-inputs-missingorspent` while reporting the channel left
+        // open (issue #649).
+        reserve_broadcast_tx(
+            &mut wallet,
+            &mut self.wallet_db.lock().unwrap(),
+            &transaction,
+        )?;
+        Ok(transaction)
     }
 
     async fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
@@ -744,9 +757,231 @@ fn checkpoint_at_or_below(
     tip.iter().find(|cp| cp.height() <= height)
 }
 
+/// Mark `tx` as an unconfirmed wallet spend and persist it.
+///
+/// Must run before the transaction is handed to LDK or broadcast: the next
+/// coin selection and `funds` have to see its inputs as spent without
+/// waiting for a mempool sync. Persisting keeps the reservation across a
+/// restart that happens before that sync.
+fn reserve_broadcast_tx(
+    wallet: &mut PersistedWallet<Connection>,
+    wallet_db: &mut Connection,
+    tx: &Transaction,
+) -> error::Result<()> {
+    let seen_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    wallet.apply_unconfirmed_txs([(tx.clone(), seen_at)]);
+    wallet.persist(wallet_db)?;
+    log::debug!(
+        target: "lampo-wallet",
+        "reserved inputs of unconfirmed tx {}",
+        tx.compute_txid()
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use bdk_wallet::chain::{BlockId, CheckPoint, ConfirmationBlockTime};
+    use bdk_wallet::keys::DerivableKey;
+    use bdk_wallet::rusqlite::Connection;
+    use bdk_wallet::{KeychainKind, PersistedWallet, Wallet};
+    use lampo_common::bitcoin::hashes::Hash;
+    use lampo_common::bitcoin::{
+        Amount, BlockHash, FeeRate, Network, OutPoint, ScriptBuf, Transaction, TxIn, TxOut,
+    };
+    use lampo_common::model::response::Utxo;
+
     use super::{is_recovering_history, jump_empty_wallet_to_tip};
+
+    /// Coins `funds` would still offer to a second `fundchannel`.
+    fn spendable_confirmed(utxos: &[Utxo]) -> Vec<&Utxo> {
+        utxos
+            .iter()
+            .filter(|utxo| utxo.confirmed > 0 && !utxo.reserved)
+            .collect()
+    }
+
+    fn regtest_xprv() -> lampo_common::bitcoin::bip32::Xpriv {
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let xkey: bdk_wallet::keys::ExtendedKey =
+            bdk_wallet::keys::bip39::Mnemonic::parse(mnemonic)
+                .expect("mnemonic")
+                .into_extended_key()
+                .expect("xkey");
+        xkey.into_xprv(Network::Regtest).expect("regtest xprv")
+    }
+
+    /// In-memory wallet holding one confirmed coin. No bitcoind: the bug is
+    /// the local unspent set between broadcast and the next sync.
+    fn funded_wallet(value: Amount) -> (PersistedWallet<Connection>, Connection, ScriptBuf) {
+        let xprv = regtest_xprv();
+        let external = bdk_wallet::descriptor::template::Bip84(xprv, KeychainKind::External);
+        let internal = bdk_wallet::descriptor::template::Bip84(xprv, KeychainKind::Internal);
+        let mut db = Connection::open_in_memory().expect("memory db");
+        let mut wallet = Wallet::create(external, internal)
+            .network(Network::Regtest)
+            .create_wallet(&mut db)
+            .expect("wallet");
+
+        // Peek, do not reveal yet: the funding update must itself mark the
+        // script active, the same way a chain scan does. Revealing first and
+        // then inserting the tx leaves the outpoint out of the index.
+        let address = wallet.peek_address(KeychainKind::External, 0).address;
+        let script = address.script_pubkey();
+        let parent = Transaction {
+            version: lampo_common::bitcoin::transaction::Version::TWO,
+            lock_time: lampo_common::bitcoin::absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                // Not a coinbase. A null prevout makes the output immature,
+                // so coin selection reports 0 available.
+                previous_output: OutPoint {
+                    txid: lampo_common::bitcoin::Txid::from_byte_array([9u8; 32]),
+                    vout: 0,
+                },
+                ..Default::default()
+            }],
+            output: vec![TxOut {
+                value,
+                script_pubkey: script.clone(),
+            }],
+        };
+        let parent_txid = parent.compute_txid();
+        // Height 0 connects to the wallet's genesis checkpoint. A higher tip
+        // without its parent is `CannotConnect`.
+        let tip = BlockId {
+            height: 0,
+            hash: BlockHash::from_byte_array([2u8; 32]),
+        };
+        let mut update = bdk_wallet::Update::default();
+        update.last_active_indices.insert(KeychainKind::External, 0);
+        update.chain = Some(CheckPoint::new(tip));
+        update.tx_update.txs = [Arc::new(parent)].into();
+        update.tx_update.anchors = [(
+            ConfirmationBlockTime {
+                block_id: tip,
+                confirmation_time: 1,
+            },
+            parent_txid,
+        )]
+        .into();
+        wallet.apply_update(update).expect("fund the wallet");
+        wallet.persist(&mut db).expect("persist fund");
+        (wallet, db, script)
+    }
+
+    fn list_like_funds(wallet: &PersistedWallet<Connection>) -> Vec<Utxo> {
+        let tip_height = wallet.local_chain().tip().height();
+        wallet
+            .list_unspent()
+            .map(|tx| {
+                let confirmed = tx
+                    .chain_position
+                    .confirmation_height_upper_bound()
+                    .map(|height| tip_height.saturating_sub(height).saturating_add(1))
+                    .unwrap_or(0);
+                Utxo {
+                    txid: tx.outpoint.txid.to_string(),
+                    vout: tx.outpoint.vout,
+                    reserved: tx.is_spent,
+                    confirmed,
+                    amount_msat: tx.txout.value.to_sat() * 1000,
+                }
+            })
+            .collect()
+    }
+
+    fn build_funding(
+        wallet: &mut PersistedWallet<Connection>,
+        script: ScriptBuf,
+        amount: Amount,
+    ) -> Transaction {
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(script, amount)
+            .fee_rate(FeeRate::from_sat_per_kwu(250))
+            .nlocktime(lampo_common::bitcoin::absolute::LockTime::ZERO);
+        let mut psbt = builder.finish().expect("coin selection");
+        assert!(wallet
+            .sign(&mut psbt, bdk_wallet::SignOptions::default())
+            .expect("sign"));
+        psbt.extract_tx().expect("extract")
+    }
+
+    #[test]
+    fn second_fundchannel_does_not_select_a_coin_already_reserved() {
+        // One confirmed coin, large enough for one channel and not two.
+        // Before the fix, both builds succeeded and `funds` still listed the
+        // coin as confirmed until the next mempool sync (issue #649).
+        let (mut wallet, mut db, _script) = funded_wallet(Amount::from_sat(200_000));
+        let before = list_like_funds(&wallet);
+        assert_eq!(
+            spendable_confirmed(&before).len(),
+            1,
+            "the fixture must start with one confirmed spendable coin"
+        );
+
+        let dest = ScriptBuf::from_hex("0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .expect("funding script");
+        let first = build_funding(&mut wallet, dest.clone(), Amount::from_sat(100_000));
+        super::reserve_broadcast_tx(&mut wallet, &mut db, &first).expect("reserve");
+
+        let after = list_like_funds(&wallet);
+        assert!(
+            spendable_confirmed(&after).is_empty(),
+            "funds must not list the spent coin as confirmed and free, got {after:?}"
+        );
+        assert!(
+            after
+                .iter()
+                .all(|utxo| { utxo.txid != first.input[0].previous_output.txid.to_string() }),
+            "the spent coin must leave list_unspent, got {after:?}"
+        );
+
+        let second = wallet.build_tx();
+        let err = {
+            let mut second = second;
+            second
+                .add_recipient(dest, Amount::from_sat(100_000))
+                .fee_rate(FeeRate::from_sat_per_kwu(250));
+            second
+                .finish()
+                .expect_err("second funding must not reuse the coin")
+        };
+        let message = err.to_string();
+        assert!(
+            message.contains("Insufficient") || message.contains("insufficient"),
+            "expected insufficient funds, got {message}"
+        );
+    }
+
+    #[test]
+    fn reserved_spend_survives_reload_before_mempool_sync() {
+        let (mut wallet, mut db, _script) = funded_wallet(Amount::from_sat(200_000));
+        let dest = ScriptBuf::from_hex("0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .expect("funding script");
+        let first = build_funding(&mut wallet, dest, Amount::from_sat(100_000));
+        super::reserve_broadcast_tx(&mut wallet, &mut db, &first).expect("reserve");
+
+        let xprv = regtest_xprv();
+        let external = bdk_wallet::descriptor::template::Bip84(xprv, KeychainKind::External);
+        let internal = bdk_wallet::descriptor::template::Bip84(xprv, KeychainKind::Internal);
+        let reloaded = Wallet::load()
+            .descriptor(KeychainKind::External, Some(external))
+            .descriptor(KeychainKind::Internal, Some(internal))
+            .check_network(Network::Regtest)
+            .load_wallet(&mut db)
+            .expect("load")
+            .expect("wallet row");
+        assert!(
+            spendable_confirmed(&list_like_funds(&reloaded)).is_empty(),
+            "a restart before the next sync must not offer the coin again"
+        );
+    }
 
     #[test]
     fn fast_sync_jumps_only_a_genesis_checkpoint() {
