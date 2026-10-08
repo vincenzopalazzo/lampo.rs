@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::hashes::Hash;
-use lampo_common::bitcoin::{Amount, OutPoint, Transaction, WPubkeyHash};
+use lampo_common::bitcoin::{Amount, OutPoint, Transaction, Txid, WPubkeyHash};
 use tokio::sync::RwLock;
 
 use lampo_common::async_trait;
@@ -511,6 +511,16 @@ impl Handler for LampoHandler {
                         );
                     }
                 };
+                // LDK was not handed this transaction, so it cannot rebroadcast
+                // it. Free the wallet reservation created before the attempt.
+                let release_unbroadcast_funding = |this: &LampoHandler, txid: Txid| {
+                    if let Err(err) = this.wallet_manager.release_transaction(txid) {
+                        log::error!(
+                            target: "lampo-wallet",
+                            "failed to release unbroadcast funding transaction {txid}: {err}"
+                        );
+                    }
+                };
                 // Same as ldk-node: ChannelFunding is 12-block economical,
                 // read from the cache (never block the event loop on RPC).
                 // An explicit `sat_per_vbyte` from the caller (LND REST
@@ -585,6 +595,7 @@ impl Handler for LampoHandler {
                 // under the shared wait-state lock so a concurrent timeout
                 // cannot force-close an already-accepted funding (and so we
                 // skip handoff if the waiter already abandoned).
+                let txid = transaction.compute_txid();
                 match self
                     .channel_manager
                     .funding_transaction_generated_if_waiting(
@@ -598,6 +609,7 @@ impl Handler for LampoHandler {
                                 .to_owned();
                         log::warn!(target: "lampo", "{}", msg);
                         abandon_temp_channel(self, &msg);
+                        release_unbroadcast_funding(self, txid);
                         return Err(error::anyhow!("{}", msg));
                     }
                     std::result::Result::Err(err) => {

@@ -906,11 +906,11 @@ fn apply_funding_wait_event(
             reason,
             ..
         }) if *expected_txid == Some(failed_txid) => {
-            // Handoff already succeeded; broadcast RPC errors are ambiguous
-            // (backend may have accepted the tx) and LDK may still rebroadcast.
-            // Do not present this as a safely-retryable open failure.
+            // Handoff already succeeded. This LDK revision may still rebroadcast
+            // the funding tx, so the wallet reservation stays held and this is
+            // not a safely retryable open failure.
             FundingWaitStep::Failed(format!(
-                "channel funding broadcast reported failure after handoff ({reason}); channel left open (broadcast may still be pending)"
+                "channel funding broadcast reported failure after handoff ({reason}); channel left open and its inputs stay reserved"
             ))
         }
         Event::Lightning(LightningEvent::CloseChannelEvent {

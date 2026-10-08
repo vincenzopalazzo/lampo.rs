@@ -55,6 +55,12 @@ pub trait WalletManager: Send + Sync {
         best_block: Height,
     ) -> error::Result<Transaction>;
 
+    /// Drop a locally reserved transaction that will not be broadcast.
+    ///
+    /// Callers must ensure Lightning can no longer rebroadcast it before
+    /// releasing its inputs for another spend.
+    fn release_transaction(&self, txid: Txid) -> error::Result<()>;
+
     /// Return the list of transaction stored inside the wallet
     async fn list_transactions(&self) -> error::Result<Vec<Utxo>>;
 

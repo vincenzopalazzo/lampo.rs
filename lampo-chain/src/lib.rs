@@ -635,14 +635,19 @@ impl Backend for LampoChainSync {
                 handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
             }
             Err(err) => {
+                let txid = tx.compute_txid();
                 let msg = format!("Failed to broadcast transaction: {err}");
                 log::error!(target: "lampo-chain", "{}", msg);
+                // LDK 0.3 may still rebroadcast a handed-off funding tx, and
+                // this revision has no public close that skips that broadcast.
+                // Keep the wallet reservation so its inputs cannot fund another
+                // channel while the old funding tx remains live.
                 // Tag with txid so an `open_channel` waiter waiting on this
                 // funding broadcast can fail without reacting to unrelated
                 // (e.g. unilateral-close) broadcast errors.
                 handler.emit(Event::OnChain(OnChainEvent::FundingChannelFailed {
                     temporary_channel_id: None,
-                    txid: Some(tx.compute_txid()),
+                    txid: Some(txid),
                     reason: msg,
                 }));
             }
@@ -1052,6 +1057,10 @@ mod tests {
 
         async fn get_onchain_balance(&self) -> error::Result<u64> {
             Ok(0)
+        }
+
+        fn release_transaction(&self, _txid: lampo_common::bitcoin::Txid) -> error::Result<()> {
+            Ok(())
         }
 
         async fn create_transaction(
