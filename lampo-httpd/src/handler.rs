@@ -45,6 +45,7 @@ impl ExternalHandler for HttpdHandler {
             "connect",
             "close",
             "channels",
+            "peers",
             "fundchannel",
             "stop",
         ];

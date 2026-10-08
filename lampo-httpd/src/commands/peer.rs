@@ -14,4 +14,5 @@ use crate::{post, AppState, ResultJson};
 post!(connect, request: request::Connect, response: request::Connect);
 post!(close, request: request::CloseChannel, response: response::CloseChannel);
 post!(channels, request: json::Value, response: json::Value);
+post!(peers, response: response::Peers);
 post!(fundchannel, request: request::OpenChannel, response: json::Value);

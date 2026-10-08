@@ -114,6 +114,98 @@ pub async fn fund_a_simple_channel_from() -> error::Result<()> {
     Ok(())
 }
 
+/// Both sides list the channel with its funding outpoint, and only the
+/// opener reports it as outbound. `peers` lists the connection from both
+/// ends with its direction.
+#[tokio_test_shutdown_timeout::test(5)]
+pub async fn channels_report_the_opener_and_peers_the_connection() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+    let _: response::Connect = node2
+        .lampod()
+        .call(
+            "connect",
+            request::Connect {
+                node_id: node1.info.node_id.clone(),
+                addr: "127.0.0.1".to_owned(),
+                port: node1.port,
+            },
+        )
+        .await
+        .unwrap();
+
+    // node1 lists node2 only once it has processed node2's `init`.
+    let mut peers = Vec::new();
+    async_wait!(async {
+        let response: response::Peers = node1
+            .lampod()
+            .call("peers", json::json!({}))
+            .await
+            .map_err(|_| ())?;
+        peers = response.peers;
+        if peers.is_empty() {
+            return Err(());
+        }
+        Ok(())
+    });
+    assert_eq!(peers.len(), 1);
+    assert_eq!(peers[0].node_id, node2.info.node_id);
+    assert!(peers[0].inbound);
+    let peers: response::Peers = node2.lampod().call("peers", json::json!({})).await?;
+    assert_eq!(peers.peers.len(), 1);
+    assert_eq!(peers.peers[0].node_id, node1.info.node_id);
+    assert!(!peers.peers[0].inbound);
+
+    let mut events = node2.lampod().events();
+    let response: json::Value = node1
+        .lampod()
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: node2.info.node_id.clone(),
+                amount: 100000,
+                public: false,
+                port: None,
+                addr: None,
+                push_msat: None,
+                sat_per_vbyte: None,
+            },
+        )
+        .await
+        .unwrap();
+    let txid = response["txid"]
+        .as_str()
+        .expect("fundchannel returns the txid")
+        .to_owned();
+    node2.fund_wallet(10).await.unwrap();
+
+    async_wait!(async {
+        while let Some(event) = events.recv().await {
+            if let Event::Lightning(LightningEvent::ChannelReady { .. }) = event {
+                return Ok(());
+            }
+        }
+        Err(())
+    });
+
+    let opener: response::Channels = node1.lampod().call("channels", json::json!({})).await?;
+    let acceptor: response::Channels = node2.lampod().call("channels", json::json!({})).await?;
+    let (opener, acceptor) = (&opener.channels[0], &acceptor.channels[0]);
+    assert!(opener.is_outbound);
+    assert!(!acceptor.is_outbound);
+    let funding_txo = opener
+        .funding_txo
+        .clone()
+        .expect("the opener knows its funding outpoint");
+    assert!(
+        funding_txo.starts_with(&format!("{txid}:")),
+        "{funding_txo} does not spend {txid}"
+    );
+    assert_eq!(acceptor.funding_txo.as_deref(), Some(funding_txo.as_str()));
+    Ok(())
+}
+
 /// `fundchannel` must honor the `public` flag it accepts.
 ///
 /// This used to fail: `open_channel` parsed `public` into the request and

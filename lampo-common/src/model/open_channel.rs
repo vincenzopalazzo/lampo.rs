@@ -74,5 +74,11 @@ pub mod response {
         pub public: bool,
         pub available_balance_for_send_msat: u64,
         pub available_balance_for_recv_msat: u64,
+        /// Whether we opened the channel.
+        #[serde(default)]
+        pub is_outbound: bool,
+        /// The funding outpoint as `txid:vout`, once the funding transaction is known.
+        #[serde(default)]
+        pub funding_txo: Option<String>,
     }
 }

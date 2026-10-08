@@ -24,7 +24,7 @@ use commands::offchain::{
     rest_setasyncinvoicepaths,
 };
 use commands::onchain::rest_new_addr;
-use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel};
+use commands::peer::{rest_channels, rest_close, rest_connect, rest_fundchannel, rest_peers};
 use commands::plugin::{rest_plugin_start, rest_plugin_stop};
 
 use crate::commands::offchain::rest_offer;
@@ -264,6 +264,7 @@ pub async fn run<T: ToSocketAddrs + Display>(
             .service(swagger_api)
             .service(rest_getinfo)
             .service(rest_channels)
+            .service(rest_peers)
             .service(rest_connect)
             .service(rest_fundchannel)
             .service(rest_close)
