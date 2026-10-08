@@ -449,6 +449,8 @@ impl LampoChannelManager {
                 public: channel.is_announced,
                 available_balance_for_send_msat: channel.outbound_capacity_msat,
                 available_balance_for_recv_msat: channel.inbound_capacity_msat,
+                is_outbound: channel.is_outbound,
+                funding_txo: channel.funding_txo.map(|txo| txo.to_string()),
             })
             .collect();
         Channels { channels }
