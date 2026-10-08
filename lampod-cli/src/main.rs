@@ -71,6 +71,10 @@ fn write_words_to_file<P: AsRef<Path>>(path: P, words: String) -> error::Result<
 
     // FIXME: we should give the possibility to encrypt this file.
     file.write_all(words.as_bytes())?;
+    // The wallet database is created only after this function returns. Force
+    // the seed to stable storage first so a power loss cannot leave descriptors
+    // whose mnemonic never reached disk.
+    file.sync_all()?;
 
     // `OpenOptions::mode` only applies when the file is created (and is
     // masked by the umask), so tighten the permissions explicitly to also
@@ -97,20 +101,31 @@ fn load_words_from_file<P: AsRef<Path>>(path: P) -> error::Result<String> {
     }
 }
 
+async fn initialize_new_bdk_wallet(
+    lampo_conf: Arc<LampoConf>,
+    wallet_path: &str,
+) -> error::Result<BDKWalletManager> {
+    // Persist the wallet identity before creating bdk-wallet.db or touching
+    // the backend. If initialization fails, the next start loads this same
+    // mnemonic and can safely retry against the existing descriptors.
+    let mnemonic = BDKWalletManager::generate_mnemonic()?;
+    write_words_to_file(wallet_path, mnemonic.clone())?;
+    BDKWalletManager::create(lampo_conf, &mnemonic).await
+}
+
 async fn create_new_wallet(
     lampo_conf: Arc<LampoConf>,
     client: Arc<dyn Backend>,
     words_path: &str,
 ) -> error::Result<Arc<dyn WalletManager>> {
-    let (wallet, mnemonic) = match client.kind() {
+    let wallet_path = format!("{}/wallet.dat", words_path);
+    let wallet = match client.kind() {
         lampo_common::backend::BackendKind::Core
         | lampo_common::backend::BackendKind::Esplora
         | lampo_common::backend::BackendKind::Electrum => {
-            BDKWalletManager::new(lampo_conf.clone()).await?
+            initialize_new_bdk_wallet(lampo_conf.clone(), &wallet_path).await?
         }
     };
-    let wallet_path = format!("{}/wallet.dat", words_path);
-    write_words_to_file(&wallet_path, mnemonic.clone())?;
     // SECURITY: do not print the mnemonic to the terminal -- it would leak
     // into scrollback buffers, tmux/screen logs, CI logs and `ps`-visible
     // transcripts. Point the user at the (0600) wallet file instead.
@@ -651,5 +666,72 @@ mod tests {
             "existing wallet.dat must be tightened to 0600, got {:o}",
             mode & 0o777
         );
+    }
+}
+
+#[cfg(test)]
+mod wallet_creation_tests {
+    use std::sync::Arc;
+
+    use lampo_common::conf::{LampoConf, Network};
+    use lampo_common::wallet::WalletManager;
+
+    use super::{initialize_new_bdk_wallet, load_words_from_file};
+    use lampo_bdk_wallet::BDKWalletManager;
+
+    /// Issue #648: backend failure after database creation must retain the
+    /// mnemonic so the same descriptors can be reopened on the next start.
+    #[test]
+    fn failed_first_start_persists_mnemonic_for_retry() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = std::env::temp_dir().join(format!(
+                "lampod-cli-failed-first-start-{}",
+                std::process::id()
+            ));
+            std::fs::remove_dir_all(&dir).ok();
+            let root = dir.join("root");
+            std::fs::create_dir_all(root.join("regtest")).unwrap();
+            let wallet_path = root.join("regtest/wallet.dat");
+
+            let mut conf = LampoConf::default();
+            conf.network = Network::Regtest;
+            conf.root_path = root.display().to_string();
+            conf.core_url = Some("http://lampo-wallet-nxdomain.invalid:18332".to_owned());
+            conf.core_user = Some("user".to_owned());
+            conf.core_pass = Some("pass".to_owned());
+            let conf = Arc::new(conf);
+
+            let first_error = match initialize_new_bdk_wallet(
+                conf.clone(),
+                wallet_path.to_str().expect("UTF-8 test path"),
+            )
+            .await
+            {
+                Ok(_) => panic!("unreachable backend must fail wallet initialization"),
+                Err(err) => err,
+            };
+            let mnemonic = load_words_from_file(&wallet_path)
+                .expect("failed initialization must retain its mnemonic");
+            assert!(!mnemonic.is_empty());
+            assert!(
+                root.join("regtest/bdk-wallet.db").exists(),
+                "test must cover failure after database creation"
+            );
+
+            let retry_error = match BDKWalletManager::restore(conf, &mnemonic).await {
+                Ok(_) => panic!("unreachable backend must fail the retry"),
+                Err(err) => err,
+            };
+            std::fs::remove_dir_all(&dir).ok();
+
+            assert!(
+                !retry_error.to_string().contains("Descriptor mismatch"),
+                "persisted mnemonic did not reopen its database: {retry_error}; first error: {first_error}"
+            );
+        });
     }
 }

@@ -64,6 +64,37 @@ pub struct BDKWalletManager {
 }
 
 impl BDKWalletManager {
+    /// Generate a fresh BIP39 mnemonic without touching the wallet database or
+    /// backend. Callers must persist it before passing it to Self::create.
+    pub fn generate_mnemonic() -> error::Result<String> {
+        let mnemonic: GeneratedKey<_, bdk_wallet::miniscript::Tap> =
+            Mnemonic::generate((WordCount::Words12, Language::English))
+                .map_err(|err| error::anyhow!("unable to generate wallet mnemonic: {err:?}"))?;
+        Ok(mnemonic.to_string())
+    }
+
+    /// Create a new wallet from a mnemonic the caller has already persisted.
+    pub async fn create(conf: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self> {
+        let (wallet, db, keymanager) = Self::build_wallet(conf.clone(), mnemonic_words).await?;
+        let client = Self::build_client(conf.clone())?;
+        let recovery_marker = PathBuf::from(format!("{}/wallet-recovery", conf.path()));
+        if recovery_marker.exists() {
+            fs::remove_file(recovery_marker)?;
+        }
+        Ok(Self {
+            wallet: StdMutex::new(wallet),
+            wallet_db: StdMutex::new(db),
+            keymanager: Arc::new(keymanager),
+            network: conf.network,
+            rpc: Arc::new(client),
+            guard: Mutex::new(false),
+            restored_seed: false,
+            reindex_from: conf.reindex,
+            conf,
+            coordinator: OnceLock::new(),
+        })
+    }
+
     /// from mnemonic_words build or bkd::Wallet or return an bdk::Error
     async fn build_wallet(
         conf: Arc<LampoConf>,
@@ -225,32 +256,9 @@ impl BDKWalletManager {
 #[async_trait]
 impl WalletManager for BDKWalletManager {
     async fn new(conf: Arc<LampoConf>) -> error::Result<(Self, String)> {
-        // Generate fresh mnemonic
-        let mnemonic: GeneratedKey<_, bdk_wallet::miniscript::Tap> =
-            Mnemonic::generate((WordCount::Words12, Language::English)).unwrap();
-        // Convert mnemonic to string
-        let mnemonic_words = mnemonic.to_string();
-        let (wallet, db, keymanager) = Self::build_wallet(conf.clone(), &mnemonic_words).await?;
-        let client = Self::build_client(conf.clone())?;
-        let recovery_marker = PathBuf::from(format!("{}/wallet-recovery", conf.path()));
-        if recovery_marker.exists() {
-            fs::remove_file(recovery_marker)?;
-        }
-        Ok((
-            Self {
-                wallet: StdMutex::new(wallet),
-                wallet_db: StdMutex::new(db),
-                keymanager: Arc::new(keymanager),
-                network: conf.network,
-                rpc: Arc::new(client),
-                guard: Mutex::new(false),
-                restored_seed: false,
-                reindex_from: conf.reindex,
-                conf: conf.clone(),
-                coordinator: OnceLock::new(),
-            },
-            mnemonic_words,
-        ))
+        let mnemonic_words = Self::generate_mnemonic()?;
+        let wallet = Self::create(conf, &mnemonic_words).await?;
+        Ok((wallet, mnemonic_words))
     }
 
     async fn restore(conf: Arc<LampoConf>, mnemonic_words: &str) -> error::Result<Self> {
