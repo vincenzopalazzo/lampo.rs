@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use lampo_common::hex;
+use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::offers::payer_proof::PayerProof;
 
 use lampo_common::error;
@@ -1268,4 +1269,162 @@ pub async fn pay_offer_blip42_contact_roundtrip() -> error::Result<()> {
     );
     assert!(payback.payment_preimage.is_some());
     Ok(())
+}
+
+/// Matt Corallo on rust-lightning #5008: a contact secret derived from one
+/// static offer signing key lets Bob and Charlie compare notes and discover
+/// Alice is the same person.
+///
+/// Each reveal must mint a fresh offer key (LDK's random-per-offer nonce) and
+/// a secret that does not match an ECDH of the other contact's key. Repeating
+/// a reveal to the same contact must keep that key and secret: a new ephemeral
+/// secret on every pay is the other half of the review.
+#[tokio_test_shutdown_timeout::test(90)]
+pub async fn blip42_contact_keys_are_not_linkable_across_contacts() -> error::Result<()> {
+    init();
+    let alice = LampoTesting::tmp().await?;
+    let btc = alice.btc.clone();
+    let bob = Arc::new(LampoTesting::new(btc.clone()).await?);
+    let charlie = Arc::new(LampoTesting::new(btc.clone()).await?);
+    // Push so each payee can later pay back on the same channel. The intro
+    // node is Alice's own peer; a shared intro is not the leak under review.
+    alice
+        .fund_channel_with_push(bob.clone(), 1_000_000, Some(500_000_000))
+        .await?;
+    alice
+        .fund_channel_with_push(charlie.clone(), 1_000_000, Some(500_000_000))
+        .await?;
+
+    let bob_offer = offer_from(&bob, "bob contact offer").await?;
+    let charlie_offer = offer_from(&charlie, "charlie contact offer").await?;
+
+    pay_revealing(&alice, &bob_offer, "bob", &bob.info.node_id).await?;
+    pay_revealing(&alice, &charlie_offer, "charlie", &charlie.info.node_id).await?;
+
+    let alice_book = list_contacts(&alice).await?;
+    let bob_contact = contact_labeled(&alice_book, "bob");
+    let charlie_contact = contact_labeled(&alice_book, "charlie");
+    assert_ne!(
+        bob_contact.primary_secret_hex, charlie_contact.primary_secret_hex,
+        "one static signing key would still be comparable across contacts: {alice_book:?}"
+    );
+    let bob_key = offer_signing_key(bob_contact.our_offer.as_deref().unwrap());
+    let charlie_key = offer_signing_key(charlie_contact.our_offer.as_deref().unwrap());
+    assert_ne!(
+        bob_key, charlie_key,
+        "Alice revealed one signing pubkey to Bob and Charlie"
+    );
+
+    // What Bob and Charlie can compare is the payer offer they stored, not
+    // Alice's book. Recomputing Bob's key against Charlie's offer must not
+    // yield Charlie's secret: that match is the static-key attack.
+    let bob_inbound = inbound_contact(&bob).await?;
+    let charlie_inbound = inbound_contact(&charlie).await?;
+    assert_ne!(
+        bob_inbound.primary_secret_hex, charlie_inbound.primary_secret_hex,
+        "receivers saw the same contact secret"
+    );
+    assert_ne!(
+        offer_signing_key(&bob_inbound.remote_offer),
+        offer_signing_key(&charlie_inbound.remote_offer),
+        "receivers saw the same payer-offer signing key"
+    );
+    assert_eq!(
+        bob_inbound.primary_secret_hex,
+        bob_contact.primary_secret_hex
+    );
+    assert_eq!(
+        charlie_inbound.primary_secret_hex,
+        charlie_contact.primary_secret_hex
+    );
+
+    // Same contact, second pay: key and secret stay put.
+    pay_revealing(&alice, &bob_offer, "bob", &bob.info.node_id).await?;
+    let again = contact_labeled(&list_contacts(&alice).await?, "bob");
+    assert_eq!(again.our_offer, bob_contact.our_offer);
+    assert_eq!(again.primary_secret_hex, bob_contact.primary_secret_hex);
+    let bob_after = inbound_contact(&bob).await?;
+    assert_eq!(bob_after.primary_secret_hex, bob_inbound.primary_secret_hex);
+    assert_eq!(bob_after.remote_offer, bob_inbound.remote_offer);
+    Ok(())
+}
+
+async fn offer_from(node: &LampoTesting, description: &str) -> error::Result<String> {
+    let offer: response::Offer = node
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: Some(description.to_owned()),
+                amount_msat: Some(50_000),
+                currency: None,
+                currency_amount: None,
+            },
+        )
+        .await?;
+    Ok(offer.bolt12)
+}
+
+async fn pay_revealing(
+    payer: &LampoTesting,
+    offer: &str,
+    label: &str,
+    intro_node: &str,
+) -> error::Result<()> {
+    let pay: response::PayResult = payer
+        .lampod()
+        .call(
+            "pay",
+            request::Pay {
+                invoice_str: offer.to_owned(),
+                amount: None,
+                bolt12: Some(request::Bolt12Pay {
+                    payer_note: Some(format!("hi {label}")),
+                    reveal_contact: Some(true),
+                    contact_label: Some(label.to_owned()),
+                    intro_node: Some(intro_node.to_owned()),
+                }),
+                timeout: Default::default(),
+                max_fee_msat: None,
+                timeout_secs: None,
+            },
+        )
+        .await?;
+    if pay.state != response::PaymentState::Success {
+        error::bail!("reveal-contact pay to {label} failed: {pay:?}");
+    }
+    Ok(())
+}
+
+async fn list_contacts(node: &LampoTesting) -> error::Result<response::Contacts> {
+    Ok(node
+        .lampod()
+        .call("listcontacts", request::ListContacts {})
+        .await?)
+}
+
+fn contact_labeled(book: &response::Contacts, label: &str) -> response::ContactInfo {
+    book.contacts
+        .iter()
+        .find(|c| c.label == label)
+        .cloned()
+        .unwrap_or_else(|| panic!("missing contact `{label}`: {book:?}"))
+}
+
+async fn inbound_contact(node: &LampoTesting) -> error::Result<response::ContactInfo> {
+    let book = list_contacts(node).await?;
+    let found = book
+        .contacts
+        .iter()
+        .find(|c| !c.remote_offer.is_empty())
+        .cloned();
+    found.ok_or_else(|| error::anyhow!("no inbound BLIP-42 contact: {book:?}"))
+}
+
+fn offer_signing_key(offer: &str) -> String {
+    let parsed = Offer::from_str(offer).unwrap_or_else(|err| panic!("invalid offer: {err:?}"));
+    parsed
+        .issuer_signing_pubkey()
+        .map(|key| key.to_string())
+        .unwrap_or_else(|| panic!("payer offer has no signing pubkey: {offer}"))
 }
