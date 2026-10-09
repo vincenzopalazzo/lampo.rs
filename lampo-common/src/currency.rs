@@ -6,7 +6,8 @@
 //! inside LDK.
 //!
 //! The fork lampo builds against
-//! (`vincenzopalazzo/rust-lightning`, `lampo/bolt12-currency-0.3`) takes the
+//! (`vincenzopalazzo/rust-lightning`, `lampo/blip42-on-rc3`, v0.3-rc3 plus
+//! currency conversion plus BLIP-42 contacts) takes the
 //! converter at initiating calls, and keeps a standing
 //! `Arc<dyn CurrencyConversion>` table on `ChannelManager` for inbound and
 //! asynchronous flows (answering invoice requests, verifying received
