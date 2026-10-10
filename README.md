@@ -82,6 +82,25 @@ Then you can query the node with the following command:
 make integration
 ```
 
+## Peer backup
+
+Lampo stores a peer's encrypted backup blob and sends our own channel-monitor
+backup, as specified by [BOLT 1 `peer_storage`](https://github.com/lightning/bolts/blob/master/01-messaging.md#the-peer_storage-and-peer_storage_retrieval-messages).
+Feature bits 42/43 (`option_provide_storage`) advertise that this node will
+store a peer's opaque blob. Sending *our* monitor backup is separate: LDK only
+queues that blob when built with `--cfg peer_storage`.
+
+That flag lives in [`.cargo/config.toml`](.cargo/config.toml). `RUSTFLAGS` and
+`CARGO_ENCODED_RUSTFLAGS` replace the file instead of appending to it, so a
+build that sets either must include `--cfg peer_storage` too. Without the cfg,
+`lampod`'s `build.rs` refuses to compile. `cargo test` doctests run under
+rustdoc, which does not read this file; that is expected and is not a missing
+backup.
+
+This is not disaster recovery. LDK stores at most 1 KiB per peer, and our
+monitor snapshot is larger than that, so a Lampo or LDK peer will not keep it.
+See [SECURITY.md](SECURITY.md#peer-backup).
+
 ## Simulation
 
 Pre-production soak harness lives in [`simulations/`](simulations/) (regtest only). See

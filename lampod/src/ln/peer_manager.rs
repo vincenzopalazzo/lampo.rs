@@ -47,7 +47,11 @@ pub type SimpleArcPeerManager<M, T, L> = PeerManager<
     Arc<L>,
     IgnoringMessageHandler,
     Arc<dyn LampoSigner>,
-    IgnoringMessageHandler,
+    // ChainMonitor implements SendOnlyMessageHandler. With `cfg(peer_storage)`
+    // it queues our encrypted channel-monitor backup; PeerManager drains that
+    // queue. IgnoringMessageHandler would drop every `peer_storage` we owe a
+    // channel peer (BOLT 1).
+    Arc<M>,
 >;
 
 type InnerLampoPeerManager =
@@ -186,7 +190,10 @@ impl LampoPeerManager {
             onion_message_handler: onion_messenger.clone(),
             route_handler: gossip_sync,
             custom_message_handler: IgnoringMessageHandler {},
-            send_only_message_handler: IgnoringMessageHandler {},
+            // Same ChainMonitor the channel manager watches. LDK encrypts our
+            // monitor backup with `NodeSigner::get_peer_storage_key` and emits
+            // `peer_storage` from this handler on each new best block.
+            send_only_message_handler: channel_manager.chain_monitor(),
         };
 
         let peer_manager = InnerLampoPeerManager::new(
