@@ -12,20 +12,24 @@ will make our best effort to address them quickly.
 
 ## Peer backup
 
-Lampo implements BOLT 1 peer storage (`option_provide_storage`). Two limits
-matter for operators:
+Lampo implements BOLT 1 peer storage (`option_provide_storage`, bits 42/43).
+Those bits mean we will store a peer's opaque blob. Our own outbound backup is
+a separate path and is compiled in only with `--cfg peer_storage`.
 
-- A peer's blob is stored inside `ChannelManager` state, capped by LDK at
-  1 KiB per funded peer. The BOLT allows 65531 bytes; a larger blob is
-  rejected with a warning and not persisted.
+- A peer's blob is stored inside `ChannelManager` state. BOLT 1 allows a
+  message of 65531 bytes; LDK persists at most 1 KiB per funded peer and
+  rejects anything larger with a warning.
 - Our own backup is an encrypted channel-monitor snapshot, sent on each new
   best block to peers we have a funded channel with. It is not a substitute
-  for the on-disk channel monitor. Restoring from a peer blob that is ahead
-  of local state is an LDK panic path (`FundRecoverer`); do not treat peer
-  storage as an unattended disaster-recovery tool yet.
+  for the on-disk channel monitor.
+- If a `peer_storage_retrieval` blob is ahead of local channel state, LDK
+  panics while handling the message. The panic text mentions a `FundRecoverer`
+  helper; that helper is not implemented (it is a TODO in LDK). Do not treat
+  peer storage as unattended disaster recovery.
 
-The send path is compiled in only when `.cargo/config.toml` sets
-`--cfg peer_storage`. A build without that flag must not be shipped.
+`.cargo/config.toml` sets the cfg for normal builds. `RUSTFLAGS` and
+`CARGO_ENCODED_RUSTFLAGS` replace that file, so those builds must append
+`--cfg peer_storage`. `lampod` refuses to compile without it.
 
 ## Supported Versions
 

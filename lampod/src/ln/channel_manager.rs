@@ -400,14 +400,6 @@ impl LampoChannelManager {
     }
 
     fn build_channel_monitor(&self) -> LampoChainMonitor {
-        // `.cargo/config.toml` must pass `--cfg peer_storage`. Without it LDK
-        // still accepts a peer's blob, but never encrypts or sends ours, so
-        // the send-only handler in the peer manager would have nothing to
-        // drain. Fail here rather than advertise a backup we do not send.
-        assert!(
-            cfg!(peer_storage),
-            "peer backup requires the `peer_storage` rustc cfg (.cargo/config.toml)"
-        );
         let keys = self.signer.clone();
         ChainMonitor::new(
             // FIXME: this is needed when use esplora or electrum
@@ -938,20 +930,18 @@ fn apply_funding_wait_event(
     }
 }
 
+// BOLT 1 peer backup is not a Cargo feature. LDK only encrypts and queues our
+// channel-monitor blob when this cfg is set. A runtime assert would still let
+// `cargo build` succeed and crash later; refuse the binary here.
+#[cfg(not(peer_storage))]
+compile_error!(
+    "peer backup requires `--cfg peer_storage` (.cargo/config.toml). \
+     RUSTFLAGS and CARGO_ENCODED_RUSTFLAGS replace that file, so append the cfg there too."
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// BOLT 1 peer backup is not a Cargo feature. If `.cargo/config.toml` is
-    /// missing, LDK compiles `ChainMonitor::send_peer_storage` out and lampo
-    /// would advertise `option_provide_storage` without ever sending our blob.
-    #[test]
-    fn peer_storage_cfg_is_enabled() {
-        assert!(
-            cfg!(peer_storage),
-            "build with `--cfg peer_storage` (see .cargo/config.toml)"
-        );
-    }
 
     fn scids(ids: &[u64]) -> HashSet<u64> {
         ids.iter().copied().collect()
