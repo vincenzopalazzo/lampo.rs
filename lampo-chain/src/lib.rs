@@ -88,6 +88,73 @@ impl chain::Listen for WalletChainListener {
     }
 }
 
+/// Whether bitcoind is still downloading blocks the rest of the network
+/// already has. `getbestblockhash` alone cannot tell: during IBD that hash
+/// *is* the backend tip, so lampo looks fully synced (issue #111).
+///
+/// Core reports this on `getblockchaininfo`:
+/// - `initialblockdownload` while the tip is far behind the network
+/// - `headers > blocks` while headers are ahead of validated blocks
+/// - a non-empty `warnings` string (pre-v29) such as "synchronizing blockheaders"
+///
+/// Returns `None` when the RPC fails so a blip does not clear a previous
+/// `true`.
+#[derive(Deserialize)]
+struct BlockchainInfo {
+    #[serde(default)]
+    initialblockdownload: bool,
+    #[serde(default)]
+    blocks: u64,
+    #[serde(default)]
+    headers: u64,
+    /// String before Core 29; array of `{warning}` objects after.
+    #[serde(default)]
+    warnings: json::Value,
+}
+
+impl BlockchainInfo {
+    fn is_syncing(&self) -> bool {
+        blockchain_info_is_syncing(
+            self.initialblockdownload,
+            self.blocks,
+            self.headers,
+            warnings_nonempty(&self.warnings),
+        )
+    }
+}
+
+fn warnings_nonempty(warnings: &json::Value) -> bool {
+    match warnings {
+        json::Value::String(text) => !text.is_empty(),
+        json::Value::Array(items) => !items.is_empty(),
+        _ => false,
+    }
+}
+
+async fn backend_is_syncing(client: &RpcClient) -> Option<bool> {
+    let resp = client
+        .call_method::<json::Value>("getblockchaininfo", &[])
+        .await
+        .ok()?;
+    let info: BlockchainInfo = json::from_value(resp).ok()?;
+    Some(info.is_syncing())
+}
+
+async fn publish_backend_sync(client: &RpcClient, coordinator: Option<&ChainSyncCoordinator>) {
+    let Some(coordinator) = coordinator else {
+        return;
+    };
+    if let Some(syncing) = backend_is_syncing(client).await {
+        if syncing != coordinator.backend_syncing() {
+            log::info!(
+                target: "lampo-chain",
+                "bitcoind backend syncing={syncing}"
+            );
+        }
+        coordinator.set_backend_syncing(syncing);
+    }
+}
+
 fn mark_initial_sync_complete(
     coordinator: &ChainSyncCoordinator,
     wallet_included: bool,
@@ -911,6 +978,14 @@ impl Backend for LampoChainSync {
         };
 
         log::info!(target: "lampo-chain", "Chain listeners synced to current tip");
+        // The tip we just caught up to may itself be an IBD tip. Publish that
+        // before marking listeners synced so getinfo/funding do not observe a
+        // window where lampo looks caught up to the network.
+        publish_backend_sync(
+            self.rpc_client.as_ref(),
+            self.coordinator.get().map(Arc::as_ref),
+        )
+        .await;
 
         if wallet_listener.as_ref().is_some_and(|l| l.had_failure()) {
             log::warn!(
@@ -942,14 +1017,43 @@ impl Backend for LampoChainSync {
             if let Err(err) = spv_client.poll_best_tip().await {
                 log::error!(target: "lampo-chain", "Error while polling best tip: {:?}", err);
             }
+            publish_backend_sync(
+                self.rpc_client.as_ref(),
+                self.coordinator.get().map(Arc::as_ref),
+            )
+            .await;
             // FIXME: make this configurable
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     }
 }
+/// Pure decision used by [`backend_is_syncing`]. Kept separate so the IBD
+/// cases from issue #111 are testable without a bitcoind.
+fn blockchain_info_is_syncing(
+    initialblockdownload: bool,
+    blocks: u64,
+    headers: u64,
+    warnings_nonempty: bool,
+) -> bool {
+    initialblockdownload || headers > blocks || warnings_nonempty
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn blockchain_info_reports_ibd_even_when_heights_match() {
+        // Harshit’s getinfo on the old PR: best_height == block_height while
+        // Core was still syncing. `initialblockdownload` is the signal that
+        // height comparison misses.
+        assert!(super::blockchain_info_is_syncing(
+            true, 721_150, 721_150, false
+        ));
+        assert!(super::blockchain_info_is_syncing(false, 100, 150, false));
+        assert!(super::blockchain_info_is_syncing(false, 100, 100, true));
+        assert!(!super::blockchain_info_is_syncing(false, 100, 100, false));
+    }
 
     use lampo_common::async_trait;
     use lampo_common::bitcoin::absolute::Height;

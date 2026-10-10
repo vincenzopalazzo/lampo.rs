@@ -68,6 +68,7 @@ impl LampoInventoryManager {
             wallet_scan_height: wallet_tips.to_consensus_u32() as u64,
             sync_in_progress: false,
             sync_progress_percent: 100,
+            backend_syncing: false,
         };
         Ok(getinfo)
     }
