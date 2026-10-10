@@ -25,7 +25,7 @@ log = { version = "0.4", features = ["std"] }
 # gRPC transport (optional, behind "grpc" feature)
 tonic = { version = "0.12", features = ["tls", "transport"], optional = true }
 prost = { version = "0.13", optional = true }
-rcgen = { version = "0.13", features = ["pem", "x509-parser"], optional = true }
+rcgen = { version = "0.14", features = ["pem", "x509-parser"], optional = true }
 
 [build-dependencies]
 # Vendored protoc so `cargo check` does not need a system `protobuf-compiler`.
