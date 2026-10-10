@@ -20,8 +20,11 @@ a separate path and is compiled in only with `--cfg peer_storage`.
   message of 65531 bytes; LDK persists at most 1 KiB per funded peer and
   rejects anything larger with a warning.
 - Our own backup is an encrypted channel-monitor snapshot, sent on each new
-  best block to peers we have a funded channel with. It is not a substitute
-  for the on-disk channel monitor.
+  best block to peers we have a funded channel with. LDK packs that snapshot
+  up to the BOLT message limit (65531 bytes). A serialized monitor is larger
+  than 1 KiB, so another Lampo or LDK node rejects it with a warning and does
+  not store it. Lampo-to-LDK outbound backups are not durable today. It is not
+  a substitute for the on-disk channel monitor.
 - If a `peer_storage_retrieval` blob is ahead of local channel state, LDK
   panics while handling the message. The panic text mentions a `FundRecoverer`
   helper; that helper is not implemented (it is a TODO in LDK). Do not treat

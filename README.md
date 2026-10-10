@@ -92,8 +92,12 @@ queues that blob when built with `--cfg peer_storage`.
 
 That flag lives in [`.cargo/config.toml`](.cargo/config.toml). `RUSTFLAGS` and
 `CARGO_ENCODED_RUSTFLAGS` replace the file instead of appending to it, so a
-build that sets either must include `--cfg peer_storage` too. Without the cfg
-the crate does not compile.
+build that sets either must include `--cfg peer_storage` too. Without the cfg,
+`lampod` does not compile.
+
+This is not disaster recovery. LDK stores at most 1 KiB per peer, and our
+monitor snapshot is larger than that, so a Lampo or LDK peer will not keep it.
+See [SECURITY.md](SECURITY.md#peer-backup).
 
 ## Simulation
 
