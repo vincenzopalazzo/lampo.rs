@@ -32,7 +32,9 @@ a separate path and is compiled in only with `--cfg peer_storage`.
 
 `.cargo/config.toml` sets the cfg for normal builds. `RUSTFLAGS` and
 `CARGO_ENCODED_RUSTFLAGS` replace that file, so those builds must append
-`--cfg peer_storage`. `lampod` refuses to compile without it.
+`--cfg peer_storage`. `lampod`'s `build.rs` refuses to compile without it.
+rustdoc does not read `.cargo/config.toml`; the check is not in the crate, so
+doctests are not a false failure.
 
 ## Supported Versions
 

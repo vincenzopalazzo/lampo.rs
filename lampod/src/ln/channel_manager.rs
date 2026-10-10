@@ -930,15 +930,6 @@ fn apply_funding_wait_event(
     }
 }
 
-// BOLT 1 peer backup is not a Cargo feature. LDK only encrypts and queues our
-// channel-monitor blob when this cfg is set. A runtime assert would still let
-// `cargo build` succeed and crash later; refuse the binary here.
-#[cfg(not(peer_storage))]
-compile_error!(
-    "peer backup requires `--cfg peer_storage` (.cargo/config.toml). \
-     RUSTFLAGS and CARGO_ENCODED_RUSTFLAGS replace that file, so append the cfg there too."
-);
-
 #[cfg(test)]
 mod tests {
     use super::*;
