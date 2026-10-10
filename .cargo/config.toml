@@ -1,0 +1,11 @@
+# LDK gates sending our BOLT 1 peer backup (`peer_storage`) behind the
+# `peer_storage` rustc cfg. It is not a Cargo feature: `ChainMonitor` only
+# encrypts and queues the channel-monitor blob when this cfg is set.
+# `ChannelManager` already stores the peer's blob and advertises
+# `option_provide_storage` without it.
+#
+# A dependent crate cannot set rustc cfgs on a dependency, so the flag has to
+# live here. `make`, CI, and `cargo test` all read this file. The target table
+# (not `[build]`) is what Cargo composes with rustflags from the environment.
+[target.'cfg(all())']
+rustflags = ["--cfg", "peer_storage"]

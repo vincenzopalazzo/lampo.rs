@@ -10,6 +10,23 @@ will make our best effort to address them quickly.
 > **experimental software**. Do not use it on mainnet with funds you
 > cannot afford to lose.
 
+## Peer backup
+
+Lampo implements BOLT 1 peer storage (`option_provide_storage`). Two limits
+matter for operators:
+
+- A peer's blob is stored inside `ChannelManager` state, capped by LDK at
+  1 KiB per funded peer. The BOLT allows 65531 bytes; a larger blob is
+  rejected with a warning and not persisted.
+- Our own backup is an encrypted channel-monitor snapshot, sent on each new
+  best block to peers we have a funded channel with. It is not a substitute
+  for the on-disk channel monitor. Restoring from a peer blob that is ahead
+  of local state is an LDK panic path (`FundRecoverer`); do not treat peer
+  storage as an unattended disaster-recovery tool yet.
+
+The send path is compiled in only when `.cargo/config.toml` sets
+`--cfg peer_storage`. A build without that flag must not be shipped.
+
 ## Supported Versions
 
 Lampo has no stable releases yet. Security fixes are applied on top of

@@ -82,6 +82,14 @@ Then you can query the node with the following command:
 make integration
 ```
 
+## Peer backup
+
+Lampo stores a peer's encrypted backup blob and sends our own channel-monitor
+backup, as specified by [BOLT 1 `peer_storage`](https://github.com/lightning/bolts/blob/master/01-messaging.md#the-peer_storage-and-peer_storage_retrieval-messages)
+(`option_provide_storage`, feature bits 42/43). LDK only sends our blob when
+built with `--cfg peer_storage`. That flag lives in [`.cargo/config.toml`](.cargo/config.toml);
+do not drop it, or the node advertises a backup it never transmits.
+
 ## Simulation
 
 Pre-production soak harness lives in [`simulations/`](simulations/) (regtest only). See
