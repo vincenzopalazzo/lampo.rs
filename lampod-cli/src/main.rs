@@ -105,6 +105,9 @@ async fn initialize_new_bdk_wallet(
     lampo_conf: Arc<LampoConf>,
     wallet_path: &str,
 ) -> error::Result<BDKWalletManager> {
+    if Path::new(wallet_path).exists() {
+        error::bail!("`{wallet_path}` already exists; refusing to replace the wallet seed");
+    }
     // Persist the wallet identity before creating bdk-wallet.db or touching
     // the backend. If initialization fails, the next start loads this same
     // mnemonic and can safely retry against the existing descriptors.
@@ -678,6 +681,42 @@ mod wallet_creation_tests {
 
     use super::{initialize_new_bdk_wallet, load_words_from_file};
     use lampo_bdk_wallet::BDKWalletManager;
+
+    /// `new-wallet` on a node that already has a seed must not replace it:
+    /// bdk-wallet.db holds only public descriptors, so wallet.dat is the
+    /// only copy of the keys.
+    #[test]
+    fn new_wallet_keeps_an_existing_seed() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            let dir = std::env::temp_dir()
+                .join(format!("lampod-cli-existing-seed-{}", std::process::id()));
+            std::fs::remove_dir_all(&dir).ok();
+            let root = dir.join("root");
+            std::fs::create_dir_all(root.join("regtest")).unwrap();
+            let wallet_path = root.join("regtest/wallet.dat");
+            std::fs::write(&wallet_path, "existing seed words").unwrap();
+
+            let mut conf = LampoConf::default();
+            conf.network = Network::Regtest;
+            conf.root_path = root.display().to_string();
+            let result = initialize_new_bdk_wallet(
+                Arc::new(conf),
+                wallet_path.to_str().expect("UTF-8 test path"),
+            )
+            .await;
+            let words = load_words_from_file(&wallet_path).unwrap();
+            let db_created = root.join("regtest/bdk-wallet.db").exists();
+            std::fs::remove_dir_all(&dir).ok();
+
+            assert!(result.is_err(), "an existing wallet.dat must be refused");
+            assert_eq!(words, "existing seed words");
+            assert!(!db_created);
+        });
+    }
 
     /// Issue #648: backend failure after database creation must retain the
     /// mnemonic so the same descriptors can be reopened on the next start.
