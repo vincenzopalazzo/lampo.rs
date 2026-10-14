@@ -624,8 +624,11 @@ impl Handler for LampoHandler {
                     counterparty_node_id,
                     temporary_channel_id,
                     channel_value_satoshis,
-                    funding_transaction: transaction,
+                    funding_transaction: transaction.clone(),
                 }));
+                // Manual handoff suppresses LDK's broadcaster, so Lampo has to
+                // submit the funding tx itself.
+                self.chain_manager.backend.brodcast_tx(&transaction).await;
                 Ok(())
             }
             ldk::events::Event::ChannelPending {

@@ -168,6 +168,51 @@ pub struct LampoChainSync {
     sweeper: OnceLock<(chain::BlockLocator, Arc<LampoSweeper>)>,
 }
 
+fn is_definitive_broadcast_rejection(err: &lampo_common::error::Error) -> bool {
+    let msg = format!("{err:?}").to_ascii_lowercase();
+    [
+        "missingorspent",
+        "txn-already-in-mempool",
+        "bad-txns-in-belowout",
+        "bad-txns-inputs-duplicate",
+        "bad-txns-vout-negative",
+        "bad-txns-vout-empty",
+        "bad-txns-oversize",
+        "bad-txns-too-many-sigops",
+        "bad-txns-premature-spend-of-coinbase",
+        "bad-txns-nonstandard-inputs",
+        "mandatory-script-verify-flag-failed",
+        "scriptsig-size",
+        "scriptpubkey",
+        "dust",
+        "min relay fee not met",
+        "absurdly-high-fee",
+        "too-long-mempool-chain",
+        "bad-txns-spends-conflicting-tx",
+    ]
+    .iter()
+    .any(|marker| msg.contains(marker))
+}
+
+#[cfg(test)]
+mod broadcast_rejection_tests {
+    use super::is_definitive_broadcast_rejection;
+
+    #[test]
+    fn missing_input_is_a_definitive_rejection() {
+        let err = lampo_common::error::anyhow!(
+            "JSON-RPC error: RPC error -26: bad-txns-inputs-missingorspent"
+        );
+        assert!(is_definitive_broadcast_rejection(&err));
+    }
+
+    #[test]
+    fn transport_failure_keeps_the_reservation() {
+        let err = lampo_common::error::anyhow!("transport error: connection reset");
+        assert!(!is_definitive_broadcast_rejection(&err));
+    }
+}
+
 impl LampoChainSync {
     async fn broadcast_once(
         &self,
@@ -636,12 +681,22 @@ impl Backend for LampoChainSync {
             }
             Err(err) => {
                 let txid = tx.compute_txid();
-                let msg = format!("Failed to broadcast transaction: {err}");
+                let mut msg = format!("Failed to broadcast transaction: {err}");
                 log::error!(target: "lampo-chain", "{}", msg);
-                // LDK 0.3 may still rebroadcast a handed-off funding tx, and
-                // this revision has no public close that skips that broadcast.
-                // Keep the wallet reservation so its inputs cannot fund another
-                // channel while the old funding tx remains live.
+                // Funding handoff uses manual broadcast, so LDK will not retry
+                // this tx. A definitive rejection can therefore release its
+                // inputs; a transport or unknown RPC error cannot.
+                if is_definitive_broadcast_rejection(&err) {
+                    if let Some(wallet) = self.wallet.get() {
+                        if let Err(release_err) = wallet.release_transaction(txid) {
+                            log::error!(
+                                target: "lampo-wallet",
+                                "failed to release rejected funding transaction {txid}: {release_err}"
+                            );
+                            msg.push_str(&format!("; wallet release failed: {release_err}"));
+                        }
+                    }
+                }
                 // Tag with txid so an `open_channel` waiter waiting on this
                 // funding broadcast can fail without reacting to unrelated
                 // (e.g. unilateral-close) broadcast errors.
