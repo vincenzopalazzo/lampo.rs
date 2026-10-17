@@ -28,6 +28,8 @@ use lampo_common::ldk::ln::channelmanager::{
     Bolt11InvoiceParameters, OptionalBolt11PaymentParams, OptionalOfferPaymentParams, PaymentId,
 };
 use lampo_common::ldk::ln::outbound_payment::{RecipientOnionFields, Retry};
+use lampo_common::ldk::offers::contacts::ContactSecrets;
+use lampo_common::ldk::offers::nonce::Nonce;
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
 use lampo_common::ldk::routing::router::{PaymentParameters, RouteParameters};
@@ -181,6 +183,18 @@ impl OffchainManager {
         payer_note: Option<String>,
         max_fee_msat: Option<u64>,
     ) -> error::Result<PaymentId> {
+        self.pay_offer_with_contact(offer_str, amount_msat, payer_note, max_fee_msat, None)
+    }
+
+    /// Pay a BOLT12 offer, optionally revealing BLIP-42 contact identity.
+    pub fn pay_offer_with_contact(
+        &self,
+        offer_str: &str,
+        amount_msat: Option<u64>,
+        payer_note: Option<String>,
+        max_fee_msat: Option<u64>,
+        contact: Option<ContactPaymentParams>,
+    ) -> error::Result<PaymentId> {
         // Same as ldk-node: a fresh random id per attempt. Hashing the offer
         // string collides on a second pay of the same offer, and a 1s retry
         // is too short for the static-invoice onion-message round trip
@@ -199,26 +213,108 @@ impl OffchainManager {
             None => Some(amount_msat.ok_or(error::anyhow!("An amount need to be specified"))?),
         };
 
-        log::debug!(target: "lampo::offchain", "paying offer with amount `{:?}` & payer_note: `{}`", amount, payer_note.as_ref().unwrap_or(&"".to_string()));
+        let mut params = OptionalOfferPaymentParams {
+            payer_note,
+            // Compact-offer payback needs enough time for the invoice-request
+            // onion round-trip plus route attempts on blinded payment paths.
+            // Match the non-contact pay timeout (ldk-node uses 10s; we use 120s
+            // so static-invoice round trips are not reported as failed early).
+            retry_strategy: Retry::Timeout(Duration::from_secs(120)),
+            route_params_config: ldk::routing::router::RouteParametersConfig {
+                max_total_routing_fee_msat: max_fee_msat,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        if let Some(contact) = contact {
+            let payer_offer_len = contact.payer_offer.as_ref().len();
+            log::info!(
+                target: "lampo::offchain",
+                "BLIP-42 pay: payer_offer_tlv_len={payer_offer_len} (limit 300), has_secrets={}",
+                contact.secrets.primary_secret().as_bytes().len() == 32
+            );
+            // Surface the size failure before LDK's opaque InvalidPayerOffer.
+            if payer_offer_len > 300 {
+                error::bail!(
+                    "compact payer_offer is {payer_offer_len} bytes; BLIP-42 requires <= 300 (use BIP-353 return path)"
+                );
+            }
+            params.contact_secrets = Some(contact.secrets);
+            params.payer_offer = Some(contact.payer_offer);
+        }
+
+        log::info!(
+            target: "lampo::offchain",
+            "paying offer with amount `{:?}`, reveal_contact={}",
+            amount,
+            params.contact_secrets.is_some()
+        );
         self.channel_manager
             .manager()
-            .pay_for_offer_with_conversion(
-                &offer,
-                amount,
-                payment_id,
-                OptionalOfferPaymentParams {
-                    payer_note,
-                    retry_strategy: Retry::Timeout(Duration::from_secs(120)),
-                    route_params_config: ldk::routing::router::RouteParametersConfig {
-                        max_total_routing_fee_msat: max_fee_msat,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                &conversion,
-            )
+            .pay_for_offer_with_conversion(&offer, amount, payment_id, params, &conversion)
             .map_err(|err| error::anyhow!("{:?}", err))?;
         Ok(payment_id)
+    }
+
+    /// Build a compact payer offer + contact secrets for BLIP-42 reveal.
+    pub fn build_contact_payment_params(
+        &self,
+        their_offer: &Offer,
+        intro_node: pubkey,
+        existing: Option<(Offer, Nonce, ContactSecrets)>,
+    ) -> error::Result<ContactPaymentParams> {
+        if let Some((payer_offer, nonce, secrets)) = existing {
+            return Ok(ContactPaymentParams {
+                secrets,
+                payer_offer,
+                nonce: Some(nonce),
+            });
+        }
+
+        let manager = self.channel_manager.manager();
+        // Compact payer offers must be <= 300 TLV bytes (BLIP-42). On signet the
+        // explicit chain hash + blinded path can land just over the limit; retry a
+        // few times in case path padding/nonce encoding varies, then fail clearly.
+        let mut last_len = 0usize;
+        for attempt in 0..8 {
+            let (builder, nonce) = manager
+                .create_compact_offer_builder(intro_node)
+                .map_err(|err| error::anyhow!("create_compact_offer_builder: {:?}", err))?;
+            let payer_offer = builder
+                .build()
+                .map_err(|err| error::anyhow!("build compact payer offer: {:?}", err))?;
+            last_len = payer_offer.as_ref().len();
+            log::info!(
+                target: "lampo::offchain",
+                "compact payer_offer attempt {attempt}: tlv_len={last_len}"
+            );
+            if last_len <= 300 {
+                let secrets = manager
+                    .compute_contact_secret(&payer_offer, nonce, their_offer)
+                    .map_err(|err| error::anyhow!("compute_contact_secret: {:?}", err))?;
+                return Ok(ContactPaymentParams {
+                    secrets,
+                    payer_offer,
+                    nonce: Some(nonce),
+                });
+            }
+        }
+        error::bail!(
+            "compact payer_offer stayed at {last_len} bytes after retries; BLIP-42 requires <= 300 (need BIP-353 or smaller blinded path / SCID intro)"
+        );
+    }
+
+    /// Create a compact payer offer for BLIP-42 without deriving a new contact secret.
+    /// Used when paying back a contact whose secret we already stored from an inbound payment.
+    pub fn create_compact_payer_offer(&self, intro_node: pubkey) -> error::Result<(Offer, Nonce)> {
+        let manager = self.channel_manager.manager();
+        let (builder, nonce) = manager
+            .create_compact_offer_builder(intro_node)
+            .map_err(|err| error::anyhow!("create_compact_offer_builder: {:?}", err))?;
+        let payer_offer = builder
+            .build()
+            .map_err(|err| error::anyhow!("build compact payer offer: {:?}", err))?;
+        Ok((payer_offer, nonce))
     }
 
     pub fn pay_invoice(
@@ -286,4 +382,11 @@ impl OffchainManager {
         log::info!("Keysend successfully done!");
         Ok(payment_result)
     }
+}
+
+/// Parameters required to reveal BLIP-42 contact identity on a BOLT12 pay.
+pub struct ContactPaymentParams {
+    pub secrets: ContactSecrets,
+    pub payer_offer: Offer,
+    pub nonce: Option<Nonce>,
 }

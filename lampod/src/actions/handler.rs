@@ -16,6 +16,7 @@ use lampo_common::event::onchain::OnChainEvent;
 use lampo_common::event::{Emitter, Event, Subscriber};
 use lampo_common::handler::ExternalHandler;
 use lampo_common::handler::Handler as EventHandler;
+use lampo_common::hex;
 use lampo_common::json;
 use lampo_common::jsonrpc::Request;
 use lampo_common::ldk;
@@ -38,8 +39,8 @@ use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
 use crate::ln::{
-    LampoChannelManager, LampoInventoryManager, LampoPeerManager, OnionMessageMailbox,
-    StaticInvoiceStore,
+    ContactStore, LampoChannelManager, LampoInventoryManager, LampoPeerManager,
+    OnionMessageMailbox, StaticInvoiceStore,
 };
 use crate::persistence::LampoPersistence;
 use crate::LampoDaemon;
@@ -94,6 +95,7 @@ pub struct LampoHandler {
     channel_manager: Arc<LampoChannelManager>,
     peer_manager: Arc<LampoPeerManager>,
     inventory_manager: Arc<LampoInventoryManager>,
+    contact_store: Arc<ContactStore>,
     wallet_manager: Arc<dyn WalletManager>,
     chain_manager: Arc<LampoChainManager>,
     persister: Arc<LampoPersistence>,
@@ -131,6 +133,7 @@ impl LampoHandler {
             channel_manager: lampod.channel_manager(),
             peer_manager: lampod.peer_manager(),
             inventory_manager: lampod.inventory_manager(),
+            contact_store: lampod.contact_store(),
             wallet_manager: lampod.wallet_manager(),
             chain_manager: lampod.onchain_manager(),
             persister: lampod.persister(),
@@ -686,26 +689,52 @@ impl Handler for LampoHandler {
                     }),
                 )
                 .await;
-                let (payment_preimage, payment_secret) = match purpose {
+                let (payment_preimage, payment_secret) = match &purpose {
                     ldk::events::PaymentPurpose::Bolt11InvoicePayment {
                         payment_preimage,
                         payment_secret,
                         ..
-                    } => (payment_preimage, Some(payment_secret)),
+                    } => (*payment_preimage, Some(*payment_secret)),
                     ldk::events::PaymentPurpose::Bolt12OfferPayment {
                         payment_preimage,
                         payment_secret,
-                        ..
-                    } => (payment_preimage, Some(payment_secret)),
+                        payment_context,
+                    } => {
+                        if let Some(secret) = payment_context.invoice_request.contact_secret {
+                            let label = format!("inbound-{}", hex::encode(&secret.as_bytes()[..8]));
+                            match self.contact_store.remember_inbound(
+                                &label,
+                                secret,
+                                payment_context.invoice_request.payer_offer.as_ref(),
+                            ) {
+                                std::result::Result::Ok(contact) => log::info!(
+                                    target: "lampo::handler",
+                                    "remembered BLIP-42 contact `{}` from claimed payment `{payment_hash}`",
+                                    contact.label
+                                ),
+                                std::result::Result::Err(err) => log::warn!(
+                                    target: "lampo::handler",
+                                    "failed to remember BLIP-42 contact from payment `{payment_hash}`: {err}"
+                                ),
+                            }
+                        }
+                        (*payment_preimage, Some(*payment_secret))
+                    }
                     ldk::events::PaymentPurpose::Bolt12RefundPayment {
                         payment_preimage,
                         payment_secret,
                         ..
-                    } => (payment_preimage, Some(payment_secret)),
+                    } => (*payment_preimage, Some(*payment_secret)),
                     ldk::events::PaymentPurpose::SpontaneousPayment(preimage) => {
-                        (Some(preimage), None)
+                        (Some(*preimage), None)
                     }
                 };
+                let _ = (
+                    receiver_node_id,
+                    amount_msat,
+                    payment_preimage,
+                    payment_secret,
+                );
                 log::warn!("please note the payments are not make persistent for the moment");
                 // FIXME: make peristent these information
                 Ok(())
