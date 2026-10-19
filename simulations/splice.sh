@@ -77,6 +77,10 @@ case "$CHAIN" in
   *) say "bitcoind at $CORE_URL chain=${CHAIN:-unknown}"; exit 1 ;;
 esac
 NETWORK=$CHAIN
+if [ "$CHAIN" = signet ]; then
+  REINDEX=$(chain_rpc getblockchaininfo | jqf 'd["result"]["blocks"]')
+  export REINDEX
+fi
 CONFIRM_WAIT=${CONFIRM_WAIT:-$([ "$CHAIN" = signet ] && echo 1200 || echo 300)}
 say "chain=$CHAIN confirm_wait=${CONFIRM_WAIT}s"
 
@@ -158,9 +162,24 @@ wait_node() { # signet startup is slower than wait_up's one minute
   return 1
 }
 
-say "starting sa and sb on $CHAIN"
-for n in "${ALLNODES[@]}"; do
+# A new wallet makes lampod write the mnemonic and exit. The next start
+# is the daemon. An existing wallet stays up on the first start.
+launch_node() {
+  local n=$1
   start_node "$n"
+  local i
+  for i in $(seq 1 20); do
+    [ -n "$(node_pid "$n")" ] || break
+    sleep 1
+  done
+  if [ -z "$(node_pid "$n")" ]; then
+    start_node "$n"
+  fi
+}
+
+say "starting sa and sb on $CHAIN reindex=${REINDEX:-none}"
+for n in "${ALLNODES[@]}"; do
+  launch_node "$n"
   ID[$n]=$(wait_node "$n") || { fail "$n never came up"; exit 2; }
   say "  $n = ${ID[$n]:0:16}.. api :$(API "$n") p2p :$(P2P "$n")"
 done
