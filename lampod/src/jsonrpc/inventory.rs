@@ -60,6 +60,7 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
         wallet_scan_height,
         sync_in_progress: chain_sync.sync_in_progress(),
         sync_progress_percent: chain_sync.progress_percent(blockheight, wallet_checkpoint),
+        backend_syncing: chain_sync.backend_syncing(),
     };
 
     Ok(json::to_value(getinfo)?)

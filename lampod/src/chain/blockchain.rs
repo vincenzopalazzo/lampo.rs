@@ -8,6 +8,7 @@ use lampo_common::backend::{Backend, FeeEstimateMode};
 use lampo_common::bitcoin;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::{FeeRate, Transaction};
+use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::Network;
 use lampo_common::error;
 use lampo_common::ldk::chain::chaininterface::{
@@ -32,6 +33,9 @@ pub struct LampoChainManager {
     /// Same flag as [`crate::LampoDaemon::shutdown`]. The refresh task
     /// holds only a `Weak` so dropping the daemon also stops the loop.
     shutdown: Arc<AtomicBool>,
+    /// Set once the daemon wires the shared coordinator. Funding reads it
+    /// to refuse a channel while bitcoind is in IBD (issue #111).
+    coordinator: std::sync::OnceLock<Arc<ChainSyncCoordinator>>,
 }
 
 /// Personal Lampo implementation
@@ -51,7 +55,22 @@ impl LampoChainManager {
             fee_cache: Arc::new(FeeCache::new()),
             fee_refresh_started: Arc::new(AtomicBool::new(false)),
             shutdown,
+            coordinator: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Remember the shared chain-sync coordinator. Called from the backend
+    /// injection path so funding can see backend IBD without a second RPC.
+    pub fn set_sync_coordinator(&self, coordinator: Arc<ChainSyncCoordinator>) {
+        let _ = self.coordinator.set(coordinator);
+    }
+
+    /// Whether the chain backend last reported that it is still downloading
+    /// blocks. `false` until a backend publishes a status.
+    pub fn chain_sync_backend_syncing(&self) -> bool {
+        self.coordinator
+            .get()
+            .is_some_and(|coordinator| coordinator.backend_syncing())
     }
 
     pub fn estimated_fees(&self) -> HashMap<String, Option<u32>> {
@@ -353,16 +372,17 @@ impl Backend for LampoChainManager {
     // trait defaults them to no-ops, so a facade that does not forward
     // silently swallows the injection and the coordinator/wallet never
     // reaches the real backend.
+    fn set_coordinator(&self, coordinator: Arc<ChainSyncCoordinator>) {
+        self.set_sync_coordinator(coordinator.clone());
+        self.backend.set_coordinator(coordinator);
+    }
+
     fn set_channel_manager(&self, channel_manager: Arc<lampo_common::types::LampoChannel>) {
         self.backend.set_channel_manager(channel_manager);
     }
 
     fn set_chain_monitor(&self, chain_monitor: Arc<lampo_common::types::LampoChainMonitor>) {
         self.backend.set_chain_monitor(chain_monitor);
-    }
-
-    fn set_coordinator(&self, coordinator: Arc<lampo_common::chainsync::ChainSyncCoordinator>) {
-        self.backend.set_coordinator(coordinator);
     }
 
     fn set_wallet_manager(&self, wallet: Arc<dyn WalletManager>) {

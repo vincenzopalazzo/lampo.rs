@@ -97,8 +97,15 @@ async fn get_info(req: HttpRequest, state: web::Data<AppState>) -> HttpResponse 
         .iter()
         .filter(|c| c.is_channel_ready && !c.is_usable)
         .count() as u32;
+    // Wallet-at-tip is not enough: bitcoind can be in IBD at that same tip
+    // (issue #111). Zeus uses `synced_to_chain` to decide whether funding
+    // is safe.
     let synced_to_chain = match (height, lampod.wallet_manager().wallet_tips().await) {
-        (Some(best_height), Ok(wallet_height)) => wallet_height.to_consensus_u32() >= best_height,
+        (Some(best_height), Ok(wallet_height)) => {
+            wallet_height.to_consensus_u32() >= best_height
+                && !lampod.chain_sync().backend_syncing()
+                && !lampod.chain_sync().sync_in_progress()
+        }
         _ => false,
     };
     let mut uris = Vec::new();

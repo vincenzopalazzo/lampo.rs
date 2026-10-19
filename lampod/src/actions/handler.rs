@@ -511,6 +511,14 @@ impl Handler for LampoHandler {
                         );
                     }
                 };
+                // Issue #111: do not build a funding tx while bitcoind is in
+                // IBD. A peer ahead of this tip cannot confirm the channel.
+                if self.chain_manager.chain_sync_backend_syncing() {
+                    let msg = "bitcoind is still syncing; refusing to fund a channel until the backend catches up";
+                    log::warn!(target: "lampo", "{msg}");
+                    abandon_temp_channel(self, msg);
+                    return Err(error::anyhow!("{msg}"));
+                }
                 // Same as ldk-node: ChannelFunding is 12-block economical,
                 // read from the cache (never block the event loop on RPC).
                 // An explicit `sat_per_vbyte` from the caller (LND REST
