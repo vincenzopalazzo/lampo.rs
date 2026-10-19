@@ -1,6 +1,6 @@
 use lightning::types::features::ChannelTypeFeatures;
 
-use crate::bitcoin::{OutPoint, Transaction};
+use crate::bitcoin::{OutPoint, Transaction, Txid};
 use crate::model::response::{PaymentHop, PaymentState};
 use crate::types::{ChannelId, NodeId};
 
@@ -66,5 +66,25 @@ pub enum LightningEvent {
         message: String,
         counterparty_node_id: Option<String>,
         funding_utxo: Option<String>,
+    },
+    /// A splice round has a funding outpoint. Emitted once LDK has exchanged
+    /// the signatures that let either side broadcast it.
+    SpliceNegotiated {
+        counterparty_node_id: NodeId,
+        channel_id: ChannelId,
+        funding_txo: OutPoint,
+    },
+    /// A splice round failed. `DiscardFunding` for the same channel, when it
+    /// arrives, is what frees the inputs.
+    SpliceFailed {
+        counterparty_node_id: NodeId,
+        channel_id: ChannelId,
+        reason: String,
+    },
+    /// Inputs contributed to a splice that will not confirm. They can be spent
+    /// again.
+    DiscardFunding {
+        channel_id: ChannelId,
+        txid: Option<Txid>,
     },
 }

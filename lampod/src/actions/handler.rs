@@ -472,6 +472,110 @@ impl Handler for LampoHandler {
                 log::info!("channel `{user_channel_id}` closed: {}", detailed_reason);
                 Ok(())
             }
+            ldk::events::Event::FundingTransactionReadyForSigning {
+                channel_id,
+                counterparty_node_id,
+                unsigned_transaction,
+                ..
+            } => {
+                log::info!(
+                    target: "lampo",
+                    "signing splice funding for channel `{channel_id}` with `{counterparty_node_id}`"
+                );
+                let signed = match self.wallet_manager.sign_owned_inputs(unsigned_transaction) {
+                    std::result::Result::Ok(tx) => tx,
+                    Err(err) => {
+                        log::error!(
+                            target: "lampo",
+                            "failed to sign splice funding for `{channel_id}`: {err}"
+                        );
+                        // A permanent sign failure must not be replayed. Cancel
+                        // the contribution so the peer is not left in quiescence.
+                        if let Err(cancel) = self
+                            .channel_manager
+                            .manager()
+                            .cancel_funding_contributed(&channel_id, &counterparty_node_id)
+                        {
+                            log::warn!(
+                                target: "lampo",
+                                "failed to cancel splice on `{channel_id}` after a signing error: {cancel:?}"
+                            );
+                        }
+                        return Ok(());
+                    }
+                };
+                if let Err(err) = self.channel_manager.manager().funding_transaction_signed(
+                    &channel_id,
+                    &counterparty_node_id,
+                    signed,
+                ) {
+                    log::error!(
+                        target: "lampo",
+                        "funding_transaction_signed refused the splice on `{channel_id}`: {err:?}"
+                    );
+                }
+                Ok(())
+            }
+            ldk::events::Event::SpliceNegotiated {
+                channel_id,
+                counterparty_node_id,
+                new_funding_txo,
+                ..
+            } => {
+                log::info!(
+                    target: "lampo",
+                    "splice negotiated on `{channel_id}` with `{counterparty_node_id}`, funding {new_funding_txo}"
+                );
+                self.emit(Event::Lightning(LightningEvent::SpliceNegotiated {
+                    counterparty_node_id,
+                    channel_id,
+                    funding_txo: new_funding_txo,
+                }));
+                Ok(())
+            }
+            ldk::events::Event::SpliceNegotiationFailed {
+                channel_id,
+                counterparty_node_id,
+                reason,
+                ..
+            } => {
+                let reason = reason.to_string();
+                log::info!(
+                    target: "lampo",
+                    "splice negotiation failed on `{channel_id}` with `{counterparty_node_id}`: {reason}"
+                );
+                self.emit(Event::Lightning(LightningEvent::SpliceFailed {
+                    counterparty_node_id,
+                    channel_id,
+                    reason,
+                }));
+                Ok(())
+            }
+            ldk::events::Event::DiscardFunding {
+                channel_id,
+                funding_info,
+            } => {
+                let txid = match &funding_info {
+                    ldk::events::FundingInfo::Tx { transaction } => {
+                        Some(transaction.compute_txid())
+                    }
+                    ldk::events::FundingInfo::OutPoint { outpoint } => Some(outpoint.txid),
+                    ldk::events::FundingInfo::Contribution { inputs, .. } => {
+                        log::info!(
+                            target: "lampo",
+                            "discarding {} splice input(s) on `{channel_id}`",
+                            inputs.len()
+                        );
+                        None
+                    }
+                };
+                log::info!(target: "lampo", "discard funding on `{channel_id}` txid={txid:?}");
+                self.emit(Event::Lightning(LightningEvent::DiscardFunding {
+                    channel_id,
+                    txid,
+                }));
+                Ok(())
+            }
             ldk::events::Event::FundingGenerationReady {
                 temporary_channel_id,
                 counterparty_node_id,

@@ -47,6 +47,9 @@ impl ExternalHandler for HttpdHandler {
             "channels",
             "peers",
             "fundchannel",
+            "splicein",
+            "spliceout",
+            "bumpchannelfee",
             "stop",
         ];
         if !BUILTIN.contains(&req.method.as_str()) {

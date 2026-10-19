@@ -53,3 +53,67 @@ pub async fn json_fundchannel(
         })?;
     Ok(json::to_value(resp)?)
 }
+
+pub async fn json_splicein(ctx: &LampoDaemon, request: &json::Value) -> Result<json::Value, Error> {
+    let request: request::SpliceIn = json::from_value(request.clone())?;
+    log::info!(target: "lampod::jsonrpc::open_channel", "splicein {:?}", request.node_id);
+    let node_id = request
+        .node_id
+        .parse::<lampo_common::types::NodeId>()
+        .map_err(|err| crate::rpc_error!("invalid `node_id` provided: {err}"))?;
+    if !ctx.peer_manager().is_connected_with(node_id) {
+        return Err(crate::rpc_error!("peer `{node_id}` is not connected"));
+    }
+    let resp = ctx
+        .channel_manager()
+        .splice_in(request)
+        .await
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    Ok(json::to_value(resp)?)
+}
+
+pub async fn json_spliceout(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    let request: request::SpliceOut = json::from_value(request.clone())?;
+    log::info!(target: "lampod::jsonrpc::open_channel", "spliceout {:?}", request.node_id);
+    let node_id = request
+        .node_id
+        .parse::<lampo_common::types::NodeId>()
+        .map_err(|err| crate::rpc_error!("invalid `node_id` provided: {err}"))?;
+    if !ctx.peer_manager().is_connected_with(node_id) {
+        return Err(crate::rpc_error!("peer `{node_id}` is not connected"));
+    }
+    let resp = ctx
+        .channel_manager()
+        .splice_out(request)
+        .await
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    Ok(json::to_value(resp)?)
+}
+
+pub async fn json_bumpchannelfee(
+    ctx: &LampoDaemon,
+    request: &json::Value,
+) -> Result<json::Value, Error> {
+    let request: request::BumpChannelFee = json::from_value(request.clone())?;
+    log::info!(
+        target: "lampod::jsonrpc::open_channel",
+        "bumpchannelfee {:?}",
+        request.node_id
+    );
+    let node_id = request
+        .node_id
+        .parse::<lampo_common::types::NodeId>()
+        .map_err(|err| crate::rpc_error!("invalid `node_id` provided: {err}"))?;
+    if !ctx.peer_manager().is_connected_with(node_id) {
+        return Err(crate::rpc_error!("peer `{node_id}` is not connected"));
+    }
+    let resp = ctx
+        .channel_manager()
+        .bump_channel_fee(request)
+        .await
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    Ok(json::to_value(resp)?)
+}
