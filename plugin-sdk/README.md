@@ -8,14 +8,16 @@ optional gRPC). The daemon does not care which SDK built the binary.
 | [`rust/`](rust/) | Rust | stdio and gRPC (`--lampo-listen`) |
 | [`zig/`](zig/) | Zig 0.17.0-dev.1476 | stdio and gRPC (`--lampo-listen`, Zrpc) |
 
-`lampo-bitcoind/` is the Rust chain backend. `lampo-bitcoind/zig/` is the
-same plugin in Zig: same RPC methods, same `init` options (`core-url`,
-`core-user`, `core-pass`), same `important` flag.
+`lampo-bitcoind` (`plugin-sdk/rust/examples/bitcoind.rs`) is the Bitcoin
+Core chain backend. `lampo-rbitcoin` is the same six RPC methods against
+an rbitcoin node: bearer token (`rpc-token-file`), cookie file
+(`rpc-cookie-file`), user/password, or a unix socket (`rpc-socket`).
+`lampo-bitcoind/zig/` is the Core plugin in Zig.
 
 ```sh
 # Rust (workspace member). Zig 0.16 is not enough: Zrpc needs the pin in
 # plugin-sdk/zig/.zigversion.
-cargo build -p lampo-bitcoind -p lampo-plugin-sdk
+cargo build -p lampo-plugin-sdk --examples
 
 # Zig
 cd plugin-sdk/zig && zig build test

@@ -30,17 +30,10 @@ impl Bitcoind {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .ok_or("bitcoind plugin: init missing options.core-url")?;
-        let user = params
-            .pointer("/options/core-user")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let pass = params
-            .pointer("/options/core-pass")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let (user, pass) = basic_credentials(params)?;
         Ok(Self {
             endpoint: url.to_owned(),
-            basic_auth: format!("Basic {}", basic_auth(user, pass)),
+            basic_auth: format!("Basic {}", basic_auth(&user, &pass)),
             client: reqwest::Client::new(),
             next_id: AtomicU64::new(1),
         })
@@ -80,6 +73,38 @@ impl Bitcoind {
             .cloned()
             .ok_or_else(|| format!("bitcoind `{method}` returned no result"))
     }
+}
+
+/// Cookie file wins over `core-user` / `core-pass`, matching the wallet.
+fn basic_credentials(params: &Value) -> Result<(String, String), String> {
+    if let Some(path) = params
+        .pointer("/options/rpc-cookie-file")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let raw = std::fs::read_to_string(path)
+            .map_err(|err| format!("bitcoind cookie file `{path}`: {err}"))?;
+        let raw = raw.trim_end_matches(['\r', '\n']);
+        let (user, pass) = raw
+            .split_once(':')
+            .ok_or("bitcoind cookie file is not user:password")?;
+        if user.is_empty() || pass.is_empty() {
+            return Err("bitcoind cookie file is not user:password".to_owned());
+        }
+        return Ok((user.to_owned(), pass.to_owned()));
+    }
+    let user = params
+        .pointer("/options/core-user")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
+    let pass = params
+        .pointer("/options/core-pass")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
+    Ok((user, pass))
 }
 
 fn basic_auth(user: &str, pass: &str) -> String {
@@ -170,4 +195,28 @@ async fn main() {
         })
         .start()
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cookie_file_wins_over_user_and_password() {
+        let dir = std::env::temp_dir().join(format!("lampo-bitcoind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cookie = dir.join("rpc.cookie");
+        std::fs::write(&cookie, "from-cookie:secret").unwrap();
+        let params = json!({
+            "options": {
+                "rpc-cookie-file": cookie,
+                "core-user": "ignored",
+                "core-pass": "ignored",
+            }
+        });
+        let (user, pass) = basic_credentials(&params).unwrap();
+        assert_eq!(user, "from-cookie");
+        assert_eq!(pass, "secret");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

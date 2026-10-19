@@ -18,6 +18,15 @@ pub struct LampoConf {
     pub core_url: Option<String>,
     pub core_user: Option<String>,
     pub core_pass: Option<String>,
+    /// rbitcoin `{datadir}/rpc.sock`. The chain plugin dials this and skips
+    /// HTTP auth. The on-chain wallet still uses `core_url`.
+    pub rpc_socket: Option<String>,
+    /// rbitcoin `{datadir}/rpc.token`. Bearer credential for the chain plugin.
+    pub rpc_token_file: Option<String>,
+    /// Core-format `user:password` file (`--rpc-cookie-file` on rbitcoin).
+    /// Used by the chain plugin and by the on-chain wallet. When set,
+    /// `core_user` / `core_pass` are optional.
+    pub rpc_cookie_file: Option<String>,
     pub private_key: Option<String>,
     pub channels_keys: Option<String>,
     pub log_file: Option<String>,
@@ -119,6 +128,9 @@ impl Default for LampoConf {
             core_url: None,
             core_user: None,
             core_pass: None,
+            rpc_socket: None,
+            rpc_token_file: None,
+            rpc_cookie_file: None,
             private_key: None,
             channels_keys: None,
             log_level: "info".to_string(),
@@ -268,6 +280,9 @@ impl TryFrom<String> for LampoConf {
         let mut core_url = None;
         let mut core_user = None;
         let mut core_pass = None;
+        let mut rpc_socket = None;
+        let mut rpc_token_file = None;
+        let mut rpc_cookie_file = None;
         if node == "core" {
             core_url = conf
                 .get_conf("core-url")
@@ -284,6 +299,19 @@ impl TryFrom<String> for LampoConf {
                 .get_conf("core-pass")
                 .map_err(|err| anyhow::anyhow!("{err}"))?;
             core_pass = core_pass.map(|pass| pass.to_trimmed());
+
+            rpc_socket = conf
+                .get_conf("rpc-socket")
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+            rpc_socket = rpc_socket.map(|path| path.to_trimmed());
+            rpc_token_file = conf
+                .get_conf("rpc-token-file")
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+            rpc_token_file = rpc_token_file.map(|path| path.to_trimmed());
+            rpc_cookie_file = conf
+                .get_conf("rpc-cookie-file")
+                .map_err(|err| anyhow::anyhow!("{err}"))?;
+            rpc_cookie_file = rpc_cookie_file.map(|path| path.to_trimmed());
         }
 
         let reindex: Option<String> = conf
@@ -410,6 +438,9 @@ impl TryFrom<String> for LampoConf {
             core_url,
             core_user,
             core_pass,
+            rpc_socket,
+            rpc_token_file,
+            rpc_cookie_file,
             private_key,
             channels_keys,
             log_file,
@@ -593,6 +624,23 @@ mod tests {
         let server_ldk = server.ldk_conf_with_async_role();
         assert!(server_ldk.enable_htlc_hold);
         assert!(server_ldk.accept_forwards_to_priv_channels);
+    }
+
+    #[test]
+    fn rbitcoin_paths_round_trip_from_conf() {
+        let dir = std::env::temp_dir().join(format!("lampo-conf-rbitcoin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("lampo.conf");
+        std::fs::write(
+            &path,
+            "network=regtest\nport=9735\nbackend=core\ncore-url=http://127.0.0.1:18443\nrpc-socket=/tmp/rpc.sock\nrpc-token-file=/tmp/rpc.token\nrpc-cookie-file=/tmp/rpc.cookie\n",
+        )
+        .unwrap();
+        let conf = LampoConf::try_from(dir.to_string_lossy().to_string()).unwrap();
+        assert_eq!(conf.rpc_socket.as_deref(), Some("/tmp/rpc.sock"));
+        assert_eq!(conf.rpc_token_file.as_deref(), Some("/tmp/rpc.token"));
+        assert_eq!(conf.rpc_cookie_file.as_deref(), Some("/tmp/rpc.cookie"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

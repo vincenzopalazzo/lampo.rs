@@ -19,6 +19,10 @@ log = { version = "0.4", features = ["std"] }
 name = "lampo-bitcoind"
 path = "examples/bitcoind.rs"
 
+[[example]]
+name = "lampo-rbitcoin"
+path = "examples/rbitcoin.rs"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 env_logger = "0.11"

@@ -186,12 +186,22 @@ impl LampoChainSync {
         let core_url = conf.core_url.as_ref().ok_or(error::anyhow!(
             "Core URL is missing from the configuration file"
         ))?;
-        let core_user = conf.core_user.as_ref().ok_or(error::anyhow!(
-            "Core User is missing from the configuration file"
-        ))?;
-        let core_pass = conf.core_pass.as_ref().ok_or(error::anyhow!(
-            "Core Password is missing from the configuration file"
-        ))?;
+        // A cookie file replaces user/password for rbitcoin and for Core.
+        // A bearer token or unix socket configures the chain plugin only;
+        // the wallet still needs the cookie or user/password.
+        let cookie = conf
+            .rpc_cookie_file
+            .as_ref()
+            .map(|path| !path.is_empty())
+            .unwrap_or(false);
+        if !cookie {
+            let _core_user = conf.core_user.as_ref().ok_or(error::anyhow!(
+                "Core User is missing from the configuration file"
+            ))?;
+            let _core_pass = conf.core_pass.as_ref().ok_or(error::anyhow!(
+                "Core Password is missing from the configuration file"
+            ))?;
+        }
 
         let (host, port) = Self::parse_core_url(core_url)?;
 
@@ -199,9 +209,9 @@ impl LampoChainSync {
         // embed the RPC credentials.
         log::debug!("Connecting to core at: {host}:{port}");
 
-        // Chain RPC goes through the handler to the bitcoind plugin. The URL
+        // Chain RPC goes through the handler to the chain plugin. The URL
         // is still validated here so a bad lampo.conf fails at startup.
-        let _ = (host, port, core_user, core_pass);
+        let _ = (host, port);
         Ok(Self {
             config: conf,
             channel_manager: OnceLock::new(),
@@ -1012,6 +1022,14 @@ mod tests {
         conf.core_user = Some("lampo".to_string());
         conf.core_pass = Some("lampo".to_string());
         Arc::new(conf)
+    }
+
+    #[test]
+    fn cookie_file_replaces_user_and_password() {
+        let mut conf = LampoConf::default();
+        conf.core_url = Some("http://127.0.0.1:18443".to_string());
+        conf.rpc_cookie_file = Some("/tmp/rbitcoin.cookie".to_string());
+        assert!(LampoChainSync::new(Arc::new(conf)).is_ok());
     }
 
     /// A well-formed `http://host:port` URL must keep working.

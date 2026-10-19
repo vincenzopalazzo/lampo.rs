@@ -54,6 +54,18 @@ pub struct LampoCliArgs {
     #[arg(long = "core-pass")]
     pub bitcoind_pass: Option<String>,
 
+    /// rbitcoin unix socket (`{datadir}/rpc.sock`)
+    #[arg(long = "rpc-socket")]
+    pub rpc_socket: Option<String>,
+
+    /// rbitcoin bearer token file (`{datadir}/rpc.token`)
+    #[arg(long = "rpc-token-file")]
+    pub rpc_token_file: Option<String>,
+
+    /// rbitcoin or Core `user:password` cookie file
+    #[arg(long = "rpc-cookie-file")]
+    pub rpc_cookie_file: Option<String>,
+
     /// Force polling in development mode
     #[arg(long = "dev-force-poll", hide = true)]
     pub dev_force_poll: bool,
@@ -132,6 +144,15 @@ impl TryInto<LampoConf> for LampoCliArgs {
         if self.bitcoind_pass.is_some() {
             conf.core_pass = self.bitcoind_pass;
         }
+        if self.rpc_socket.is_some() {
+            conf.rpc_socket = self.rpc_socket;
+        }
+        if self.rpc_token_file.is_some() {
+            conf.rpc_token_file = self.rpc_token_file;
+        }
+        if self.rpc_cookie_file.is_some() {
+            conf.rpc_cookie_file = self.rpc_cookie_file;
+        }
         if self.log_file.is_some() {
             conf.log_file = self.log_file;
         }
@@ -184,6 +205,9 @@ mod tests {
             bitcoind_url: None,
             bitcoind_user: None,
             bitcoind_pass: None,
+            rpc_socket: None,
+            rpc_token_file: None,
+            rpc_cookie_file: None,
             dev_force_poll: false,
             api_host: None,
             api_port: None,

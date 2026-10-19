@@ -181,13 +181,7 @@ impl BDKWalletManager {
         let url = conf.core_url.as_ref().ok_or(error::anyhow!(
             "RPC URL is missing from the configuration file"
         ))?;
-        let user = conf.core_user.as_ref().ok_or(error::anyhow!(
-            "RPC User is missing from the configuration file"
-        ))?;
-        let pass = conf.core_pass.as_ref().ok_or(error::anyhow!(
-            "RPC Password is missing from the configuration file"
-        ))?;
-        let client = Client::new(url, Auth::UserPass(user.clone(), pass.clone()))?;
+        let client = Client::new(url, core_rpc_auth(&conf)?)?;
         Ok(client)
     }
 
@@ -735,6 +729,25 @@ fn jump_empty_wallet_to_tip(start_height: u32, fast_sync: bool, recovering_histo
     start_height == 0 && fast_sync && !recovering_history
 }
 
+/// Cookie file wins over `core-user` / `core-pass`. rbitcoin's TCP
+/// listener accepts that file when started with `--rpc-cookie-file`.
+fn core_rpc_auth(conf: &LampoConf) -> error::Result<Auth> {
+    if let Some(cookie) = conf
+        .rpc_cookie_file
+        .as_ref()
+        .filter(|path| !path.is_empty())
+    {
+        return Ok(Auth::CookieFile(PathBuf::from(cookie)));
+    }
+    let user = conf.core_user.as_ref().ok_or(error::anyhow!(
+        "RPC User is missing from the configuration file"
+    ))?;
+    let pass = conf.core_pass.as_ref().ok_or(error::anyhow!(
+        "RPC Password is missing from the configuration file"
+    ))?;
+    Ok(Auth::UserPass(user.clone(), pass.clone()))
+}
+
 /// Nearest persisted checkpoint at or below `height`, walking from the tip.
 /// `None` if the wallet has no checkpoint that far back (sparse chain).
 fn checkpoint_at_or_below(
@@ -746,7 +759,32 @@ fn checkpoint_at_or_below(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_recovering_history, jump_empty_wallet_to_tip};
+    use super::{core_rpc_auth, is_recovering_history, jump_empty_wallet_to_tip};
+    use bdk_bitcoind_rpc::bitcoincore_rpc::Auth;
+    use lampo_common::conf::LampoConf;
+
+    #[test]
+    fn cookie_file_is_the_wallet_credential() {
+        let mut conf = LampoConf::default();
+        conf.rpc_cookie_file = Some("/tmp/rbitcoin.cookie".to_owned());
+        conf.core_user = Some("ignored".to_owned());
+        conf.core_pass = Some("ignored".to_owned());
+        match core_rpc_auth(&conf).unwrap() {
+            Auth::CookieFile(path) => {
+                assert_eq!(path, std::path::PathBuf::from("/tmp/rbitcoin.cookie"))
+            }
+            _ => panic!("cookie file must win"),
+        }
+
+        conf.rpc_cookie_file = None;
+        match core_rpc_auth(&conf).unwrap() {
+            Auth::UserPass(user, pass) => {
+                assert_eq!(user, "ignored");
+                assert_eq!(pass, "ignored");
+            }
+            _ => panic!("user/password is the fallback"),
+        }
+    }
 
     #[test]
     fn fast_sync_jumps_only_a_genesis_checkpoint() {

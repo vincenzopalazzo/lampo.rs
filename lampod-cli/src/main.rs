@@ -376,6 +376,18 @@ fn bitcoind_init(conf: &LampoConf, base: &InitConfig) -> InitConfig {
         init.options
             .insert("core-pass".into(), lampo_common::json::json!(pass));
     }
+    if let Some(path) = &conf.rpc_socket {
+        init.options
+            .insert("rpc-socket".into(), lampo_common::json::json!(path));
+    }
+    if let Some(path) = &conf.rpc_token_file {
+        init.options
+            .insert("rpc-token-file".into(), lampo_common::json::json!(path));
+    }
+    if let Some(path) = &conf.rpc_cookie_file {
+        init.options
+            .insert("rpc-cookie-file".into(), lampo_common::json::json!(path));
+    }
     init
 }
 
@@ -391,19 +403,38 @@ fn split_plugin(raw: &str) -> (String, Vec<String>) {
     (bin, args)
 }
 
-fn default_bitcoind_plugin() -> Option<String> {
+fn default_named_plugin(name: &str) -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
     for candidate in [
-        dir.join("lampo-bitcoind"),
-        dir.join("../release/lampo-bitcoind"),
-        dir.join("../debug/lampo-bitcoind"),
+        dir.join(name),
+        dir.join("examples").join(name),
+        dir.join("../debug/examples").join(name),
+        dir.join("../release/examples").join(name),
+        dir.join("../release").join(name),
+        dir.join("../debug").join(name),
     ] {
         if candidate.is_file() {
             return Some(candidate.to_string_lossy().into_owned());
         }
     }
     None
+}
+
+fn default_bitcoind_plugin() -> Option<String> {
+    default_named_plugin("lampo-bitcoind")
+}
+
+fn default_rbitcoin_plugin() -> Option<String> {
+    default_named_plugin("lampo-rbitcoin")
+}
+
+fn wants_rbitcoin(conf: &LampoConf) -> bool {
+    // A cookie file is also a Core credential. Only the rbitcoin-only
+    // transports select `lampo-rbitcoin` when the operator passed no plugin.
+    [&conf.rpc_socket, &conf.rpc_token_file]
+        .iter()
+        .any(|value| value.as_ref().is_some_and(|path| !path.is_empty()))
 }
 
 async fn start_plugins(
@@ -457,20 +488,28 @@ async fn start_plugins(
 
     // Default chain backend. Same role as CLN's shipped plugins: present
     // unless the operator already passed a plugin that will register the
-    // bitcoind methods.
+    // chain methods. rbitcoin auth keys select `lampo-rbitcoin`.
     if plugin_paths.is_empty() {
-        if let Some(default_plugin) = default_bitcoind_plugin() {
+        if wants_rbitcoin(conf) {
+            let Some(default_plugin) = default_rbitcoin_plugin() else {
+                error::bail!(
+                    "rpc-socket or rpc-token-file is set, but lampo-rbitcoin was not found. Build it with `cargo build -p lampo-plugin-sdk --example lampo-rbitcoin` or pass --plugin"
+                );
+            };
+            plugin_paths.push(default_plugin);
+        } else if let Some(default_plugin) = default_bitcoind_plugin() {
             plugin_paths.push(default_plugin);
         }
     }
 
     // Start each plugin. An `important` plugin (CLN's flag) aborts startup.
     for plugin_path in &plugin_paths {
-        let plugin_init = if plugin_path.contains("lampo-bitcoind") {
-            bitcoind_init(conf, &init_config)
-        } else {
-            init_config.clone()
-        };
+        let plugin_init =
+            if plugin_path.contains("lampo-bitcoind") || plugin_path.contains("lampo-rbitcoin") {
+                bitcoind_init(conf, &init_config)
+            } else {
+                init_config.clone()
+            };
         let (plugin_bin, plugin_args) = split_plugin(plugin_path);
         match manager
             .start_plugin_with_args(&plugin_bin, &plugin_args, &plugin_init)
