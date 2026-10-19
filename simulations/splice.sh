@@ -6,11 +6,14 @@
 # is pending, bumps the fee, splices out, then pays across the channel.
 # Asserts RPC fields and the channel value, never log prose.
 #
-# Ports API 8411-8412 / P2P 20411-20412. Data dir defaults to
+# Ports API 8611-8612 / P2P 20611-20612. Data dir defaults to
 # $HOME/lampo-splice-qa, not the soak tree under $HOME/lampo-sim.
+# Regtest mines. Signet (mutinynet on :38332) waits for the chain that
+# is already running and takes coins from the faucet.
 #
-# Env: REPO BIN SIMDIR SEED SPLICE_IN_SATS(50000) SPLICE_OUT_SATS(10000)
-#      CHANNEL_SATS(400000)
+# Env: REPO BIN SIMDIR CORE_URL SEED CHANNEL_SATS(150000)
+#      SPLICE_IN_SATS(20000) SPLICE_OUT_SATS(10000)
+#      FAUCET PAY_NODE_URL FAUCET_TOKEN
 #
 # Usage:
 #   REPO=$HOME/lampo-splice-qa BIN=$REPO/target/release/lampod-cli \
@@ -20,11 +23,14 @@ set -uo pipefail
 REPO=${REPO:-$HOME/lampo-splice-qa}
 BIN=${BIN:-$REPO/target/release/lampod-cli}
 SIMDIR=${SIMDIR:-$HOME/lampo-splice-qa/sim-run}
-API_BASE=${API_BASE:-8410}
-P2P_BASE=${P2P_BASE:-20410}
-CHANNEL_SATS=${CHANNEL_SATS:-400000}
-SPLICE_IN_SATS=${SPLICE_IN_SATS:-50000}
+API_BASE=${API_BASE:-8610}
+P2P_BASE=${P2P_BASE:-20610}
+CORE_URL=${CORE_URL:-http://127.0.0.1:38332}
+CHANNEL_SATS=${CHANNEL_SATS:-150000}
+SPLICE_IN_SATS=${SPLICE_IN_SATS:-20000}
 SPLICE_OUT_SATS=${SPLICE_OUT_SATS:-10000}
+FAUCET=${FAUCET:-https://faucet.mutinynet.com}
+PAY_NODE_URL=${PAY_NODE_URL:-http://127.0.0.1:7996}
 LOG=${LOG:-$SIMDIR/splice.log}
 CSV=${CSV:-$SIMDIR/splice.csv}
 
@@ -40,10 +46,30 @@ echo "ts,step,detail" > "$CSV"
 
 row() { echo "$(date -Iseconds),$1,$2" >> "$CSV"; say "$1 $2"; }
 
-say "splice QA: bin=$BIN simdir=$SIMDIR seed=$SEED"
+chain_rpc() {
+  curl -sS --max-time 30 --user "$CORE_USER:$CORE_PASS" \
+    --data-binary "{\"jsonrpc\":\"1.0\",\"id\":1,\"method\":\"$1\",\"params\":${2:-[]}}" \
+    "$CORE_URL"
+}
+in_mempool() { chain_rpc getrawmempool | grep -q "$1"; }
+advance() {
+  if [ "$CHAIN" = regtest ]; then
+    mine "${1:-6}"
+  else
+    sleep $(( ${1:-6} * 20 ))
+  fi
+}
+
+say "splice QA: bin=$BIN simdir=$SIMDIR core=$CORE_URL seed=$SEED"
 [ -x "$BIN" ] || { say "binary missing: $BIN"; exit 1; }
-bcli getblockchaininfo | jqf 'd["result"]["chain"]' | grep -q regtest \
-  || { say "bitcoind at $CORE_URL is not regtest"; exit 1; }
+CHAIN=$(chain_rpc getblockchaininfo | jqf 'd["result"]["chain"]')
+case "$CHAIN" in
+  regtest|signet) ;;
+  *) say "bitcoind at $CORE_URL chain=${CHAIN:-unknown}"; exit 1 ;;
+esac
+NETWORK=$CHAIN
+CONFIRM_WAIT=${CONFIRM_WAIT:-$([ "$CHAIN" = signet ] && echo 1200 || echo 300)}
+say "chain=$CHAIN confirm_wait=${CONFIRM_WAIT}s"
 
 GUARD_PIDFILE="$SIMDIR/harness.pid"
 if [ -f "$GUARD_PIDFILE" ]; then
@@ -66,22 +92,82 @@ cleanup_nodes() {
   for n in "${ALLNODES[@]}"; do wait_dead "$n" 30 || kill9 "$n"; done
 }
 
-say "starting sa and sb"
+fund_signet() { # $1 name. Pays the mutinynet L402 from a node already on this signet.
+  local n=$1 addr code ch inv tok st pres
+  addr=$(rpc "$(API "$n")" new_addr | jqf 'd["address"]')
+  [ -n "$addr" ] || return 1
+  if [ -n "${FAUCET_TOKEN:-}" ]; then
+    code=$(curl -s -o /tmp/splice-faucet.out -w "%{http_code}" --max-time 30 \
+      -X POST "$FAUCET/api/onchain" -H 'content-type: application/json' \
+      -H "Authorization: Bearer $FAUCET_TOKEN" \
+      -d "{\"sats\":1000000,\"address\":\"$addr\"}")
+    say "faucet bearer http=$code"
+    [ "$code" = 200 ] || return 1
+  else
+    ch=$(curl -s --max-time 20 "$FAUCET/api/l402") || return 1
+    inv=$(echo "$ch" | jqf 'd.get("invoice","")')
+    tok=$(echo "$ch" | jqf 'd.get("token","")')
+    [ -n "$inv" ] && [ -n "$tok" ] || { say "faucet: no L402 challenge"; return 1; }
+    pres=$(curl -sS --max-time 120 -X POST "$PAY_NODE_URL/pay" \
+      -H 'content-type: application/json' -d "{\"invoice_str\":\"$inv\"}" | head -c 200)
+    echo "$pres" | grep -q '"payment_preimage"' || {
+      pres=$(curl -sS --max-time 120 -X POST "http://127.0.0.1:8111/pay" \
+        -H 'content-type: application/json' -d "{\"invoice_str\":\"$inv\"}" | head -c 200)
+    }
+    echo "$pres" | grep -q '"payment_preimage"' || { say "faucet challenge unpaid ($pres)"; return 1; }
+    st=""
+    for _ in $(seq 1 12); do
+      sleep 5
+      st=$(curl -s --max-time 15 "$FAUCET/api/l402/check?token=$tok" | jqf 'd.get("status","")')
+      [ "$st" = "settled" ] && break
+    done
+    [ "$st" = "settled" ] || { say "faucet L402 never settled"; return 1; }
+    code=$(curl -s -o /tmp/splice-faucet.out -w "%{http_code}" --max-time 30 \
+      -X POST "$FAUCET/api/onchain" -H 'content-type: application/json' \
+      -H "Authorization: Bearer $tok" \
+      -d "{\"sats\":1000000,\"address\":\"$addr\"}")
+    say "faucet l402 http=$code body=$(head -c 120 /tmp/splice-faucet.out)"
+    [ "$code" = 200 ] || return 1
+  fi
+  local funds=0
+  for _ in $(seq 1 24); do
+    sleep 30
+    funds=$(rpc "$(API "$n")" funds | jqf 'sum(int(t.get("amount_msat",0)) for t in d.get("transactions",[]) if int(t.get("amount_msat",0))>0)')
+    [ "${funds:-0}" -gt 200000000 ] && return 0
+  done
+  say "$n still unfunded ($funds msat)"
+  return 1
+}
+
+say "starting sa and sb on $CHAIN"
 for n in "${ALLNODES[@]}"; do
   start_node "$n"
   ID[$n]=$(wait_up "$n") || { fail "$n never came up"; exit 2; }
   say "  $n = ${ID[$n]:0:16}.. api :$(API "$n") p2p :$(P2P "$n")"
 done
-for n in "${ALLNODES[@]}"; do fund_node "$n" 0.05 || { fail "fund $n"; exit 2; }; done
-sleep 140
+if [ "$CHAIN" = regtest ]; then
+  for n in "${ALLNODES[@]}"; do fund_node "$n" 0.05 || { fail "fund $n"; exit 2; }; done
+  sleep 140
+else
+  fund_signet sa || { fail "signet faucet did not fund sa"; exit 2; }
+fi
 wait_wallet_synced 420 || { fail "wallets never synced"; exit 2; }
 
-open_channel sa sb "${ID[sb]}" "$CHANNEL_SATS" 0 || { fail "open sa->sb"; exit 2; }
-deadline=$(( $(date +%s) + 240 ))
+if [ "$CHAIN" = regtest ]; then
+  open_channel sa sb "${ID[sb]}" "$CHANNEL_SATS" 0 || { fail "open sa->sb"; exit 2; }
+else
+  rpc "$(API sa)" connect "{\"node_id\":\"${ID[sb]}\",\"addr\":\"127.0.0.1\",\"port\":$(P2P sb)}" >/dev/null
+  open_resp=$(TMO=180 rpc "$(API sa)" fundchannel \
+    "{\"node_id\":\"${ID[sb]}\",\"addr\":\"127.0.0.1\",\"port\":$(P2P sb),\"amount\":$CHANNEL_SATS,\"public\":false,\"push_msat\":0}")
+  ferr=$(fundchannel_error "$open_resp")
+  [ -z "$ferr" ] || { fail "fundchannel: $ferr"; exit 2; }
+  say "fundchannel tx $(echo "$open_resp" | jqf 'd.get("txid","")')"
+fi
+deadline=$(( $(date +%s) + CONFIRM_WAIT ))
 while :; do
   [ "$(ready_channels sa)" -ge 1 ] && [ "$(ready_channels sb)" -ge 1 ] && break
   [ "$(date +%s)" -gt "$deadline" ] && { fail "channel never ready"; exit 2; }
-  mine 2
+  advance 1
   sleep 15
 done
 base=$(rpc "$(API sa)" channels | jqf 'd["channels"][0]["amount"]')
@@ -98,11 +184,11 @@ ferr=$(fundchannel_error "$first")
 [ -z "$ferr" ] || { fail "splicein: $ferr"; exit 2; }
 txid1=$(echo "$first" | jqf 'd.get("txid","")')
 [ "${#txid1}" = 64 ] || { fail "splicein txid: $first"; exit 2; }
-for _ in $(seq 1 20); do
-  bcli getrawmempool | grep -q "$txid1" && break
+for _ in $(seq 1 40); do
+  in_mempool "$txid1" && break
   sleep 3
 done
-bcli getrawmempool | grep -q "$txid1" || { fail "splicein tx $txid1 not in mempool"; exit 2; }
+in_mempool "$txid1" || { fail "splicein tx $txid1 not in mempool"; exit 2; }
 row splicein "txid=$txid1"
 
 second=$(rpc "$(API sa)" splicein "{\"node_id\":\"${ID[sb]}\",\"amount\":$SPLICE_IN_SATS}")
@@ -116,17 +202,17 @@ ferr=$(fundchannel_error "$bumped")
 txid2=$(echo "$bumped" | jqf 'd.get("txid","")')
 [ "${#txid2}" = 64 ] || { fail "bump txid: $bumped"; exit 2; }
 [ "$txid2" != "$txid1" ] || { fail "bump reused txid $txid1"; exit 2; }
-for _ in $(seq 1 20); do
-  bcli getrawmempool | grep -q "$txid2" && break
+for _ in $(seq 1 40); do
+  in_mempool "$txid2" && break
   sleep 3
 done
-bcli getrawmempool | grep -q "$txid2" || { fail "bump tx $txid2 not in mempool"; exit 2; }
+in_mempool "$txid2" || { fail "bump tx $txid2 not in mempool"; exit 2; }
 row bump "txid=$txid2"
-mine 8
+advance 8
 wait_wallet_synced 300 || true
 
 want_in=$(( CHANNEL_SATS + SPLICE_IN_SATS ))
-deadline=$(( $(date +%s) + 300 ))
+deadline=$(( $(date +%s) + CONFIRM_WAIT ))
 after_in=0
 while :; do
   after_in=$(rpc "$(API sa)" channels | jqf 'd["channels"][0]["amount"]')
@@ -143,16 +229,16 @@ ferr=$(fundchannel_error "$out")
 [ -z "$ferr" ] || { fail "spliceout: $ferr"; exit 2; }
 txid3=$(echo "$out" | jqf 'd.get("txid","")')
 [ "${#txid3}" = 64 ] || { fail "spliceout txid: $out"; exit 2; }
-for _ in $(seq 1 20); do
-  bcli getrawmempool | grep -q "$txid3" && break
+for _ in $(seq 1 40); do
+  in_mempool "$txid3" && break
   sleep 3
 done
-bcli getrawmempool | grep -q "$txid3" || { fail "spliceout tx $txid3 not in mempool"; exit 2; }
+in_mempool "$txid3" || { fail "spliceout tx $txid3 not in mempool"; exit 2; }
 row spliceout "txid=$txid3"
-mine 8
+advance 8
 wait_wallet_synced 300 || true
 
-deadline=$(( $(date +%s) + 300 ))
+deadline=$(( $(date +%s) + CONFIRM_WAIT ))
 after_out=0
 while :; do
   after_out=$(rpc "$(API sa)" channels | jqf 'd["channels"][0]["amount"]')

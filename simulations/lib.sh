@@ -33,6 +33,7 @@ KEEP_GOING=${KEEP_GOING:-0}
 API_BASE=${API_BASE:-8100}
 P2P_BASE=${P2P_BASE:-19900}
 CORE_URL=${CORE_URL:-http://127.0.0.1:18332}
+NETWORK=${NETWORK:-regtest}
 CORE_USER=${CORE_USER:-testutil}
 CORE_PASS=${CORE_PASS:-testutilpassword}
 ART=${ART:-$SIMDIR/artifacts}
@@ -71,8 +72,8 @@ P2P() { echo $(( P2P_BASE + ${IDX[$1]:-${1#n}} )); }
 node_dir() { echo "$SIMDIR/$1"; }
 node_pid() { pgrep -f "lampod-cli --data-dir $SIMDIR/$1 " | head -1; }
 node_log() { echo "$SIMDIR/$1/mh.log"; }
-manager_file() { echo "$SIMDIR/$1/regtest/manager"; }         # LDK fs_store v1
-monitors_dir() { echo "$SIMDIR/$1/regtest/monitors"; }        # one file per channel
+manager_file() { echo "$SIMDIR/$1/$NETWORK/manager"; }         # LDK fs_store v1
+monitors_dir() { echo "$SIMDIR/$1/$NETWORK/monitors"; }        # one file per channel
 
 collect_artifacts() { # $1 = tag
   local dir="$ART/$(date +%Y%m%d-%H%M%S)-$1" n
@@ -90,9 +91,9 @@ fail() { say "FAIL: $*"; collect_artifacts "$(echo "$*" | tr ' /' '__' | head -c
 
 start_node() { # $1 = name (writes conf; never deletes lampod.pid)
   local n=$1 dir; dir=$(node_dir "$n")
-  mkdir -p "$dir/regtest"
-  cat > "$dir/regtest/lampo.conf" <<EOF
-network=regtest
+  mkdir -p "$dir/$NETWORK"
+  cat > "$dir/$NETWORK/lampo.conf" <<EOF
+network=$NETWORK
 port=$(P2P "$n")
 bind-addr=127.0.0.1
 api-host=http://127.0.0.1
@@ -112,12 +113,12 @@ EOF
   done
   setsid_run() {
     if command -v setsid >/dev/null 2>&1; then
-      setsid nohup "$BIN" --data-dir "$dir" --network regtest \
+      setsid nohup "$BIN" --data-dir "$dir" --network "$NETWORK" \
         "${plugin_args[@]}" \
         > "$dir/mh.log" 2>&1 < /dev/null &
     else
       # No setsid on macOS; plain nohup + disown detaches well enough.
-      nohup "$BIN" --data-dir "$dir" --network regtest \
+      nohup "$BIN" --data-dir "$dir" --network "$NETWORK" \
         "${plugin_args[@]}" \
         > "$dir/mh.log" 2>&1 < /dev/null &
     fi
