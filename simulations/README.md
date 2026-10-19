@@ -78,11 +78,12 @@ What must pass before `SIMULATION COMPLETE`:
 
 For a structural dead-end multihop path (`hs—hm—hr`), also run `multihop.sh`.
 
-Splice QA uses its own data dir and ports (`8411`/`20411`), not the soak tree:
+Splice QA uses its own data dir and ports (`8611`/`20611`), not the soak tree.
+On signet it does not mine; it uses the bitcoind that is already running:
 
 ```bash
 REPO=$HOME/lampo-splice-qa BIN=$REPO/target/release/lampod-cli \
-  ./simulations/splice.sh
+  CORE_URL=http://127.0.0.1:38332 ./simulations/splice.sh
 ```
 
 The last line is `SPLICE QA COMPLETE`.
