@@ -11,6 +11,7 @@ The harness never touches mainnet or any production / “sacred” nodes.
 | `recover.sh` | Phase 1: recovery matrix + term/kill stress (includes R00: unfundable `fundchannel` must return the wallet error, not a receive timeout) |
 | `simulate.sh` | Phase 2: N-node soak with chaos (reorg, restart, feespam, …) |
 | `multihop.sh` | Fixed `hs—hm—hr` multihop smoke |
+| `splice.sh` | Two-node splice-in, fee bump, splice-out, then a payment |
 | `run-mh.sh` | Single-instance launcher (`soak` / `recover` / `stop`) |
 | `ship.sh` | Optional: git-bundle deploy to a remote build host |
 | `interop.sh` / `ldk-deploy.sh` | lampo ↔ LDK-Server interop (optional) |
@@ -76,6 +77,15 @@ What must pass before `SIMULATION COMPLETE`:
 3. **Coverage gate**: CSV Success rows cover every node as `src` and as `dst`.
 
 For a structural dead-end multihop path (`hs—hm—hr`), also run `multihop.sh`.
+
+Splice QA uses its own data dir and ports (`8411`/`20411`), not the soak tree:
+
+```bash
+REPO=$HOME/lampo-splice-qa BIN=$REPO/target/release/lampod-cli \
+  ./simulations/splice.sh
+```
+
+The last line is `SPLICE QA COMPLETE`.
 
 Results: `$SIMDIR/results.csv`, `$SIMDIR/sim.log`, failure artifacts under `$SIMDIR/artifacts/`.
 
