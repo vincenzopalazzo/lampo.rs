@@ -26,6 +26,10 @@ use lampo_common::wallet::WalletManager;
 use super::channel_manager::{LampoChannelManager, FUNDING_WAIT_TIMEOUT_SECS};
 use crate::chain::FeeTarget;
 
+/// On-chain sats kept back per anchor channel so a splice-in cannot spend the
+/// coins a force-close needs for CPFP. Same default as ldk-node.
+const ANCHOR_CHANNEL_RESERVE_SATS: u64 = 25_000;
+
 /// 1.5× the funding feerate, the ceiling ldk-node uses for a splice and its
 /// RBF. The max is never raised to meet an RBF minimum.
 pub(crate) fn splice_fee_ceiling(estimate: FeeRate) -> FeeRate {
@@ -94,9 +98,11 @@ impl LampoChannelManager {
         let (node_id, channel_id) =
             self.splice_channel_ids(&request.node_id, request.channel_id.as_deref())?;
         let balance = self.wallet_manager().get_onchain_balance().await?;
-        if balance < request.amount {
+        let reserve = self.anchor_reserve_sats();
+        let available = balance.saturating_sub(reserve);
+        if available < request.amount {
             error::bail!(
-                "not enough confirmed on-chain funds to splice in {} sats (have {balance})",
+                "not enough confirmed on-chain funds to splice in {} sats (have {balance}, {reserve} kept for anchor channels)",
                 request.amount
             );
         }
@@ -239,6 +245,21 @@ impl LampoChannelManager {
         Ok((node_id, channel_id))
     }
 
+    fn anchor_reserve_sats(&self) -> u64 {
+        let anchors = self
+            .manager()
+            .list_channels()
+            .into_iter()
+            .filter(|channel| {
+                channel.channel_type.as_ref().map_or(true, |features| {
+                    features.supports_anchors_zero_fee_htlc_tx()
+                        || features.supports_anchor_zero_fee_commitments()
+                })
+            })
+            .count() as u64;
+        anchors.saturating_mul(ANCHOR_CHANNEL_RESERVE_SATS)
+    }
+
     fn splice_feerates(&self, sat_per_vbyte: Option<u64>) -> error::Result<(FeeRate, FeeRate)> {
         let min = match sat_per_vbyte {
             Some(sat_per_vbyte) => FeeRate::from_sat_per_kwu(sat_per_vbyte.saturating_mul(250)),
@@ -298,9 +319,21 @@ impl LampoChannelManager {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(FUNDING_WAIT_TIMEOUT_SECS);
         loop {
             if tokio::time::Instant::now() >= deadline {
-                error::bail!(
-                    "splice negotiation timed out after {FUNDING_WAIT_TIMEOUT_SECS}s with peer {node_id}; channel left open"
-                );
+                // A splice that never finishes `stfu` leaves the channel
+                // quiescent. Cancel while our signatures are still unreleased.
+                // If they already went out, cancel fails and the round may
+                // still confirm.
+                match self
+                    .manager()
+                    .cancel_funding_contributed(&channel_id, &node_id)
+                {
+                    Ok(()) => error::bail!(
+                        "splice negotiation timed out after {FUNDING_WAIT_TIMEOUT_SECS}s with peer {node_id}; the splice was canceled"
+                    ),
+                    Err(err) => error::bail!(
+                        "splice negotiation timed out after {FUNDING_WAIT_TIMEOUT_SECS}s with peer {node_id}; cancel failed ({err:?}) and the splice may still confirm"
+                    ),
+                }
             }
             match tokio::time::timeout_at(deadline, events.recv()).await {
                 Ok(Some(Event::Lightning(LightningEvent::SpliceNegotiated {
