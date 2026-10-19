@@ -8,6 +8,9 @@
 //! `getblock`, `getblockheader`, `getblockchaininfo`, `estimatesmartfee`,
 //! `getmempoolinfo`. It is `important`: if it fails, the daemon does not start.
 //!
+//! rbitcoin speaks this same JSON-RPC over HTTP Basic. See
+//! `plugin-sdk/README.md`.
+//!
 //! ```sh
 //! zig build -Doptimize=ReleaseSafe
 //! # binary: zig-out/bin/lampo-bitcoind

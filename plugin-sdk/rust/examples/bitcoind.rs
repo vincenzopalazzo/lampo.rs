@@ -4,6 +4,9 @@
 //! `core-pass` in `init`. Chain sync then calls the RPC methods below
 //! instead of opening the bitcoind port itself.
 //!
+//! rbitcoin speaks this same JSON-RPC. Use HTTP Basic (`--rpc-listen`
+//! and `--rpc-cookie-file`). See `plugin-sdk/README.md`.
+//!
 //! ```text
 //! cargo run -p lampo-plugin-sdk --example bitcoind
 //! lampod-cli --plugin target/debug/examples/bitcoind
