@@ -104,6 +104,7 @@ core-user=$CORE_USER
 core-pass=$CORE_PASS
 ${CURRENCY_RATES:+currency-rates=$CURRENCY_RATES}
 ${CURRENCY_TOLERANCE_BPS:+currency-tolerance-bps=$CURRENCY_TOLERANCE_BPS}
+${REINDEX:+reindex=$REINDEX}
 EOF
   # Plugins are a CLI flag, not a conf line.
   local -a plugin_args=()
