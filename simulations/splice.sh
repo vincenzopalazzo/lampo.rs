@@ -62,6 +62,15 @@ advance() {
 
 say "splice QA: bin=$BIN simdir=$SIMDIR core=$CORE_URL seed=$SEED"
 [ -x "$BIN" ] || { say "binary missing: $BIN"; exit 1; }
+# Current lampod talks to bitcoind through the chain plugin.
+if [ -z "${LAMPO_PLUGINS:-}" ]; then
+  plugin_guess="$(dirname "$BIN")/examples/lampo-bitcoind"
+  if [ -x "$plugin_guess" ]; then
+    export LAMPO_PLUGINS="$plugin_guess"
+  fi
+fi
+say "plugins=${LAMPO_PLUGINS:-none}"
+[ -n "${LAMPO_PLUGINS:-}" ] || { say "lampod needs the bitcoind plugin (LAMPO_PLUGINS)"; exit 1; }
 CHAIN=$(chain_rpc getblockchaininfo | jqf 'd["result"]["chain"]')
 case "$CHAIN" in
   regtest|signet) ;;

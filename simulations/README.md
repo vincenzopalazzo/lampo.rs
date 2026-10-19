@@ -83,6 +83,7 @@ On signet it does not mine; it uses the bitcoind that is already running:
 
 ```bash
 REPO=$HOME/lampo-splice-qa BIN=$REPO/target/release/lampod-cli \
+  LAMPO_PLUGINS=$REPO/target/release/examples/lampo-bitcoind \
   CORE_URL=http://127.0.0.1:38332 ./simulations/splice.sh
 ```
 
