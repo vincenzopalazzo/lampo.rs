@@ -16,3 +16,6 @@ post!(close, request: request::CloseChannel, response: response::CloseChannel);
 post!(channels, request: json::Value, response: json::Value);
 post!(peers, response: response::Peers);
 post!(fundchannel, request: request::OpenChannel, response: json::Value);
+post!(splicein, request: request::SpliceIn, response: json::Value);
+post!(spliceout, request: request::SpliceOut, response: json::Value);
+post!(bumpchannelfee, request: request::BumpChannelFee, response: json::Value);

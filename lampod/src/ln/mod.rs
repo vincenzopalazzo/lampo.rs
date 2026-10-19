@@ -5,6 +5,7 @@ mod inventory_manager;
 mod offchain_manager;
 mod om_mailbox;
 mod peer_manager;
+mod splice;
 mod static_invoice_store;
 
 pub mod payer_proof;

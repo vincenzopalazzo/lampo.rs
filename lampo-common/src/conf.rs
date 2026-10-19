@@ -6,6 +6,15 @@ use clightningrpc_conf::{CLNConf, SyncCLNConf};
 pub use bitcoin::Network;
 pub use lightning::util::config::UserConfig;
 
+/// LDK defaults, plus the same splice acceptance ldk-node turns on.
+/// `UserConfig::default` rejects inbound splices so older peers stay safe;
+/// a node that exposes `splicein` has to accept the other side of that splice.
+fn default_user_config() -> UserConfig {
+    let mut conf = UserConfig::default();
+    conf.reject_inbound_splices = false;
+    conf
+}
+
 #[derive(Clone, Debug)]
 pub struct LampoConf {
     pub inner: Option<CLNConf>,
@@ -111,7 +120,7 @@ impl Default for LampoConf {
             inner: None,
             // default network is testnet
             network: Network::Testnet,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: default_user_config(),
             // default port is 19735 for testnet
             port: 19735,
             root_path: lampo_home,
@@ -404,7 +413,7 @@ impl TryFrom<String> for LampoConf {
             inner: Some(conf),
             root_path,
             network,
-            ldk_conf: UserConfig::default(),
+            ldk_conf: default_user_config(),
             port: u64::from_str(&port)?,
             node,
             core_url,

@@ -1,4 +1,5 @@
 //! Wallet Manager implementation with BDK
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -28,14 +29,16 @@ use tokio_cron_scheduler::{Job, JobScheduler};
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::bip32::Xpriv;
 use lampo_common::bitcoin::blockdata::locktime::absolute::LockTime;
-use lampo_common::bitcoin::psbt::Psbt;
+use lampo_common::bitcoin::constants::WITNESS_SCALE_FACTOR;
+use lampo_common::bitcoin::psbt::{self, Psbt};
 use lampo_common::bitcoin::PrivateKey;
 use lampo_common::bitcoin::{
-    Amount, Block, FeeRate, OutPoint, ScriptBuf, Transaction, TxOut, Txid,
+    Amount, Block, FeeRate, OutPoint, ScriptBuf, Transaction, TxOut, Txid, Weight,
 };
 use lampo_common::chainsync::ChainSyncCoordinator;
 use lampo_common::conf::{LampoConf, Network};
 use lampo_common::keys::LampoKeysManager;
+use lampo_common::ldk::util::wallet_utils::{CoinSelection, ConfirmedUtxo, Input as SpliceInput};
 use lampo_common::model::response::NewAddress;
 use lampo_common::model::response::Utxo;
 use lampo_common::secp256k1::SecretKey;
@@ -382,6 +385,117 @@ impl WalletManager for BDKWalletManager {
             error::bail!("wallet not able to sing the psbt {psbt}");
         }
         Ok(psbt.extract_tx()?)
+    }
+
+    async fn select_confirmed_utxos(
+        &self,
+        must_spend: Vec<SpliceInput>,
+        must_pay_to: Vec<TxOut>,
+        fee_rate: FeeRate,
+    ) -> error::Result<CoinSelection> {
+        // Same shape as ldk-node `Wallet::select_confirmed_utxos`: the shared
+        // funding input is foreign, only confirmed wallet outputs are added,
+        // and a revealed change address is persisted so a restart cannot
+        // hand that script out again.
+        let mut wallet = self.wallet.lock().unwrap();
+        let mut tx_builder = wallet.build_tx();
+        tx_builder.only_witness_utxo().exclude_unconfirmed();
+        for input in &must_spend {
+            let psbt_input = psbt::Input {
+                witness_utxo: Some(input.previous_utxo.clone()),
+                ..Default::default()
+            };
+            let weight = ldk_to_bdk_satisfaction_weight(input.satisfaction_weight);
+            tx_builder
+                .add_foreign_utxo(input.outpoint, psbt_input, weight)
+                .map_err(|err| error::anyhow!("shared splice input: {err}"))?;
+        }
+        for output in &must_pay_to {
+            tx_builder.add_recipient(output.script_pubkey.clone(), output.value);
+        }
+        tx_builder.fee_rate(fee_rate);
+        let psbt = tx_builder.finish().map_err(|err| {
+            error::anyhow!("failed to select confirmed outputs for a splice: {err}")
+        })?;
+        let unsigned = psbt.unsigned_tx;
+        let mut confirmed_utxos = Vec::with_capacity(unsigned.input.len());
+        for txin in &unsigned.input {
+            if must_spend
+                .iter()
+                .any(|input| input.outpoint == txin.previous_output)
+            {
+                continue;
+            }
+            let prevtx = wallet
+                .tx_details(txin.previous_output.txid)
+                .map(|details| details.tx.as_ref().clone())
+                .ok_or_else(|| {
+                    error::anyhow!(
+                        "selected splice input {} is not in the wallet",
+                        txin.previous_output
+                    )
+                })?;
+            let utxo =
+                ConfirmedUtxo::new_p2wpkh(prevtx, txin.previous_output.vout).map_err(|()| {
+                    error::anyhow!(
+                        "selected splice input {} is not P2WPKH",
+                        txin.previous_output
+                    )
+                })?;
+            confirmed_utxos.push(utxo);
+        }
+        if confirmed_utxos.is_empty() {
+            error::bail!("splice coin selection produced no wallet inputs");
+        }
+        if unsigned.output.len() > must_pay_to.len() + 1 {
+            error::bail!(
+                "splice coin selection produced {} unexpected outputs",
+                unsigned.output.len() - must_pay_to.len()
+            );
+        }
+        let change_output = unsigned
+            .output
+            .into_iter()
+            .find(|txout| must_pay_to.iter().all(|output| output != txout));
+        if change_output.is_some() {
+            let mut db = self.wallet_db.lock().unwrap();
+            wallet
+                .persist(&mut db)
+                .map_err(|err| error::anyhow!("failed to persist splice change address: {err}"))?;
+        }
+        Ok(CoinSelection {
+            confirmed_utxos,
+            change_output,
+        })
+    }
+
+    fn sign_owned_inputs(&self, unsigned_tx: Transaction) -> error::Result<Transaction> {
+        let wallet = self.wallet.lock().unwrap();
+        let mut psbt = Psbt::from_unsigned_tx(unsigned_tx)
+            .map_err(|err| error::anyhow!("splice transaction is not a PSBT: {err}"))?;
+        let owned: HashMap<OutPoint, bdk_wallet::LocalOutput> = wallet
+            .list_output()
+            .map(|output| (output.outpoint, output))
+            .collect();
+        for (index, txin) in psbt.unsigned_tx.input.iter().enumerate() {
+            if let Some(utxo) = owned.get(&txin.previous_output) {
+                psbt.inputs[index] = wallet
+                    .get_psbt_input(utxo.clone(), None, true)
+                    .map_err(|err| error::anyhow!("splice psbt input: {err}"))?;
+            }
+        }
+        let mut sign_options = SignOptions::default();
+        sign_options.trust_witness_utxo = true;
+        // Owned inputs are signed. The shared funding input stays unsigned
+        // for `funding_transaction_signed`.
+        wallet
+            .sign(&mut psbt, sign_options)
+            .map_err(|err| error::anyhow!("failed to sign splice inputs: {err}"))?;
+        match psbt.extract_tx() {
+            Ok(tx) => Ok(tx),
+            Err(lampo_common::bitcoin::psbt::ExtractTxError::MissingInputValue { tx }) => Ok(tx),
+            Err(err) => error::bail!("failed to extract the signed splice transaction: {err}"),
+        }
     }
 
     async fn list_transactions(&self) -> error::Result<Vec<Utxo>> {
@@ -744,6 +858,19 @@ fn jump_empty_wallet_to_tip(start_height: u32, fast_sync: bool, recovering_histo
     start_height == 0 && fast_sync && !recovering_history
 }
 
+/// LDK's `satisfaction_weight` already counts the empty `script_sig` length
+/// and the witness-count byte. BDK adds those itself, so passing the LDK
+/// value straight through double-counts 5 weight units and inflates the
+/// splice fee. Same conversion as ldk-node.
+fn ldk_to_bdk_satisfaction_weight(ldk_satisfaction_weight: u64) -> Weight {
+    const EMPTY_SCRIPT_SIG_WEIGHT: u64 = 1 * WITNESS_SCALE_FACTOR as u64;
+    const EMPTY_WITNESS_COUNT_WEIGHT: u64 = 1;
+    Weight::from_wu(
+        ldk_satisfaction_weight
+            .saturating_sub(EMPTY_SCRIPT_SIG_WEIGHT + EMPTY_WITNESS_COUNT_WEIGHT),
+    )
+}
+
 /// Nearest persisted checkpoint at or below `height`, walking from the tip.
 /// `None` if the wallet has no checkpoint that far back (sparse chain).
 fn checkpoint_at_or_below(
@@ -755,7 +882,15 @@ fn checkpoint_at_or_below(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_recovering_history, jump_empty_wallet_to_tip};
+    use super::{is_recovering_history, jump_empty_wallet_to_tip, ldk_to_bdk_satisfaction_weight};
+    use lampo_common::bitcoin::Weight;
+
+    #[test]
+    fn splice_satisfaction_weight_drops_the_bytes_bdk_adds() {
+        // 4 (empty script_sig length, scaled) + 1 (witness count) = 5.
+        assert_eq!(ldk_to_bdk_satisfaction_weight(220), Weight::from_wu(215));
+        assert_eq!(ldk_to_bdk_satisfaction_weight(0), Weight::from_wu(0));
+    }
 
     #[test]
     fn fast_sync_jumps_only_a_genesis_checkpoint() {

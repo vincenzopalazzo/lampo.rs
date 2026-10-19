@@ -111,7 +111,7 @@ where
 /// before giving up. LDK reaps a stalled unfunded channel after roughly a
 /// minute of ping ticks; this outer bound guarantees the request always
 /// returns even if the peer stalls in a state that emits no terminal event.
-const FUNDING_WAIT_TIMEOUT_SECS: u64 = 120;
+pub(crate) const FUNDING_WAIT_TIMEOUT_SECS: u64 = 120;
 
 /// Coordinates the `open_channel` waiter with `FundingGenerationReady` so a
 /// timeout cannot force-close a channel whose funding LDK already accepted

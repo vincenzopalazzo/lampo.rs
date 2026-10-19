@@ -1253,3 +1253,173 @@ pub async fn asyncinvoicepaths_requires_token_when_configured() -> error::Result
         .await?;
     Ok(())
 }
+
+/// Splice in, refuse a second splice while one is pending, bump the fee, then
+/// splice out. The channel value moves by the spliced amounts once the new
+/// funding transaction has the channel's confirmation depth.
+#[tokio_test_shutdown_timeout::test(8)]
+pub async fn splice_in_out_and_fee_bump_between_two_nodes() -> error::Result<()> {
+    init();
+    let node1 = LampoTesting::tmp().await?;
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+    let _: response::Connect = node2
+        .lampod()
+        .call(
+            "connect",
+            request::Connect {
+                node_id: node1.info.node_id.clone(),
+                addr: "127.0.0.1".to_owned(),
+                port: node1.port,
+            },
+        )
+        .await?;
+
+    let mut events = node2.lampod().events();
+    let open_amount = 200_000u64;
+    node1
+        .lampod()
+        .call::<_, json::Value>(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: node2.info.node_id.clone(),
+                amount: open_amount,
+                public: false,
+                port: None,
+                addr: None,
+                push_msat: None,
+                sat_per_vbyte: None,
+            },
+        )
+        .await?;
+    node2.fund_wallet(10).await?;
+    async_wait!(async {
+        while let Some(event) = events.recv().await {
+            if let Event::Lightning(LightningEvent::ChannelReady { .. }) = event {
+                return Ok(());
+            }
+        }
+        Err(())
+    });
+
+    let no_pending = node1
+        .lampod()
+        .call::<_, json::Value>(
+            "bumpchannelfee",
+            request::BumpChannelFee {
+                node_id: node2.info.node_id.clone(),
+                channel_id: None,
+                sat_per_vbyte: None,
+            },
+        )
+        .await;
+    assert!(
+        no_pending.is_err(),
+        "bump with nothing in flight must fail, got {no_pending:?}"
+    );
+
+    let splice_in_sats = 20_000u64;
+    let first: response::Splice = node1
+        .lampod()
+        .call(
+            "splicein",
+            request::SpliceIn {
+                node_id: node2.info.node_id.clone(),
+                channel_id: None,
+                amount: splice_in_sats,
+                sat_per_vbyte: None,
+            },
+        )
+        .await?;
+    assert_eq!(first.txid.len(), 64);
+
+    let second = node1
+        .lampod()
+        .call::<_, json::Value>(
+            "splicein",
+            request::SpliceIn {
+                node_id: node2.info.node_id.clone(),
+                channel_id: None,
+                amount: splice_in_sats,
+                sat_per_vbyte: None,
+            },
+        )
+        .await;
+    let second = second.expect_err("a second splice while one is pending must fail");
+    assert!(
+        second.to_string().contains("bumpchannelfee"),
+        "pending splice error should name the bump method, got {second}"
+    );
+
+    let bumped: response::Splice = node1
+        .lampod()
+        .call(
+            "bumpchannelfee",
+            request::BumpChannelFee {
+                node_id: node2.info.node_id.clone(),
+                channel_id: Some(first.channel_id.clone()),
+                sat_per_vbyte: Some(20),
+            },
+        )
+        .await?;
+    assert_ne!(bumped.txid, first.txid);
+    wait_for_broadcast(&node1, &bumped.txid).await;
+
+    node2.fund_wallet(8).await?;
+    let mut after_in = 0u64;
+    async_wait!(async {
+        let channels: response::Channels = node1
+            .lampod()
+            .call("channels", json::json!({}))
+            .await
+            .map_err(|_| ())?;
+        let channel = channels.channels.first().ok_or(())?;
+        if channel.amount >= open_amount + splice_in_sats {
+            after_in = channel.amount;
+            return Ok(());
+        }
+        Err(())
+    });
+
+    let address = node1.wallet.get_onchain_address().await?;
+    let splice_out_sats = 10_000u64;
+    let spliced_out: response::Splice = node1
+        .lampod()
+        .call(
+            "spliceout",
+            request::SpliceOut {
+                node_id: node2.info.node_id.clone(),
+                channel_id: None,
+                amount: splice_out_sats,
+                address: address.address,
+                sat_per_vbyte: None,
+            },
+        )
+        .await?;
+    assert_eq!(spliced_out.txid.len(), 64);
+    wait_for_broadcast(&node1, &spliced_out.txid).await;
+    node2.fund_wallet(8).await?;
+    async_wait!(async {
+        let channels: response::Channels = node1
+            .lampod()
+            .call("channels", json::json!({}))
+            .await
+            .map_err(|_| ())?;
+        let channel = channels.channels.first().ok_or(())?;
+        if channel.amount + splice_out_sats <= after_in {
+            return Ok(());
+        }
+        Err(())
+    });
+    Ok(())
+}
+
+/// The splice RPC returns once LDK has the funding outpoint. Broadcast is a
+/// separate task, so mine only after bitcoind has the transaction.
+async fn wait_for_broadcast(node: &LampoTesting, txid: &str) {
+    async_wait!(async {
+        match node.btc.client.get_raw_mempool() {
+            Ok(mempool) if format!("{mempool:?}").contains(txid) => Ok(()),
+            _ => Err(()),
+        }
+    });
+}

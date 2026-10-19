@@ -9,6 +9,7 @@ use crate::bitcoin::{Block, BlockHash, ScriptBuf, Transaction};
 use crate::chainsync::ChainSyncCoordinator;
 use crate::conf::LampoConf;
 use crate::error;
+use crate::ldk::util::wallet_utils::{CoinSelection, Input as SpliceInput};
 use crate::model::response::{NewAddress, Utxo};
 use crate::signer::LampoSigner;
 
@@ -116,5 +117,28 @@ pub trait WalletManager: Send + Sync {
     /// Sign every input in `psbt` that this wallet controls.
     fn sign_psbt(&self, _psbt: Psbt) -> error::Result<Transaction> {
         error::bail!("wallet does not sign PSBTs")
+    }
+
+    /// Pick confirmed wallet inputs for a splice, the way ldk-node's
+    /// `Wallet::select_confirmed_utxos` does. `must_spend` is the shared
+    /// funding input LDK already reserved; it must not come back in the
+    /// selection. The default refuses: only a wallet that can coin-select
+    /// should splice in.
+    async fn select_confirmed_utxos(
+        &self,
+        _must_spend: Vec<SpliceInput>,
+        _must_pay_to: Vec<TxOut>,
+        _fee_rate: FeeRate,
+    ) -> error::Result<CoinSelection> {
+        error::bail!("wallet does not select coins for splicing")
+    }
+
+    /// Sign the inputs of `unsigned` that this wallet owns and leave the
+    /// shared funding input for LDK. Default fills a PSBT and calls
+    /// [`WalletManager::sign_psbt`].
+    fn sign_owned_inputs(&self, unsigned: Transaction) -> error::Result<Transaction> {
+        let psbt = Psbt::from_unsigned_tx(unsigned)
+            .map_err(|err| error::anyhow!("unsigned splice transaction is not a PSBT: {err}"))?;
+        self.sign_psbt(psbt)
     }
 }
