@@ -148,10 +148,20 @@ fund_signet() { # $1 name. Pays the mutinynet L402 from a node already on this s
   return 1
 }
 
+wait_node() { # signet startup is slower than wait_up's one minute
+  local n=$1 id
+  for _ in $(seq 1 60); do
+    sleep 5
+    id=$(rpc "$(API "$n")" getinfo 2>/dev/null | jqf 'd.get("node_id","")')
+    [ -n "$id" ] && { echo "$id"; return 0; }
+  done
+  return 1
+}
+
 say "starting sa and sb on $CHAIN"
 for n in "${ALLNODES[@]}"; do
   start_node "$n"
-  ID[$n]=$(wait_up "$n") || { fail "$n never came up"; exit 2; }
+  ID[$n]=$(wait_node "$n") || { fail "$n never came up"; exit 2; }
   say "  $n = ${ID[$n]:0:16}.. api :$(API "$n") p2p :$(P2P "$n")"
 done
 if [ "$CHAIN" = regtest ]; then
