@@ -192,7 +192,9 @@ impl LampoPeerManager {
             custom_message_handler: IgnoringMessageHandler {},
             // Same ChainMonitor the channel manager watches. LDK encrypts our
             // monitor backup with `NodeSigner::get_peer_storage_key` and emits
-            // `peer_storage` from this handler on each new best block.
+            // `peer_storage` from this handler on every `best_block_updated`.
+            // The esplora poll skips that call when the tip hash and height
+            // are unchanged, so a repeat poll does not send another blob.
             send_only_message_handler: channel_manager.chain_monitor(),
         };
 

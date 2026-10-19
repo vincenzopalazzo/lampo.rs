@@ -30,9 +30,9 @@ default-members = [
 ]
 resolver = "2"
 
-# `peer_storage` is an LDK rustc cfg, not a Cargo feature. Declaring it here
-# keeps `-D unexpected_cfgs` / `-D warnings` from failing the compile_error
-# guard in lampod when a build forgets `--cfg peer_storage`.
+# `peer_storage` is an LDK rustc cfg, not a Cargo feature. Listing it here
+# lets `cfg!(peer_storage)` in `lampod/build.rs` compile without an
+# `unexpected_cfgs` warning. A missing cfg fails that build script.
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(peer_storage)',

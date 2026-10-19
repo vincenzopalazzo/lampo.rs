@@ -450,10 +450,37 @@ async fn confirm_tip(
         .map_err(|err| error::anyhow!("{err}"))?;
     let decoded = decode_header(&header, None).map_err(|err| error::anyhow!("{err}"))?;
     let height = u32::try_from(height).map_err(|err| error::anyhow!("{err}"))?;
+    // `ChainMonitor::best_block_updated` emits a `peer_storage` blob on every
+    // call once `cfg(peer_storage)` is set, including when the tip did not
+    // move. This loop polls every 30s, so only a new hash or height is forwarded.
+    let known = channel_manager.current_best_block();
+    if tip_already_applied(
+        known.height,
+        known.block_hash,
+        height,
+        decoded.header.block_hash(),
+    ) {
+        log::debug!(
+            target: "lampo-chain",
+            "transaction sync tip unchanged {hash} height {height}"
+        );
+        return Ok(());
+    }
     Confirm::best_block_updated(&*channel_manager, &decoded.header, height);
     Confirm::best_block_updated(&*chain_monitor, &decoded.header, height);
     log::info!(target: "lampo-chain", "transaction sync tip {hash} height {height}");
     Ok(())
+}
+
+/// True when esplora reported the same tip `ChannelManager` already applied.
+/// Same height with a different hash is a reorg and must still be forwarded.
+fn tip_already_applied(
+    known_height: u32,
+    known_hash: BlockHash,
+    height: u32,
+    hash: BlockHash,
+) -> bool {
+    known_height == height && known_hash == hash
 }
 
 async fn confirm_relevant(
@@ -966,7 +993,18 @@ mod tests {
     use lampo_common::signer::LampoSigner;
     use lampo_common::wallet::{BlockRef, WalletManager};
 
-    use super::{mark_initial_sync_complete, LampoChainSync, WalletChainListener};
+    use super::{
+        mark_initial_sync_complete, tip_already_applied, LampoChainSync, WalletChainListener,
+    };
+
+    #[test]
+    fn unchanged_esplora_tip_is_not_reapplied() {
+        let hash = BlockHash::all_zeros();
+        assert!(tip_already_applied(10, hash, 10, hash));
+        let reorg = BlockHash::from_slice(&[1u8; 32]).unwrap();
+        assert!(!tip_already_applied(10, hash, 10, reorg));
+        assert!(!tip_already_applied(10, hash, 11, hash));
+    }
 
     fn conf_with_core_url(url: &str) -> Arc<LampoConf> {
         let mut conf = LampoConf::default();

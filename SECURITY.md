@@ -19,16 +19,20 @@ a separate path and is compiled in only with `--cfg peer_storage`.
 - A peer's blob is stored inside `ChannelManager` state. BOLT 1 allows a
   message of 65531 bytes; LDK persists at most 1 KiB per funded peer and
   rejects anything larger with a warning.
-- Our own backup is an encrypted channel-monitor snapshot, sent on each new
-  best block to peers we have a funded channel with. LDK packs that snapshot
-  up to the BOLT message limit (65531 bytes). A serialized monitor is larger
-  than 1 KiB, so another Lampo or LDK node rejects it with a warning and does
-  not store it. Lampo-to-LDK outbound backups are not durable today. It is not
-  a substitute for the on-disk channel monitor.
+- Our own backup is an encrypted channel-monitor snapshot, sent when LDK is
+  told about a new best block, to peers we have a funded channel with. The
+  esplora backend polls the tip every 30 seconds and forwards it only when
+  the hash or height changed. LDK packs that snapshot up to the BOLT message
+  limit (65531 bytes). A serialized monitor is larger than 1 KiB, so another
+  Lampo or LDK node rejects it with a warning and does not store it.
+  Lampo-to-LDK outbound backups are not durable today. It is not a substitute
+  for the on-disk channel monitor.
 - If a `peer_storage_retrieval` blob is ahead of local channel state, LDK
   panics while handling the message. The panic text mentions a `FundRecoverer`
-  helper; that helper is not implemented (it is a TODO in LDK). Do not treat
-  peer storage as unattended disaster recovery.
+  helper; that helper is not implemented (it is a TODO in LDK). Sending the
+  blob makes that path reachable for a peer that stores the full BOLT size
+  and returns it on reconnect. Do not treat peer storage as unattended
+  disaster recovery.
 
 `.cargo/config.toml` sets the cfg for normal builds. `RUSTFLAGS` and
 `CARGO_ENCODED_RUSTFLAGS` replace that file, so those builds must append
