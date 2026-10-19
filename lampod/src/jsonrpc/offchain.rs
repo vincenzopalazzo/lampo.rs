@@ -11,7 +11,6 @@ use lampo_common::hex;
 use lampo_common::jsonrpc::{Error, RpcError};
 use lampo_common::ldk;
 use lampo_common::ldk::offers::contacts::{ContactSecret, ContactSecrets};
-use lampo_common::ldk::offers::nonce::Nonce;
 use lampo_common::ldk::offers::offer;
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::CurrencyCode;
@@ -595,23 +594,19 @@ fn build_reveal_contact_params(
                 data: None,
             })
         })?;
-    let nonce_hex = params
-        .nonce
-        .as_ref()
-        .map(|n| hex::encode(n.as_slice()))
-        .ok_or_else(|| {
-            Error::Rpc(RpcError {
-                code: -1,
-                message: "compact payer offer missing nonce".into(),
-                data: None,
-            })
-        })?;
+    let contact_id_hex = params.contact_id_hex.clone().ok_or_else(|| {
+        Error::Rpc(RpcError {
+            code: -1,
+            message: "payer offer missing contact id".into(),
+            data: None,
+        })
+    })?;
     let outbound = NewOutboundContact {
         label,
         remote_offer: their_offer,
         primary_secret: *params.secrets.primary_secret(),
         our_offer: params.payer_offer.clone(),
-        our_offer_nonce_hex: nonce_hex,
+        our_offer_nonce_hex: contact_id_hex,
     };
     Ok((params, Some(outbound)))
 }
@@ -660,79 +655,57 @@ fn contact_params_from_stored(
         })
     })?;
 
-    let (payer_offer, nonce) = match (&contact.our_offer, &contact.our_offer_nonce_hex) {
-        (Some(offer_s), Some(nonce_hex)) => {
-            let offer = Offer::from_str(offer_s).map_err(|err| {
+    let payer_offer = if let Some(offer_s) = &contact.our_offer {
+        Offer::from_str(offer_s).map_err(|err| {
+            Error::Rpc(RpcError {
+                code: -1,
+                message: format!("stored our_offer invalid: {err:?}"),
+                data: None,
+            })
+        })?
+    } else {
+        let intro_pk = parse_pubkey(intro_node.ok_or_else(|| {
+            Error::Rpc(RpcError {
+                code: -1,
+                message: format!(
+                    "contact `{}` has no stored our_offer; provide bolt12.intro_node (and reveal_contact) to create one for payback",
+                    contact.label
+                ),
+                data: None,
+            })
+        })?)?;
+        let (offer, contact_id_hex) = ctx
+            .offchain_manager()
+            .create_payer_offer(intro_pk)
+            .map_err(|err| {
                 Error::Rpc(RpcError {
                     code: -1,
-                    message: format!("stored our_offer invalid: {err:?}"),
+                    message: err.to_string(),
                     data: None,
                 })
             })?;
-            (offer, decode_nonce(nonce_hex)?)
-        }
-        _ => {
-            let intro_pk = parse_pubkey(intro_node.ok_or_else(|| {
+        store
+            .remember_outbound(
+                &contact.label,
+                their_offer,
+                secrets.primary_secret(),
+                &offer,
+                &contact_id_hex,
+            )
+            .map_err(|err| {
                 Error::Rpc(RpcError {
                     code: -1,
-                    message: format!(
-                        "contact `{}` has no stored our_offer; provide bolt12.intro_node (and reveal_contact) to create one for payback",
-                        contact.label
-                    ),
+                    message: err.to_string(),
                     data: None,
                 })
-            })?)?;
-            let (offer, nonce) = ctx
-                .offchain_manager()
-                .create_compact_payer_offer(intro_pk)
-                .map_err(|err| {
-                    Error::Rpc(RpcError {
-                        code: -1,
-                        message: err.to_string(),
-                        data: None,
-                    })
-                })?;
-            let nonce_hex = hex::encode(nonce.as_slice());
-            store
-                .remember_outbound(
-                    &contact.label,
-                    their_offer,
-                    secrets.primary_secret(),
-                    &offer,
-                    &nonce_hex,
-                )
-                .map_err(|err| {
-                    Error::Rpc(RpcError {
-                        code: -1,
-                        message: err.to_string(),
-                        data: None,
-                    })
-                })?;
-            (offer, nonce)
-        }
+            })?;
+        offer
     };
 
     Ok(ContactPaymentParams {
         secrets,
         payer_offer,
-        nonce: Some(nonce),
-    })
-}
-
-fn decode_nonce(nonce_hex: &str) -> Result<Nonce, Error> {
-    let bytes = hex::decode(nonce_hex).map_err(|err| {
-        Error::Rpc(RpcError {
-            code: -1,
-            message: format!("invalid nonce hex: {err}"),
-            data: None,
-        })
-    })?;
-    Nonce::try_from(bytes.as_slice()).map_err(|_| {
-        Error::Rpc(RpcError {
-            code: -1,
-            message: "contact our_offer_nonce_hex must be 16 bytes".into(),
-            data: None,
-        })
+        contact_id_hex: contact.our_offer_nonce_hex.clone(),
     })
 }
 

@@ -256,65 +256,99 @@ impl OffchainManager {
         Ok(payment_id)
     }
 
-    /// Build a compact payer offer + contact secrets for BLIP-42 reveal.
+    /// Build a payer offer signed by a fresh [`ContactId`], plus the contact secret
+    /// for `their_offer`.
+    ///
+    /// Each call without `existing` mints a new id, so two contacts do not share a
+    /// signing key. The secret is the bLIP 42 ECDH of that key and their offer.
     pub fn build_contact_payment_params(
         &self,
         their_offer: &Offer,
         intro_node: pubkey,
-        existing: Option<(Offer, Nonce, ContactSecrets)>,
+        existing: Option<(Offer, ContactSecrets)>,
     ) -> error::Result<ContactPaymentParams> {
-        if let Some((payer_offer, nonce, secrets)) = existing {
+        if let Some((payer_offer, secrets)) = existing {
             return Ok(ContactPaymentParams {
                 secrets,
                 payer_offer,
-                nonce: Some(nonce),
+                contact_id_hex: None,
             });
         }
 
-        let manager = self.channel_manager.manager();
-        // Compact payer offers must be <= 300 TLV bytes (BLIP-42). On signet the
-        // explicit chain hash + blinded path can land just over the limit; retry a
-        // few times in case path padding/nonce encoding varies, then fail clearly.
-        let mut last_len = 0usize;
-        for attempt in 0..8 {
-            let (builder, nonce) = manager
-                .create_compact_offer_builder(intro_node)
-                .map_err(|err| error::anyhow!("create_compact_offer_builder: {:?}", err))?;
-            let payer_offer = builder
-                .build()
-                .map_err(|err| error::anyhow!("build compact payer offer: {:?}", err))?;
-            last_len = payer_offer.as_ref().len();
-            log::info!(
-                target: "lampo::offchain",
-                "compact payer_offer attempt {attempt}: tlv_len={last_len}"
-            );
-            if last_len <= 300 {
-                let secrets = manager
-                    .compute_contact_secret(&payer_offer, nonce, their_offer)
-                    .map_err(|err| error::anyhow!("compute_contact_secret: {:?}", err))?;
-                return Ok(ContactPaymentParams {
-                    secrets,
-                    payer_offer,
-                    nonce: Some(nonce),
-                });
+        let id = ldk::offers::contacts::ContactId::from_entropy_source(self.keys_manager.as_ref());
+        let contact_id_hex = match &id {
+            ldk::offers::contacts::ContactId::Entropy(bytes) => hex::encode(bytes),
+            ldk::offers::contacts::ContactId::Bip353(_) => {
+                error::bail!("fresh contact id must be entropy")
             }
-        }
-        error::bail!(
-            "compact payer_offer stayed at {last_len} bytes after retries; BLIP-42 requires <= 300 (need BIP-353 or smaller blinded path / SCID intro)"
+        };
+        let payer_offer = self.payer_offer_from_contact_id(&id, intro_node)?;
+        let payer_offer_len = payer_offer.as_ref().len();
+        log::info!(
+            target: "lampo::offchain",
+            "payer_offer from ContactId: tlv_len={payer_offer_len}"
         );
+        if payer_offer_len > 300 {
+            error::bail!("payer_offer is {payer_offer_len} bytes; BLIP-42 requires <= 300");
+        }
+        let secrets =
+            ldk::offers::contacts::compute_contact_secret(&id.signing_secret(), their_offer)
+                .map_err(|err| error::anyhow!("compute_contact_secret: {:?}", err))?;
+        Ok(ContactPaymentParams {
+            secrets,
+            payer_offer,
+            contact_id_hex: Some(contact_id_hex),
+        })
     }
 
-    /// Create a compact payer offer for BLIP-42 without deriving a new contact secret.
-    /// Used when paying back a contact whose secret we already stored from an inbound payment.
-    pub fn create_compact_payer_offer(&self, intro_node: pubkey) -> error::Result<(Offer, Nonce)> {
-        let manager = self.channel_manager.manager();
-        let (builder, nonce) = manager
-            .create_compact_offer_builder(intro_node)
-            .map_err(|err| error::anyhow!("create_compact_offer_builder: {:?}", err))?;
-        let payer_offer = builder
+    /// Payer offer for a payback, signed by a new [`ContactId`].
+    pub fn create_payer_offer(&self, intro_node: pubkey) -> error::Result<(Offer, String)> {
+        let id = ldk::offers::contacts::ContactId::from_entropy_source(self.keys_manager.as_ref());
+        let contact_id_hex = match &id {
+            ldk::offers::contacts::ContactId::Entropy(bytes) => hex::encode(bytes),
+            ldk::offers::contacts::ContactId::Bip353(_) => {
+                error::bail!("fresh contact id must be entropy")
+            }
+        };
+        let payer_offer = self.payer_offer_from_contact_id(&id, intro_node)?;
+        Ok((payer_offer, contact_id_hex))
+    }
+
+    fn payer_offer_from_contact_id(
+        &self,
+        id: &ldk::offers::contacts::ContactId,
+        intro_node: pubkey,
+    ) -> error::Result<Offer> {
+        use ldk::blinded_path::message::{MessageContext, MessageForwardNode, OffersContext};
+        use ldk::offers::currency::NullCurrencyConversion;
+        use ldk::offers::offer::OfferBuilder;
+        use lampo_common::bitcoin::secp256k1::Secp256k1;
+
+        let secp_sign = Secp256k1::signing_only();
+        let secp_ctx = Secp256k1::new();
+        let our_node_id = self.channel_manager.manager().get_our_node_id();
+        let receive_key = self.keys_manager.get_receive_auth_key();
+        let nonce = Nonce::from_entropy_source(self.keys_manager.as_ref());
+        let context = MessageContext::Offers(OffersContext::InvoiceRequest {
+            nonce,
+            payment_metadata: None,
+        });
+        let path = BlindedMessagePath::new(
+            &[MessageForwardNode {
+                node_id: intro_node,
+                short_channel_id: None,
+            }],
+            our_node_id,
+            receive_key,
+            context,
+            true,
+            self.keys_manager.as_ref(),
+            &secp_ctx,
+        );
+        OfferBuilder::from_contact_id(id, &NullCurrencyConversion, &secp_sign)
+            .path(path)
             .build()
-            .map_err(|err| error::anyhow!("build compact payer offer: {:?}", err))?;
-        Ok((payer_offer, nonce))
+            .map_err(|err| error::anyhow!("build payer offer: {:?}", err))
     }
 
     pub fn pay_invoice(
@@ -388,5 +422,6 @@ impl OffchainManager {
 pub struct ContactPaymentParams {
     pub secrets: ContactSecrets,
     pub payer_offer: Offer,
-    pub nonce: Option<Nonce>,
+    /// Hex of the entropy `ContactId`, when this pay minted one.
+    pub contact_id_hex: Option<String>,
 }
