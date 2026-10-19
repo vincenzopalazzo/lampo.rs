@@ -513,6 +513,18 @@ impl Handler for LampoHandler {
                         target: "lampo",
                         "funding_transaction_signed refused the splice on `{channel_id}`: {err:?}"
                     );
+                    // Leaving the event acknowledged without a cancel keeps
+                    // the channel in quiescence waiting for signatures.
+                    if let Err(cancel) = self
+                        .channel_manager
+                        .manager()
+                        .cancel_funding_contributed(&channel_id, &counterparty_node_id)
+                    {
+                        log::warn!(
+                            target: "lampo",
+                            "failed to cancel splice on `{channel_id}` after LDK refused the signature: {cancel:?}"
+                        );
+                    }
                 }
                 Ok(())
             }
