@@ -287,10 +287,10 @@ impl LampoTesting {
         tokio::spawn(lampo.clone().listen());
 
         // wait that lampo starts (bounded: an infinite wait hangs the whole CI job).
-        // 30s is tight when the suite starts several nodes at once against a
-        // fresh rbitcoin datadir.
+        // A fresh rbitcoin datadir preallocates its archive before the first
+        // getblockchaininfo returns, and getinfo waits on that tip.
         let mut ready = false;
-        for _ in 0..90 {
+        for _ in 0..60 {
             match handler
                 .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
                 .await
@@ -301,12 +301,12 @@ impl LampoTesting {
                 }
                 Err(err) => {
                     log::error!("error: `{}`", err);
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 }
             }
         }
         if !ready {
-            error::bail!("lampo failed to become ready via getinfo within 90s");
+            error::bail!("lampo failed to become ready via getinfo within 12s");
         }
 
         let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;

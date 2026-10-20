@@ -15,12 +15,16 @@ pub async fn json_getinfo(ctx: &LampoDaemon, request: &json::Value) -> Result<js
     let alias = ctx.conf.alias.clone();
     // we have to put "" in case of alias missing as cln provide us with a random alias.
     let alias = alias.unwrap_or_default();
-    let (block_hash, height) = ctx
-        .onchain_manager()
-        .backend
-        .get_best_block()
-        .await
-        .map_err(|err| error::anyhow!("{:?}", err))?;
+    // The chain plugin has no RPC timeout. A stuck getblockchaininfo
+    // would hold this call until the client gives up, which is what the
+    // integration harness saw as "getinfo did not answer".
+    let (block_hash, height) = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        ctx.onchain_manager().backend.get_best_block(),
+    )
+    .await
+    .map_err(|_| error::anyhow!("getinfo: chain tip timed out"))?
+    .map_err(|err| error::anyhow!("{:?}", err))?;
 
     let blockheight = height.unwrap_or_default();
     let lampo_dir = ctx.conf.root_path.to_string();
