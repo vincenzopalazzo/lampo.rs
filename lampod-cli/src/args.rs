@@ -97,13 +97,7 @@ impl TryInto<LampoConf> for LampoCliArgs {
     fn try_into(self) -> Result<LampoConf, Self::Error> {
         // if network is not specified, set the testnet dir
         let network = self.network.unwrap_or(String::from("testnet"));
-        let network = match network.as_str() {
-            "bitcoin" => Network::Bitcoin,
-            "testnet" => Network::Testnet,
-            "regtest" => Network::Regtest,
-            "signet" => Network::Signet,
-            _ => error::bail!("Invalid network {network}"),
-        };
+        let network = parse_network(&network)?;
 
         // Resolve the data dir without going through `LampoConf::default()`:
         // prefer the explicit `--data-dir`, otherwise the same
@@ -164,6 +158,18 @@ impl TryInto<LampoConf> for LampoCliArgs {
     }
 }
 
+fn parse_network(network: &str) -> Result<Network, error::Error> {
+    let network = match network {
+        "bitcoin" => Network::Bitcoin,
+        "testnet" => Network::Testnet,
+        "testnet4" => Network::Testnet4,
+        "regtest" => Network::Regtest,
+        "signet" => Network::Signet,
+        _ => error::bail!("Invalid network {network}"),
+    };
+    Ok(network)
+}
+
 pub fn parse_args() -> Result<LampoCliArgs, error::Error> {
     Ok(LampoCliArgs::parse())
 }
@@ -194,6 +200,13 @@ mod tests {
             remote_plugins: Vec::new(),
             subcommand: None,
         }
+    }
+
+    #[test]
+    fn parse_network_accepts_testnet4() {
+        assert_eq!(parse_network("testnet4").unwrap(), Network::Testnet4);
+        assert_eq!(parse_network("testnet").unwrap(), Network::Testnet);
+        assert!(parse_network("testnet5").is_err());
     }
 
     /// Regression (bug 3, CLI side): `try_into` no longer calls
