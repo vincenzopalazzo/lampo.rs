@@ -60,6 +60,16 @@ RUN cd /tmp/ && \
     mv /tmp/bitcoin-$BITCOIN_VERSION/bin/bitcoin* /usr/local/bin/ && \
     rm -rf bitcoin.tar.gz /tmp/bitcoin-$BITCOIN_VERSION
 
+# rbitcoin is the second integration-test lane (LAMPO_CHAIN_BACKEND=rbitcoin).
+# Linux x86_64 is the supported release path. macOS/Windows builds are not used here.
+ENV RBITCOIN_VERSION=0.8.0
+RUN cd /tmp/ && \
+    wget https://github.com/reardencode/rbitcoin/releases/download/v$RBITCOIN_VERSION/rbitcoin-node-x86_64-linux -O rbitcoin-node && \
+    wget https://github.com/reardencode/rbitcoin/releases/download/v$RBITCOIN_VERSION/SHA256SUMS.linux-musl && \
+    grep ' rbitcoin-node$' SHA256SUMS.linux-musl | sha256sum -c - && \
+    install -m 0755 rbitcoin-node /usr/local/bin/rbitcoin-node && \
+    rm -f rbitcoin-node SHA256SUMS.linux-musl
+
 RUN pipx ensurepath
 ENV PATH="/root/.local/bin:${PATH}"
 RUN pipx completions

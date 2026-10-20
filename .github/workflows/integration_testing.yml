@@ -11,10 +11,14 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        chain: [core, rbitcoin]
     steps:
       - uses: actions/checkout@v2
-      - name: lampo integration testing
+      - name: lampo integration testing (${{ matrix.chain }})
         run: |
           docker build -f docker/Dockerfile -t lampo-ci-ubuntu .
-          docker run lampo-ci-ubuntu
+          docker run -e LAMPO_CHAIN_BACKEND=${{ matrix.chain }} lampo-ci-ubuntu

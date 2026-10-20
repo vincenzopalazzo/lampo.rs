@@ -738,7 +738,7 @@ pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
 /// the recipient out of the graph makes its paths introduction-point at the
 /// server, which every payer of its offers is connected to by construction.
 async fn async_payments_server_and_recipient(
-    btc: Arc<BtcNode>,
+    btc: Arc<ChainBackend>,
 ) -> error::Result<(Arc<LampoTesting>, Arc<LampoTesting>)> {
     let server = Arc::new(
         LampoTesting::new_with(btc, |conf| {
