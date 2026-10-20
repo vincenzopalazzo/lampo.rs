@@ -286,9 +286,11 @@ impl LampoTesting {
         let handler = lampo.handler();
         tokio::spawn(lampo.clone().listen());
 
-        // wait that lampo starts (bounded: an infinite wait hangs the whole CI job)
+        // wait that lampo starts (bounded: an infinite wait hangs the whole CI job).
+        // 30s is tight when the suite starts several nodes at once against a
+        // fresh rbitcoin datadir.
         let mut ready = false;
-        for _ in 0..30 {
+        for _ in 0..90 {
             match handler
                 .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
                 .await
@@ -304,7 +306,7 @@ impl LampoTesting {
             }
         }
         if !ready {
-            error::bail!("lampo failed to become ready via getinfo within 30s");
+            error::bail!("lampo failed to become ready via getinfo within 90s");
         }
 
         let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
