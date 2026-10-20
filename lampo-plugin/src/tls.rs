@@ -12,7 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use lampo_common::error;
-use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
+use rcgen::{CertificateParams, DistinguishedName, DnType, Issuer, KeyPair};
 
 /// Directory layout for plugin certificates.
 ///
@@ -112,8 +112,9 @@ impl CertStore {
         let ca_key_pem = fs::read_to_string(self.ca_key_path())?;
 
         let ca_key = KeyPair::from_pem(&ca_key_pem)?;
-        let ca_params = CertificateParams::from_ca_cert_pem(&ca_cert_pem)?;
-        let ca_cert = ca_params.self_signed(&ca_key)?;
+        // rcgen 0.14 signs with an Issuer parsed from the stored CA, not a
+        // re-issued self-signed certificate.
+        let issuer = Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key)?;
 
         // Generate client cert
         let mut params = CertificateParams::default();
@@ -123,7 +124,7 @@ impl CertStore {
         params.distinguished_name = dn;
 
         let client_key = KeyPair::generate()?;
-        let client_cert = params.signed_by(&client_key, &ca_cert, &ca_key)?;
+        let client_cert = params.signed_by(&client_key, &issuer)?;
 
         fs::write(self.client_cert_path(), client_cert.pem())?;
         fs::write(self.client_key_path(), client_key.serialize_pem())?;
