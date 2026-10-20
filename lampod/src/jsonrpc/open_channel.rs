@@ -23,7 +23,14 @@ pub async fn json_fundchannel(
     let node_id = request
         .node_id()
         .map_err(|err| crate::rpc_error!("invalid `node_id` provided: {err}"))?;
-    if !ctx.peer_manager().is_connected_with(node_id) {
+    // `is_connected_with` panics when the peer manager was never initialized.
+    // That panic is reachable from this RPC (the worker calls it before any
+    // connect attempt) and must come back as an RPC error.
+    let connected = ctx
+        .peer_manager()
+        .try_is_connected_with(node_id)
+        .map_err(|err| crate::rpc_error!("{err}"))?;
+    if !connected {
         log::trace!("we are not connected with the peer {}", request.node_id);
         let conn = request::Connect::try_from(request.clone())?;
         let conn = json::to_value(conn)?;
