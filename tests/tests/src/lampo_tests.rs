@@ -1316,8 +1316,8 @@ pub async fn pay_offer_blip42_contact_roundtrip() -> error::Result<()> {
         n1_contacts
             .contacts
             .iter()
-            .any(|c| c.label == "node2" && c.our_offer.is_some()),
-        "node1 must persist outbound contact with our_offer: {n1_contacts:?}"
+            .any(|c| c.label == "node2" && c.contact_id.starts_with("entropy:")),
+        "node1 must persist outbound contact with a ContactId: {n1_contacts:?}"
     );
 
     // node2 should have remembered the inbound contact (+ payer offer return path).
@@ -1400,8 +1400,8 @@ pub async fn blip42_contact_keys_are_not_linkable_across_contacts() -> error::Re
         bob_contact.primary_secret_hex, charlie_contact.primary_secret_hex,
         "one static signing key would still be comparable across contacts: {alice_book:?}"
     );
-    let bob_key = offer_signing_key(bob_contact.our_offer.as_deref().unwrap());
-    let charlie_key = offer_signing_key(charlie_contact.our_offer.as_deref().unwrap());
+    let bob_key = bob_contact.signing_pubkey.clone();
+    let charlie_key = charlie_contact.signing_pubkey.clone();
     assert_ne!(
         bob_key, charlie_key,
         "Alice revealed one signing pubkey to Bob and Charlie"
@@ -1433,7 +1433,8 @@ pub async fn blip42_contact_keys_are_not_linkable_across_contacts() -> error::Re
     // Same contact, second pay: key and secret stay put.
     pay_revealing(&alice, &bob_offer, "bob", &bob.info.node_id).await?;
     let again = contact_labeled(&list_contacts(&alice).await?, "bob");
-    assert_eq!(again.our_offer, bob_contact.our_offer);
+    assert_eq!(again.contact_id, bob_contact.contact_id);
+    assert_eq!(again.signing_pubkey, bob_contact.signing_pubkey);
     assert_eq!(again.primary_secret_hex, bob_contact.primary_secret_hex);
     let bob_after = inbound_contact(&bob).await?;
     assert_eq!(bob_after.primary_secret_hex, bob_inbound.primary_secret_hex);

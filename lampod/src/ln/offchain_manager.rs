@@ -28,7 +28,7 @@ use lampo_common::ldk::ln::channelmanager::{
     Bolt11InvoiceParameters, OptionalBolt11PaymentParams, OptionalOfferPaymentParams, PaymentId,
 };
 use lampo_common::ldk::ln::outbound_payment::{RecipientOnionFields, Retry};
-use lampo_common::ldk::offers::contacts::ContactSecrets;
+use lampo_common::ldk::offers::contacts::{ContactId, ContactSecrets};
 use lampo_common::ldk::offers::nonce::Nonce;
 use lampo_common::ldk::offers::offer::Amount;
 use lampo_common::ldk::offers::offer::Offer;
@@ -259,30 +259,15 @@ impl OffchainManager {
     /// Build a payer offer signed by a fresh [`ContactId`], plus the contact secret
     /// for `their_offer`.
     ///
-    /// Each call without `existing` mints a new id, so two contacts do not share a
-    /// signing key. The secret is the bLIP 42 ECDH of that key and their offer.
+    /// Each call mints a new id, so two contacts do not share a signing key. The
+    /// secret is the bLIP 42 ECDH of that key and their offer.
     pub fn build_contact_payment_params(
         &self,
         their_offer: &Offer,
         intro_node: pubkey,
-        existing: Option<(Offer, ContactSecrets)>,
     ) -> error::Result<ContactPaymentParams> {
-        if let Some((payer_offer, secrets)) = existing {
-            return Ok(ContactPaymentParams {
-                secrets,
-                payer_offer,
-                contact_id_hex: None,
-            });
-        }
-
-        let id = ldk::offers::contacts::ContactId::from_entropy_source(self.keys_manager.as_ref());
-        let contact_id_hex = match &id {
-            ldk::offers::contacts::ContactId::Entropy(bytes) => hex::encode(bytes),
-            ldk::offers::contacts::ContactId::Bip353(_) => {
-                error::bail!("fresh contact id must be entropy")
-            }
-        };
-        let payer_offer = self.payer_offer_from_contact_id(&id, intro_node)?;
+        let id = ContactId::from_entropy_source(self.keys_manager.as_ref());
+        let payer_offer = self.payer_offer_for_contact(&id, intro_node)?;
         let payer_offer_len = payer_offer.as_ref().len();
         log::info!(
             target: "lampo::offchain",
@@ -291,36 +276,22 @@ impl OffchainManager {
         if payer_offer_len > 300 {
             error::bail!("payer_offer is {payer_offer_len} bytes; BLIP-42 requires <= 300");
         }
-        let secrets =
-            ldk::offers::contacts::compute_contact_secret(&id.signing_secret(), their_offer)
-                .map_err(|err| error::anyhow!("compute_contact_secret: {:?}", err))?;
+        let secrets = ldk::offers::contacts::compute_contact_secret(&id.signing_secret(), their_offer)
+            .map_err(|err| error::anyhow!("compute_contact_secret: {:?}", err))?;
         Ok(ContactPaymentParams {
             secrets,
             payer_offer,
-            contact_id_hex: Some(contact_id_hex),
+            contact_id: id,
         })
     }
 
-    /// Payer offer for a payback, signed by a new [`ContactId`].
-    pub fn create_payer_offer(&self, intro_node: pubkey) -> error::Result<(Offer, String)> {
-        let id = ldk::offers::contacts::ContactId::from_entropy_source(self.keys_manager.as_ref());
-        let contact_id_hex = match &id {
-            ldk::offers::contacts::ContactId::Entropy(bytes) => hex::encode(bytes),
-            ldk::offers::contacts::ContactId::Bip353(_) => {
-                error::bail!("fresh contact id must be entropy")
-            }
-        };
-        let payer_offer = self.payer_offer_from_contact_id(&id, intro_node)?;
-        Ok((payer_offer, contact_id_hex))
-    }
-
-    fn payer_offer_from_contact_id(
+    /// Payer offer signed by `id`. Currency conversion is not involved: this offer has no amount.
+    pub fn payer_offer_for_contact(
         &self,
-        id: &ldk::offers::contacts::ContactId,
+        id: &ContactId,
         intro_node: pubkey,
     ) -> error::Result<Offer> {
         use ldk::blinded_path::message::{MessageContext, MessageForwardNode, OffersContext};
-        use ldk::offers::currency::NullCurrencyConversion;
         use ldk::offers::offer::OfferBuilder;
         use lampo_common::bitcoin::secp256k1::Secp256k1;
 
@@ -345,7 +316,7 @@ impl OffchainManager {
             self.keys_manager.as_ref(),
             &secp_ctx,
         );
-        OfferBuilder::from_contact_id(id, &NullCurrencyConversion, &secp_sign)
+        OfferBuilder::from_contact_id(id, &secp_sign)
             .path(path)
             .build()
             .map_err(|err| error::anyhow!("build payer offer: {:?}", err))
@@ -422,6 +393,5 @@ impl OffchainManager {
 pub struct ContactPaymentParams {
     pub secrets: ContactSecrets,
     pub payer_offer: Offer,
-    /// Hex of the entropy `ContactId`, when this pay minted one.
-    pub contact_id_hex: Option<String>,
+    pub contact_id: ContactId,
 }

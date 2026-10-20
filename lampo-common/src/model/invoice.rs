@@ -60,9 +60,8 @@ pub mod request {
         /// Label under which to store/load this contact in the local contact book.
         #[serde(default)]
         pub contact_label: Option<String>,
-        /// Intro node pubkey (hex) used to build a compact payer offer blinded path.
-        /// Required when `reveal_contact` is set unless a stored contact already
-        /// has `our_offer` + nonce.
+        /// Intro node pubkey (hex) used to build the payer offer blinded path.
+        /// Required when revealing a contact or paying one back.
         #[serde(default)]
         pub intro_node: Option<String>,
     }
@@ -70,10 +69,14 @@ pub mod request {
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
     pub struct AddContact {
         pub label: String,
-        /// Remote BOLT12 offer used to pay this contact back.
-        pub offer: String,
+        /// Their BOLT12 offer. Set this or [`Self::bip353`].
+        #[serde(default)]
+        pub offer: Option<String>,
+        /// Their BIP 353 name. Set this or [`Self::offer`].
+        #[serde(default)]
+        pub bip353: Option<String>,
         /// Optional hex contact secret received from an inbound payment.
-        /// When set, secrets are derived via `ContactSecrets::from_remote_secret`.
+        /// When set, pay sends this secret instead of recomputing it.
         #[serde(default)]
         pub contact_secret_hex: Option<String>,
     }
@@ -116,9 +119,12 @@ pub mod contacts_response {
     #[derive(Serialize, Deserialize, Debug, Clone, Apiv2Schema)]
     pub struct ContactInfo {
         pub label: String,
+        pub contact_id: String,
+        pub signing_pubkey: String,
         pub remote_offer: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub bip353: Option<String>,
         pub primary_secret_hex: String,
-        pub our_offer: Option<String>,
     }
 
     #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]

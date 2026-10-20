@@ -12,7 +12,7 @@ pub mod payer_proof;
 pub mod peer_event;
 
 pub use channel_manager::LampoChannelManager;
-pub use contacts::{Contact, ContactStore};
+pub use contacts::{ContactInfo, ContactStore};
 pub use inventory_manager::LampoInventoryManager;
 pub use offchain_manager::{ContactPaymentParams, OffchainManager};
 pub use om_mailbox::OnionMessageMailbox;

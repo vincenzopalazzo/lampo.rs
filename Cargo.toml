@@ -46,11 +46,12 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 # (see issue #537).
 [workspace.dependencies]
 # All lightning* crates come from one git revision: the 0.3 contact stack
-# plus ContactId (`lampo/blip42-contact-id-0.3`). Mixing this lightning crate
-# with crates.io builds two copies of lightning-types.
-lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "2f1d1b140" }
-lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "2f1d1b140" }
-lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "2f1d1b140", features = ["tokio"] }
-lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "2f1d1b140" }
-lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "2f1d1b140" }
-lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "2f1d1b140" }
+# plus ContactId (`lampo/blip42-contact-id-0.3`). `from_contact_id` takes no
+# currency converter. Mixing this lightning crate with crates.io builds two
+# copies of lightning-types.
+lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "154d810dc" }
+lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "154d810dc" }
+lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "154d810dc", features = ["tokio"] }
+lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "154d810dc" }
+lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "154d810dc" }
+lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "154d810dc" }

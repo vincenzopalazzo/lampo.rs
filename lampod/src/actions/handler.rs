@@ -702,8 +702,10 @@ impl Handler for LampoHandler {
                     } => {
                         if let Some(secret) = payment_context.invoice_request.contact_secret {
                             let label = format!("inbound-{}", hex::encode(&secret.as_bytes()[..8]));
+                            let id = self.channel_manager.fresh_contact_id();
                             match self.contact_store.remember_inbound(
                                 &label,
+                                id,
                                 secret,
                                 payment_context.invoice_request.payer_offer.as_ref(),
                             ) {
