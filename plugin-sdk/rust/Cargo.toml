@@ -8,7 +8,7 @@ description = "SDK for writing lampo plugins in Rust"
 lampo-plugin-common = { path = "../../lampo-plugin-common" }
 lampo-plugin = { path = "../../lampo-plugin", features = ["grpc"] }
 tokio = { version = "1", features = ["io-util", "io-std", "sync", "rt", "macros", "net", "signal"] }
-tonic = { version = "0.12", features = ["transport"] }
+tonic = { version = "0.13", features = ["transport"] }
 futures-core = "0.3"
 tokio-stream = "0.1"
 serde = { version = "1.0", features = ["derive"] }
