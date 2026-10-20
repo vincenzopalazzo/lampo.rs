@@ -403,6 +403,8 @@ impl LampoTesting {
         let mut lampo = LampoDaemon::new(lampo_conf.clone(), wallet.clone())?;
         wallet.clone().listen().await?;
         let node = Arc::new(LampoChainSync::new(lampo_conf.clone())?);
+        let plugin = start_bitcoind_plugin(&lampo_conf).await?;
+        node.set_handler(plugin);
         lampo.init(node).await?;
         // The RPC methods live behind this handler; without it every call
         // comes back as "method not found".
@@ -416,16 +418,28 @@ impl LampoTesting {
         let httpd = run_httpd(lampo.clone()).await?;
         let handler = lampo.handler();
         let daemon_task = lampo.clone().listen();
-        while let Err(err) = handler
-            .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
-            .await
-        {
-            log::debug!(
-                target: "lampo-testing",
-                "waiting for the restarted node: `{}`",
-                err
-            );
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let mut ready = false;
+        for _ in 0..30 {
+            match handler
+                .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
+                .await
+            {
+                Ok(_) => {
+                    ready = true;
+                    break;
+                }
+                Err(err) => {
+                    log::debug!(
+                        target: "lampo-testing",
+                        "waiting for the restarted node: `{}`",
+                        err
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            }
+        }
+        if !ready {
+            error::bail!("restarted lampo failed to become ready via getinfo within 30s");
         }
         let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
         Ok(Self {

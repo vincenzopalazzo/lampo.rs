@@ -144,6 +144,7 @@ impl ExternalHandler for HttpdHandler {
             "decode",
             "pay",
             "keysend",
+            "listpayments",
             "asyncinvoicepaths",
             "setasyncinvoicepaths",
             "new_addr",
