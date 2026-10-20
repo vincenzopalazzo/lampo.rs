@@ -30,6 +30,7 @@ CHANNEL_SATS=${CHANNEL_SATS:-150000}
 SPLICE_IN_SATS=${SPLICE_IN_SATS:-20000}
 SPLICE_OUT_SATS=${SPLICE_OUT_SATS:-10000}
 FAUCET=${FAUCET:-https://faucet.mutinynet.com}
+FAUCET_UA=${FAUCET_UA:-Mozilla/5.0}
 PAY_NODE_URL=${PAY_NODE_URL:-http://127.0.0.1:7996}
 LOG=${LOG:-$SIMDIR/splice.log}
 CSV=${CSV:-$SIMDIR/splice.csv}
@@ -110,14 +111,14 @@ fund_signet() { # $1 name. Pays the mutinynet L402 from a node already on this s
   addr=$(rpc "$(API "$n")" new_addr | jqf 'd["address"]')
   [ -n "$addr" ] || return 1
   if [ -n "${FAUCET_TOKEN:-}" ]; then
-    code=$(curl -s -o /tmp/splice-faucet.out -w "%{http_code}" --max-time 30 \
+    code=$(curl -sA "$FAUCET_UA" -o /tmp/splice-faucet.out -w "%{http_code}" --max-time 30 \
       -X POST "$FAUCET/api/onchain" -H 'content-type: application/json' \
       -H "Authorization: Bearer $FAUCET_TOKEN" \
       -d "{\"sats\":1000000,\"address\":\"$addr\"}")
     say "faucet bearer http=$code"
     [ "$code" = 200 ] || return 1
   else
-    ch=$(curl -s --max-time 20 "$FAUCET/api/l402") || return 1
+    ch=$(curl -sA "$FAUCET_UA" --max-time 20 "$FAUCET/api/l402") || return 1
     inv=$(echo "$ch" | jqf 'd.get("invoice","")')
     tok=$(echo "$ch" | jqf 'd.get("token","")')
     [ -n "$inv" ] && [ -n "$tok" ] || { say "faucet: no L402 challenge"; return 1; }
@@ -131,11 +132,11 @@ fund_signet() { # $1 name. Pays the mutinynet L402 from a node already on this s
     st=""
     for _ in $(seq 1 12); do
       sleep 5
-      st=$(curl -s --max-time 15 "$FAUCET/api/l402/check?token=$tok" | jqf 'd.get("status","")')
+      st=$(curl -sA "$FAUCET_UA" --max-time 15 "$FAUCET/api/l402/check?token=$tok" | jqf 'd.get("status","")')
       [ "$st" = "settled" ] && break
     done
     [ "$st" = "settled" ] || { say "faucet L402 never settled"; return 1; }
-    code=$(curl -s -o /tmp/splice-faucet.out -w "%{http_code}" --max-time 30 \
+    code=$(curl -sA "$FAUCET_UA" -o /tmp/splice-faucet.out -w "%{http_code}" --max-time 30 \
       -X POST "$FAUCET/api/onchain" -H 'content-type: application/json' \
       -H "Authorization: Bearer $tok" \
       -d "{\"sats\":1000000,\"address\":\"$addr\"}")
@@ -195,6 +196,9 @@ else
 fi
 wait_wallet_synced 420 || { fail "wallets never synced"; exit 2; }
 
+# A previous QA run may have left another ready channel in this data
+# dir. Every splice call names the channel this run opened.
+before_ids=$(channel_ids sa)
 if [ "$CHAIN" = regtest ]; then
   open_channel sa sb "${ID[sb]}" "$CHANNEL_SATS" 0 || { fail "open sa->sb"; exit 2; }
 else
@@ -205,23 +209,47 @@ else
   [ -z "$ferr" ] || { fail "fundchannel: $ferr"; exit 2; }
   say "fundchannel tx $(echo "$open_resp" | jqf 'd.get("txid","")')"
 fi
+new_channel_id() {
+  BEFORE="$before_ids" rpc "$(API sa)" channels | BEFORE="$before_ids" python3 -c '
+import json, os, sys
+before=set(os.environ.get("BEFORE","").split())
+d=json.load(sys.stdin)
+new=[c["channel_id"] for c in d.get("channels",[]) if c.get("ready") and c.get("channel_id") not in before]
+print(new[0] if len(new)==1 else "")
+'
+}
 deadline=$(( $(date +%s) + CONFIRM_WAIT ))
+cid=""
 while :; do
-  [ "$(ready_channels sa)" -ge 1 ] && [ "$(ready_channels sb)" -ge 1 ] && break
+  cid=$(new_channel_id)
+  [ -n "$cid" ] && [ "$(ready_channels sb)" -ge 1 ] && break
   [ "$(date +%s)" -gt "$deadline" ] && { fail "channel never ready"; exit 2; }
   advance 1
   sleep 15
 done
-base=$(rpc "$(API sa)" channels | jqf 'd["channels"][0]["amount"]')
-row open "amount=$base"
+chan_amount() {
+  CID="$cid" rpc "$(API sa)" channels | CID="$cid" python3 -c '
+import json, os, sys
+d=json.load(sys.stdin)
+cid=os.environ["CID"]
+for c in d.get("channels",[]):
+    if c.get("channel_id")==cid:
+        print(c.get("amount",0))
+        break
+else:
+    print(0)
+'
+}
+base=$(chan_amount)
+row open "amount=$base channel=$cid"
 [ "$base" = "$CHANNEL_SATS" ] || { fail "opened amount $base, wanted $CHANNEL_SATS"; exit 2; }
 
-bump=$(rpc "$(API sa)" bumpchannelfee "{\"node_id\":\"${ID[sb]}\"}")
+bump=$(rpc "$(API sa)" bumpchannelfee "{\"node_id\":\"${ID[sb]}\",\"channel_id\":\"$cid\"}")
 msg=$(fundchannel_error "$bump")
 echo "$msg" | grep -q "no pending splice" || { fail "bump with nothing pending: $msg"; exit 2; }
 row bump-empty "ok"
 
-first=$(TMO=150 rpc "$(API sa)" splicein "{\"node_id\":\"${ID[sb]}\",\"amount\":$SPLICE_IN_SATS}")
+first=$(TMO=150 rpc "$(API sa)" splicein "{\"node_id\":\"${ID[sb]}\",\"channel_id\":\"$cid\",\"amount\":$SPLICE_IN_SATS}")
 ferr=$(fundchannel_error "$first")
 [ -z "$ferr" ] || { fail "splicein: $ferr"; exit 2; }
 txid1=$(echo "$first" | jqf 'd.get("txid","")')
@@ -233,12 +261,12 @@ done
 in_mempool "$txid1" || { fail "splicein tx $txid1 not in mempool"; exit 2; }
 row splicein "txid=$txid1"
 
-second=$(rpc "$(API sa)" splicein "{\"node_id\":\"${ID[sb]}\",\"amount\":$SPLICE_IN_SATS}")
+second=$(rpc "$(API sa)" splicein "{\"node_id\":\"${ID[sb]}\",\"channel_id\":\"$cid\",\"amount\":$SPLICE_IN_SATS}")
 msg=$(fundchannel_error "$second")
 echo "$msg" | grep -q "bumpchannelfee" || { fail "second splicein: $msg"; exit 2; }
 row splicein-pending "ok"
 
-bumped=$(TMO=150 rpc "$(API sa)" bumpchannelfee "{\"node_id\":\"${ID[sb]}\",\"sat_per_vbyte\":20}")
+bumped=$(TMO=150 rpc "$(API sa)" bumpchannelfee "{\"node_id\":\"${ID[sb]}\",\"channel_id\":\"$cid\",\"sat_per_vbyte\":20}")
 ferr=$(fundchannel_error "$bumped")
 [ -z "$ferr" ] || { fail "bumpchannelfee: $ferr"; exit 2; }
 txid2=$(echo "$bumped" | jqf 'd.get("txid","")')
@@ -257,7 +285,7 @@ want_in=$(( CHANNEL_SATS + SPLICE_IN_SATS ))
 deadline=$(( $(date +%s) + CONFIRM_WAIT ))
 after_in=0
 while :; do
-  after_in=$(rpc "$(API sa)" channels | jqf 'd["channels"][0]["amount"]')
+  after_in=$(chan_amount)
   [ "${after_in:-0}" -ge "$want_in" ] && break
   [ "$(date +%s)" -gt "$deadline" ] && { fail "channel value $after_in after splice-in, wanted >= $want_in"; exit 2; }
   sleep 10
@@ -266,7 +294,7 @@ row splicein-locked "amount=$after_in"
 
 addr=$(rpc "$(API sa)" new_addr | jqf 'd["address"]')
 [ -n "$addr" ] || { fail "no splice-out address"; exit 2; }
-out=$(TMO=150 rpc "$(API sa)" spliceout "{\"node_id\":\"${ID[sb]}\",\"amount\":$SPLICE_OUT_SATS,\"address\":\"$addr\"}")
+out=$(TMO=150 rpc "$(API sa)" spliceout "{\"node_id\":\"${ID[sb]}\",\"channel_id\":\"$cid\",\"amount\":$SPLICE_OUT_SATS,\"address\":\"$addr\"}")
 ferr=$(fundchannel_error "$out")
 [ -z "$ferr" ] || { fail "spliceout: $ferr"; exit 2; }
 txid3=$(echo "$out" | jqf 'd.get("txid","")')
@@ -283,7 +311,7 @@ wait_wallet_synced 300 || true
 deadline=$(( $(date +%s) + CONFIRM_WAIT ))
 after_out=0
 while :; do
-  after_out=$(rpc "$(API sa)" channels | jqf 'd["channels"][0]["amount"]')
+  after_out=$(chan_amount)
   [ "${after_out:-0}" -gt 0 ] && [ $(( after_out + SPLICE_OUT_SATS )) -le "$after_in" ] && break
   [ "$(date +%s)" -gt "$deadline" ] && { fail "channel value $after_out after splice-out, before=$after_in"; exit 2; }
   sleep 10
