@@ -33,6 +33,8 @@ use lampo_common::ldk::blinded_path::message::BlindedMessagePath;
 use lampo_common::ldk::events::{Event, ReplayEvent};
 use lampo_common::ldk::io;
 use lampo_common::ldk::processor::{process_events_async, GossipSync, NO_LIQUIDITY_MANAGER};
+use lampo_common::ldk::sign::NodeSigner;
+use lampo_common::persist::{LampoAsyncPersistence, LampoPersistenceBackend};
 use lampo_common::signer::LampoSigner;
 use lampo_common::types::LampoGraph;
 use lampo_common::utils;
@@ -45,7 +47,7 @@ use crate::actions::Handler;
 use crate::chain::LampoChainManager;
 use crate::ln::OffchainManager;
 use crate::ln::{LampoChannelManager, LampoInventoryManager, LampoPeerManager};
-use crate::persistence::LampoPersistence;
+use crate::persistence::persistence_for;
 use crate::utils::logger::LampoLogger;
 
 pub(crate) type P2PGossipSync =
@@ -71,7 +73,7 @@ pub struct LampoDaemon {
     signer: Arc<dyn LampoSigner>,
     offchain_manager: Option<Arc<OffchainManager>>,
     logger: Arc<LampoLogger>,
-    persister: Arc<LampoPersistence>,
+    persister: Arc<dyn LampoPersistenceBackend>,
     handler: Option<Arc<LampoHandler>>,
     shutdown: Arc<AtomicBool>,
     chain_sync: Arc<ChainSyncCoordinator>,
@@ -79,7 +81,10 @@ pub struct LampoDaemon {
 
 impl LampoDaemon {
     /// Build a daemon signing with the wallet's own in-memory keys.
-    pub fn new(config: Arc<LampoConf>, wallet_manager: Arc<dyn WalletManager>) -> Self {
+    pub fn new(
+        config: Arc<LampoConf>,
+        wallet_manager: Arc<dyn WalletManager>,
+    ) -> error::Result<Self> {
         let signer = wallet_manager.ldk_keys();
         Self::with_signer(config, wallet_manager, signer)
     }
@@ -90,8 +95,18 @@ impl LampoDaemon {
         config: Arc<LampoConf>,
         wallet_manager: Arc<dyn WalletManager>,
         signer: Arc<dyn LampoSigner>,
-    ) -> Self {
-        let root_path = config.path();
+    ) -> error::Result<Self> {
+        let node_id = signer
+            .get_node_id(ldk::sign::Recipient::Node)
+            .map_err(|()| error::anyhow!("deriving the node id"))?;
+        let storage_key = match signer.vss_storage_key() {
+            Some(key) => key,
+            None if config.storage.as_deref() == Some("vss") => {
+                error::bail!("the configured signer does not provide a VSS storage key")
+            }
+            None => [0; 32],
+        };
+        let persister = persistence_for(&config, &node_id.to_string(), storage_key)?;
         let chain_sync = Arc::new(ChainSyncCoordinator::new());
         // Wire the wallet to the coordinator here so every daemon (CLI, tests,
         // embedders) gets consistent sync-progress reporting with no per-caller
@@ -100,10 +115,10 @@ impl LampoDaemon {
         // Destination, shutdown and change scripts come from the wallet so
         // closed-channel funds land where the node can spend them.
         signer.set_wallet(wallet_manager.clone());
-        LampoDaemon {
+        Ok(LampoDaemon {
             conf: config,
             logger: Arc::new(LampoLogger {}),
-            persister: Arc::new(LampoPersistence::new(root_path.into())),
+            persister,
             peer_manager: None,
             onchain_manager: None,
             channel_manager: None,
@@ -114,7 +129,7 @@ impl LampoDaemon {
             handler: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             chain_sync,
-        }
+        })
     }
 
     /// Backend-agnostic chain-sync coordinator shared across the daemon's
@@ -139,7 +154,7 @@ impl LampoDaemon {
         self.conf.clone()
     }
 
-    pub fn persister(&self) -> Arc<LampoPersistence> {
+    pub fn persister(&self) -> Arc<dyn LampoPersistenceBackend> {
         self.persister.clone()
     }
 
@@ -353,7 +368,7 @@ impl LampoDaemon {
 
         tokio::spawn(async move {
             process_events_async(
-                self.persister.clone(),
+                LampoAsyncPersistence::new(self.persister.clone()),
                 |env| self.handler_ldk_events(env),
                 self.channel_manager().chain_monitor(),
                 self.channel_manager().manager(),

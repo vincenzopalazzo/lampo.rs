@@ -240,7 +240,7 @@ async fn run(args: LampoCliArgs) -> error::Result<()> {
     let wallet = Arc::new(wallet);
 
     log::debug!(target: "lampod-cli", "wallet created with success");
-    let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone());
+    let mut lampod = LampoDaemon::new(lampo_conf.clone(), wallet.clone())?;
 
     // Chain sync calls bitcoind during `init`, before the event handler used
     // to be installed. Start the plugin and attach a dispatcher first, or
