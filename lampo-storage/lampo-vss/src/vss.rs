@@ -48,7 +48,7 @@ pub struct VssClient {
 }
 
 struct SeedEntropy {
-    bytes: Vec<u8>,
+    bytes: [u8; 8],
 }
 
 impl EntropySource for SeedEntropy {
@@ -76,17 +76,13 @@ fn expand(key: &[u8; 32], label: &[u8]) -> [u8; 32] {
 struct Seal {
     obfuscator: KeyObfuscator,
     value_key: [u8; 32],
-    nonce_key: [u8; 32],
 }
 
 impl Seal {
     fn new(storage_key: [u8; 32]) -> Self {
-        // Split one derived key so names, values, and nonces use different
-        // material. The labels are fixed; a restart must open the same store.
         Self {
             obfuscator: KeyObfuscator::new(expand(&storage_key, b"lampo-vss-key-name-v1")),
             value_key: expand(&storage_key, b"lampo-vss-value-v1"),
-            nonce_key: expand(&storage_key, b"lampo-vss-nonce-v1"),
         }
     }
 
@@ -100,26 +96,18 @@ impl Seal {
             .map_err(|err| format!("deobfuscating VSS key: {err}"))
     }
 
-    fn next_nonce_material(&self, key: &str, version: i64) -> [u8; 8] {
-        // The VSS key version is unique per successful write of this key and
-        // survives a restart, unlike a process-local counter. Mix the key so
-        // two keys at the same version do not share a nonce.
-        let mut mixed = (version as u64).to_le_bytes();
-        for (index, byte) in key.as_bytes().iter().enumerate() {
-            mixed[index % mixed.len()] ^= byte;
-        }
-        for (index, byte) in self.nonce_key.iter().enumerate() {
-            mixed[index % mixed.len()] ^= byte.wrapping_add(index as u8);
-        }
-        mixed
-    }
+    fn seal(&self, value: Vec<u8>, version: i64) -> Result<Vec<u8>, String> {
+        use lampo_common::bitcoin::secp256k1::rand::{rngs::OsRng, RngCore};
 
-    fn seal(&mut self, key: &str, value: Vec<u8>, version: i64) -> Result<Vec<u8>, String> {
-        let mixed = self.next_nonce_material(key, version);
+        // The nonce is stored in the Storable encryption metadata, so fresh
+        // CSPRNG output remains decryptable and prevents concurrent writers
+        // sealing the same key/version from reusing a nonce.
+        let mut nonce_material = [0u8; 8];
+        OsRng.fill_bytes(&mut nonce_material);
         let builder = StorableBuilder::new(
             self.value_key,
             SeedEntropy {
-                bytes: mixed.to_vec(),
+                bytes: nonce_material,
             },
         );
         let storable = builder.build(value, version);
@@ -133,7 +121,7 @@ impl Seal {
     fn open(&self, encoded: Vec<u8>, key: &str, expected_version: i64) -> Result<Vec<u8>, String> {
         let storable = vss_client::types::Storable::decode(encoded.as_slice())
             .map_err(|err| format!("decoding encrypted VSS value: {err}"))?;
-        let builder = StorableBuilder::new(self.value_key, SeedEntropy { bytes: Vec::new() });
+        let builder = StorableBuilder::new(self.value_key, SeedEntropy { bytes: [0; 8] });
         let (value, embedded) = builder
             .deconstruct(storable)
             .map_err(|err| format!("decrypting VSS value: {err}"))?;
@@ -150,16 +138,19 @@ impl Seal {
 
 const VSS_SIGNING_CONSTANT: &[u8] =
     b"VSS Signature Authorizer Signing Salt Constant..................";
+const VSS_AUTH_TOKEN_HEADER: &str = "X-VSS-Auth-Token";
 
 /// Signs every VSS request the way `vss-server`'s signature authorizer expects.
 struct VssSigner {
     secret: [u8; 32],
+    auth_token: Option<String>,
 }
 
 impl VssSigner {
-    fn new(storage_key: [u8; 32]) -> Self {
+    fn new(storage_key: [u8; 32], auth_token: Option<String>) -> Self {
         Self {
             secret: expand(&storage_key, b"lampo-vss-auth-v1"),
+            auth_token,
         }
     }
 
@@ -204,6 +195,9 @@ impl VssHeaderProvider for VssSigner {
     > {
         let mut headers = std::collections::HashMap::new();
         headers.insert("Authorization".to_owned(), self.authorization_header());
+        if let Some(token) = self.auth_token.as_ref() {
+            headers.insert(VSS_AUTH_TOKEN_HEADER.to_owned(), token.clone());
+        }
         Ok(headers)
     }
 }
@@ -212,8 +206,9 @@ impl VssClient {
     /// Connect to `base_url`.
     ///
     /// `storage_key` encrypts every value and obfuscates every key before the
-    /// request is sent. `auth_token`, when set, is sent as a bearer token so
-    /// a network-reachable server can reject unauthenticated writers.
+    /// request is sent. `auth_token`, when set, is sent in
+    /// `X-VSS-Auth-Token` so it does not replace the VSS signature in
+    /// `Authorization`.
     pub fn new(
         base_url: &str,
         store_id: &str,
@@ -244,10 +239,10 @@ impl VssClient {
                 // vss-server grants access to the pubkey that signs each
                 // request. A static bearer token is not that proof. Sign with
                 // a key derived from the storage key so a restart opens the
-                // same user. `auth_token` is kept so a deployment in front of
-                // a proxy can still send a bearer token.
-                let provider: Arc<dyn VssHeaderProvider> = Arc::new(VssSigner::new(storage_key));
-                let _ = auth_token;
+                // same user. A proxy token uses its own header because the
+                // signature authorizer owns `Authorization`.
+                let provider: Arc<dyn VssHeaderProvider> =
+                    Arc::new(VssSigner::new(storage_key, auth_token));
                 let client = AsyncVssClient::new_with_headers(base_url, retry, provider);
                 runtime.block_on(run(client, store_id, seal, rx, ready_tx));
             })?;
@@ -325,10 +320,31 @@ impl VssClient {
     }
 }
 
+fn open_at_cached_version(
+    seal: &Seal,
+    key: &str,
+    cached_version: Option<i64>,
+    value: KeyValue,
+) -> Result<Vec<u8>, String> {
+    let expected_version = cached_version.ok_or_else(|| {
+        format!("VSS returned `{key}` although it was absent from the startup inventory")
+    })?;
+    if value.version != expected_version {
+        return Err(format!(
+            "VSS rollback detected for `{key}`: response version {}, cached version {expected_version}",
+            value.version
+        ));
+    }
+
+    // A put is sealed with the version supplied by the client. The server
+    // stores that write at the next key version.
+    seal.open(value.value, key, expected_version.saturating_sub(1))
+}
+
 async fn run(
     client: AsyncVssClient<Retry>,
     store_id: String,
-    mut seal: Seal,
+    seal: Seal,
     rx: std_mpsc::Receiver<Request>,
     ready: std_mpsc::SyncSender<Result<(), String>>,
 ) {
@@ -378,14 +394,7 @@ async fn run(
                             .ok_or_else(|| ReadError::Other("VSS returned no value".to_owned()))
                     })
                     .and_then(|value| {
-                        // The server can return an older ciphertext for this
-                        // key. The seal embeds the version we wrote; that must
-                        // match the version the server reports for the key.
-                        // The blob is sealed with the version we sent
-                        // (0 on the first write). The server then stores that
-                        // key at version + 1. Check the version we sealed.
-                        let sealed_version = value.version.saturating_sub(1);
-                        seal.open(value.value, &key, sealed_version)
+                        open_at_cached_version(&seal, &key, versions.get(&key).copied(), value)
                             .map_err(ReadError::Other)
                     });
                 let _ = reply.send(result);
@@ -396,7 +405,7 @@ async fn run(
                     continue;
                 }
                 let version = versions.get(&key).copied().unwrap_or(0);
-                let sealed = match seal.seal(&key, value, version) {
+                let sealed = match seal.seal(value, version) {
                     Ok(sealed) => sealed,
                     Err(err) => {
                         let _ = reply.send(Err(err));
@@ -540,4 +549,88 @@ async fn list_key_versions(
 struct StoreSnapshot {
     keys: Vec<(String, i64)>,
     global_version: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_token_does_not_replace_signature_authorization() {
+        let signer = VssSigner::new([7u8; 32], Some("proxy-secret".to_owned()));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let headers = runtime.block_on(signer.get_headers(&[])).unwrap();
+
+        assert_eq!(
+            headers.get(VSS_AUTH_TOKEN_HEADER).map(String::as_str),
+            Some("proxy-secret")
+        );
+        let signature = headers.get("Authorization").unwrap();
+        assert!(!signature.is_empty());
+        assert_ne!(signature, "proxy-secret");
+    }
+
+    #[test]
+    fn sealing_same_version_uses_unique_random_nonces() {
+        let seal = Seal::new([3u8; 32]);
+        let first = seal.seal(b"value".to_vec(), 7).unwrap();
+        let second = seal.seal(b"value".to_vec(), 7).unwrap();
+        let first_storable = vss_client::types::Storable::decode(first.as_slice()).unwrap();
+        let second_storable = vss_client::types::Storable::decode(second.as_slice()).unwrap();
+
+        assert_ne!(
+            first_storable.encryption_metadata.unwrap().nonce,
+            second_storable.encryption_metadata.unwrap().nonce
+        );
+        assert_eq!(
+            seal.open(second, "key", 7).unwrap(),
+            b"value",
+            "the random nonce must remain encoded for decryption"
+        );
+    }
+
+    #[test]
+    fn read_rejects_response_older_than_inventory() {
+        let seal = Seal::new([5u8; 32]);
+        let encrypted = seal.seal(b"old".to_vec(), 2).unwrap();
+        let err = open_at_cached_version(
+            &seal,
+            "manager",
+            Some(4),
+            KeyValue {
+                key: seal.hide_key("manager"),
+                version: 3,
+                value: encrypted,
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.contains("rollback detected"), "unexpected error: {err}");
+        assert!(
+            err.contains("response version 3"),
+            "unexpected error: {err}"
+        );
+        assert!(err.contains("cached version 4"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn read_accepts_response_matching_inventory_and_seal() {
+        let seal = Seal::new([5u8; 32]);
+        let encrypted = seal.seal(b"current".to_vec(), 3).unwrap();
+        let value = open_at_cached_version(
+            &seal,
+            "manager",
+            Some(4),
+            KeyValue {
+                key: seal.hide_key("manager"),
+                version: 4,
+                value: encrypted,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(value, b"current");
+    }
 }

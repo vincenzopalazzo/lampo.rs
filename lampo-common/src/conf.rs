@@ -6,7 +6,7 @@ use clightningrpc_conf::{CLNConf, SyncCLNConf};
 pub use bitcoin::Network;
 pub use lightning::util::config::UserConfig;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct LampoConf {
     pub inner: Option<CLNConf>,
     pub network: Network,
@@ -86,6 +86,67 @@ pub struct LampoConf {
     /// Bearer token for a remote VSS server. Required when `storage-url` is
     /// not a loopback address. The store id is public and is not a secret.
     pub storage_auth_token: Option<String>,
+}
+
+struct Redacted<'a>(&'a Option<String>);
+
+impl std::fmt::Debug for Redacted<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(_) => formatter.debug_tuple("Some").field(&"[REDACTED]").finish(),
+            None => formatter.write_str("None"),
+        }
+    }
+}
+
+impl std::fmt::Debug for LampoConf {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LampoConf")
+            .field(
+                "inner",
+                &self.inner.as_ref().map(|_| "[REDACTED config source]"),
+            )
+            .field("network", &self.network)
+            .field("ldk_conf", &self.ldk_conf)
+            .field("port", &self.port)
+            .field("root_path", &self.root_path)
+            .field("node", &self.node)
+            .field("core_url", &Redacted(&self.core_url))
+            .field("core_user", &self.core_user)
+            .field("core_pass", &Redacted(&self.core_pass))
+            .field("private_key", &Redacted(&self.private_key))
+            .field("channels_keys", &Redacted(&self.channels_keys))
+            .field("log_file", &self.log_file)
+            .field("log_level", &self.log_level)
+            .field("alias", &self.alias)
+            .field("bind_addr", &self.bind_addr)
+            .field("announce_addr", &self.announce_addr)
+            .field("api_host", &self.api_host)
+            .field("api_port", &self.api_port)
+            .field("lnd", &self.lnd)
+            .field("lnd_tls_sans", &self.lnd_tls_sans)
+            .field("reindex", &self.reindex)
+            .field("dev_sync", &self.dev_sync)
+            .field("wallet_sync_parallel", &self.wallet_sync_parallel)
+            .field("sync_mode", &self.sync_mode)
+            .field("fast_sync", &self.fast_sync)
+            .field("async_payments_role", &self.async_payments_role)
+            .field(
+                "async_invoice_server_paths",
+                &Redacted(&self.async_invoice_server_paths),
+            )
+            .field("api_token", &Redacted(&self.api_token))
+            .field("currency_rates", &self.currency_rates)
+            .field("currency_tolerance_bps", &self.currency_tolerance_bps)
+            .field("plugins", &self.plugins)
+            .field("plugin_dir", &self.plugin_dir)
+            .field("remote_plugins", &self.remote_plugins)
+            .field("storage", &self.storage)
+            .field("storage_url", &Redacted(&self.storage_url))
+            .field("storage_auth_token", &Redacted(&self.storage_auth_token))
+            .finish()
+    }
 }
 
 impl LampoConf {
@@ -610,6 +671,37 @@ mod tests {
         let server_ldk = server.ldk_conf_with_async_role();
         assert!(server_ldk.enable_htlc_hold);
         assert!(server_ldk.accept_forwards_to_priv_channels);
+    }
+
+    #[test]
+    fn debug_redacts_configuration_secrets() {
+        let conf = LampoConf {
+            core_url: Some("http://rpc-user:rpc-url-secret@localhost".to_owned()),
+            core_pass: Some("core-password-secret".to_owned()),
+            private_key: Some("private-key-secret".to_owned()),
+            channels_keys: Some("channel-keys-secret".to_owned()),
+            async_invoice_server_paths: Some("blinded-path-secret".to_owned()),
+            api_token: Some("api-token-secret".to_owned()),
+            storage_url: Some("https://user:url-secret@vss.example?token=query-secret".to_owned()),
+            storage_auth_token: Some("storage-token-secret".to_owned()),
+            ..LampoConf::default()
+        };
+
+        let debug = format!("{conf:?}");
+        for secret in [
+            "rpc-url-secret",
+            "core-password-secret",
+            "private-key-secret",
+            "channel-keys-secret",
+            "blinded-path-secret",
+            "api-token-secret",
+            "url-secret",
+            "query-secret",
+            "storage-token-secret",
+        ] {
+            assert!(!debug.contains(secret), "Debug leaked {secret}: {debug}");
+        }
+        assert!(debug.contains("[REDACTED]"));
     }
 }
 

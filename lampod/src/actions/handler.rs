@@ -246,6 +246,7 @@ impl LampoHandler {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|since| since.as_secs())
             .unwrap_or_default();
+        let id = PaymentRecord::direction_qualified_id(direction, &id);
         let previous = match self.persister.get_payment(&id) {
             std::result::Result::Ok(previous) => previous,
             Err(err) => {
@@ -780,8 +781,8 @@ impl Handler for LampoHandler {
                         (Some(preimage), None)
                     }
                 };
-                // Inbound payments are keyed by hash: there is no payment id on
-                // this side.
+                // The hash is the inbound-side identity because this side has
+                // no payment id. `record_payment` qualifies it by direction.
                 self.record_payment(
                     payment_hash.to_string(),
                     payment_hash.to_string(),

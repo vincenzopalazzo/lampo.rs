@@ -95,8 +95,9 @@ impl PaymentStatus {
 /// A payment as lampo records it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaymentRecord {
-    /// Hex payment id for an outbound payment, hex payment hash for an inbound
-    /// one, which is what each side is addressed by.
+    /// Direction-qualified storage identity. This is distinct from the
+    /// externally meaningful payment hash so a circular BOLT 11 payment can
+    /// retain both its inbound and outbound records.
     pub id: String,
     pub payment_hash: String,
     pub direction: PaymentDirection,
@@ -111,6 +112,11 @@ pub struct PaymentRecord {
 }
 
 impl PaymentRecord {
+    /// Build a stable identity from the direction and LDK-side payment id.
+    pub fn direction_qualified_id(direction: PaymentDirection, id: &str) -> String {
+        format!("{}-{id}", direction.as_str())
+    }
+
     /// Key for a key/value backend.
     ///
     /// The timestamp comes first and is zero padded, so a store that can only
@@ -546,6 +552,34 @@ mod tests {
             1
         );
         assert!(store.get_payment("absent").unwrap().is_none());
+    }
+
+    #[test]
+    fn circular_payment_directions_have_distinct_ids() {
+        let dir = ScratchDir::new("circular-payment");
+        let store = dir.backend();
+        let payment_hash = "same-payment-hash";
+        let inbound_id =
+            PaymentRecord::direction_qualified_id(PaymentDirection::Inbound, payment_hash);
+        let outbound_id =
+            PaymentRecord::direction_qualified_id(PaymentDirection::Outbound, payment_hash);
+        let mut inbound = payment(&inbound_id, 100, PaymentStatus::Succeeded);
+        inbound.direction = PaymentDirection::Inbound;
+        inbound.payment_hash = payment_hash.to_owned();
+        let mut outbound = payment(&outbound_id, 100, PaymentStatus::Succeeded);
+        outbound.payment_hash = payment_hash.to_owned();
+
+        store.upsert_payment(&inbound).unwrap();
+        store.upsert_payment(&outbound).unwrap();
+
+        let records = store.list_payments(&PaymentFilter::default()).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_ne!(inbound_id, outbound_id);
+        assert!(store.get_payment(&inbound_id).unwrap().is_some());
+        assert!(store.get_payment(&outbound_id).unwrap().is_some());
+        assert!(records
+            .iter()
+            .all(|record| record.payment_hash == payment_hash));
     }
 
     /// The point of the typed store: ask for a window and get only that window.

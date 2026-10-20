@@ -13,6 +13,7 @@ use lampo_common::persist::{
     LampoPersistenceBackend, PaymentFilter, PaymentRecord, PaymentStore, PersistenceKind,
     PAYMENTS_NAMESPACE,
 };
+use url::{Host, Url};
 
 mod vss;
 
@@ -53,7 +54,7 @@ impl VssStore {
     /// Connect to `base_url` and use `store_id` as the node's isolated keyspace.
     ///
     /// `storage_key` encrypts values and obfuscates keys before they are
-    /// uploaded. `auth_token` is sent as a bearer token when the server
+    /// uploaded. `auth_token` is sent in `X-VSS-Auth-Token` when the server
     /// requires one; a remote URL without a token is refused.
     pub fn new(
         base_url: &str,
@@ -61,7 +62,8 @@ impl VssStore {
         storage_key: [u8; 32],
         auth_token: Option<String>,
     ) -> error::Result<Self> {
-        if !is_loopback(base_url) && auth_token.as_deref().unwrap_or("").is_empty() {
+        let is_loopback = validate_vss_url(base_url)?;
+        if !is_loopback && auth_token.as_deref().unwrap_or("").is_empty() {
             error::bail!(
                 "storage=vss on a non-local URL needs storage-auth-token;                  the store id is public and is not an authenticator"
             );
@@ -85,6 +87,51 @@ impl VssStore {
     }
 }
 
+/// Return a stable, credential-free VSS endpoint for logs and local identity.
+///
+/// The original URL is still used for requests so deployments using signed
+/// query strings keep working. Userinfo, query parameters, and fragments must
+/// never be logged or written to `.lampo-storage-backend`.
+pub fn canonical_vss_url(base_url: &str) -> error::Result<String> {
+    let mut url = parse_vss_url(base_url)?;
+    url.set_username("")
+        .map_err(|_| error::anyhow!("storage-url cannot contain this username"))?;
+    url.set_password(None)
+        .map_err(|_| error::anyhow!("storage-url cannot contain this password"))?;
+    url.set_query(None);
+    url.set_fragment(None);
+
+    let mut canonical = url.to_string();
+    while canonical.ends_with('/') {
+        canonical.pop();
+    }
+    Ok(canonical)
+}
+
+fn parse_vss_url(base_url: &str) -> error::Result<Url> {
+    let url = Url::parse(base_url).map_err(|err| error::anyhow!("invalid storage-url: {err}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        error::bail!("storage-url must use http or https");
+    }
+    if url.host_str().is_none() {
+        error::bail!("storage-url must include a host");
+    }
+    Ok(url)
+}
+
+fn validate_vss_url(base_url: &str) -> error::Result<bool> {
+    let url = parse_vss_url(base_url)?;
+    let is_loopback = match url.host().expect("parse_vss_url requires a host") {
+        Host::Domain(host) => host.eq_ignore_ascii_case("localhost"),
+        Host::Ipv4(ip) => ip.is_loopback(),
+        Host::Ipv6(ip) => ip.is_loopback(),
+    };
+    if url.scheme() == "http" && !is_loopback {
+        error::bail!("storage-url must use https for a non-loopback host");
+    }
+    Ok(is_loopback)
+}
+
 fn storage_key(primary_namespace: &str, secondary_namespace: &str, key: &str) -> String {
     format!("{primary_namespace}/{secondary_namespace}/{key}")
 }
@@ -105,25 +152,6 @@ fn split_storage_key(key: &str) -> error::Result<(String, String, String)> {
         .next()
         .ok_or_else(|| error::anyhow!("VSS key has no key component"))?;
     Ok((primary.to_owned(), secondary.to_owned(), key.to_owned()))
-}
-
-fn is_loopback(url: &str) -> bool {
-    let host = url
-        .split("://")
-        .nth(1)
-        .unwrap_or(url)
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .split('@')
-        .next_back()
-        .unwrap_or("");
-    let host = host.rsplit_once(':').map(|(host, _)| host).unwrap_or(host);
-    let host = host.trim_matches(|ch| ch == '[' || ch == ']');
-    matches!(
-        host,
-        "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "[::1]"
-    )
 }
 
 fn load_payments(client: &dyn StoreClient) -> error::Result<HashMap<String, PaymentRecord>> {
@@ -418,6 +446,42 @@ mod tests {
     }
 
     #[test]
+    fn plaintext_vss_is_limited_to_loopback_hosts() {
+        for url in [
+            "http://localhost:8080",
+            "http://127.0.0.2:8080",
+            "http://[::1]:8080",
+        ] {
+            assert_eq!(validate_vss_url(url).unwrap(), true, "{url}");
+        }
+        for url in [
+            "http://0.0.0.0:8080",
+            "http://192.168.1.2:8080",
+            "http://example.test",
+            "http://[::]:8080",
+        ] {
+            let err = validate_vss_url(url).unwrap_err().to_string();
+            assert!(err.contains("https"), "unexpected error for {url}: {err}");
+        }
+        assert!(!validate_vss_url("https://example.test").unwrap());
+    }
+
+    #[test]
+    fn canonical_vss_url_omits_credentials_and_normalizes_endpoint() {
+        let first =
+            canonical_vss_url("https://user:pass@VSS.EXAMPLE.test:443/api/?token=one#secret")
+                .unwrap();
+        let second = canonical_vss_url("https://vss.example.test/api?token=two").unwrap();
+
+        assert_eq!(first, "https://vss.example.test/api");
+        assert_eq!(first, second);
+        assert_eq!(
+            canonical_vss_url("http://[::1]:8080/").unwrap(),
+            "http://[::1]:8080"
+        );
+    }
+
+    #[test]
     fn payments_are_seeded_and_upserted_by_id() {
         let client = FakeClient::default();
         client
@@ -445,6 +509,39 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn circular_payment_directions_have_distinct_ids() {
+        let client = FakeClient::default();
+        let store = VssStore::with_client(Box::new(client.clone())).unwrap();
+        let payment_hash = "same-payment-hash";
+        let mut inbound = payment(PaymentStatus::Succeeded);
+        inbound.id = PaymentRecord::direction_qualified_id(PaymentDirection::Inbound, payment_hash);
+        inbound.payment_hash = payment_hash.to_owned();
+        inbound.direction = PaymentDirection::Inbound;
+        let mut outbound = payment(PaymentStatus::Succeeded);
+        outbound.id =
+            PaymentRecord::direction_qualified_id(PaymentDirection::Outbound, payment_hash);
+        outbound.payment_hash = payment_hash.to_owned();
+
+        store.upsert_payment(&inbound).unwrap();
+        store.upsert_payment(&outbound).unwrap();
+
+        let records = store.list_payments(&PaymentFilter::default()).unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(store.get_payment(&inbound.id).unwrap().is_some());
+        assert!(store.get_payment(&outbound.id).unwrap().is_some());
+        assert!(records
+            .iter()
+            .all(|record| record.payment_hash == payment_hash));
+        assert_eq!(
+            client
+                .list(&namespace_prefix(PAYMENTS_NAMESPACE, ""))
+                .unwrap()
+                .len(),
+            2
         );
     }
 }

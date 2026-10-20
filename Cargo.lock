@@ -2497,6 +2497,7 @@ dependencies = [
  "log",
  "prost 0.11.9",
  "tokio",
+ "url",
  "vss-client",
 ]
 
