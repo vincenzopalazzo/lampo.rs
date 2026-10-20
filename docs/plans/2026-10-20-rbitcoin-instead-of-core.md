@@ -56,7 +56,7 @@ Core's 5.14s includes `createwallet`. The mine itself is the bulk. rbitcoin has 
 - `core` (default, unset): Bitcoin Core via `corepc-node`, same as before.
 - `rbitcoin`: `rbitcoin-node` from `LAMPO_RBITCOIN` or `PATH`. Cookie file, no wallet. Mining is `generatetoaddress` to the lampo address.
 
-Integration workflow runs both lanes (`fail-fast: false`). The image installs Core 25.1 and rbitcoin 0.8.0. Locally, leave the env unset.
+Integration workflow builds the test harness and `lampo-bitcoind` once, then runs that binary on Core 25.1 and rbitcoin 0.8.0 (`fail-fast: false`). The Docker image is not the CI runner. Locally, leave the env unset.
 
 rbitcoin is not a replacement. The lane exists so a regtest RPC break shows up in CI. Do not point `simulations/` at it.
 
