@@ -83,9 +83,13 @@ On signet it does not mine; it uses the bitcoind that is already running:
 
 ```bash
 REPO=$HOME/lampo-splice-qa BIN=$REPO/target/release/lampod-cli \
-  LAMPO_PLUGINS=$REPO/target/release/examples/lampo-bitcoind \
-  CORE_URL=http://127.0.0.1:38332 ./simulations/splice.sh
+  ./simulations/splice-signet.sh
 ```
+
+`splice-signet.sh` uses the signet bitcoind already listening on
+`:38332`, and API `8811` / P2P `20811`, so it does not share a data
+dir with the regtest run. Set `FAUCET_TOKEN` when the faucet already
+issued a bearer token.
 
 The last line is `SPLICE QA COMPLETE`.
 
