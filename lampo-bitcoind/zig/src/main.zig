@@ -100,11 +100,17 @@ const Node = struct {
 
         if (sdk.objectGet(parsed.value, "error")) |err_value| {
             if (err_value != .null) {
-                // Keep the parsed tree alive only for the error name. The
-                // daemon sees the JSON-RPC error code; the message is the
-                // error name because Zig errors cannot carry the bitcoind string.
+                // Core's code is what the daemon classifies on. The message
+                // is only needed for `-26` reasons that share that code
+                // (`non-final`, `txn-already-in-mempool`).
+                const code = switch (sdk.objectGet(err_value, "code") orelse .null) {
+                    .integer => |n| n,
+                    else => 0,
+                };
+                const message = sdk.objectGetString(err_value, "message") orelse "";
+                const forwarded = forwardBitcoindError(code, message);
                 parsed.deinit();
-                return error.BitcoindError;
+                return forwarded;
             }
         }
         const result = sdk.objectGet(parsed.value, "result") orelse {
@@ -179,6 +185,23 @@ fn cloneValue(allocator: std.mem.Allocator, value: std.json.Value) !std.json.Val
             break :blk .{ .object = copy };
         },
     };
+}
+
+/// Map a Core `sendrawtransaction` error onto a Zig error the plugin
+/// runtime turns back into that same JSON-RPC code.
+fn forwardBitcoindError(code: i64, message: []const u8) anyerror {
+    if (code == -27) return error.RpcAlreadyInChain;
+    if (code == -26) {
+        if (std.mem.indexOf(u8, message, "non-final") != null) return error.RpcNonFinal;
+        if (std.mem.indexOf(u8, message, "txn-already-in-mempool") != null) {
+            return error.RpcAlreadyInChain;
+        }
+        if (std.mem.indexOf(u8, message, "txn-already-known") != null) {
+            return error.RpcAlreadyInChain;
+        }
+        return error.RpcRejected;
+    }
+    return error.BitcoindError;
 }
 
 fn makeRpc(comptime method: []const u8) sdk.RpcHandler {

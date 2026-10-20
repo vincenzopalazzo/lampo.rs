@@ -168,59 +168,91 @@ pub struct LampoChainSync {
     sweeper: OnceLock<(chain::BlockLocator, Arc<LampoSweeper>)>,
 }
 
-/// Classify a `sendrawtransaction` error.
+/// Bitcoin Core `sendrawtransaction` codes (`rpc/protocol.h`).
 ///
-/// Already-in-mempool and already-in-block are success: the inputs are
-/// spent, so a wallet reservation must not be released. Policy rejects are
-/// final. Anything else, including `non-final` after the caller's retries,
-/// may still confirm and must be retried.
+/// `-26` is `RPC_TRANSACTION_REJECTED`: the message is the policy reason.
+/// `-27` is `RPC_TRANSACTION_ALREADY_IN_CHAIN`: the tx is already in a
+/// block, so its inputs stay reserved. A tx already in the mempool is
+/// `OK` on Core 29 (no error). Older cores report that as `-26` with
+/// `txn-already-in-mempool`.
+const RPC_TRANSACTION_REJECTED: i32 = -26;
+const RPC_TRANSACTION_ALREADY_IN_CHAIN: i32 = -27;
+
+/// First Core broadcast code in `text`. Ignores a plugin wrapper such as
+/// `-32000` when the bitcoind code is also present.
+fn broadcast_rpc_code(text: &str) -> Option<i32> {
+    let lower = text.to_ascii_lowercase();
+    let mut rest = lower.as_str();
+    let mut fallback = None;
+    while let Some(idx) = rest.find("rpc error ") {
+        let after = &rest[idx + "rpc error ".len()..];
+        let token: String = after
+            .chars()
+            .take_while(|c| *c == '-' || c.is_ascii_digit())
+            .collect();
+        if let Ok(code) = token.parse::<i32>() {
+            if matches!(
+                code,
+                RPC_TRANSACTION_REJECTED | RPC_TRANSACTION_ALREADY_IN_CHAIN
+            ) {
+                return Some(code);
+            }
+            fallback = Some(code);
+        }
+        rest = if after.is_empty() { "" } else { &after[1..] };
+    }
+    fallback
+}
+
+fn error_text(err: &lampo_common::error::Error) -> String {
+    let display = format!("{err}");
+    if display.to_ascii_lowercase().contains("rpc error ") {
+        return display;
+    }
+    format!("{err:?}")
+}
+
+/// `true` when Core rejected the tx as `non-final`. That is still code
+/// `-26`; the reason is the only way to tell it from a final policy reject.
+fn is_non_final(err: &lampo_common::error::Error) -> bool {
+    let text = error_text(err);
+    broadcast_rpc_code(&text) == Some(RPC_TRANSACTION_REJECTED)
+        && text.to_ascii_lowercase().contains("non-final")
+}
+
+/// Classify a `sendrawtransaction` error from Core's RPC code.
+///
+/// `-27` keeps the reservation. `-26` releases it, except `non-final`
+/// (retried by the caller) and an already-known mempool tx. No code, or
+/// any other code, is unreachable: the tx may still confirm.
 fn classify_broadcast_error(err: &lampo_common::error::Error) -> BroadcastOutcome {
-    let msg = format!("{err:?}");
+    let msg = error_text(err);
     let lower = msg.to_ascii_lowercase();
-    if [
-        "txn-already-in-mempool",
-        "txn-already-known",
-        "already in block chain",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-    {
-        return BroadcastOutcome::AlreadyKnown;
+    match broadcast_rpc_code(&msg) {
+        Some(RPC_TRANSACTION_ALREADY_IN_CHAIN) => BroadcastOutcome::AlreadyKnown,
+        Some(RPC_TRANSACTION_REJECTED)
+            if lower.contains("txn-already-in-mempool") || lower.contains("txn-already-known") =>
+        {
+            BroadcastOutcome::AlreadyKnown
+        }
+        Some(RPC_TRANSACTION_REJECTED) if lower.contains("non-final") => {
+            BroadcastOutcome::Unreachable(msg)
+        }
+        Some(RPC_TRANSACTION_REJECTED) => BroadcastOutcome::Rejected(msg),
+        _ => BroadcastOutcome::Unreachable(msg),
     }
-    const REJECTS: &[&str] = &[
-        "missingorspent",
-        "bad-txns-in-belowout",
-        "bad-txns-inputs-duplicate",
-        "bad-txns-vout-negative",
-        "bad-txns-vout-empty",
-        "bad-txns-oversize",
-        "bad-txns-too-many-sigops",
-        "bad-txns-premature-spend-of-coinbase",
-        "bad-txns-nonstandard-inputs",
-        "mandatory-script-verify-flag-failed",
-        "scriptsig-size",
-        "dust",
-        "min relay fee not met",
-        "absurdly-high-fee",
-        "too-long-mempool-chain",
-        "bad-txns-spends-conflicting-tx",
-    ];
-    if REJECTS.iter().any(|marker| lower.contains(marker)) {
-        return BroadcastOutcome::Rejected(msg);
-    }
-    BroadcastOutcome::Unreachable(msg)
 }
 
 #[cfg(test)]
 mod broadcast_rejection_tests {
     use lampo_common::backend::BroadcastOutcome;
 
-    use super::classify_broadcast_error;
+    use super::{classify_broadcast_error, is_non_final};
 
     #[test]
-    fn missing_input_is_a_definitive_rejection() {
+    fn rejected_code_releases_the_reservation() {
         let err = lampo_common::error::anyhow!(
-            "JSON-RPC error: RPC error -26: bad-txns-inputs-missingorspent"
+            "plugin `bitcoind` `sendrawtransaction` RPC error -26: bad-txns-inputs-missingorspent"
         );
         assert!(matches!(
             classify_broadcast_error(&err),
@@ -229,9 +261,10 @@ mod broadcast_rejection_tests {
     }
 
     #[test]
-    fn already_in_mempool_keeps_the_reservation() {
-        let err =
-            lampo_common::error::anyhow!("JSON-RPC error: RPC error -26: txn-already-in-mempool");
+    fn already_in_chain_code_keeps_the_reservation() {
+        let err = lampo_common::error::anyhow!(
+            "plugin `bitcoind` `sendrawtransaction` RPC error -27: Transaction already in block chain"
+        );
         assert_eq!(
             classify_broadcast_error(&err),
             BroadcastOutcome::AlreadyKnown
@@ -239,8 +272,32 @@ mod broadcast_rejection_tests {
     }
 
     #[test]
+    fn already_in_mempool_on_reject_code_keeps_the_reservation() {
+        let err = lampo_common::error::anyhow!(
+            "plugin `bitcoind` `sendrawtransaction` RPC error -26: txn-already-in-mempool"
+        );
+        assert_eq!(
+            classify_broadcast_error(&err),
+            BroadcastOutcome::AlreadyKnown
+        );
+    }
+
+    #[test]
+    fn non_final_is_not_a_final_reject() {
+        let err = lampo_common::error::anyhow!(
+            "plugin `bitcoind` `sendrawtransaction` RPC error -26: non-final"
+        );
+        assert!(is_non_final(&err));
+        assert!(matches!(
+            classify_broadcast_error(&err),
+            BroadcastOutcome::Unreachable(_)
+        ));
+    }
+
+    #[test]
     fn transport_failure_keeps_the_reservation() {
         let err = lampo_common::error::anyhow!("transport error: connection reset");
+        assert!(!is_non_final(&err));
         assert!(matches!(
             classify_broadcast_error(&err),
             BroadcastOutcome::Unreachable(_)
@@ -262,26 +319,24 @@ impl LampoChainSync {
             .await
     }
 
-    /// Submit `tx`, retrying a short `non-final` race. Does not emit events
-    /// and does not touch the wallet.
+    /// Submit `tx`. A success returns immediately. Only a `non-final`
+    /// reject is retried, and only twice more. Does not emit events and
+    /// does not touch the wallet.
     async fn submit_raw_tx(&self, tx: &lampo_common::bitcoin::Transaction) -> BroadcastOutcome {
-        let mut resp = self.broadcast_once(tx).await;
-        for attempt in 1..=3 {
-            let transient = matches!(&resp, Err(err)
-                if format!("{err:?}").to_ascii_lowercase().contains("non-final"));
-            if !transient {
-                break;
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            match self.broadcast_once(tx).await {
+                Ok(_) => return BroadcastOutcome::Accepted,
+                Err(err) if is_non_final(&err) && attempt < 3 => {
+                    log::warn!(
+                        target: "lampo-chain",
+                        "broadcast rejected as non-final, retry {attempt}/3 in 3s"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                }
+                Err(err) => return classify_broadcast_error(&err),
             }
-            log::warn!(
-                target: "lampo-chain",
-                "broadcast rejected as non-final, retry {attempt}/3 in 3s"
-            );
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            resp = self.broadcast_once(tx).await;
-        }
-        match resp {
-            Ok(_) => BroadcastOutcome::Accepted,
-            Err(err) => classify_broadcast_error(&err),
         }
     }
 

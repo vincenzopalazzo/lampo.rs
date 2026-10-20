@@ -69,11 +69,12 @@ impl Bitcoind {
         let value: Value = serde_json::from_slice(&bytes)
             .map_err(|err| format!("bitcoind `{method}` invalid JSON: {err}"))?;
         if let Some(error) = value.get("error").filter(|err| !err.is_null()) {
+            let code = error.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
             let message = error
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("bitcoind error");
-            return Err(format!("bitcoind `{method}`: {message}"));
+            return Err(format!("bitcoind `{method}` RPC error {code}: {message}"));
         }
         value
             .get("result")
