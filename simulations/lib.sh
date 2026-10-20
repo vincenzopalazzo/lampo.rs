@@ -36,6 +36,8 @@ CORE_URL=${CORE_URL:-http://127.0.0.1:18332}
 NETWORK=${NETWORK:-regtest}
 CORE_USER=${CORE_USER:-testutil}
 CORE_PASS=${CORE_PASS:-testutilpassword}
+# One generatetoaddress can sit on a busy disk for minutes.
+CORE_TMO=${CORE_TMO:-30}
 ART=${ART:-$SIMDIR/artifacts}
 
 # Seeded RNG — same scheme as simulate.sh: every draw is a fresh
@@ -56,7 +58,7 @@ print(int(math.exp(math.log($2) + (math.log($3)-math.log($2)) * r.random())))"
 }
 
 bcli() { # bitcoind RPC on the loaded `default` wallet
-  curl -sS --max-time 30 --user "$CORE_USER:$CORE_PASS" \
+  curl -sS --max-time "$CORE_TMO" --user "$CORE_USER:$CORE_PASS" \
     --data-binary "{\"jsonrpc\":\"1.0\",\"id\":1,\"method\":\"$1\",\"params\":${2:-[]}}" \
     "$CORE_URL/wallet/default"
 }

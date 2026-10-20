@@ -47,7 +47,7 @@ echo "ts,step,detail" > "$CSV"
 row() { echo "$(date -Iseconds),$1,$2" >> "$CSV"; say "$1 $2"; }
 
 chain_rpc() {
-  curl -sS --max-time 30 --user "$CORE_USER:$CORE_PASS" \
+  curl -sS --max-time "$CORE_TMO" --user "$CORE_USER:$CORE_PASS" \
     --data-binary "{\"jsonrpc\":\"1.0\",\"id\":1,\"method\":\"$1\",\"params\":${2:-[]}}" \
     "$CORE_URL"
 }
