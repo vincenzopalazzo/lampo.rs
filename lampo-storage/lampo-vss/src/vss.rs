@@ -1,8 +1,12 @@
 //! Synchronous bridge to the async VSS client.
 use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use lampo_common::error;
 use lampo_common::ldk::io;
@@ -41,6 +45,12 @@ enum ReadError {
     NotFound,
     Other(String),
 }
+
+/// One VSS HTTP call. The caller waits a little longer so a timed-out
+/// worker reports the error before the channel wait gives up.
+const VSS_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const VSS_CALL_TIMEOUT: Duration = Duration::from_secs(70);
+const VSS_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A blocking VSS client whose worker serializes mutations and tracks versions.
 pub struct VssClient {
@@ -208,12 +218,16 @@ impl VssClient {
     /// `storage_key` encrypts every value and obfuscates every key before the
     /// request is sent. `auth_token`, when set, is sent in
     /// `X-VSS-Auth-Token` so it does not replace the VSS signature in
-    /// `Authorization`.
+    /// `Authorization`. `global_version_path` is the durable client copy of
+    /// the store version. The VSS protocol requires it: reloading the
+    /// version from the server on every start would accept a rolled-back
+    /// store.
     pub fn new(
         base_url: &str,
         store_id: &str,
         storage_key: [u8; 32],
         auth_token: Option<String>,
+        global_version_path: PathBuf,
     ) -> error::Result<Self> {
         let (requests, rx) = std_mpsc::channel::<Request>();
         let (ready_tx, ready_rx) = std_mpsc::sync_channel(1);
@@ -244,14 +258,26 @@ impl VssClient {
                 let provider: Arc<dyn VssHeaderProvider> =
                     Arc::new(VssSigner::new(storage_key, auth_token));
                 let client = AsyncVssClient::new_with_headers(base_url, retry, provider);
-                runtime.block_on(run(client, store_id, seal, rx, ready_tx));
+                runtime.block_on(run(
+                    client,
+                    store_id,
+                    seal,
+                    global_version_path,
+                    rx,
+                    ready_tx,
+                ));
             })?;
 
-        ready_rx
-            .recv()
-            .map_err(|_| error::anyhow!("VSS worker exited during startup"))?
-            .map_err(|err| error::anyhow!("{err}"))?;
-        Ok(Self { requests })
+        match ready_rx.recv_timeout(VSS_STARTUP_TIMEOUT) {
+            Ok(Ok(())) => Ok(Self { requests }),
+            Ok(Err(err)) => Err(error::anyhow!("{err}")),
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                Err(error::anyhow!("VSS startup timed out"))
+            }
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => {
+                Err(error::anyhow!("VSS worker exited during startup"))
+            }
+        }
     }
 
     pub fn read(&self, key: &str) -> Result<Vec<u8>, io::Error> {
@@ -262,14 +288,18 @@ impl VssClient {
                 reply,
             })
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "VSS worker is gone"))?;
-        match answer.recv() {
+        match answer.recv_timeout(VSS_CALL_TIMEOUT) {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(ReadError::NotFound)) => Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 "VSS key does not exist",
             )),
             Ok(Err(ReadError::Other(err))) => Err(io::Error::new(io::ErrorKind::Other, err)),
-            Err(_) => Err(io::Error::new(
+            Err(std_mpsc::RecvTimeoutError::Timeout) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                "VSS request timed out",
+            )),
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => Err(io::Error::new(
                 io::ErrorKind::Other,
                 "VSS worker dropped the reply",
             )),
@@ -299,10 +329,15 @@ impl VssClient {
                 reply,
             })
             .map_err(|_| error::anyhow!("VSS worker is gone"))?;
-        answer
-            .recv()
-            .map_err(|_| error::anyhow!("VSS worker dropped the reply"))?
-            .map_err(|err| error::anyhow!("{err}"))
+        match answer.recv_timeout(VSS_CALL_TIMEOUT) {
+            Ok(result) => result.map_err(|err| error::anyhow!("{err}")),
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                Err(error::anyhow!("VSS request timed out"))
+            }
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => {
+                Err(error::anyhow!("VSS worker dropped the reply"))
+            }
+        }
     }
 
     fn request(
@@ -313,10 +348,15 @@ impl VssClient {
         self.requests
             .send(request(reply))
             .map_err(|_| error::anyhow!("VSS worker is gone"))?;
-        answer
-            .recv()
-            .map_err(|_| error::anyhow!("VSS worker dropped the reply"))?
-            .map_err(|err| error::anyhow!("{err}"))
+        match answer.recv_timeout(VSS_CALL_TIMEOUT) {
+            Ok(result) => result.map_err(|err| error::anyhow!("{err}")),
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                Err(error::anyhow!("VSS request timed out"))
+            }
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => {
+                Err(error::anyhow!("VSS worker dropped the reply"))
+            }
+        }
     }
 }
 
@@ -345,6 +385,7 @@ async fn run(
     client: AsyncVssClient<Retry>,
     store_id: String,
     seal: Seal,
+    global_version_path: PathBuf,
     rx: std_mpsc::Receiver<Request>,
     ready: std_mpsc::SyncSender<Result<(), String>>,
 ) {
@@ -357,6 +398,8 @@ async fn run(
     };
     // The server only ever sees obfuscated keys. Translate them back before
     // the rest of the node looks up a channel-manager key by its plain name.
+    // A key we cannot read is not skipped: this store id is ours, and a
+    // missing monitor is the stale-monitor case.
     let mut versions = HashMap::new();
     for (remote_key, version) in snapshot.keys {
         match seal.show_key(&remote_key) {
@@ -364,12 +407,21 @@ async fn run(
                 versions.insert(key, version);
             }
             Err(err) => {
-                log::error!(target: "lampo-vss", "skipping unrecognized VSS key: {err}");
+                let _ = ready.send(Err(format!(
+                    "refusing to start: unrecognized VSS key: {err}"
+                )));
+                return;
             }
         }
     }
-    let mut global_version = snapshot.global_version;
-    let mut poisoned: Option<String> = None;
+    let mut global_version =
+        match reconcile_stored_global_version(&global_version_path, snapshot.global_version) {
+            Ok(version) => version,
+            Err(err) => {
+                let _ = ready.send(Err(err));
+                return;
+            }
+        };
     if ready.send(Ok(())).is_err() {
         return;
     }
@@ -378,32 +430,28 @@ async fn run(
         match request {
             Request::Read { key, reply } => {
                 let remote_key = seal.hide_key(&key);
-                let result = client
-                    .get_object(&GetObjectRequest {
-                        store_id: store_id.clone(),
-                        key: remote_key,
-                    })
-                    .await
-                    .map_err(|err| match err {
+                let result = match timed(client.get_object(&GetObjectRequest {
+                    store_id: store_id.clone(),
+                    key: remote_key,
+                }))
+                .await
+                {
+                    Err(err) => Err(ReadError::Other(err)),
+                    Ok(Err(err)) => Err(match err {
                         VssError::NoSuchKeyError(_) => ReadError::NotFound,
                         other => ReadError::Other(other.to_string()),
-                    })
-                    .and_then(|response| {
-                        response
-                            .value
-                            .ok_or_else(|| ReadError::Other("VSS returned no value".to_owned()))
-                    })
-                    .and_then(|value| {
-                        open_at_cached_version(&seal, &key, versions.get(&key).copied(), value)
-                            .map_err(ReadError::Other)
-                    });
+                    }),
+                    Ok(Ok(response)) => response
+                        .value
+                        .ok_or_else(|| ReadError::Other("VSS returned no value".to_owned()))
+                        .and_then(|value| {
+                            open_at_cached_version(&seal, &key, versions.get(&key).copied(), value)
+                                .map_err(ReadError::Other)
+                        }),
+                };
                 let _ = reply.send(result);
             }
             Request::Write { key, value, reply } => {
-                if let Some(err) = poisoned.as_ref() {
-                    let _ = reply.send(Err(err.clone()));
-                    continue;
-                }
                 let version = versions.get(&key).copied().unwrap_or(0);
                 let sealed = match seal.seal(value, version) {
                     Ok(sealed) => sealed,
@@ -413,67 +461,83 @@ async fn run(
                     }
                 };
                 let remote_key = seal.hide_key(&key);
-                let result = match client
-                    .put_object(&PutObjectRequest {
-                        store_id: store_id.clone(),
-                        global_version: Some(global_version),
-                        transaction_items: vec![KeyValue {
-                            key: remote_key,
-                            version,
-                            value: sealed,
-                        }],
-                        delete_items: vec![],
-                    })
-                    .await
+                let result = match timed(client.put_object(&PutObjectRequest {
+                    store_id: store_id.clone(),
+                    global_version: Some(global_version),
+                    transaction_items: vec![KeyValue {
+                        key: remote_key,
+                        version,
+                        value: sealed,
+                    }],
+                    delete_items: vec![],
+                }))
+                .await
                 {
-                    Ok(_) => {
-                        versions.insert(key, version + 1);
-                        global_version += 1;
-                        Ok(())
-                    }
-                    Err(err) => {
+                    Err(err) => Err(err),
+                    Ok(Err(err)) => {
                         let message = describe_write_error(err);
                         if is_conflict(&message) {
-                            poisoned = Some(message.clone());
+                            stop_process(&reply, message);
                         }
                         Err(message)
+                    }
+                    Ok(Ok(_)) => {
+                        versions.insert(key, version + 1);
+                        global_version += 1;
+                        if let Err(err) =
+                            record_global_version(&global_version_path, global_version)
+                        {
+                            stop_process(
+                                &reply,
+                                format!(
+                                    "VSS committed global version {global_version} but the local record failed: {err}"
+                                ),
+                            );
+                        }
+                        Ok(())
                     }
                 };
                 let _ = reply.send(result);
             }
             Request::Remove { key, reply } => {
-                if let Some(err) = poisoned.as_ref() {
-                    let _ = reply.send(Err(err.clone()));
-                    continue;
-                }
                 let result = match versions.get(&key).copied() {
                     None => Ok(()),
                     Some(version) => {
                         let remote_key = seal.hide_key(&key);
-                        match client
-                            .put_object(&PutObjectRequest {
-                                store_id: store_id.clone(),
-                                global_version: Some(global_version),
-                                transaction_items: vec![],
-                                delete_items: vec![KeyValue {
-                                    key: remote_key,
-                                    version,
-                                    value: vec![],
-                                }],
-                            })
-                            .await
+                        match timed(client.put_object(&PutObjectRequest {
+                            store_id: store_id.clone(),
+                            global_version: Some(global_version),
+                            transaction_items: vec![],
+                            delete_items: vec![KeyValue {
+                                key: remote_key,
+                                version,
+                                value: vec![],
+                            }],
+                        }))
+                        .await
                         {
-                            Ok(_) => {
-                                versions.remove(&key);
-                                global_version += 1;
-                                Ok(())
-                            }
-                            Err(err) => {
+                            Err(err) => Err(err),
+                            Ok(Err(err)) => {
                                 let message = describe_write_error(err);
                                 if is_conflict(&message) {
-                                    poisoned = Some(message.clone());
+                                    stop_process(&reply, message);
                                 }
                                 Err(message)
+                            }
+                            Ok(Ok(_)) => {
+                                versions.remove(&key);
+                                global_version += 1;
+                                if let Err(err) =
+                                    record_global_version(&global_version_path, global_version)
+                                {
+                                    stop_process(
+                                        &reply,
+                                        format!(
+                                            "VSS committed global version {global_version} but the local record failed: {err}"
+                                        ),
+                                    );
+                                }
+                                Ok(())
                             }
                         }
                     }
@@ -493,6 +557,102 @@ async fn run(
             }
         }
     }
+}
+
+async fn timed<T>(future: impl std::future::Future<Output = T>) -> Result<T, String> {
+    match tokio::time::timeout(VSS_REQUEST_TIMEOUT, future).await {
+        Ok(value) => Ok(value),
+        Err(_) => Err("VSS request timed out after 60s".to_owned()),
+    }
+}
+
+/// A conflict means another writer has this store. Keep serving and the
+/// in-memory channel state can still sign. Stop the process instead.
+fn stop_process(reply: &std_mpsc::SyncSender<Result<(), String>>, message: String) -> ! {
+    log::error!(
+        target: "lampo-vss",
+        "{message}; shutting down so this process cannot keep signing"
+    );
+    let _ = reply.send(Err(message));
+    std::process::exit(1);
+}
+
+/// Compare the server's `global_version` with the copy on disk.
+///
+/// A lower server version is a restored backup. A higher one is a put that
+/// reached the server before we could record it, so the server wins. A
+/// missing local record adopts the server once.
+fn adopt_global_version(local: Option<i64>, server: i64) -> Result<i64, String> {
+    match local {
+        Some(local) if server < local => Err(format!(
+            "VSS global version {server} is behind the local record {local}; refusing to start on a rolled-back store"
+        )),
+        _ => Ok(server),
+    }
+}
+
+fn read_global_version(path: &Path) -> Result<Option<i64>, String> {
+    match fs::read_to_string(path) {
+        Ok(contents) => {
+            let text = contents.trim();
+            if text.is_empty() {
+                return Err(format!(
+                    "VSS global version record `{}` is empty",
+                    path.display()
+                ));
+            }
+            let version = text.parse::<i64>().map_err(|_| {
+                format!(
+                    "VSS global version record `{}` is not an integer",
+                    path.display()
+                )
+            })?;
+            if version < 0 {
+                return Err(format!(
+                    "VSS global version record `{}` is negative",
+                    path.display()
+                ));
+            }
+            Ok(Some(version))
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(format!(
+            "reading VSS global version record `{}`: {err}",
+            path.display()
+        )),
+    }
+}
+
+fn record_global_version(path: &Path, version: i64) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| "VSS global version record has no parent directory".to_owned())?;
+    fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    let temporary = path.with_extension("tmp");
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|err| err.to_string())?;
+    file.write_all(format!("{version}\n").as_bytes())
+        .map_err(|err| err.to_string())?;
+    file.sync_all().map_err(|err| err.to_string())?;
+    fs::rename(&temporary, path).map_err(|err| err.to_string())?;
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+fn reconcile_stored_global_version(path: &Path, server: i64) -> Result<i64, String> {
+    let local = read_global_version(path)?;
+    let adopted = adopt_global_version(local, server)?;
+    if local != Some(adopted) {
+        record_global_version(path, adopted)?;
+    }
+    Ok(adopted)
 }
 
 fn describe_write_error(err: VssError) -> String {
@@ -517,15 +677,14 @@ async fn list_key_versions(
     let mut page_token = None;
     let mut global_version = None;
     loop {
-        let response = client
-            .list_key_versions(&ListKeyVersionsRequest {
-                store_id: store_id.to_owned(),
-                key_prefix: prefix.clone(),
-                page_size: None,
-                page_token,
-            })
-            .await
-            .map_err(|err| err.to_string())?;
+        let response = timed(client.list_key_versions(&ListKeyVersionsRequest {
+            store_id: store_id.to_owned(),
+            key_prefix: prefix.clone(),
+            page_size: None,
+            page_token,
+        }))
+        .await?
+        .map_err(|err| err.to_string())?;
         if global_version.is_none() {
             global_version = response.global_version;
         }
@@ -632,5 +791,40 @@ mod tests {
         .unwrap();
 
         assert_eq!(value, b"current");
+    }
+
+    #[test]
+    fn a_lower_server_version_is_refused() {
+        let err = adopt_global_version(Some(5), 3).unwrap_err();
+        assert!(err.contains("rolled-back"), "unexpected error: {err}");
+        assert!(err.contains("behind the local record 5"), "{err}");
+    }
+
+    #[test]
+    fn a_missing_or_older_local_version_adopts_the_server() {
+        assert_eq!(adopt_global_version(None, 4).unwrap(), 4);
+        assert_eq!(adopt_global_version(Some(4), 4).unwrap(), 4);
+        assert_eq!(adopt_global_version(Some(2), 4).unwrap(), 4);
+    }
+
+    #[test]
+    fn the_global_version_record_round_trips_and_blocks_a_rewind() {
+        let dir = std::env::temp_dir().join(format!(
+            "lampo-vss-version-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("global-version");
+
+        assert_eq!(reconcile_stored_global_version(&path, 3).unwrap(), 3);
+        assert_eq!(read_global_version(&path).unwrap(), Some(3));
+        assert_eq!(reconcile_stored_global_version(&path, 5).unwrap(), 5);
+        let err = reconcile_stored_global_version(&path, 4).unwrap_err();
+        assert!(err.contains("rolled-back"), "unexpected error: {err}");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

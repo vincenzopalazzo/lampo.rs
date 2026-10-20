@@ -50,8 +50,9 @@ fn post_method(host: &str, port: u16, method: &str, body: &[u8]) -> error::Resul
     if method.is_empty() || method.contains(['/', ' ', '\n', '\r', '?']) {
         error::bail!("refusing to post RPC method `{method}`");
     }
-    // A parallel suite can hit EAGAIN on connect. Retry that; a refused
-    // connection is a real failure and should not be retried forever.
+    // A parallel suite races the listen socket. Blocking connect reports
+    // that as connection refused or a timeout, not WouldBlock. Retry those
+    // a few times; anything else is a real failure.
     let mut stream = None;
     let mut last_err = None;
     for attempt in 1..=5 {
@@ -60,7 +61,7 @@ fn post_method(host: &str, port: u16, method: &str, body: &[u8]) -> error::Resul
                 stream = Some(connected);
                 break;
             }
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+            Err(err) if connect_is_retryable(&err) => {
                 last_err = Some(err);
                 std::thread::sleep(Duration::from_millis(50 * attempt));
             }
@@ -98,6 +99,16 @@ fn post_method(host: &str, port: u16, method: &str, body: &[u8]) -> error::Resul
         error::bail!("httpd `{method}` returned `{status}`");
     }
     Ok(decode_body(&header, &response[header_end + 4..])?)
+}
+
+fn connect_is_retryable(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::TimedOut
+            | std::io::ErrorKind::Interrupted
+    )
 }
 
 fn decode_body(header: &str, body: &[u8]) -> error::Result<Vec<u8>> {
@@ -191,6 +202,16 @@ mod tests {
         let body = b"5\r\nhello\r\n0\r\n\r\n";
         let decoded = decode_body("Transfer-Encoding: chunked", body).unwrap();
         assert_eq!(decoded, b"hello");
+    }
+
+    #[test]
+    fn retries_a_refused_connect_and_not_a_missing_host() {
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        let timed_out = std::io::Error::from(std::io::ErrorKind::TimedOut);
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert!(connect_is_retryable(&refused));
+        assert!(connect_is_retryable(&timed_out));
+        assert!(!connect_is_retryable(&missing));
     }
 
     #[test]

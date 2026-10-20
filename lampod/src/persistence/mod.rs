@@ -45,8 +45,13 @@ pub fn persistence_for(
             })?;
             let safe_url = canonical_vss_url(url)?;
             log::info!(target: "lampod", "persisting to the VSS server at {safe_url}");
-            let store =
-                VssStore::new(url, &store_id, storage_key, conf.storage_auth_token.clone())?;
+            let store = VssStore::new(
+                url,
+                &store_id,
+                storage_key,
+                conf.storage_auth_token.clone(),
+                vss_global_version_path(conf),
+            )?;
             Arc::new(FundCriticalMarkerStore::new(
                 store,
                 vss_initialized_path(conf),
@@ -64,6 +69,7 @@ pub fn persistence_for(
 }
 
 const VSS_INITIALIZED_FILE: &str = ".lampo-vss-initialized";
+const VSS_GLOBAL_VERSION_FILE: &str = ".lampo-vss-global-version";
 
 struct FundCriticalMarkerStore<T> {
     inner: T,
@@ -226,6 +232,10 @@ fn record_vss_initialized(conf: &LampoConf) -> error::Result<()> {
 
 fn vss_initialized_path(conf: &LampoConf) -> PathBuf {
     Path::new(&conf.path()).join(VSS_INITIALIZED_FILE)
+}
+
+fn vss_global_version_path(conf: &LampoConf) -> PathBuf {
+    Path::new(&conf.path()).join(VSS_GLOBAL_VERSION_FILE)
 }
 
 fn record_vss_initialized_at(marker: &Path) -> error::Result<()> {

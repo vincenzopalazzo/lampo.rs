@@ -22,7 +22,9 @@ use vss::VssClient;
 /// VSS-backed Lampo persistence.
 pub struct VssStore {
     client: Box<dyn StoreClient>,
-    payments: Mutex<HashMap<String, PaymentRecord>>,
+    /// `None` until the first payment read. Startup must not download every
+    /// payment blob before the node can listen.
+    payments: Mutex<Option<HashMap<String, PaymentRecord>>>,
 }
 
 trait StoreClient: Send + Sync {
@@ -61,6 +63,7 @@ impl VssStore {
         store_id: &str,
         storage_key: [u8; 32],
         auth_token: Option<String>,
+        global_version_path: std::path::PathBuf,
     ) -> error::Result<Self> {
         let is_loopback = validate_vss_url(base_url)?;
         if !is_loopback && auth_token.as_deref().unwrap_or("").is_empty() {
@@ -68,12 +71,16 @@ impl VssStore {
                 "storage=vss on a non-local URL needs storage-auth-token;                  the store id is public and is not an authenticator"
             );
         }
-        let client: Box<dyn StoreClient> =
-            Box::new(VssClient::new(base_url, store_id, storage_key, auth_token)?);
-        let payments = load_payments(client.as_ref())?;
+        let client: Box<dyn StoreClient> = Box::new(VssClient::new(
+            base_url,
+            store_id,
+            storage_key,
+            auth_token,
+            global_version_path,
+        )?);
         Ok(Self {
             client,
-            payments: Mutex::new(payments),
+            payments: Mutex::new(None),
         })
     }
 
@@ -82,8 +89,22 @@ impl VssStore {
         let payments = load_payments(client.as_ref())?;
         Ok(Self {
             client,
-            payments: Mutex::new(payments),
+            payments: Mutex::new(Some(payments)),
         })
+    }
+
+    /// Load payment history on the first read, not while the daemon is starting.
+    fn payment_cache(
+        &self,
+    ) -> error::Result<std::sync::MutexGuard<'_, Option<HashMap<String, PaymentRecord>>>> {
+        let mut cache = self
+            .payments
+            .lock()
+            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?;
+        if cache.is_none() {
+            *cache = Some(load_payments(self.client.as_ref())?);
+        }
+        Ok(cache)
     }
 }
 
@@ -240,10 +261,10 @@ impl KVStoreSync for VssStore {
 
 impl PaymentStore for VssStore {
     fn upsert_payment(&self, payment: &PaymentRecord) -> error::Result<()> {
-        let mut payments = self
-            .payments
-            .lock()
-            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?;
+        let mut cache = self.payment_cache()?;
+        let payments = cache
+            .as_mut()
+            .expect("payment cache is loaded before an upsert");
 
         self.client
             .write(
@@ -257,18 +278,17 @@ impl PaymentStore for VssStore {
 
     fn get_payment(&self, id: &str) -> error::Result<Option<PaymentRecord>> {
         Ok(self
-            .payments
-            .lock()
-            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?
-            .get(id)
-            .cloned())
+            .payment_cache()?
+            .as_ref()
+            .and_then(|payments| payments.get(id).cloned()))
     }
 
     fn list_payments(&self, filter: &PaymentFilter) -> error::Result<Vec<PaymentRecord>> {
-        let mut matched: Vec<_> = self
-            .payments
-            .lock()
-            .map_err(|err| error::anyhow!("payment map poisoned: {err}"))?
+        let cache = self.payment_cache()?;
+        let payments = cache
+            .as_ref()
+            .expect("payment cache is loaded before a list");
+        let mut matched: Vec<_> = payments
             .values()
             .filter(|record| filter.matches(record))
             .cloned()
@@ -435,7 +455,13 @@ mod tests {
 
     #[test]
     fn remote_vss_without_a_token_is_refused() {
-        let err = match VssStore::new("https://vss.example.test", "store", [7u8; 32], None) {
+        let err = match VssStore::new(
+            "https://vss.example.test",
+            "store",
+            [7u8; 32],
+            None,
+            std::path::PathBuf::from("unused-vss-version"),
+        ) {
             Ok(_) => panic!("remote VSS without a token must be refused"),
             Err(err) => err.to_string(),
         };

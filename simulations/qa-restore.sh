@@ -197,43 +197,48 @@ say "R2 wiped manager must not look like a new funded node"
 stop_dir "$A" || exit 1
 if [ "$BACKEND" = fs ]; then
   rm -f "$A/regtest/manager"
+  # LDK stores the manager at `<data-dir>/<network>/manager` when both
+  # namespaces are empty. If that file is still here, the wipe did not happen.
+  if [ -f "$A/regtest/manager" ]; then
+    rc R2 FAIL "manager file still present after rm"
+    exit 1
+  fi
 else
-  # Drop every VSS object for this node's store id by pointing the URL at a
-  # fresh empty server path is not possible here. Delete the remote keys by
-  # removing the local marker's sibling and the VSS rows is operator-side.
-  # The fail-closed check keys off the local marker plus a missing manager.
-  # Simulate the wipe the code can see: keep the marker, and if we cannot
-  # delete remote keys, skip the remote wipe and say so.
-  if [ -f "$A/regtest/.lampo-vss-initialized" ]; then
-    say "  VSS marker present; remote wipe is not performed by this script"
-    say "  (refusing a wiped store is covered when the server returns NotFound)"
-    rc R2 SKIP "remote wipe needs a server-side delete; marker is present"
-  else
+  # The refusal keys off the local marker plus a missing remote manager.
+  # This script cannot sign a VSS delete. The operator passes a command that
+  # removes the manager key; without it the case is a failure, not a skip.
+  if [ ! -f "$A/regtest/.lampo-vss-initialized" ]; then
     rc R2 FAIL "VSS node has no initialization marker"
     exit 1
   fi
-fi
-if [ "$BACKEND" = fs ]; then
-  launch "$A"
-  sleep 6
-  if NEW=$(wait_api "$API_BASE"); then
-    # A wiped filesystem store has no local marker. LDK may start a new
-    # node. That is only safe if the identity changed, so the old channels
-    # are not claimed by an empty manager.
-    NOW=$(channels "$API_BASE")
-    if [ "$NEW" = "$IDA" ] && [ "$NOW" = 0 ]; then
-      rc R2 FAIL "same node id, zero channels, after manager wipe (monitors left behind)"
-      say "R2 is a fund-loss case: the node started instead of refusing"
-      exit 1
-    fi
-    if [ "$NOW" -ge 1 ]; then
-      rc R2 PASS "channel still present after manager wipe ($NOW)"
-    else
-      rc R2 PASS "wiped manager came back as a different node"
-    fi
-  else
-    rc R2 PASS "wiped manager did not serve API"
+  if [ -z "${VSS_WIPE_CMD:-}" ]; then
+    rc R2 FAIL "remote wipe was not run; set VSS_WIPE_CMD to delete the VSS manager key"
+    exit 1
   fi
+  if ! bash -c "$VSS_WIPE_CMD"; then
+    rc R2 FAIL "VSS_WIPE_CMD failed"
+    exit 1
+  fi
+fi
+launch "$A"
+sleep 6
+if NEW=$(wait_api "$API_BASE"); then
+  # A wiped store must not come back as the same funded node. A channel that
+  # is still listed means the manager file was never removed.
+  NOW=$(channels "$API_BASE")
+  if [ "$NEW" = "$IDA" ] && [ "$NOW" = 0 ]; then
+    rc R2 FAIL "same node id, zero channels, after manager wipe (monitors left behind)"
+    say "R2 is a fund-loss case: the node started instead of refusing"
+    exit 1
+  fi
+  if [ "$NOW" -ge 1 ]; then
+    rc R2 FAIL "channel still present after manager wipe ($NOW)"
+    say "R2 did not wipe the manager"
+    exit 1
+  fi
+  rc R2 PASS "wiped manager came back as a different node"
+else
+  rc R2 PASS "wiped manager did not serve API"
 fi
 
 say "QA restore done"
