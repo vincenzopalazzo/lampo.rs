@@ -7,6 +7,10 @@ publish = false
 
 [dependencies]
 actix-web = { version = "4", features = ["rustls-0_23"] }
+# actix-rt 2.14 made `net` and `signal` optional and off by default.
+# actix-server 2.7/2.8 still imports them. Enabling them here unifies
+# the features for the whole build; a dev-dependency would not.
+actix-rt = { version = "2.15", features = ["net", "signal"] }
 base64 = "0.22"
 bytes = "1"
 futures-util = "0.3"
@@ -35,5 +39,4 @@ prost-build = "0.13"
 protoc-bin-vendored = "3"
 
 [dev-dependencies]
-actix-rt = "2"
 tempfile = "3"
