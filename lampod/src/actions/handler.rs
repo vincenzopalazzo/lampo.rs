@@ -2,9 +2,11 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use lampo_common::backend::BroadcastOutcome;
 use lampo_common::bitcoin::absolute::Height;
 use lampo_common::bitcoin::hashes::Hash;
-use lampo_common::bitcoin::{Amount, OutPoint, Transaction, WPubkeyHash};
+use lampo_common::bitcoin::{Amount, OutPoint, Transaction, Txid, WPubkeyHash};
+use lampo_common::wallet::WalletManager;
 use tokio::sync::RwLock;
 
 use lampo_common::async_trait;
@@ -34,7 +36,7 @@ use lampo_plugin_common::hooks::HookPoint;
 use lampo_plugin_common::messages::HookResponse;
 use lampo_plugin_common::topics;
 
-use crate::chain::{FeeTarget, LampoChainManager, WalletManager};
+use crate::chain::{FeeTarget, LampoChainManager};
 use crate::command::Command;
 use crate::ln::payer_proof::{self, PayerProofRecord};
 use crate::ln::{
@@ -511,6 +513,8 @@ impl Handler for LampoHandler {
                         );
                     }
                 };
+                // LDK was not handed this transaction, so it cannot rebroadcast
+                // it. Free the wallet reservation created before the attempt.
                 // Same as ldk-node: ChannelFunding is 12-block economical,
                 // read from the cache (never block the event loop on RPC).
                 // An explicit `sat_per_vbyte` from the caller (LND REST
@@ -585,6 +589,7 @@ impl Handler for LampoHandler {
                 // under the shared wait-state lock so a concurrent timeout
                 // cannot force-close an already-accepted funding (and so we
                 // skip handoff if the waiter already abandoned).
+                let txid = transaction.compute_txid();
                 match self
                     .channel_manager
                     .funding_transaction_generated_if_waiting(
@@ -598,12 +603,16 @@ impl Handler for LampoHandler {
                                 .to_owned();
                         log::warn!(target: "lampo", "{}", msg);
                         abandon_temp_channel(self, &msg);
+                        release_reserved_spend(self.wallet_manager.as_ref(), txid);
                         return Err(error::anyhow!("{}", msg));
                     }
                     std::result::Result::Err(err) => {
                         let msg = format!("funding_transaction_generated failed: {err}");
                         log::error!(target: "lampo", "{}", msg);
                         abandon_temp_channel(self, &msg);
+                        // Handoff failed, so LDK has no copy to broadcast and
+                        // will not emit DiscardFunding for this tx.
+                        release_reserved_spend(self.wallet_manager.as_ref(), txid);
                         return Err(err);
                     }
                     std::result::Result::Ok(true) => {}
@@ -614,6 +623,89 @@ impl Handler for LampoHandler {
                     channel_value_satoshis,
                     funding_transaction: transaction,
                 }));
+                // `funding_transaction_generated_manual_broadcast` does not
+                // broadcast. LDK emits `FundingTxBroadcastSafe` only after the
+                // counterparty's `funding_signed` is persisted. Broadcasting
+                // here would publish the funding tx before that signature.
+                Ok(())
+            }
+            ldk::events::Event::FundingTxBroadcastSafe {
+                funding_txo,
+                former_temporary_channel_id,
+                counterparty_node_id,
+                ..
+            } => {
+                log::info!(
+                    target: "lampo",
+                    "funding tx {funding_txo} for `{former_temporary_channel_id}` with `{counterparty_node_id}` is safe to broadcast"
+                );
+                // The wallet recorded this spend in `create_transaction`,
+                // including across a restart before the event is replayed.
+                // A missing tx is not replayed: it will not appear on the next
+                // tick, and `ReplayEvent` would block every later LDK event.
+                // The reservation stays, so the coin cannot fund another channel.
+                let Some(transaction) = self.wallet_manager.get_transaction(funding_txo.txid)?
+                else {
+                    log::error!(
+                        target: "lampo",
+                        "funding transaction {} is not in the wallet; cannot broadcast",
+                        funding_txo.txid
+                    );
+                    return Ok(());
+                };
+                // Manual broadcast: LDK will not publish or rebroadcast this
+                // tx. `AlreadyKnown` keeps the reservation (issue #649).
+                // `Unreachable` returns Err so the event is replayed.
+                match self
+                    .chain_manager
+                    .backend
+                    .broadcast_tx_checked(&transaction)
+                    .await?
+                {
+                    BroadcastOutcome::Accepted | BroadcastOutcome::AlreadyKnown => {
+                        self.emit(Event::OnChain(OnChainEvent::SendRawTransaction(
+                            transaction,
+                        )));
+                    }
+                    BroadcastOutcome::Rejected(reason) => {
+                        let txid = transaction.compute_txid();
+                        release_reserved_spend(self.wallet_manager.as_ref(), txid);
+                        let msg = format!("Failed to broadcast transaction: {reason}");
+                        log::error!(target: "lampo-chain", "{msg}");
+                        self.emit(Event::OnChain(OnChainEvent::FundingChannelFailed {
+                            temporary_channel_id: None,
+                            txid: Some(txid),
+                            reason: msg,
+                        }));
+                    }
+                    BroadcastOutcome::Unreachable(reason) => {
+                        error::bail!("funding broadcast unreachable, will retry: {reason}");
+                    }
+                }
+                Ok(())
+            }
+            ldk::events::Event::DiscardFunding {
+                channel_id,
+                funding_info,
+            } => {
+                // LDK emits this when a manual-broadcast channel dies before
+                // the funding tx is published. The stored tx is a dummy, so
+                // the payload is the funding outpoint.
+                match reserved_funding_txid(&funding_info) {
+                    Some(txid) => {
+                        log::info!(
+                            target: "lampo",
+                            "discarding unbroadcast funding {txid} for channel {channel_id}"
+                        );
+                        release_reserved_spend(self.wallet_manager.as_ref(), txid);
+                    }
+                    None => {
+                        log::info!(
+                            target: "lampo",
+                            "discard funding for channel {channel_id} names no single tx; leaving wallet reservations"
+                        );
+                    }
+                }
                 Ok(())
             }
             ldk::events::Event::ChannelPending {
@@ -1039,6 +1131,27 @@ impl Handler for LampoHandler {
     }
 }
 
+fn release_reserved_spend(wallet: &dyn WalletManager, txid: Txid) {
+    if let Err(err) = wallet.release_transaction(txid) {
+        log::error!(
+            target: "lampo-wallet",
+            "failed to release reserved transaction {txid}: {err}"
+        );
+    }
+}
+
+/// Txid of a funding spend this wallet reserved, when LDK names one.
+///
+/// Splice `Contribution` lists inputs rather than a single transaction.
+/// Those reservations are not created by `create_transaction`.
+fn reserved_funding_txid(info: &ldk::events::FundingInfo) -> Option<Txid> {
+    match info {
+        ldk::events::FundingInfo::Tx { transaction } => Some(transaction.compute_txid()),
+        ldk::events::FundingInfo::OutPoint { outpoint } => Some(outpoint.txid),
+        ldk::events::FundingInfo::Contribution { .. } => None,
+    }
+}
+
 /// What to do with a `PaymentClaimable` event.
 #[derive(Debug, PartialEq, Eq)]
 enum PaymentClaimDecision {
@@ -1162,5 +1275,33 @@ mod payment_claimable_tests {
             &ldk::events::PaymentPurpose::SpontaneousPayment(preimage.clone()),
         );
         assert_eq!(decision, PaymentClaimDecision::Claim(preimage));
+    }
+}
+
+#[cfg(test)]
+mod reserved_funding_txid_tests {
+    use lampo_common::bitcoin::hashes::Hash;
+    use lampo_common::bitcoin::Txid;
+    use lampo_common::ldk::chain::transaction::OutPoint;
+    use lampo_common::ldk::events::FundingInfo;
+
+    use super::reserved_funding_txid;
+
+    #[test]
+    fn outpoint_txid_is_the_reserved_spend() {
+        let txid = Txid::from_byte_array([7u8; 32]);
+        let info = FundingInfo::OutPoint {
+            outpoint: OutPoint { txid, index: 0 },
+        };
+        assert_eq!(reserved_funding_txid(&info), Some(txid));
+    }
+
+    #[test]
+    fn contribution_is_not_a_single_reservation() {
+        let info = FundingInfo::Contribution {
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        };
+        assert!(reserved_funding_txid(&info).is_none());
     }
 }

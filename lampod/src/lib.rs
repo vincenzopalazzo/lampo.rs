@@ -406,7 +406,11 @@ impl LampoDaemon {
     // a recipient's invoice (the payer then times out for no reason), and a
     // transient store error on `StaticInvoiceRequested` is worth one retry —
     // LDK regenerates neither across restarts, so replay is the only
-    // recovery. Rate-limit skips are `Ok`, not errors, so they do not replay
+    // recovery. `FundingTxBroadcastSafe` is replayed only when the handler
+    // returns Err, which it does for an unreachable broadcast: manual
+    // broadcast means LDK will not retry the funding tx itself. A missing
+    // wallet tx returns Ok so it cannot sit at the head of the queue.
+    // Rate-limit skips are `Ok`, not errors, so they do not replay
     // and cannot stall the queue. Other handlers can fail permanently (peer
     // disconnected, wallet without funds); LDK keeps a failed event at the
     // head of the queue, so replaying those would block every later event
@@ -417,6 +421,7 @@ impl LampoDaemon {
             Event::SpendableOutputs { .. }
                 | Event::PersistStaticInvoice { .. }
                 | Event::StaticInvoiceRequested { .. }
+                | Event::FundingTxBroadcastSafe { .. }
         );
         if let Err(err) = self.handler().handle(env).await {
             if replay_on_failure {

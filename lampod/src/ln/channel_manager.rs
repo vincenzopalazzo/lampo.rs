@@ -202,7 +202,11 @@ impl LampoChannelManager {
             return Ok(false);
         }
         self.manager()
-            .funding_transaction_generated(temporary_channel_id, counterparty_node_id, transaction)
+            .funding_transaction_generated_manual_broadcast(
+                temporary_channel_id,
+                counterparty_node_id,
+                transaction,
+            )
             .map_err(|err| error::anyhow!("{:?}", err))?;
         state.insert(temporary_channel_id, FundingWaitState::Accepted);
         Ok(true)
@@ -906,11 +910,11 @@ fn apply_funding_wait_event(
             reason,
             ..
         }) if *expected_txid == Some(failed_txid) => {
-            // Handoff already succeeded; broadcast RPC errors are ambiguous
-            // (backend may have accepted the tx) and LDK may still rebroadcast.
-            // Do not present this as a safely-retryable open failure.
+            // Manual broadcast means LDK will not retry this funding tx. A
+            // definitive rejection releases its inputs; an ambiguous RPC error
+            // still keeps them reserved.
             FundingWaitStep::Failed(format!(
-                "channel funding broadcast reported failure after handoff ({reason}); channel left open (broadcast may still be pending)"
+                "channel funding broadcast failed after handoff ({reason})"
             ))
         }
         Event::Lightning(LightningEvent::CloseChannelEvent {
