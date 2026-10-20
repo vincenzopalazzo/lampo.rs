@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
 use bdk_bitcoind_rpc::bitcoincore_rpc::{Auth, Client, RpcApi};
 use bdk_bitcoind_rpc::Emitter;
+use bdk_wallet::bitcoin::NetworkKind;
 use bdk_wallet::chain::BlockId;
 use bdk_wallet::descriptor::template::Bip84;
 use bdk_wallet::keys::bip39::Mnemonic;
@@ -120,7 +121,7 @@ impl BDKWalletManager {
         let xkey: ExtendedKey = mnemonic.into_extended_key()?;
         // Get xprv from the extended key
         let xprv = xkey
-            .into_xprv(conf.network)
+            .into_xprv(NetworkKind::from(conf.network))
             .ok_or(error::anyhow!("Error converting xpriv"))?;
 
         let path_db = format!("{}/bdk-wallet.db", conf.path());
@@ -453,7 +454,7 @@ impl WalletManager for BDKWalletManager {
                 rpc_client.as_ref(),
                 wallet_tip,
                 start_height,
-                bdk_bitcoind_rpc::NO_EXPECTED_MEMPOOL_TXIDS,
+                bdk_bitcoind_rpc::NO_EXPECTED_MEMPOOL_TXS,
             );
 
             while let Some(emission) = emitter.next_block()? {
