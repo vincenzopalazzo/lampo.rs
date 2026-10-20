@@ -6,6 +6,8 @@ Guidance for coding agents working in this repository.
 
 - `make fmt` — rustfmt (+ clippy when enabled)
 - `make check` — full test suite
+- `make bins` — compile test binaries once into `target/ci-bins`
+- `make unit` — rerun the chain-free binaries, no second cargo build
 - `make integration` — regtest suite against Bitcoin Core (`LAMPO_CHAIN=all` adds rbitcoin)
 - `cargo check -p <crate>` / `cargo test -p <crate>` — single crate
 

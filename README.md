@@ -78,11 +78,13 @@ Then you can query the node with the following command:
 
 ### To run integration tests:
 
-Needs `bitcoind` on `PATH`. `make integration` builds the chain plugin and
-runs the suite against Bitcoin Core. `LAMPO_CHAIN=all` also runs it against
-`rbitcoin-node` (or `LAMPO_RBITCOIN`).
+`make bins` compiles the test binaries once. `make unit` reruns the
+ones that do not need a chain. `make integration` needs `bitcoind` on
+`PATH` and runs the regtest suite against Bitcoin Core.
+`LAMPO_CHAIN=all` also runs it against `rbitcoin-node` (or `LAMPO_RBITCOIN`).
 
 ```
+make unit
 make integration
 LAMPO_CHAIN=all make integration
 ```
