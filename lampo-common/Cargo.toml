@@ -31,4 +31,8 @@ hex = "0.4.3"
 
 # FIXME: make this option and expose under a feature flag
 paperclip = { version = "0.9.5", features = ["actix4"] }
+# paperclip's actix4 feature pulls in actix-server, which imports actix-rt's
+# `net` and `signal` modules; actix-rt 2.14 made those optional and off by
+# default. Every lampo crate depends on this one, so enable them here.
+actix-rt = { version = "2.15", features = ["net", "signal"] }
 tokio = { version = "1", features = ["sync"] }
