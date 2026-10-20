@@ -255,7 +255,13 @@ pub const Plugin = struct {
         }
         if (self.findRpc(method)) |handler| {
             const result = handler(self.ctx, self.allocator, params) catch |err| {
-                try writeError(out, id, -32000, @errorName(err));
+                const forwarded: struct { i32, []const u8 } = switch (err) {
+                    error.RpcAlreadyInChain => .{ -27, "RPC error -27: Transaction already in block chain" },
+                    error.RpcNonFinal => .{ -26, "RPC error -26: non-final" },
+                    error.RpcRejected => .{ -26, "RPC error -26: rejected" },
+                    else => .{ -32000, @errorName(err) },
+                };
+                try writeError(out, id, forwarded[0], forwarded[1]);
                 return false;
             };
             try writeResult(out, id, result);

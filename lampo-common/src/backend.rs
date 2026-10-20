@@ -47,6 +47,20 @@ impl BackendKind {
     }
 }
 
+/// What `sendrawtransaction` did with a transaction.
+///
+/// `AlreadyKnown` is not a failure: the inputs are spent in the mempool or
+/// in a block, so the wallet reservation must stay. `Unreachable` means the
+/// node may still have accepted the tx, so the reservation stays and the
+/// caller can retry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BroadcastOutcome {
+    Accepted,
+    AlreadyKnown,
+    Rejected(String),
+    Unreachable(String),
+}
+
 /// bitcoind `estimatesmartfee` estimate mode. Matches ldk-node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FeeEstimateMode {
@@ -136,6 +150,18 @@ pub trait Backend: Send + Sync {
     async fn minimum_mempool_fee(&self) -> error::Result<u32>;
 
     async fn brodcast_tx(&self, tx: &Transaction);
+
+    /// Broadcast and report whether the tx was accepted, already known,
+    /// rejected, or unreachable. Does not touch wallet reservations and
+    /// does not emit events; the caller decides both.
+    ///
+    /// The default fails closed. A backend that only implements
+    /// [`Self::brodcast_tx`] must not be treated as a successful publish.
+    async fn broadcast_tx_checked(&self, _tx: &Transaction) -> error::Result<BroadcastOutcome> {
+        Err(error::anyhow!(
+            "backend does not report a broadcast outcome"
+        ))
+    }
 
     async fn get_utxo(&self, block: &BlockHash, idx: u64) -> UtxoResult;
 

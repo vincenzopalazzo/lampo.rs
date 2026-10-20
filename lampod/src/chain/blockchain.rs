@@ -4,7 +4,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use lampo_common::async_trait;
-use lampo_common::backend::{Backend, FeeEstimateMode};
+use lampo_common::backend::{Backend, BroadcastOutcome, FeeEstimateMode};
 use lampo_common::bitcoin;
 use lampo_common::bitcoin::blockdata::constants::ChainHash;
 use lampo_common::bitcoin::{FeeRate, Transaction};
@@ -292,6 +292,13 @@ impl UtxoLookup for LampoChainManager {
 impl Backend for LampoChainManager {
     async fn brodcast_tx(&self, tx: &Transaction) {
         self.backend.brodcast_tx(tx).await;
+    }
+
+    async fn broadcast_tx_checked(
+        &self,
+        tx: &Transaction,
+    ) -> lampo_common::error::Result<BroadcastOutcome> {
+        self.backend.broadcast_tx_checked(tx).await
     }
 
     async fn fee_rate_estimation_with_mode(

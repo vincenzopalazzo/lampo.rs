@@ -808,11 +808,14 @@ impl PluginManager {
                 "params": params
             }))
             .await?;
-        if let Some(error) = response.get("error") {
+        if let Some(error) = response.get("error").filter(|err| !err.is_null()) {
             let msg = error
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("plugin error");
+            if let Some(code) = error.get("code").and_then(|c| c.as_i64()) {
+                error::bail!("plugin `{plugin_name}` `{method}` RPC error {code}: {msg}");
+            }
             error::bail!("plugin `{plugin_name}` `{method}`: {msg}");
         }
         response

@@ -8,7 +8,7 @@ use lightning_block_sync::{poll, BlockHeaderData, BlockSourceResult};
 use lightning_block_sync::{BlockSource, SpvClient};
 
 use lampo_common::async_trait;
-use lampo_common::backend::{Backend, BlockData};
+use lampo_common::backend::{Backend, BlockData, BroadcastOutcome};
 use lampo_common::bitcoin::consensus::encode::serialize_hex;
 use lampo_common::bitcoin::{Block, BlockHash};
 use lampo_common::chainsync::ChainSyncCoordinator;
@@ -168,6 +168,143 @@ pub struct LampoChainSync {
     sweeper: OnceLock<(chain::BlockLocator, Arc<LampoSweeper>)>,
 }
 
+/// Bitcoin Core `sendrawtransaction` codes (`rpc/protocol.h`).
+///
+/// `-26` is `RPC_TRANSACTION_REJECTED`: the message is the policy reason.
+/// `-27` is `RPC_TRANSACTION_ALREADY_IN_CHAIN`: the tx is already in a
+/// block, so its inputs stay reserved. A tx already in the mempool is
+/// `OK` on Core 29 (no error). Older cores report that as `-26` with
+/// `txn-already-in-mempool`.
+const RPC_TRANSACTION_REJECTED: i32 = -26;
+const RPC_TRANSACTION_ALREADY_IN_CHAIN: i32 = -27;
+
+/// First Core broadcast code in `text`. Ignores a plugin wrapper such as
+/// `-32000` when the bitcoind code is also present.
+fn broadcast_rpc_code(text: &str) -> Option<i32> {
+    let lower = text.to_ascii_lowercase();
+    let mut rest = lower.as_str();
+    let mut fallback = None;
+    while let Some(idx) = rest.find("rpc error ") {
+        let after = &rest[idx + "rpc error ".len()..];
+        let token: String = after
+            .chars()
+            .take_while(|c| *c == '-' || c.is_ascii_digit())
+            .collect();
+        if let Ok(code) = token.parse::<i32>() {
+            if matches!(
+                code,
+                RPC_TRANSACTION_REJECTED | RPC_TRANSACTION_ALREADY_IN_CHAIN
+            ) {
+                return Some(code);
+            }
+            fallback = Some(code);
+        }
+        rest = if after.is_empty() { "" } else { &after[1..] };
+    }
+    fallback
+}
+
+fn error_text(err: &lampo_common::error::Error) -> String {
+    let display = format!("{err}");
+    if display.to_ascii_lowercase().contains("rpc error ") {
+        return display;
+    }
+    format!("{err:?}")
+}
+
+/// `true` when Core rejected the tx as `non-final`. That is still code
+/// `-26`; the reason is the only way to tell it from a final policy reject.
+fn is_non_final(err: &lampo_common::error::Error) -> bool {
+    let text = error_text(err);
+    broadcast_rpc_code(&text) == Some(RPC_TRANSACTION_REJECTED)
+        && text.to_ascii_lowercase().contains("non-final")
+}
+
+/// Classify a `sendrawtransaction` error from Core's RPC code.
+///
+/// `-27` keeps the reservation. `-26` releases it, except `non-final`
+/// (retried by the caller) and an already-known mempool tx. No code, or
+/// any other code, is unreachable: the tx may still confirm.
+fn classify_broadcast_error(err: &lampo_common::error::Error) -> BroadcastOutcome {
+    let msg = error_text(err);
+    let lower = msg.to_ascii_lowercase();
+    match broadcast_rpc_code(&msg) {
+        Some(RPC_TRANSACTION_ALREADY_IN_CHAIN) => BroadcastOutcome::AlreadyKnown,
+        Some(RPC_TRANSACTION_REJECTED)
+            if lower.contains("txn-already-in-mempool") || lower.contains("txn-already-known") =>
+        {
+            BroadcastOutcome::AlreadyKnown
+        }
+        Some(RPC_TRANSACTION_REJECTED) if lower.contains("non-final") => {
+            BroadcastOutcome::Unreachable(msg)
+        }
+        Some(RPC_TRANSACTION_REJECTED) => BroadcastOutcome::Rejected(msg),
+        _ => BroadcastOutcome::Unreachable(msg),
+    }
+}
+
+#[cfg(test)]
+mod broadcast_rejection_tests {
+    use lampo_common::backend::BroadcastOutcome;
+
+    use super::{classify_broadcast_error, is_non_final};
+
+    #[test]
+    fn rejected_code_releases_the_reservation() {
+        let err = lampo_common::error::anyhow!(
+            "plugin `bitcoind` `sendrawtransaction` RPC error -26: bad-txns-inputs-missingorspent"
+        );
+        assert!(matches!(
+            classify_broadcast_error(&err),
+            BroadcastOutcome::Rejected(_)
+        ));
+    }
+
+    #[test]
+    fn already_in_chain_code_keeps_the_reservation() {
+        let err = lampo_common::error::anyhow!(
+            "plugin `bitcoind` `sendrawtransaction` RPC error -27: Transaction already in block chain"
+        );
+        assert_eq!(
+            classify_broadcast_error(&err),
+            BroadcastOutcome::AlreadyKnown
+        );
+    }
+
+    #[test]
+    fn already_in_mempool_on_reject_code_keeps_the_reservation() {
+        let err = lampo_common::error::anyhow!(
+            "plugin `bitcoind` `sendrawtransaction` RPC error -26: txn-already-in-mempool"
+        );
+        assert_eq!(
+            classify_broadcast_error(&err),
+            BroadcastOutcome::AlreadyKnown
+        );
+    }
+
+    #[test]
+    fn non_final_is_not_a_final_reject() {
+        let err = lampo_common::error::anyhow!(
+            "plugin `bitcoind` `sendrawtransaction` RPC error -26: non-final"
+        );
+        assert!(is_non_final(&err));
+        assert!(matches!(
+            classify_broadcast_error(&err),
+            BroadcastOutcome::Unreachable(_)
+        ));
+    }
+
+    #[test]
+    fn transport_failure_keeps_the_reservation() {
+        let err = lampo_common::error::anyhow!("transport error: connection reset");
+        assert!(!is_non_final(&err));
+        assert!(matches!(
+            classify_broadcast_error(&err),
+            BroadcastOutcome::Unreachable(_)
+        ));
+    }
+}
+
 impl LampoChainSync {
     async fn broadcast_once(
         &self,
@@ -180,6 +317,27 @@ impl LampoChainSync {
         handler
             .call("sendrawtransaction", json::json!([serialize_hex(tx)]))
             .await
+    }
+
+    /// Submit `tx`. A success returns immediately. Only a `non-final`
+    /// reject is retried, and only twice more. Does not emit events and
+    /// does not touch the wallet.
+    async fn submit_raw_tx(&self, tx: &lampo_common::bitcoin::Transaction) -> BroadcastOutcome {
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            match self.broadcast_once(tx).await {
+                Ok(_) => return BroadcastOutcome::Accepted,
+                Err(err) if is_non_final(&err) && attempt < 3 => {
+                    log::warn!(
+                        target: "lampo-chain",
+                        "broadcast rejected as non-final, retry {attempt}/3 in 3s"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                }
+                Err(err) => return classify_broadcast_error(&err),
+            }
+        }
     }
 
     pub fn new(conf: Arc<LampoConf>) -> error::Result<Self> {
@@ -636,44 +794,40 @@ impl Backend for LampoChainSync {
     }
 
     async fn brodcast_tx(&self, tx: &lampo_common::bitcoin::Transaction) {
-        // Retry transient rejections. Observed live on regtest (issues #572
-        // and its follow-up): `sendrawtransaction` answers `-26 non-final`
-        // when the node's height views race bitcoind's chain state during
-        // mining bursts; a few seconds later the same tx broadcasts fine
-        // (LDK's monitor rebroadcast heals exactly this way). Retrying
-        // bounded turns the whole skew class into a non-event instead of a
-        // zombie-pending funding channel.
-        let mut resp = self.broadcast_once(tx).await;
-        for attempt in 1..=3 {
-            let transient = matches!(&resp, Err(e) if format!("{e:?}").contains("non-final"));
-            if !transient {
-                break;
-            }
-            log::warn!(target: "lampo-chain", "broadcast rejected as non-final, retry {attempt}/3 in 3s");
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            resp = self.broadcast_once(tx).await;
-        }
-        log::info!("Broadcasting tx result: {:?}", resp);
+        // LDK rebroadcasts through this path (commitments, sweeps, bumps).
+        // A tx bitcoind already has is success: releasing its inputs here
+        // reopened issue #649. Wallet release is the funding handler's job,
+        // and only after a policy reject of a tx that was never published.
+        let outcome = self.submit_raw_tx(tx).await;
+        log::info!(target: "lampo-chain", "Broadcasting tx result: {outcome:?}");
         let Some(handler) = self.handler.get() else {
             return;
         };
-        match resp {
-            Ok(_) => {
+        match outcome {
+            BroadcastOutcome::Accepted | BroadcastOutcome::AlreadyKnown => {
                 handler.emit(Event::OnChain(OnChainEvent::SendRawTransaction(tx.clone())));
             }
-            Err(err) => {
-                let msg = format!("Failed to broadcast transaction: {err}");
-                log::error!(target: "lampo-chain", "{}", msg);
+            BroadcastOutcome::Rejected(reason) | BroadcastOutcome::Unreachable(reason) => {
+                let txid = tx.compute_txid();
+                let msg = format!("Failed to broadcast transaction: {reason}");
+                log::error!(target: "lampo-chain", "{msg}");
                 // Tag with txid so an `open_channel` waiter waiting on this
                 // funding broadcast can fail without reacting to unrelated
                 // (e.g. unilateral-close) broadcast errors.
                 handler.emit(Event::OnChain(OnChainEvent::FundingChannelFailed {
                     temporary_channel_id: None,
-                    txid: Some(tx.compute_txid()),
+                    txid: Some(txid),
                     reason: msg,
                 }));
             }
         }
+    }
+
+    async fn broadcast_tx_checked(
+        &self,
+        tx: &lampo_common::bitcoin::Transaction,
+    ) -> error::Result<BroadcastOutcome> {
+        Ok(self.submit_raw_tx(tx).await)
     }
 
     async fn fee_rate_estimation_with_mode(
@@ -1090,6 +1244,10 @@ mod tests {
 
         async fn get_onchain_balance(&self) -> error::Result<u64> {
             Ok(0)
+        }
+
+        fn release_transaction(&self, _txid: lampo_common::bitcoin::Txid) -> error::Result<()> {
+            Ok(())
         }
 
         async fn create_transaction(
