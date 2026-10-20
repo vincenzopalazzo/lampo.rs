@@ -426,6 +426,13 @@ impl LampoChannelManager {
         self.wallet_manager.clone()
     }
 
+    /// Fresh entropy [`ContactId`] for a contact book entry.
+    pub fn fresh_contact_id(&self) -> lampo_common::ldk::offers::contacts::ContactId {
+        use lampo_common::ldk::offers::contacts::ContactId;
+        use lampo_common::ldk::sign::EntropySource;
+        ContactId::from_entropy_source(self.signer.as_ref())
+    }
+
     pub fn manager(&self) -> Arc<LampoChannel> {
         self.channeld
             .get()

@@ -2467,6 +2467,8 @@ dependencies = [
  "lampo-plugin-common",
  "log",
  "once_cell",
+ "serde",
+ "serde_json",
  "time",
  "tokio",
 ]
@@ -2555,7 +2557,7 @@ dependencies = [
 [[package]]
 name = "lightning"
 version = "0.3.0-rc2"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -2573,7 +2575,7 @@ dependencies = [
 [[package]]
 name = "lightning-background-processor"
 version = "0.3.0-rc2"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -2587,7 +2589,7 @@ dependencies = [
 [[package]]
 name = "lightning-block-sync"
 version = "0.3.0-rc2"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -2596,7 +2598,7 @@ dependencies = [
 [[package]]
 name = "lightning-invoice"
 version = "0.35.0-rc2"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "bech32",
  "bitcoin",
@@ -2607,7 +2609,7 @@ dependencies = [
 [[package]]
 name = "lightning-liquidity"
 version = "0.3.0-rc2"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "bitcoin",
  "bitreq 0.3.7",
@@ -2623,7 +2625,7 @@ dependencies = [
 [[package]]
 name = "lightning-macros"
 version = "0.2.2+git"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2633,7 +2635,7 @@ dependencies = [
 [[package]]
 name = "lightning-net-tokio"
 version = "0.3.0-rc2"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -2643,7 +2645,7 @@ dependencies = [
 [[package]]
 name = "lightning-persister"
 version = "0.3.0-rc2"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "bitcoin",
  "lightning",
@@ -2654,7 +2656,7 @@ dependencies = [
 [[package]]
 name = "lightning-rapid-gossip-sync"
 version = "0.3.0-rc2"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
@@ -2665,7 +2667,7 @@ dependencies = [
 [[package]]
 name = "lightning-types"
 version = "0.4.0-rc2"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "bitcoin",
 ]
@@ -3200,7 +3202,7 @@ dependencies = [
 [[package]]
 name = "possiblyrandom"
 version = "0.2.0"
-source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=e8c981e71#e8c981e71aba1946dab961e4f152be04f202f2b9"
+source = "git+https://github.com/vincenzopalazzo/rust-lightning?rev=154d810dc#154d810dcc5b4cc42acec2fb7f28a6f39369eda4"
 dependencies = [
  "getrandom 0.2.16",
 ]
@@ -3399,7 +3401,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -3437,7 +3439,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]

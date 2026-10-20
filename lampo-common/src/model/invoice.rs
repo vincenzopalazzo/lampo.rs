@@ -54,7 +54,35 @@ pub mod request {
     #[derive(Serialize, Deserialize, Apiv2Schema)]
     pub struct Bolt12Pay {
         pub payer_note: Option<String>,
+        /// When true, reveal BLIP-42 contact identity (contact_secret + compact payer offer).
+        #[serde(default)]
+        pub reveal_contact: Option<bool>,
+        /// Label under which to store/load this contact in the local contact book.
+        #[serde(default)]
+        pub contact_label: Option<String>,
+        /// Intro node pubkey (hex) used to build the payer offer blinded path.
+        /// Required when revealing a contact or paying one back.
+        #[serde(default)]
+        pub intro_node: Option<String>,
     }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct AddContact {
+        pub label: String,
+        /// Their BOLT12 offer. Set this or [`Self::bip353`].
+        #[serde(default)]
+        pub offer: Option<String>,
+        /// Their BIP 353 name. Set this or [`Self::offer`].
+        #[serde(default)]
+        pub bip353: Option<String>,
+        /// Optional hex contact secret received from an inbound payment.
+        /// When set, pay sends this secret instead of recomputing it.
+        #[serde(default)]
+        pub contact_secret_hex: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct ListContacts {}
 
     /// Mint blinded paths on a static-invoice server for an often-offline
     /// recipient. `node_id` must be a channel counterparty; those pubkey
@@ -81,6 +109,27 @@ pub mod request {
         pub token: Option<String>,
         #[serde(default)]
         pub force: bool,
+    }
+}
+
+pub mod contacts_response {
+    use paperclip::actix::Apiv2Schema;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Apiv2Schema)]
+    pub struct ContactInfo {
+        pub label: String,
+        pub contact_id: String,
+        pub signing_pubkey: String,
+        pub remote_offer: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub bip353: Option<String>,
+        pub primary_secret_hex: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Apiv2Schema)]
+    pub struct Contacts {
+        pub contacts: Vec<ContactInfo>,
     }
 }
 
