@@ -22,22 +22,23 @@ install:
 	$(CC) install --locked --path ./lampo-cli
 	$(CC) install --locked --path ./lampod-cli
 
-# Regtest integration tests. Needs bitcoind on PATH. The rbitcoin lane
-# also needs rbitcoin-node, or LAMPO_RBITCOIN pointing at it.
-# LAMPO_CHAIN=core (default) runs Core only. LAMPO_CHAIN=all runs both.
+# Test binaries land in target/ci-bins. `unit` and `integration` rerun
+# those binaries and do not call cargo again.
 LAMPO_CHAIN ?= core
-PLUGIN_BIN=$(CURDIR)/target/debug/examples/lampo-bitcoind
 
-integration: plugin
-	LAMPO_BITCOIND=$(PLUGIN_BIN) LAMPO_CHAIN_BACKEND=core \
-		TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) $(CC) test -p tests --lib $(ARGS)
+bins:
+	./tools/test-bins.sh build
+
+unit: bins
+	TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) ./tools/test-bins.sh run-unit
+
+integration: bins
+	LAMPO_CHAIN_BACKEND=core TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) \
+		./tools/test-bins.sh run-integration
 	@if [ "$(LAMPO_CHAIN)" = "all" ]; then \
-		LAMPO_BITCOIND=$(PLUGIN_BIN) LAMPO_CHAIN_BACKEND=rbitcoin \
-			TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) $(CC) test -p tests --lib $(ARGS); \
+		LAMPO_CHAIN_BACKEND=rbitcoin TEST_LOG_LEVEL=$(TEST_LOG_LEVEL) \
+			./tools/test-bins.sh run-integration; \
 	fi
-
-plugin:
-	$(CC) build -p lampo-plugin-sdk --example lampo-bitcoind
 
 audit:
 	$(CC) install cargo-audit

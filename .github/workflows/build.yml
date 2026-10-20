@@ -30,8 +30,8 @@ jobs:
         with:
           command: check
 
-      - name: Run cargo test
-        run: cargo test
+      # Tests run from the binaries built once in integration_testing.yml.
+      # A second `cargo test` here only recompiles the same crates.
 
       - name: Build release binary
         run: cargo build --release

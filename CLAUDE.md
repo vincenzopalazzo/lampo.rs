@@ -4,6 +4,7 @@
 
 - `make fmt` — Run linting and formatting (rustfmt + clippy)
 - `make check` — Run all tests
+- `make unit` — chain-free tests from `target/ci-bins`, no second cargo build
 - `make integration` — regtest suite against Bitcoin Core (`LAMPO_CHAIN=all` adds rbitcoin)
 - `cargo check -p <crate>` — Type-check a single crate
 - `cargo test -p <crate>` — Test a single crate
