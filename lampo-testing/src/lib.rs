@@ -152,6 +152,44 @@ pub struct LampoTesting {
     pub lnd_admin_macaroon_hex: String,
 }
 
+fn config_for_restart(conf: &LampoConf, port: u64, api_port: u64) -> LampoConf {
+    let mut conf = conf.clone();
+    conf.port = port;
+    conf.api_port = api_port;
+    conf
+}
+
+async fn wait_for_daemon_shutdown(
+    mut task: tokio::task::JoinHandle<Result<(), lampo_common::ldk::io::Error>>,
+    timeout: Duration,
+) -> error::Result<()> {
+    match tokio::time::timeout(timeout, &mut task).await {
+        Ok(Ok(Ok(()))) => Ok(()),
+        Ok(Ok(Err(err))) => {
+            log::warn!(
+                target: "lampo-testing",
+                "daemon task ended with `{err}` during restart"
+            );
+            Ok(())
+        }
+        Ok(Err(err)) => {
+            log::warn!(
+                target: "lampo-testing",
+                "daemon task panicked during restart: {err}"
+            );
+            Ok(())
+        }
+        Err(_) => {
+            task.abort();
+            let _ = task.await;
+            error::bail!(
+                "daemon task did not exit within {}s of shutdown; restart aborted",
+                timeout.as_secs()
+            )
+        }
+    }
+}
+
 impl LampoTesting {
     pub async fn tmp() -> error::Result<Self> {
         Self::tmp_with(|_| {}).await
@@ -271,7 +309,7 @@ impl LampoTesting {
 
         // run httpd and create the handler that will connect to it
         let rpc_url = format!("http://{}:{}", lampo_conf.api_host, lampo_conf.api_port);
-        log::info!("httpd client url `{rpc_url}`");
+        log::debug!(target: "lampo-testing", "httpd client url `{rpc_url}`");
         let handler = Arc::new(HttpdHandler::new(rpc_url)?);
         lampo.add_external_handler(handler.clone()).await?;
         log::info!("Handler added to lampo");
@@ -342,47 +380,23 @@ impl LampoTesting {
             httpd.stop().await?;
         }
         self.daemon.shutdown();
-        let daemon_task = self.daemon_task.take();
+        let daemon_task = self
+            .daemon_task
+            .take()
+            .ok_or_else(|| error::anyhow!("daemon task missing during restart"))?;
+        let original_conf = self.daemon.conf();
         let mnemonic = self.mnemonic.clone();
         let btc = self.btc.clone();
         let root_path = Arc::clone(&self.root_path);
-        // Drop the old daemon graph (and its persistence Arc) before opening a
-        // replacement store against the same destination. The event processor
-        // is awaited first so its final persist finishes and releases the store.
+        wait_for_daemon_shutdown(daemon_task, Duration::from_secs(15)).await?;
+
+        // Only after the task has exited may the old daemon graph and its
+        // persistence Arc be dropped and a replacement store opened.
         drop(self);
-        if let Some(task) = daemon_task {
-            match tokio::time::timeout(Duration::from_secs(15), task).await {
-                Ok(Ok(Ok(()))) => {}
-                Ok(Ok(Err(err))) => {
-                    log::warn!("daemon task ended with `{err}` during restart");
-                }
-                Ok(Err(err)) => {
-                    log::warn!("daemon task panicked during restart: {err}");
-                }
-                Err(_) => {
-                    log::warn!("daemon task did not exit within 15s of shutdown");
-                }
-            }
-        }
 
         let port = port::random_free_port().unwrap();
-        let mut lampo_conf = LampoConf::new(
-            Some(root_path.path().to_string_lossy().to_string()),
-            Some(lampo_common::bitcoin::Network::Regtest),
-            Some(port.into()),
-        )?;
-        lampo_conf.api_port = port::random_free_port().unwrap().into();
-        let values = btc.params.get_cookie_values().unwrap();
-        lampo_conf.core_url = Some(btc.rpc_url());
-        lampo_conf.core_user = values.as_ref().map(|v| v.user.trim().to_owned());
-        lampo_conf.core_pass = values.map(|v| v.password.trim().to_owned());
-        lampo_conf.dev_sync = Some(true);
-        lampo_conf.storage = std::env::var("LAMPO_TEST_STORAGE").ok();
-        lampo_conf.storage_url = std::env::var("LAMPO_TEST_STORAGE_URL").ok();
-        lampo_conf
-            .ldk_conf
-            .channel_handshake_limits
-            .force_announced_channel_preference = false;
+        let api_port = port::random_free_port().unwrap();
+        let lampo_conf = config_for_restart(original_conf.as_ref(), port.into(), api_port.into());
 
         let lampo_conf = Arc::new(lampo_conf);
         let wallet = Arc::new(BDKWalletManager::restore(lampo_conf.clone(), &mnemonic).await?);
@@ -406,7 +420,11 @@ impl LampoTesting {
             .call::<json::Value, response::GetInfo>("getinfo", json::json!({}))
             .await
         {
-            log::debug!("waiting for the restarted node: `{}`", err);
+            log::debug!(
+                target: "lampo-testing",
+                "waiting for the restarted node: `{}`",
+                err
+            );
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
         let info: response::GetInfo = handler.call("getinfo", json::json!({})).await?;
@@ -622,4 +640,67 @@ async fn start_bitcoind_plugin(
         .await
         .map_err(|err| error::anyhow!("bitcoind plugin `{plugin_path}`: {err}"))?;
     Ok(Arc::new(manager))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restart_config_changes_only_runtime_ports() {
+        let mut original = LampoConf::default();
+        original.port = 10;
+        original.api_port = 11;
+        original.alias = Some("configured-by-test".to_owned());
+        original.bind_addr = Some("127.0.0.2".to_owned());
+        original.storage = Some("vss".to_owned());
+        original.storage_url = Some("http://127.0.0.1:18080".to_owned());
+        original.storage_auth_token = Some("test-token".to_owned());
+        original
+            .ldk_conf
+            .channel_handshake_limits
+            .force_announced_channel_preference = false;
+
+        let restarted = config_for_restart(&original, 20, 21);
+
+        assert_eq!(restarted.port, 20);
+        assert_eq!(restarted.api_port, 21);
+        assert_eq!(restarted.alias, original.alias);
+        assert_eq!(restarted.bind_addr, original.bind_addr);
+        assert_eq!(restarted.storage, original.storage);
+        assert_eq!(restarted.storage_url, original.storage_url);
+        assert_eq!(restarted.storage_auth_token, original.storage_auth_token);
+        assert_eq!(
+            restarted
+                .ldk_conf
+                .channel_handshake_limits
+                .force_announced_channel_preference,
+            original
+                .ldk_conf
+                .channel_handshake_limits
+                .force_announced_channel_preference
+        );
+        assert_eq!(original.port, 10);
+        assert_eq!(original.api_port, 11);
+    }
+
+    #[test]
+    fn daemon_shutdown_timeout_aborts_restart() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            let task = tokio::spawn(async {
+                std::future::pending::<()>().await;
+                Ok::<(), lampo_common::ldk::io::Error>(())
+            });
+            let err = wait_for_daemon_shutdown(task, Duration::from_millis(1))
+                .await
+                .unwrap_err();
+
+            assert!(err.to_string().contains("restart aborted"));
+        });
+    }
 }

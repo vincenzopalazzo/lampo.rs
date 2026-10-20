@@ -83,11 +83,49 @@ except Exception:
   return 1
 }
 
+node_pids() { # $1 dir
+  local command p
+  for p in $(pgrep -f "lampod-cli --data-dir" || true); do
+    command=$(ps -p "$p" -o command= 2>/dev/null || true)
+    case "$command" in
+      *"lampod-cli --data-dir $1 "*) echo "$p" ;;
+    esac
+  done
+}
+
+wait_stopped() { # $1 dir [$2 timeout]
+  local deadline
+  deadline=$(( $(date +%s) + ${2:-15} ))
+  while [ "$(date +%s)" -le "$deadline" ]; do
+    [ -z "$(node_pids "$1")" ] && return 0
+    sleep 1
+  done
+  return 1
+}
+
 stop_dir() { # $1 dir
   local p
-  p=$(pgrep -f "lampod-cli --data-dir $1 " | head -1 || true)
-  [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
-  sleep 1
+  p=$(node_pids "$1")
+  [ -z "$p" ] && return 0
+  kill -TERM $p 2>/dev/null || true
+  if ! wait_stopped "$1"; then
+    p=$(node_pids "$1")
+    [ -n "$p" ] && kill -9 $p 2>/dev/null || true
+    wait_stopped "$1" 5 || {
+      say "refusing to continue: lampod is still running in $1"
+      return 1
+    }
+  fi
+}
+
+kill9_dir() { # $1 dir
+  local p
+  p=$(node_pids "$1")
+  [ -n "$p" ] && kill -9 $p 2>/dev/null || true
+  wait_stopped "$1" 5 || {
+    say "lampod in $1 survived SIGKILL"
+    return 1
+  }
 }
 
 channels() { # $1 port
@@ -108,6 +146,11 @@ bcli generatetoaddress "[101,\"$ADDR\"]" >/dev/null
 
 A=$SIMDIR/a
 B=$SIMDIR/b
+# A previous run may still own these data directories and their pid locks.
+# Never unlink a live lampod.pid: stop every matching daemon and verify it is
+# gone before deleting either simulation directory.
+stop_dir "$A" || exit 1
+stop_dir "$B" || exit 1
 rm -rf "$A" "$B"
 write_conf "$A" "$API_BASE" "$P2P_BASE"
 write_conf "$B" $((API_BASE+1)) $((P2P_BASE+1))
@@ -138,7 +181,7 @@ say "channels before fault: $BEFORE"
 
 # Case 1: kill -9 and restart. Channel must still be listed.
 say "R1 kill -9 then restart"
-stop_dir "$A"
+kill9_dir "$A" || exit 1
 launch "$A"
 wait_api "$API_BASE" >/dev/null || { rc R1 FAIL "node did not return"; exit 1; }
 AFTER=$(channels "$API_BASE")
@@ -151,9 +194,9 @@ fi
 # initialized, so a missing manager must refuse startup instead of minting
 # a new node under the same identity.
 say "R2 wiped manager must not look like a new funded node"
-stop_dir "$A"
+stop_dir "$A" || exit 1
 if [ "$BACKEND" = fs ]; then
-  rm -f "$A/manager"
+  rm -f "$A/regtest/manager"
 else
   # Drop every VSS object for this node's store id by pointing the URL at a
   # fresh empty server path is not possible here. Delete the remote keys by
@@ -161,7 +204,7 @@ else
   # The fail-closed check keys off the local marker plus a missing manager.
   # Simulate the wipe the code can see: keep the marker, and if we cannot
   # delete remote keys, skip the remote wipe and say so.
-  if [ -f "$A/.lampo-vss-initialized" ]; then
+  if [ -f "$A/regtest/.lampo-vss-initialized" ]; then
     say "  VSS marker present; remote wipe is not performed by this script"
     say "  (refusing a wiped store is covered when the server returns NotFound)"
     rc R2 SKIP "remote wipe needs a server-side delete; marker is present"
