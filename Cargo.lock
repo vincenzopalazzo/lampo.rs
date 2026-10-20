@@ -2393,6 +2393,7 @@ dependencies = [
 name = "lampo-plugin-sdk"
 version = "0.1.0"
 dependencies = [
+ "actix-rt",
  "base64 0.22.1",
  "env_logger",
  "futures-core",
