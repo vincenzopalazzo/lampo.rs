@@ -165,16 +165,20 @@ wait_node() { # signet startup is slower than wait_up's one minute
 # A new wallet makes lampod write the mnemonic and exit. The next start
 # is the daemon. An existing wallet stays up on the first start.
 launch_node() {
-  local n=$1
+  local n=$1 id
   start_node "$n"
   local i
-  for i in $(seq 1 20); do
-    [ -n "$(node_pid "$n")" ] || break
+  # A new wallet writes the mnemonic and exits. On a loaded host that
+  # can take well over 20s, so wait until it exits or the API answers.
+  for i in $(seq 1 180); do
+    if [ -z "$(node_pid "$n")" ]; then
+      start_node "$n"
+      return 0
+    fi
+    id=$(rpc "$(API "$n")" getinfo 2>/dev/null | jqf 'd.get("node_id","")' || true)
+    [ -n "$id" ] && return 0
     sleep 1
   done
-  if [ -z "$(node_pid "$n")" ]; then
-    start_node "$n"
-  fi
 }
 
 say "starting sa and sb on $CHAIN reindex=${REINDEX:-none}"
