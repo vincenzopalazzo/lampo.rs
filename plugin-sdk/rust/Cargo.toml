@@ -7,6 +7,11 @@ description = "SDK for writing lampo plugins in Rust"
 [dependencies]
 lampo-plugin-common = { path = "../../lampo-plugin-common" }
 lampo-plugin = { path = "../../lampo-plugin", features = ["grpc"] }
+# actix-rt 2.14 made `net` and `signal` optional. The bitcoind example
+# pulls actix-server 2.7, which still imports them. lampo-lnd enables
+# the features, but this package does not depend on lampo-lnd, so
+# `cargo build --example lampo-bitcoind` never sees that flag.
+actix-rt = { version = "2.15", features = ["net", "signal"] }
 tokio = { version = "1", features = ["io-util", "io-std", "sync", "rt", "macros", "net", "signal"] }
 tonic = { version = "0.13", features = ["transport"] }
 futures-core = "0.3"
