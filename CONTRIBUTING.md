@@ -58,6 +58,12 @@ Make sure all tests are passing with:
 
     $ make check
 
+Regtest tests, against Bitcoin Core:
+
+    $ make integration
+
+`LAMPO_CHAIN=all make integration` also runs the same suite against rbitcoin.
+
 ## Code style
 
 The following code guidelines will help make code review smoother.

@@ -8,9 +8,8 @@ on:
   schedule:
     - cron: '30 1 1,15 * *'
 
-# The Docker image is a dev environment (it used to carry Core Lightning).
-# These tests only need a chain binary on PATH and the lampo-bitcoind
-# plugin. Compile once, then run that binary against Core and rbitcoin.
+# Same suite as `make integration` / `LAMPO_CHAIN=all make integration`.
+# Compile once, then run that binary against Core and rbitcoin.
 jobs:
   build:
     name: Build test binaries
