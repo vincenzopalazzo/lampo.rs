@@ -52,6 +52,9 @@ use crate::wire::{
 /// Optional `wake_up_notification_client` (eclair bit 133). The testnet
 /// LSP only proposes on-the-fly funding to peers that advertise it.
 pub const WAKE_UP_NOTIFICATION_CLIENT_BIT: usize = 133;
+/// Optional Phoenix `trampoline_payment_experimental` (bit 149). Phoenix
+/// invoices carry it, and the LSP funds those on the fly.
+pub const EXPERIMENTAL_TRAMPOLINE_BIT: usize = 149;
 /// Optional Phoenix `splice_prototype` (eclair bit 155). The testnet LSP
 /// sends a legacy `channel_reestablish` TLV when this bit is set. This is
 /// not BOLT splice (63).
@@ -222,6 +225,7 @@ impl PhoenixLspHandler {
             chain_hash: ChainHash::using_genesis_block_const(network),
             lsp_features: init_features_with_bits(&[
                 WAKE_UP_NOTIFICATION_CLIENT_BIT,
+                EXPERIMENTAL_TRAMPOLINE_BIT,
                 SPLICE_PROTOTYPE_BIT,
                 ON_THE_FLY_FUNDING_BIT,
                 FUNDING_FEE_CREDIT_BIT,
@@ -1172,7 +1176,7 @@ mod tests {
         let (handler, _events) = make_handler(Some(LSP), policy());
         assert_eq!(
             feature_bits(&handler.init_features(&lsp_id())),
-            vec![133, 155, 561, 563]
+            vec![133, 149, 155, 561, 563]
         );
         assert!(handler.init_features(&other_id()).le_flags().is_empty());
         assert_eq!(handler.message_types(), wire::MESSAGE_TYPES.to_vec());

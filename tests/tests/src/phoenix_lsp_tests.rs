@@ -1,6 +1,6 @@
 //! Two Lampo nodes where node `lsp` plays the ACINQ Phoenix LSP for node
 //! `client`: the client dials it at startup, advertises the Phoenix feature
-//! bits (133, 155, 561 and 563, never 129) to it alone, shows what the LSP sends in
+//! bits (133, 149, 155, 561 and 563, never 129) to it alone, shows what the LSP sends in
 //! `phoenixlsp-info`, and
 //! completes a `dns_address_request` round trip answered from a test hook.
 use std::str::FromStr;

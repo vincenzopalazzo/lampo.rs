@@ -67,16 +67,17 @@ and mainnet
   channel-peer reconnect loop would never bring it back, and that loop
   only runs when a listener is bound; an LSP client needs no listener.
 - Advertises these optional init bits to the LSP and to no other peer:
-  `wake_up_notification_client` (133), Phoenix `splice_prototype` (155),
-  `on_the_fly_funding` (561) and `funding_fee_credit` (563). Eclair only
-  proposes on-the-fly funding to a peer that advertises bit 133. Bit 155
-  makes that LSP send the legacy 32-byte `channel_reestablish` funding
-  TLV; the pinned LDK accepts that as well as the 33-byte official
-  encoding. `zero_reserve_channels` (129) is deliberately not
-  advertised: ACINQ's testnet3 LSP stops answering a peer whose init
-  carries it (no `recommended_feerates`, no pong, ping timeout after
-  30 s). Observed on 2026-10-02; the bit is still read from the LSP's
-  own init.
+  `wake_up_notification_client` (133), Phoenix
+  `trampoline_payment_experimental` (149), `splice_prototype` (155),
+  `on_the_fly_funding` (561) and `funding_fee_credit` (563). Phoenix
+  invoices carry bit 149, and the pinned LDK sets that bit on every
+  BOLT11 invoice. Bit 155 makes the LSP send the legacy 32-byte
+  `channel_reestablish` funding TLV; the fork accepts that as well as
+  the 33-byte official encoding. `zero_reserve_channels` (129) is
+  deliberately not advertised: ACINQ's testnet3 LSP stops answering a
+  peer whose init carries it (no `recommended_feerates`, no pong, ping
+  timeout after 30 s). Observed on 2026-10-02; the bit is still read
+  from the LSP's own init.
 - Parses every Phoenix message, from any peer, and drops the ones that do
   not come from the LSP. Parsing them all matters: three of the types
   (41042, 41044, 41046) are even, and LDK disconnects a peer that sends
