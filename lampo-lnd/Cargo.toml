@@ -21,7 +21,7 @@ lampod = { path = "../lampod" }
 log = "0.4"
 pbjson = "0.7"
 pbjson-types = "0.7"
-prost = "0.13"
+prost = "0.14"
 rand = "0.8"
 rcgen = "0.14"
 rustls = { version = "0.23", features = ["ring"] }
