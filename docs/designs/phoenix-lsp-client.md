@@ -70,14 +70,11 @@ and mainnet
   `wake_up_notification_client` (133), Phoenix
   `trampoline_payment_experimental` (149), `splice_prototype` (155),
   `on_the_fly_funding` (561) and `funding_fee_credit` (563). BOLT11
-  invoices do not carry bit 149. Phoenixd treats that invoice bit as a
-  trampoline recipient and drops route hints; the testnet LSP then
-  fails the payment with `TrampolineFeeInsufficient` and does not
-  splice.   Hints stay on the invoice, including when no channel can hold
-  the amount, so phoenixd names the channel in a legacy trampoline.
-  An invoice must not invent an alias for a channel that does not
-  exist: the testnet LSP answered that hop with a permanent channel
-  failure and did not send `will_add_htlc`.
+  invoices do not carry bit 149, so phoenixd keeps the route hint.
+  When a channel can hold the amount, the hint is that channel.
+  When it cannot, the hint is Phoenix's peer-id short channel id:
+  `0xff` plus the tail of our pubkey. That is the hop that made the
+  LSP send `will_add_htlc` to phoenixd.
   Bit 155 makes the LSP send the legacy 32-byte
   `channel_reestablish` funding TLV; the fork accepts that as well as
   the 33-byte official encoding. `zero_reserve_channels` (129) is
