@@ -73,11 +73,8 @@ and mainnet
   invoices do not carry bit 149. Phoenixd treats that invoice bit as a
   trampoline recipient and drops route hints; the testnet LSP then
   fails the payment with `TrampolineFeeInsufficient` and does not
-  splice.   Hints stay on the invoice, including when no channel can hold
+  splice. Hints stay on the invoice, including when no channel can hold
   the amount, so phoenixd names the channel in a legacy trampoline.
-  With no channel at all, the invoice names a not-yet-opened alias
-  hop to each connected peer, which is how a phoenix invoice asks
-  the LSP to send `will_add_htlc`.
   Bit 155 makes the LSP send the legacy 32-byte
   `channel_reestablish` funding TLV; the fork accepts that as well as
   the 33-byte official encoding. `zero_reserve_channels` (129) is
