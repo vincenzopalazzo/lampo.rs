@@ -51,9 +51,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 # currency-conversion commit, plus Phoenix liquidity-ad TLVs on splice and
 # init. Mixing this lightning crate with the crates.io rc2 crates builds two
 # copies of lightning-types and the traits no longer match.
-lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "11ce1dfe6ec34babfc3c5a68122c7b7b6415a198" }
-lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "11ce1dfe6ec34babfc3c5a68122c7b7b6415a198" }
-lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "11ce1dfe6ec34babfc3c5a68122c7b7b6415a198", features = ["tokio"] }
-lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "11ce1dfe6ec34babfc3c5a68122c7b7b6415a198" }
-lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "11ce1dfe6ec34babfc3c5a68122c7b7b6415a198" }
-lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "11ce1dfe6ec34babfc3c5a68122c7b7b6415a198" }
+lightning = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "f3464c8978bc41837ba817a254b4a7d4b330790f" }
+lightning-block-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "f3464c8978bc41837ba817a254b4a7d4b330790f" }
+lightning-persister = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "f3464c8978bc41837ba817a254b4a7d4b330790f", features = ["tokio"] }
+lightning-background-processor = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "f3464c8978bc41837ba817a254b4a7d4b330790f" }
+lightning-net-tokio = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "f3464c8978bc41837ba817a254b4a7d4b330790f" }
+lightning-rapid-gossip-sync = { git = "https://github.com/vincenzopalazzo/rust-lightning", rev = "f3464c8978bc41837ba817a254b4a7d4b330790f" }
