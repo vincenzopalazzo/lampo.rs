@@ -24,7 +24,7 @@ log = { version = "0.4", features = ["std"] }
 
 # gRPC transport (optional, behind "grpc" feature)
 tonic = { version = "0.13", features = ["tls-ring", "transport"], optional = true }
-prost = { version = "0.13", optional = true }
+prost = { version = "0.14", optional = true }
 rcgen = { version = "0.14", features = ["pem", "x509-parser"], optional = true }
 
 [build-dependencies]
