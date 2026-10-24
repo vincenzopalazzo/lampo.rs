@@ -702,9 +702,67 @@ impl PhoenixLspHandler {
         }
     }
 
+    /// Ask the LSP to open a channel and fund it. Our `open_channel2`
+    /// contribution is zero; `request_funding` is the purchase.
+    fn open_purchase(
+        &self,
+        channel_manager: &LampoChannel,
+        amount_sat: u64,
+        rate: &FundingRate,
+        feerate_per_kw: u32,
+        payment_hash: PaymentHash,
+        lsp: &PublicKey,
+    ) -> Option<PreparedLiquidity> {
+        // The testnet LSP rejects an open below 400000 sat.
+        let mut amount_sat = amount_sat.max(400_000).max(u64::from(rate.min_amount_sat));
+        let max_amount = u64::from(rate.max_amount_sat);
+        if amount_sat > max_amount {
+            amount_sat = max_amount;
+        }
+        if amount_sat < u64::from(rate.min_amount_sat) {
+            log::warn!(
+                target: LOG_TARGET,
+                "cannot open: {amount_sat} sat is outside the LSP rate {}..={}",
+                rate.min_amount_sat,
+                rate.max_amount_sat
+            );
+            return None;
+        }
+        let request = LiquidityRequest {
+            requested_amount_sat: amount_sat,
+            funding_rate: rate.clone(),
+            payment_details: PaymentDetails::FromFutureHtlc {
+                payment_hashes: vec![payment_hash],
+            },
+        };
+        let channel_id = channel_manager
+            .create_liquidity_funded_channel(
+                *lsp,
+                amount_sat,
+                0,
+                None,
+                feerate_per_kw,
+                request.encode(),
+            )
+            .map_err(|err| {
+                log::warn!(target: LOG_TARGET, "cannot ask the LSP to open a channel: {err:?}");
+            })
+            .ok()?;
+        log::info!(
+            target: LOG_TARGET,
+            "asked the LSP to open a channel funded with {amount_sat} sat for `{}` (`{channel_id}`)",
+            hex::encode(payment_hash.0)
+        );
+        Some(PreparedLiquidity {
+            channel_id,
+            amount_sat,
+            fees: rate.fees(feerate_per_kw, amount_sat, amount_sat, true),
+            payment_hash,
+        })
+    }
+
     /// Ask the LSP to add `amount_sat` on the one ready channel we share.
-    /// A node with no channel yet still needs a dual-funded open, which LDK
-    /// cannot start.
+    /// With no channel yet, ask the LSP to open and fund one.
     fn begin_purchase(
         &self,
         channel_manager: &LampoChannel,
@@ -723,11 +781,14 @@ impl PhoenixLspHandler {
         let channel_id = match channels.len() {
             1 => channels.pop().expect("length checked"),
             0 => {
-                log::info!(
-                    target: LOG_TARGET,
-                    "accepted will_add_htlc but there is no ready channel with the LSP; a dual-funded open is not implemented"
+                return self.open_purchase(
+                    channel_manager,
+                    amount_sat,
+                    rate,
+                    feerate_per_kw,
+                    payment_hash,
+                    &lsp,
                 );
-                return None;
             }
             _ => {
                 log::warn!(
