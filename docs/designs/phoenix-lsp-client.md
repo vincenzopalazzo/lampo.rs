@@ -66,16 +66,13 @@ and mainnet
   gone. The LSP has no channel with a new node, so the ordinary
   channel-peer reconnect loop would never bring it back, and that loop
   only runs when a listener is bound; an LSP client needs no listener.
-- Advertises the optional feature bits `splice_prototype` (155),
-  `on_the_fly_funding` (561) and `funding_fee_credit` (563) in the
-  `init` sent to the LSP, and to no other peer. Bit 155 is eclair's
-  Phoenix splice prototype, not BOLT splice (63), which LDK already
-  advertises. The testnet LSP advertises 155 and will not send
-  `will_add_htlc` to a peer that omits it. `zero_reserve_channels`
-  (129) is deliberately not advertised: ACINQ's testnet3 LSP stops
-  answering a peer whose init carries it (no `recommended_feerates`,
-  no pong, ping timeout after 30 s). Observed on 2026-10-02; the bit
-  is still read from the LSP's own init.
+- Advertises the optional feature bits `on_the_fly_funding` (561) and
+  `funding_fee_credit` (563) in the `init` sent to the LSP, and to no
+  other peer. `zero_reserve_channels` (129) is deliberately not
+  advertised: ACINQ's testnet3 LSP stops answering a peer whose init
+  carries it (no `recommended_feerates`, no pong, ping timeout after
+  30 s), while 561 and 563 alone are served normally. Observed on
+  2026-10-02; the bit is still read from the LSP's own init.
 - Parses every Phoenix message, from any peer, and drops the ones that do
   not come from the LSP. Parsing them all matters: three of the types
   (41042, 41044, 41046) are even, and LDK disconnects a peer that sends
