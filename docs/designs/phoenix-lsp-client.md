@@ -75,9 +75,9 @@ and mainnet
   fails the payment with `TrampolineFeeInsufficient` and does not
   splice.   Hints stay on the invoice, including when no channel can hold
   the amount, so phoenixd names the channel in a legacy trampoline.
-  With no channel at all, the invoice names an alias hop to each
-  connected peer. That is the hint shape that made the LSP send
-  `will_add_htlc` to phoenixd.
+  An invoice must not invent an alias for a channel that does not
+  exist: the testnet LSP answered that hop with a permanent channel
+  failure and did not send `will_add_htlc`.
   Bit 155 makes the LSP send the legacy 32-byte
   `channel_reestablish` funding TLV; the fork accepts that as well as
   the 33-byte official encoding. `zero_reserve_channels` (129) is
