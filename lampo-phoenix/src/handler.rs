@@ -362,6 +362,12 @@ impl PhoenixLspHandler {
         self.lock().lsp = Some(peer);
     }
 
+    /// Test hook: install a rate card without waiting for the LSP's init TLV.
+    #[cfg(feature = "testing")]
+    pub fn set_will_fund_rates_for_test(&self, rates: WillFundRates) {
+        self.lock().will_fund_rates = Some(rates);
+    }
+
     /// The funding fee the LSP may take from a payment with `payment_hash`:
     /// non-zero only when every HTLC part came over a channel with the LSP
     /// and a recorded purchase paid from future HTLCs lists the hash.
@@ -733,9 +739,9 @@ impl PhoenixLspHandler {
             log::warn!(target: LOG_TARGET, "cannot start a liquidity splice on `{channel_id}`: {err:?}");
         }).ok()?;
         // No wallet inputs: the LSP adds the liquidity. Our side of
-        // `splice_init` contributes nothing beyond the purchase request.
+        // `splice_init` contributes only the shared-input fee, plus the purchase.
         let contribution = template
-            .splice_out(Vec::new(), feerate, max_feerate)
+            .request_remote_funding(feerate, max_feerate)
             .map_err(|err| {
                 log::warn!(target: LOG_TARGET, "cannot build the liquidity splice: {err:?}");
             })

@@ -1417,7 +1417,10 @@ pub async fn splice_in_out_and_fee_bump_between_two_nodes() -> error::Result<()>
 /// separate task, so mine only after bitcoind has the transaction.
 async fn wait_for_broadcast(node: &LampoTesting, txid: &str) {
     async_wait!(async {
-        match node.btc.client.get_raw_mempool() {
+        let Some(core) = node.btc.core() else {
+            return Err(());
+        };
+        match core.client.get_raw_mempool() {
             Ok(mempool) if format!("{mempool:?}").contains(txid) => Ok(()),
             _ => Err(()),
         }

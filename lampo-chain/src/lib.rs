@@ -572,7 +572,7 @@ async fn prev_block_hash(
         .call("esplora_header", json::json!([hash.to_string()]))
         .await
         .map_err(|err| error::anyhow!("{err}"))?;
-    let decoded = decode_header(&header).map_err(|err| error::anyhow!("{err}"))?;
+    let decoded = decode_header(&header, None).map_err(|err| error::anyhow!("{err}"))?;
     Ok(decoded.header.prev_blockhash)
 }
 
@@ -618,7 +618,7 @@ async fn confirm_tip(
             target: "lampo-chain",
             "transaction sync tip unchanged {hash} height {height}"
         );
-        return Ok(());
+        return Ok((decoded.header.block_hash(), height));
     }
     Confirm::best_block_updated(&*channel_manager, &decoded.header, height);
     Confirm::best_block_updated(&*chain_monitor, &decoded.header, height);
