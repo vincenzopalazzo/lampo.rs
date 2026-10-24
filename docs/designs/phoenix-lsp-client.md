@@ -79,9 +79,11 @@ and mainnet
   an unknown even message.
 - Keeps the LSP's init features, the last `recommended_feerates`, the
   fee credit it holds, and every `will_add_htlc` it proposed.
-- Decides what the liquidity policy makes of each `will_add_htlc` and
-  logs it at `info` under the `phoenix-lsp` target. It does not reply:
-  the LSP fails the upstream HTLC after a delay on its own.
+- Decides what the liquidity policy makes of each `will_add_htlc`. An
+  acceptance, once the peer lock is released, splices the ready LSP
+  channel and puts `request_funding` (TLV 1339) on `splice_init`. The
+  purchase is recorded when the splice is negotiated. A node with no
+  channel yet still cannot onboard: that needs a dual-funded open.
 - Records liquidity purchases in the node's persister, next to LDK's
   own data, under `phoenix_lsp/purchases/<funding txid>`, and uses
   them to accept the funding fee the LSP takes from a later HTLC.
@@ -112,22 +114,15 @@ purchase lists the payment hash with payment type 128 or 129 (a type
 purchase's mining plus service fee minus the fee credit already used.
 Anything else is failed back, as before.
 
-### Known gap in LDK
+### Funding fee on the HTLC
 
-LDK only tolerates a shortfall declared through its own
-`update_add_htlc` TLV 65537. Phoenix declares the funding fee in TLV
-41041 (an amount and the funding txid), which LDK ignores as an unknown
-odd TLV. The HTLC is therefore rejected inside LDK with
-`FinalIncorrectHTLCAmount` before any Lampo code runs, even with the
-config flag on. The claim rule above is correct and tested, but inert
-against the real LSP until LDK learns that TLV. There is no Lampo-side
-hook for a final-hop receive, so this needs a change in the pinned
-rust-lightning fork.
+The pinned rust-lightning fork reads Phoenix TLV 41041 (amount and
+funding txid) and adds that amount to the skimmed fee LDK already
+allows. The claim rule above then checks the shortfall against the
+recorded purchase.
 
 ## Not done here
 
-Opening or splicing a channel with `request_funding`, parsing the init
-TLV 1339 that carries the LSP's rate card (LDK drops unknown init TLVs,
-so `will_fund_rates` has a codec but nothing feeds it), answering a
-`will_add_htlc` with `will_fail_htlc`, swap-in, trampoline and taproot
-channels.
+A dual-funded open for a node that has no channel with the LSP yet,
+answering a rejected proposal with `will_fail_htlc`, swap-in, trampoline
+and taproot channels.

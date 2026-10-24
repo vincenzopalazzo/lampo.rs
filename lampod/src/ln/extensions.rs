@@ -387,6 +387,7 @@ mod tests {
             features: InitFeatures::empty(),
             networks: None,
             remote_network_address: None,
+            will_fund_rates: None,
         }
     }
 }

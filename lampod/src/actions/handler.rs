@@ -375,6 +375,7 @@ impl Handler for LampoHandler {
                         features: peer.init_features,
                         networks: None,
                         remote_network_address: None,
+                        will_fund_rates: None,
                     };
                     let requery = self.channel_manager.gossip_sync().peer_connected(
                         counterparty_node_id,

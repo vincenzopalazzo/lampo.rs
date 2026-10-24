@@ -256,6 +256,23 @@ impl Readable for PaymentDetails {
     }
 }
 
+/// A buyer's `request_funding` (TLV 1339 on `splice_init`): how much inbound
+/// liquidity to buy, at which advertised rate, paid from which payments.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiquidityRequest {
+    pub requested_amount_sat: u64,
+    pub funding_rate: FundingRate,
+    pub payment_details: PaymentDetails,
+}
+
+impl Writeable for LiquidityRequest {
+    fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
+        self.requested_amount_sat.write(w)?;
+        self.funding_rate.write(w)?;
+        self.payment_details.write(w)
+    }
+}
+
 /// The seller's `will_fund_rates`: its rate card and the payment types it
 /// accepts.
 #[derive(Clone, Debug, PartialEq, Eq)]

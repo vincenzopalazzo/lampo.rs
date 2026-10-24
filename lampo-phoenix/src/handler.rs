@@ -1,8 +1,8 @@
 //! The Phoenix LSP client as a daemon extension: it advertises the Phoenix
 //! feature bits to the configured LSP only, decodes every Phoenix message,
-//! keeps what the LSP told us, decides (without acting) about on-the-fly
-//! funding proposals, vouches for the funding fee of a recorded purchase,
-//! and serves the `phoenixlsp-*` RPCs.
+//! keeps what the LSP told us, and when the liquidity policy accepts a
+//! `will_add_htlc` asks the LSP to splice in liquidity. It vouches for the
+//! funding fee of a recorded purchase and serves the `phoenixlsp-*` RPCs.
 //!
 //! Peer callbacks run while the peer manager holds its own locks, so
 //! nothing here calls back into it; messages to send are queued and the
@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 use lampo_common::bitcoin::constants::ChainHash;
 use lampo_common::bitcoin::secp256k1::PublicKey;
-use lampo_common::bitcoin::Network;
+use lampo_common::bitcoin::{FeeRate, Network, Txid};
 use lampo_common::conf::LampoConf;
 use lampo_common::error;
 use lampo_common::event::ln::LightningEvent;
@@ -29,6 +29,7 @@ use lampo_common::json;
 use lampo_common::jsonrpc;
 use lampo_common::ldk;
 use lampo_common::ldk::ln::msgs::{ErrorAction, Init, LightningError};
+use lampo_common::ldk::ln::types::ChannelId;
 use lampo_common::ldk::ln::wire::Type;
 use lampo_common::ldk::types::features::InitFeatures;
 use lampo_common::ldk::types::payment::{PaymentHash, PaymentPreimage};
@@ -38,9 +39,11 @@ use lampo_common::types::LampoChannel;
 use crate::channels::accept_underpaying_htlcs_from;
 use crate::conf::{PhoenixConf, PhoenixLspPeer};
 use crate::events::PhoenixLspEvent;
-use crate::liquidity_ads::{PaymentType, WillFundRates};
+use crate::liquidity_ads::{
+    Fees, FundingRate, LiquidityRequest, PaymentDetails, PaymentType, WillFundRates,
+};
 use crate::policy::{LiquidityPolicy, PolicyDecision};
-use crate::purchases::{max_funding_fee_msat, unix_now, PurchaseStore, Store};
+use crate::purchases::{max_funding_fee_msat, unix_now, Purchase, PurchaseStore, Store};
 use crate::rpc;
 use crate::wire::{
     self, AddFeeCredit, DnsAddressRequest, PhoenixLspMessage, RecommendedFeerates, WillAddHtlc,
@@ -141,6 +144,17 @@ pub struct PendingWillAddHtlc {
     /// Unix seconds.
     pub received_at: u64,
     pub decision: WillAddHtlcDecision,
+    /// Set once a splice asking for this liquidity has been handed to LDK.
+    prepared: Option<PreparedLiquidity>,
+}
+
+/// A purchase splice we asked the LSP for and have not recorded yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PreparedLiquidity {
+    channel_id: ChannelId,
+    amount_sat: u64,
+    fees: Fees,
+    payment_hash: PaymentHash,
 }
 
 /// A copy of what the handler knows, for `phoenixlsp-info`.
@@ -480,6 +494,7 @@ impl PhoenixLspHandler {
                 msg,
                 received_at: unix_now(),
                 decision,
+                prepared: None,
             },
         );
         drop(state);
@@ -591,7 +606,239 @@ impl PhoenixLspHandler {
                 // let them through and check the fee on claim.
                 accept_underpaying_htlcs_from(channel_manager, &counterparty_node_id);
             }
+            Event::Lightning(LightningEvent::Extension {
+                extension,
+                kind,
+                payload,
+            }) if extension == LOG_TARGET => {
+                // The peer callback that queued this event still holds the
+                // peer-manager lock, so the splice runs here instead.
+                match kind.as_str() {
+                    "will_add_htlc" => self.act_on_accepted(channel_manager),
+                    "funding_cancelled" => {
+                        let channel_id = payload
+                            .get("channel_id")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("");
+                        self.cancel_purchase(channel_manager, channel_id);
+                    }
+                    _ => {}
+                }
+            }
+            Event::Lightning(LightningEvent::SpliceNegotiated {
+                counterparty_node_id,
+                channel_id,
+                funding_txo,
+            }) if self.is_lsp(&counterparty_node_id) => {
+                self.record_negotiated_purchase(channel_manager, channel_id, funding_txo.txid);
+            }
             _ => {}
+        }
+    }
+
+    /// Start a splice for every accepted proposal that does not have one yet.
+    fn act_on_accepted(&self, channel_manager: &LampoChannel) {
+        let state = self.lock();
+        let Some(amount_sat) = self.policy.auto_liquidity_sat else {
+            return;
+        };
+        let Some(rates) = state.will_fund_rates.clone() else {
+            return;
+        };
+        let Some(rate) = rates.find_rate(amount_sat).cloned() else {
+            return;
+        };
+        let Some(feerate_per_kw) = state
+            .feerates
+            .as_ref()
+            .map(|feerates| feerates.funding_feerate)
+        else {
+            return;
+        };
+        let jobs: Vec<([u8; 32], PaymentHash)> = state
+            .pending
+            .iter()
+            .filter(|(_, pending)| {
+                matches!(
+                    pending.decision,
+                    WillAddHtlcDecision::Policy(PolicyDecision::Accept)
+                ) && pending.prepared.is_none()
+            })
+            .map(|(id, pending)| (*id, pending.msg.payment_hash))
+            .collect();
+        drop(state);
+        for (id, payment_hash) in jobs {
+            let Some(prepared) = self.begin_purchase(
+                channel_manager,
+                amount_sat,
+                &rate,
+                feerate_per_kw,
+                payment_hash,
+            ) else {
+                continue;
+            };
+            if let Some(pending) = self.lock().pending.get_mut(&id) {
+                pending.prepared = Some(prepared);
+            }
+        }
+    }
+
+    /// Ask the LSP to add `amount_sat` on the one ready channel we share.
+    /// A node with no channel yet still needs a dual-funded open, which LDK
+    /// cannot start.
+    fn begin_purchase(
+        &self,
+        channel_manager: &LampoChannel,
+        amount_sat: u64,
+        rate: &FundingRate,
+        feerate_per_kw: u32,
+        payment_hash: PaymentHash,
+    ) -> Option<PreparedLiquidity> {
+        let lsp = self.lsp_node_id()?;
+        let mut channels: Vec<ChannelId> = channel_manager
+            .list_channels()
+            .into_iter()
+            .filter(|channel| channel.counterparty.node_id == lsp && channel.is_channel_ready)
+            .map(|channel| channel.channel_id)
+            .collect();
+        let channel_id = match channels.len() {
+            1 => channels.pop().expect("length checked"),
+            0 => {
+                log::info!(
+                    target: LOG_TARGET,
+                    "accepted will_add_htlc but there is no ready channel with the LSP; a dual-funded open is not implemented"
+                );
+                return None;
+            }
+            _ => {
+                log::warn!(
+                    target: LOG_TARGET,
+                    "accepted will_add_htlc but `{lsp}` has {} ready channels; pass is ambiguous",
+                    channels.len()
+                );
+                return None;
+            }
+        };
+        let request = LiquidityRequest {
+            requested_amount_sat: amount_sat,
+            funding_rate: rate.clone(),
+            payment_details: PaymentDetails::FromFutureHtlc {
+                payment_hashes: vec![payment_hash],
+            },
+        };
+        let feerate = FeeRate::from_sat_per_kwu(u64::from(feerate_per_kw));
+        let max_feerate =
+            FeeRate::from_sat_per_kwu(u64::from(feerate_per_kw).saturating_mul(3) / 2);
+        let template = channel_manager.splice_channel(&channel_id, &lsp).map_err(|err| {
+            log::warn!(target: LOG_TARGET, "cannot start a liquidity splice on `{channel_id}`: {err:?}");
+        }).ok()?;
+        // No wallet inputs: the LSP adds the liquidity. Our side of
+        // `splice_init` contributes nothing beyond the purchase request.
+        let contribution = template
+            .splice_out(Vec::new(), feerate, max_feerate)
+            .map_err(|err| {
+                log::warn!(target: LOG_TARGET, "cannot build the liquidity splice: {err:?}");
+            })
+            .ok()?
+            .with_request_funding(request.encode());
+        let locktime = channel_manager
+            .current_best_block()
+            .height
+            .saturating_sub(1);
+        channel_manager
+            .funding_contributed(&channel_id, &lsp, contribution, Some(locktime))
+            .map_err(|err| {
+                log::warn!(target: LOG_TARGET, "LSP liquidity splice was refused: {err}");
+            })
+            .ok()?;
+        let is_channel_creation = false;
+        log::info!(
+            target: LOG_TARGET,
+            "asked the LSP to splice {amount_sat} sat into `{channel_id}` for `{}`",
+            hex::encode(payment_hash.0)
+        );
+        Some(PreparedLiquidity {
+            channel_id,
+            amount_sat,
+            fees: rate.fees(feerate_per_kw, amount_sat, amount_sat, is_channel_creation),
+            payment_hash,
+        })
+    }
+
+    fn cancel_purchase(&self, channel_manager: &LampoChannel, channel_id_hex: &str) {
+        let Some(lsp) = self.lsp_node_id() else {
+            return;
+        };
+        let Some(channel_id) = hex::decode(channel_id_hex)
+            .ok()
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .map(ChannelId::from_bytes)
+        else {
+            log::warn!(target: LOG_TARGET, "LSP cancel named a channel id that is not 32 bytes");
+            return;
+        };
+        match channel_manager.cancel_funding_contributed(&channel_id, &lsp) {
+            Ok(()) => {
+                log::info!(target: LOG_TARGET, "cancelled the liquidity splice on `{channel_id}`")
+            }
+            Err(err) => log::warn!(
+                target: LOG_TARGET,
+                "could not cancel the liquidity splice on `{channel_id}`: {err:?}"
+            ),
+        }
+        let mut state = self.lock();
+        for pending in state.pending.values_mut() {
+            if pending
+                .prepared
+                .as_ref()
+                .is_some_and(|prepared| prepared.channel_id == channel_id)
+            {
+                pending.prepared = None;
+            }
+        }
+    }
+
+    fn record_negotiated_purchase(
+        &self,
+        channel_manager: &LampoChannel,
+        channel_id: ChannelId,
+        txid: Txid,
+    ) {
+        let prepared = self.lock().pending.values().find_map(|pending| {
+            pending
+                .prepared
+                .as_ref()
+                .filter(|prepared| prepared.channel_id == channel_id)
+                .cloned()
+        });
+        let Some(prepared) = prepared else {
+            return;
+        };
+        let Some(lsp) = self.lsp_node_id() else {
+            return;
+        };
+        let fee_credit_used_msat = channel_manager
+            .splice_liquidity_ack(&lsp, &channel_id)
+            .map(|ack| ack.fee_credit_used_msat)
+            .unwrap_or(0);
+        let purchase = Purchase {
+            funding_txid: txid.to_string(),
+            amount_sat: prepared.amount_sat,
+            mining_fee_sat: prepared.fees.mining_fee_sat,
+            service_fee_sat: prepared.fees.service_fee_sat,
+            payment_type: PaymentType::FromFutureHtlc.bit(),
+            payment_hashes: vec![hex::encode(prepared.payment_hash.0)],
+            fee_credit_used_msat,
+            created_at: unix_now(),
+        };
+        match self.purchases.upsert(purchase) {
+            Ok(()) => log::info!(
+                target: LOG_TARGET,
+                "recorded liquidity purchase `{txid}` (fee credit {fee_credit_used_msat} msat)"
+            ),
+            Err(err) => {
+                log::warn!(target: LOG_TARGET, "could not record liquidity purchase `{txid}`: {err}")
+            }
         }
     }
 }
@@ -674,6 +921,21 @@ impl CustomMessageExtension for PhoenixLspHandler {
         );
         state.connected = true;
         state.lsp_init_features = Some(init.features.clone());
+        if let Some(bytes) = init.will_fund_rates.as_deref() {
+            match WillFundRates::decode(bytes) {
+                Ok(rates) => {
+                    log::info!(
+                        target: LOG_TARGET,
+                        "LSP published {} funding rate(s)",
+                        rates.funding_rates.len()
+                    );
+                    state.will_fund_rates = Some(rates);
+                }
+                Err(err) => {
+                    log::warn!(target: LOG_TARGET, "LSP will_fund_rates could not be read: {err:?}")
+                }
+            }
+        }
         drop(state);
         self.emit(PhoenixLspEvent::Connected {
             counterparty_node_id: peer,
@@ -842,6 +1104,7 @@ mod tests {
             features: init_features_with_bits(bits),
             networks: None,
             remote_network_address: None,
+            will_fund_rates: None,
         };
         handler.peer_connected(node_id, &init, false).unwrap();
     }
