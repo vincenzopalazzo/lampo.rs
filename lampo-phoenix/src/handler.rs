@@ -713,8 +713,10 @@ impl PhoenixLspHandler {
         payment_hash: PaymentHash,
         lsp: &PublicKey,
     ) -> Option<PreparedLiquidity> {
-        // The testnet LSP rejects an open below 400000 sat.
-        let mut amount_sat = amount_sat.max(400_000).max(u64::from(rate.min_amount_sat));
+        // Ask for the policy amount inside the rate the LSP published.
+        // A hardcoded 400000 sat floor forced a purchase the in-flight
+        // HTLC limit could not pay for.
+        let mut amount_sat = amount_sat.max(u64::from(rate.min_amount_sat));
         let max_amount = u64::from(rate.max_amount_sat);
         if amount_sat > max_amount {
             amount_sat = max_amount;
