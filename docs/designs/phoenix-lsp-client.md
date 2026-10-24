@@ -69,9 +69,13 @@ and mainnet
 - Advertises these optional init bits to the LSP and to no other peer:
   `wake_up_notification_client` (133), Phoenix
   `trampoline_payment_experimental` (149), `splice_prototype` (155),
-  `on_the_fly_funding` (561) and `funding_fee_credit` (563). Phoenix
-  invoices carry bit 149, and the pinned LDK sets that bit on every
-  BOLT11 invoice. Bit 155 makes the LSP send the legacy 32-byte
+  `on_the_fly_funding` (561) and `funding_fee_credit` (563). BOLT11
+  invoices do not carry bit 149. Phoenixd treats that invoice bit as a
+  trampoline recipient and drops route hints; the testnet LSP then
+  fails the payment with `TrampolineFeeInsufficient` and does not
+  splice. Hints stay on the invoice, including when no channel can hold
+  the amount, so phoenixd names the channel in a legacy trampoline.
+  Bit 155 makes the LSP send the legacy 32-byte
   `channel_reestablish` funding TLV; the fork accepts that as well as
   the 33-byte official encoding. `zero_reserve_channels` (129) is
   deliberately not advertised: ACINQ's testnet3 LSP stops answering a
