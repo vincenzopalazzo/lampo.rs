@@ -12,6 +12,11 @@ pub use lightning::util::config::UserConfig;
 fn default_user_config() -> UserConfig {
     let mut conf = UserConfig::default();
     conf.reject_inbound_splices = false;
+    // The ACINQ LSP stores `option_dual_fund` as a permanent channel
+    // feature when both inits carry it, and refuses `splice_init` on a
+    // channel opened without that feature. Advertising the bit does not
+    // open v2 channels; `create_channel` is still the v1 open.
+    conf.enable_dual_funded_channels = true;
     conf
 }
 
@@ -607,6 +612,7 @@ mod tests {
         let ldk = conf.ldk_conf_with_async_role();
         assert!(!ldk.enable_htlc_hold);
         assert!(!ldk.hold_outbound_htlcs_at_next_hop);
+        assert!(ldk.enable_dual_funded_channels);
     }
 
     #[test]

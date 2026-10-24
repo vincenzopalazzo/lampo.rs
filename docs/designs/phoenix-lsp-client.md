@@ -77,7 +77,11 @@ and mainnet
   LSP send `will_add_htlc` to phoenixd.
   Bit 155 makes the LSP send the legacy 32-byte
   `channel_reestablish` funding TLV; the fork accepts that as well as
-  the 33-byte official encoding. `zero_reserve_channels` (129) is
+  the 33-byte official encoding. The node also advertises
+  `option_dual_fund` (28) in its normal init. The LSP copies that into
+  the channel's permanent features and refuses `splice_init` on a
+  channel opened without it (`splicing is not allowed on this channel`,
+  observed 2026-10-24). `zero_reserve_channels` (129) is
   deliberately not advertised: ACINQ's testnet3 LSP stops answering a
   peer whose init carries it (no `recommended_feerates`, no pong, ping
   timeout after 30 s). Observed on 2026-10-02; the bit is still read
