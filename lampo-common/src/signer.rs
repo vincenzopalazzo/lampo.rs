@@ -53,6 +53,7 @@ pub trait LampoSigner:
 /// Object-safe view of an LDK channel signer, plus cloning through the box.
 pub trait ErasedChannelSigner: EcdsaChannelSigner + Send + Sync {
     fn box_clone(&self) -> Box<dyn ErasedChannelSigner>;
+    fn phoenix_funding_secret(&self) -> Option<SecretKey>;
 }
 
 impl<T> ErasedChannelSigner for T
@@ -61,6 +62,10 @@ where
 {
     fn box_clone(&self) -> Box<dyn ErasedChannelSigner> {
         Box::new(self.clone())
+    }
+
+    fn phoenix_funding_secret(&self) -> Option<SecretKey> {
+        ChannelSigner::phoenix_funding_secret(self as &T)
     }
 }
 
@@ -127,6 +132,10 @@ impl ChannelSigner for LampoChannelSigner {
 
     fn channel_keys_id(&self) -> [u8; 32] {
         self.0.channel_keys_id()
+    }
+
+    fn phoenix_funding_secret(&self) -> Option<SecretKey> {
+        ChannelSigner::phoenix_funding_secret(&*self.0)
     }
 }
 
