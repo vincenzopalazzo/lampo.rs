@@ -13,9 +13,11 @@ fn default_user_config() -> UserConfig {
     let mut conf = UserConfig::default();
     conf.reject_inbound_splices = false;
     // The ACINQ LSP stores `option_dual_fund` as a permanent channel
-    // feature when both inits carry it, and refuses `splice_init` on a
-    // channel opened without that feature. Advertising the bit does not
-    // open v2 channels; `create_channel` is still the v1 open.
+    // feature when both inits carry it. A v1 open is then rejected
+    // (`custom local channel reserve is incompatible with dual-funded
+    // channels`) because that reserve must be empty, which only a v2
+    // open does. Channels opened without the feature refuse
+    // `splice_init`. Advertising the bit does not by itself open v2.
     conf.enable_dual_funded_channels = true;
     conf
 }

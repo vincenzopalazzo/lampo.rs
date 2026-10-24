@@ -79,9 +79,12 @@ and mainnet
   `channel_reestablish` funding TLV; the fork accepts that as well as
   the 33-byte official encoding. The node also advertises
   `option_dual_fund` (28) in its normal init. The LSP copies that into
-  the channel's permanent features and refuses `splice_init` on a
-  channel opened without it (`splicing is not allowed on this channel`,
-  observed 2026-10-24). `zero_reserve_channels` (129) is
+  the channel's permanent features. A v1 `open_channel` then fails
+  their `require` with `custom local channel reserve is incompatible
+  with dual-funded channels` (observed 2026-10-24): the reserve is
+  `Some` on v1 and must be empty, which is a v2 open. `splice_init`
+  on a channel opened without the feature is refused with `splicing
+  is not allowed on this channel`. `zero_reserve_channels` (129) is
   deliberately not advertised: ACINQ's testnet3 LSP stops answering a
   peer whose init carries it (no `recommended_feerates`, no pong, ping
   timeout after 30 s). Observed on 2026-10-02; the bit is still read
