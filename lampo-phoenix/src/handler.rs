@@ -464,14 +464,20 @@ impl PhoenixLspHandler {
         let Some(rates) = state.will_fund_rates.as_ref() else {
             return WillAddHtlcDecision::MissingFundingRates;
         };
-        let Some(rate) = rates.find_rate(amount_sat) else {
-            return WillAddHtlcDecision::NoRateForAmount { amount_sat };
+        // The channel has to be able to hold the HTLC, so the purchase is at
+        // least the payment. The policy amount is the floor when the payment
+        // is smaller.
+        let purchase_sat = amount_sat.max(msg.amount_msat / 1000);
+        let Some(rate) = rates.find_rate(purchase_sat) else {
+            return WillAddHtlcDecision::NoRateForAmount {
+                amount_sat: purchase_sat,
+            };
         };
         let is_channel_creation = !self.has_lsp_channel.load(Ordering::Acquire);
         let fees = rate.fees(
             feerates.funding_feerate,
-            amount_sat,
-            amount_sat,
+            purchase_sat,
+            purchase_sat,
             is_channel_creation,
         );
         WillAddHtlcDecision::Policy(self.policy.evaluate(
@@ -664,9 +670,6 @@ impl PhoenixLspHandler {
         let Some(rates) = state.will_fund_rates.clone() else {
             return;
         };
-        let Some(rate) = rates.find_rate(amount_sat).cloned() else {
-            return;
-        };
         let Some(feerate_per_kw) = state
             .feerates
             .as_ref()
@@ -674,7 +677,7 @@ impl PhoenixLspHandler {
         else {
             return;
         };
-        let jobs: Vec<([u8; 32], PaymentHash)> = state
+        let jobs: Vec<([u8; 32], PaymentHash, u64)> = state
             .pending
             .iter()
             .filter(|(_, pending)| {
@@ -683,13 +686,22 @@ impl PhoenixLspHandler {
                     WillAddHtlcDecision::Policy(PolicyDecision::Accept)
                 ) && pending.prepared.is_none()
             })
-            .map(|(id, pending)| (*id, pending.msg.payment_hash))
+            .map(|(id, pending)| {
+                (
+                    *id,
+                    pending.msg.payment_hash,
+                    amount_sat.max(pending.msg.amount_msat / 1000),
+                )
+            })
             .collect();
         drop(state);
-        for (id, payment_hash) in jobs {
+        for (id, payment_hash, purchase_sat) in jobs {
+            let Some(rate) = rates.find_rate(purchase_sat).cloned() else {
+                continue;
+            };
             let Some(prepared) = self.begin_purchase(
                 channel_manager,
-                amount_sat,
+                purchase_sat,
                 &rate,
                 feerate_per_kw,
                 payment_hash,
