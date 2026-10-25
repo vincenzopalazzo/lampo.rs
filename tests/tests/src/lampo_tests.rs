@@ -778,6 +778,76 @@ async fn wait_node_in_graph(node: &LampoTesting, node_id: &str) {
     );
 }
 
+/// A node with public channels but no node announcement (lampo without
+/// `announce-addr`) is in the graph, but no payer can connect to it. Its
+/// offers must be introduced by a peer that announces an address instead
+/// of the node itself.
+#[tokio_test_shutdown_timeout::test(180)]
+pub async fn offer_from_unannounced_node_is_introduced_by_peer() -> error::Result<()> {
+    init();
+    let node1 = Arc::new(LampoTesting::tmp().await?);
+    // Loopback is not announceable, so announce a name. node2 still listens
+    // on the test `bind-addr`.
+    let node2 = Arc::new(
+        LampoTesting::new_with(node1.btc.clone(), |conf| {
+            conf.announce_addr = Some("node2.lampo.test".to_owned());
+        })
+        .await?,
+    );
+
+    node2.fund_channel_with(node1.clone(), 1_000_000).await?;
+    wait_node_in_graph(&node1, &node1.info.node_id.clone()).await;
+
+    // node2 announces itself once a minute, after its channel is public.
+    let node2_id = lampo_common::bitcoin::secp256k1::PublicKey::from_str(&node2.info.node_id)?;
+    let node2_id = lampo_common::ldk::routing::gossip::NodeId::from_pubkey(&node2_id);
+    async_wait!(
+        async {
+            let graph = node1.daemon().channel_manager().graph();
+            let graph = graph.read_only();
+            match graph
+                .node(&node2_id)
+                .and_then(|node| node.announcement_info.as_ref())
+            {
+                Some(info) if !info.addresses().is_empty() => Ok(()),
+                _ => Err(()),
+            }
+        },
+        10
+    );
+
+    let offer: response::Offer = node1
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: None,
+                amount_msat: Some(100_000),
+                currency: None,
+                currency_amount: None,
+            },
+        )
+        .await?;
+    let offer = lampo_common::ldk::offers::offer::Offer::from_str(&offer.bolt12)
+        .map_err(|err| error::anyhow!("{err:?}"))?;
+    assert!(
+        !offer.paths().is_empty(),
+        "the offer must carry blinded paths"
+    );
+
+    let graph = node1.daemon().channel_manager().graph();
+    let graph = graph.read_only();
+    for path in offer.paths() {
+        assert_eq!(
+            path.public_introduction_node_id(&graph),
+            Some(&node2_id),
+            "the offer must be introduced by the peer, got {:?}",
+            path.introduction_node()
+        );
+    }
+    Ok(())
+}
+
 /// Mint server paths over RPC and install them on the recipient.
 ///
 /// This is the operator path: `asyncinvoicepaths` on the server, then
