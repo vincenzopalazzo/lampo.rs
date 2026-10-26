@@ -733,7 +733,7 @@ pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
 ///
 /// The server -> recipient channel is **private**: a recipient that appears
 /// in the network graph (via a public channel announcement) but announces no
-/// addresses builds self-introduced blinded paths, and `DefaultMessageRouter`
+/// addresses builds self-introduced blinded paths, and LDK's message router
 /// cannot route onion messages to announced nodes without addresses. Keeping
 /// the recipient out of the graph makes its paths introduction-point at the
 /// server, which every payer of its offers is connected to by construction.
@@ -776,6 +776,73 @@ async fn wait_node_in_graph(node: &LampoTesting, node_id: &str) {
         },
         5
     );
+}
+
+/// A node with public channels but no node announcement (lampo without
+/// `announce-addr`) is in the graph, but no payer can connect to it. Its
+/// offers must be introduced by a peer that announces an address instead
+/// of the node itself, named by node id so that LND peers can forward to it.
+#[tokio_test_shutdown_timeout::test(180)]
+pub async fn offer_from_unannounced_node_is_introduced_by_peer() -> error::Result<()> {
+    init();
+    let node1 = Arc::new(LampoTesting::tmp().await?);
+    // Loopback is not announceable, so announce a name. node2 still listens
+    // on the test `bind-addr`.
+    let node2 = Arc::new(
+        LampoTesting::new_with(node1.btc.clone(), |conf| {
+            conf.announce_addr = Some("node2.lampo.test".to_owned());
+        })
+        .await?,
+    );
+
+    node2.fund_channel_with(node1.clone(), 1_000_000).await?;
+    wait_node_in_graph(&node1, &node1.info.node_id.clone()).await;
+
+    // node2 announces itself once a minute, after its channel is public.
+    let node2_pubkey = lampo_common::bitcoin::secp256k1::PublicKey::from_str(&node2.info.node_id)?;
+    let node2_id = lampo_common::ldk::routing::gossip::NodeId::from_pubkey(&node2_pubkey);
+    async_wait!(
+        async {
+            let graph = node1.daemon().channel_manager().graph();
+            let graph = graph.read_only();
+            match graph
+                .node(&node2_id)
+                .and_then(|node| node.announcement_info.as_ref())
+            {
+                Some(info) if !info.addresses().is_empty() => Ok(()),
+                _ => Err(()),
+            }
+        },
+        10
+    );
+
+    let offer: response::Offer = node1
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: None,
+                amount_msat: Some(100_000),
+                currency: None,
+                currency_amount: None,
+            },
+        )
+        .await?;
+    let offer = lampo_common::ldk::offers::offer::Offer::from_str(&offer.bolt12)
+        .map_err(|err| error::anyhow!("{err:?}"))?;
+    assert!(
+        !offer.paths().is_empty(),
+        "the offer must carry blinded paths"
+    );
+
+    for path in offer.paths() {
+        assert_eq!(
+            path.introduction_node(),
+            &lampo_common::ldk::blinded_path::IntroductionNode::NodeId(node2_pubkey),
+            "the offer must be introduced by the peer's node id"
+        );
+    }
+    Ok(())
 }
 
 /// Mint server paths over RPC and install them on the recipient.
@@ -1417,8 +1484,10 @@ pub async fn splice_in_out_and_fee_bump_between_two_nodes() -> error::Result<()>
 /// separate task, so mine only after bitcoind has the transaction.
 async fn wait_for_broadcast(node: &LampoTesting, txid: &str) {
     async_wait!(async {
-        match node.btc.client.get_raw_mempool() {
-            Ok(mempool) if format!("{mempool:?}").contains(txid) => Ok(()),
+        match node.btc.core().map(|core| core.client.get_raw_mempool()) {
+            Some(Ok(mempool)) if format!("{mempool:?}").contains(txid) => Ok(()),
+            // rbitcoin has no typed client to read the mempool with.
+            None => Ok(()),
             _ => Err(()),
         }
     });

@@ -2,6 +2,7 @@
 mod async_payments;
 mod channel_manager;
 mod inventory_manager;
+mod message_router;
 mod offchain_manager;
 mod om_mailbox;
 mod peer_manager;

@@ -14,16 +14,17 @@ use lampo_common::ldk::ln::peer_handler::MessageHandler;
 use lampo_common::ldk::ln::peer_handler::{IgnoringMessageHandler, PeerManager};
 use lampo_common::ldk::net;
 use lampo_common::ldk::net::SocketDescriptor;
-use lampo_common::ldk::onion_message::messenger::{DefaultMessageRouter, OnionMessenger};
+use lampo_common::ldk::onion_message::messenger::OnionMessenger;
 use lampo_common::ldk::routing::gossip::{NetworkGraph, P2PGossipSync};
 use lampo_common::ldk::sign::EntropySource;
 use lampo_common::signer::LampoSigner;
 use lampo_common::types::NodeId;
-use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor, LampoGraph};
+use lampo_common::types::{LampoArcChannelManager, LampoChainMonitor};
 
 use crate::async_run;
 use crate::chain::{LampoChainManager, WalletManager};
 use crate::ln::async_payments::AsyncPaymentsHandler;
+use crate::ln::message_router::LampoMessageRouter;
 use crate::ln::LampoChannelManager;
 use crate::utils::logger::LampoLogger;
 
@@ -32,7 +33,7 @@ pub type LampoArcOnionMessenger<L> = OnionMessenger<
     Arc<dyn LampoSigner>,
     Arc<L>,
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
-    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<L>, Arc<dyn LampoSigner>>>,
+    Arc<LampoMessageRouter>,
     Arc<LampoArcChannelManager<LampoChainMonitor, L>>,
     Arc<AsyncPaymentsHandler>,
     IgnoringMessageHandler,
@@ -131,7 +132,7 @@ impl LampoPeerManager {
         // responder under any node_id). Seed from the node's CSPRNG instead.
         let ephemeral_bytes = keys.get_secure_random_bytes();
         let graph = channel_manager.graph();
-        let message_router = Arc::new(DefaultMessageRouter::new(graph.clone(), keys.clone()));
+        let message_router = Arc::new(LampoMessageRouter::new(graph.clone(), keys.clone()));
         // Off unless the operator set a role or recipient paths (or later
         // calls `setasyncinvoicepaths`). Default nodes must not process
         // static-invoice onion messages.

@@ -22,7 +22,7 @@ use lampo_common::ldk::chain::chainmonitor::ChainMonitor;
 use lampo_common::ldk::chain::channelmonitor::ChannelMonitor;
 use lampo_common::ldk::chain::{BlockLocator, ChannelMonitorUpdateStatus};
 use lampo_common::ldk::ln::channelmanager::{ChainParameters, ChannelManagerReadArgs};
-use lampo_common::ldk::onion_message::messenger::DefaultMessageRouter;
+use lampo_common::ldk::onion_message::messenger::NodeIdMessageRouter;
 use lampo_common::ldk::routing::gossip::NetworkGraph;
 use lampo_common::ldk::routing::router::DefaultRouter;
 use lampo_common::ldk::routing::scoring::{
@@ -743,8 +743,8 @@ impl LampoChannelManager {
         let _ = self.network_graph();
         let monitors = self.get_channel_monitors()?;
 
-        let default_message_router = DefaultMessageRouter::new(self.graph(), self.signer.clone());
-        let default_message_router = Arc::new(default_message_router);
+        let message_router = NodeIdMessageRouter::new(self.graph(), self.signer.clone());
+        let message_router = Arc::new(message_router);
         let read_args = ChannelManagerReadArgs::new(
             self.signer.clone(),
             self.signer.clone(),
@@ -753,7 +753,7 @@ impl LampoChannelManager {
             self.chain_monitor(),
             self.onchain.clone() as Arc<dyn BroadcasterInterface + Send + Sync>,
             self.router.get().expect("router not initialized").clone(),
-            default_message_router,
+            message_router,
             Arc::new(LampoCurrencyConversion::from_conf(&self.conf)?),
             self.logger.clone(),
             self.conf.ldk_conf_with_async_role(),
@@ -812,8 +812,8 @@ impl LampoChannelManager {
 
         // network_graph() lazily initializes the graph, scorer, and router
         let network_graph = self.network_graph();
-        let default_message_router = DefaultMessageRouter::new(self.graph(), self.signer.clone());
-        let default_message_router = Arc::new(default_message_router);
+        let message_router = NodeIdMessageRouter::new(self.graph(), self.signer.clone());
+        let message_router = Arc::new(message_router);
 
         let keymanagers = self.signer.clone();
         let conversion = Arc::new(LampoCurrencyConversion::from_conf(&self.conf)?);
@@ -822,7 +822,7 @@ impl LampoChannelManager {
             self.chain_monitor(),
             self.onchain.clone(),
             network_graph,
-            default_message_router.clone(),
+            message_router.clone(),
             conversion,
             self.logger.clone(),
             keymanagers.clone(),
