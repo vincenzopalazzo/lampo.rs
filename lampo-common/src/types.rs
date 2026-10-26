@@ -2,7 +2,7 @@
 use std::sync::{Arc, Mutex};
 
 use lightning::chain::chaininterface::{BroadcasterInterface, FeeEstimator};
-use lightning::onion_message::messenger::DefaultMessageRouter;
+use lightning::onion_message::messenger::NodeIdMessageRouter;
 
 use crate::bitcoin::secp256k1::PublicKey;
 use crate::ldk::chain::chainmonitor::ChainMonitor;
@@ -37,7 +37,10 @@ pub type LampoArcChannelManager<M, L> = ChannelManager<
     Arc<dyn LampoSigner>,
     Arc<dyn FeeEstimator + Send + Sync>,
     Arc<LampoRouter>,
-    Arc<DefaultMessageRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<dyn LampoSigner>>>,
+    // Blinded message paths name each hop by node id, not by short channel
+    // id: LND drops onion messages whose next hop is a channel alias it
+    // can't find in the public graph (lnd#11245).
+    Arc<NodeIdMessageRouter<Arc<LampoGraph>, Arc<LampoLogger>, Arc<dyn LampoSigner>>>,
     Arc<L>,
 >;
 

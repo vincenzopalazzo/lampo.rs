@@ -733,7 +733,7 @@ pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
 ///
 /// The server -> recipient channel is **private**: a recipient that appears
 /// in the network graph (via a public channel announcement) but announces no
-/// addresses builds self-introduced blinded paths, and `DefaultMessageRouter`
+/// addresses builds self-introduced blinded paths, and LDK's message router
 /// cannot route onion messages to announced nodes without addresses. Keeping
 /// the recipient out of the graph makes its paths introduction-point at the
 /// server, which every payer of its offers is connected to by construction.
@@ -781,7 +781,7 @@ async fn wait_node_in_graph(node: &LampoTesting, node_id: &str) {
 /// A node with public channels but no node announcement (lampo without
 /// `announce-addr`) is in the graph, but no payer can connect to it. Its
 /// offers must be introduced by a peer that announces an address instead
-/// of the node itself.
+/// of the node itself, named by node id so that LND peers can forward to it.
 #[tokio_test_shutdown_timeout::test(180)]
 pub async fn offer_from_unannounced_node_is_introduced_by_peer() -> error::Result<()> {
     init();
@@ -799,8 +799,8 @@ pub async fn offer_from_unannounced_node_is_introduced_by_peer() -> error::Resul
     wait_node_in_graph(&node1, &node1.info.node_id.clone()).await;
 
     // node2 announces itself once a minute, after its channel is public.
-    let node2_id = lampo_common::bitcoin::secp256k1::PublicKey::from_str(&node2.info.node_id)?;
-    let node2_id = lampo_common::ldk::routing::gossip::NodeId::from_pubkey(&node2_id);
+    let node2_pubkey = lampo_common::bitcoin::secp256k1::PublicKey::from_str(&node2.info.node_id)?;
+    let node2_id = lampo_common::ldk::routing::gossip::NodeId::from_pubkey(&node2_pubkey);
     async_wait!(
         async {
             let graph = node1.daemon().channel_manager().graph();
@@ -835,14 +835,11 @@ pub async fn offer_from_unannounced_node_is_introduced_by_peer() -> error::Resul
         "the offer must carry blinded paths"
     );
 
-    let graph = node1.daemon().channel_manager().graph();
-    let graph = graph.read_only();
     for path in offer.paths() {
         assert_eq!(
-            path.public_introduction_node_id(&graph),
-            Some(&node2_id),
-            "the offer must be introduced by the peer, got {:?}",
-            path.introduction_node()
+            path.introduction_node(),
+            &lampo_common::ldk::blinded_path::IntroductionNode::NodeId(node2_pubkey),
+            "the offer must be introduced by the peer's node id"
         );
     }
     Ok(())
