@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use lampo_common::backend::Backend;
-use lampo_common::bitcoin::{BlockHash, Transaction};
+use lampo_common::bitcoin::{Amount, BlockHash, FeeRate, ScriptBuf, Transaction, TxOut};
 use lampo_common::conf::LampoConf;
 use lampo_common::currency::LampoCurrencyConversion;
 use lampo_common::error;
@@ -402,8 +402,9 @@ impl LampoChannelManager {
     fn build_channel_monitor(&self) -> LampoChainMonitor {
         let keys = self.signer.clone();
         ChainMonitor::new(
-            // FIXME: this is needed when use esplora or electrum
-            None,
+            // Watched transactions and outputs; only a transaction-sync
+            // backend (esplora-style plugin) acts on them.
+            Some(self.onchain.clone()),
             self.onchain.clone(),
             self.logger.clone(),
             self.onchain.clone(),
@@ -566,17 +567,55 @@ impl LampoChannelManager {
         // flag false and the timeout path force-closing an already-funded
         // channel.
         let mut events = self.handler().events();
-        let temp_channel_id = self
-            .manager()
-            .create_channel(
-                peer_id,
-                open_channel.amount,
-                push_msat,
-                0,
-                None,
-                Some(config),
-            )
-            .map_err(|err| error::anyhow!("{:?}", err))?;
+        let temp_channel_id = if config.enable_dual_funded_channels {
+            // A v1 open is rejected once `option_dual_fund` is advertised:
+            // the reserve must be empty, which is `open_channel2`.
+            if push_msat != 0 {
+                error::bail!("a dual-funded open does not take push_msat");
+            }
+            let sat_per_vb = u32::try_from(open_channel.sat_per_vbyte.unwrap_or(5))
+                .unwrap_or(5)
+                .max(1);
+            let feerate_kw = sat_per_vb.saturating_mul(250);
+            // Same size as the P2WSH funding output LDK will add, so the
+            // selected fee matches the feerate written in `open_channel2`.
+            let mut program = vec![0x00, 0x20];
+            program.extend_from_slice(&[0u8; 32]);
+            let funding_sized = ScriptBuf::from_bytes(program);
+            let selection = self
+                .wallet_manager()
+                .select_confirmed_utxos(
+                    Vec::new(),
+                    vec![TxOut {
+                        value: Amount::from_sat(open_channel.amount),
+                        script_pubkey: funding_sized,
+                    }],
+                    FeeRate::from_sat_per_kwu(u64::from(feerate_kw)),
+                )
+                .await?;
+            self.manager()
+                .create_dual_funded_channel(
+                    peer_id,
+                    open_channel.amount,
+                    0,
+                    Some(config),
+                    selection.confirmed_utxos,
+                    selection.change_output,
+                    feerate_kw,
+                )
+                .map_err(|err| error::anyhow!("{err:?}"))?
+        } else {
+            self.manager()
+                .create_channel(
+                    peer_id,
+                    open_channel.amount,
+                    push_msat,
+                    0,
+                    None,
+                    Some(config),
+                )
+                .map_err(|err| error::anyhow!("{err:?}"))?
+        };
         if let Some(sat_per_vbyte) = open_channel.sat_per_vbyte {
             self.funding_fee_rates
                 .lock()

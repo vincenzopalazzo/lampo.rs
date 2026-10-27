@@ -294,3 +294,28 @@ When enabled: insert wallet checkpoint at `tip - confirmations_margin` before `s
 - Lampo: `lampo-chain/src/lib.rs` — `listen()`, `synchronize_listeners`
 - Lampo: `lampo-bdk-wallet/src/lib.rs` — `sync()`, `Emitter`
 - Production tracking: [#540](https://github.com/vincenzopalazzo/lampo.rs/issues/540)
+## Transaction sync (esplora-style plugins)
+
+A chain plugin that answers `esplora_tip` (folgore's `--mempool-space-url`,
+electrum) has no cumulative chainwork, so lampo does not walk headers with
+it. Instead `lampo-chain` runs a transaction sync every 30 s:
+
+1. It polls what LDK registered through `chain::Filter` (the chain manager
+   is the filter; the backend keeps the registry): watched transactions and
+   confirmed spends of watched outputs are reported with
+   `transactions_confirmed`, once per block they confirm in, with their
+   position taken from the esplora merkle proof. A transaction that lost its
+   block is reported with `transaction_unconfirmed`.
+2. It tells the channel manager and chain monitor the tip
+   (`best_block_updated`), after the confirmations so depth counts from it.
+3. It catches the on-chain wallet up: a wallet still at genesis jumps to
+   `reindex` or the tip through `WalletManager::set_checkpoint`; after that
+   each new block is fetched with `getblock` and applied, 200 per pass.
+   Headers are walked back from the tip to the newest block the wallet also
+   has (`WalletManager::checkpoint_hash`), so a reorg replays from the fork.
+
+The wallet's own `reindex` fast-forward still asks core for the block hash
+and only warns when core is not there, leaving the checkpoint to this sync.
+Proven against testnet3 on 2026-10-02 (`simulations/phoenix-lsp-testnet.sh`):
+a fresh node saw its deposits, opened a channel, and had the channel
+confirmed and used in both directions through a mempool.space-backed plugin.

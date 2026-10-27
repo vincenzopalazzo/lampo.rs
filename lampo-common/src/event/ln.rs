@@ -1,6 +1,7 @@
 use lightning::types::features::ChannelTypeFeatures;
 
 use crate::bitcoin::{OutPoint, Transaction, Txid};
+use crate::json;
 use crate::model::response::{PaymentHop, PaymentState};
 use crate::types::{ChannelId, NodeId};
 
@@ -86,5 +87,22 @@ pub enum LightningEvent {
     DiscardFunding {
         channel_id: ChannelId,
         txid: Option<Txid>,
+    },
+    /// This node issued a BOLT 11 invoice. Extensions use it to tell a
+    /// payment they asked for from one they did not.
+    InvoiceIssued {
+        /// Hex payment hash.
+        payment_hash: String,
+        amount_msat: Option<u64>,
+    },
+    /// Something a protocol extension reports. The daemon does not know
+    /// the extensions' vocabularies: `extension` is the extension's name,
+    /// `kind` what happened, and `payload` the details as the extension
+    /// serializes them. Subscribers that care decode `payload` with the
+    /// extension's own types.
+    Extension {
+        extension: String,
+        kind: String,
+        payload: json::Value,
     },
 }

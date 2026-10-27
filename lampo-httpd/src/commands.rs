@@ -1,4 +1,5 @@
 pub mod daemon;
+pub mod extension;
 pub mod inventory;
 pub mod offchain;
 pub mod onchain;
