@@ -237,6 +237,10 @@ impl LampoTesting {
         // unless a listening address is configured, and neither do we, so
         // the harness has to say where it listens. `conf_fn` may override.
         lampo_conf.bind_addr = Some("127.0.0.1".to_owned());
+        // Only a node with a public `announce-addr` opens announced
+        // channels. Nothing resolves this name, which is fine: tests dial
+        // `bind-addr`. Tests of unannounced nodes clear it in `conf_fn`.
+        lampo_conf.announce_addr = Some("lampo.test".to_owned());
 
         lampo_conf
             .ldk_conf

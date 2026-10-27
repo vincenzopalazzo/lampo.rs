@@ -492,6 +492,19 @@ impl LampoConf {
         self.async_payments_role.is_some() || self.async_invoice_server_paths.is_some()
     }
 
+    /// Whether this node may announce channels: only with a public
+    /// `announce-addr`, as ldk-node requires.
+    ///
+    /// A node with announced channels but no node announcement is in the
+    /// network graph without an address. LDK then uses it as the
+    /// introduction node of its own blinded paths, which payers that are
+    /// not its peers cannot connect to. With only unannounced channels it
+    /// stays out of the graph, and its blinded paths are introduced by its
+    /// peers.
+    pub fn may_announce_channels(&self) -> bool {
+        self.announce_addr.as_deref().is_some_and(is_announceable)
+    }
+
     /// The LDK config adjusted for the configured async payments role.
     ///
     /// Defaults keep `enable_htlc_hold` and `hold_outbound_htlcs_at_next_hop`
@@ -501,6 +514,14 @@ impl LampoConf {
     /// HTLCs so it can go offline after sending.
     pub fn ldk_conf_with_async_role(&self) -> UserConfig {
         let mut conf = self.ldk_conf.clone();
+        if !self.may_announce_channels() {
+            // As in ldk-node: keep every channel unannounced, and reject
+            // inbound channels that ask to be announced.
+            conf.channel_handshake_config.announce_for_forwarding = false;
+            conf.channel_handshake_limits
+                .force_announced_channel_preference = true;
+            conf.accept_forwards_to_priv_channels = false;
+        }
         match self.async_payments_role.as_deref() {
             Some("server") => {
                 conf.enable_htlc_hold = true;
@@ -586,6 +607,32 @@ mod tests {
         let ldk = conf.ldk_conf_with_async_role();
         assert!(!ldk.enable_htlc_hold);
         assert!(!ldk.hold_outbound_htlcs_at_next_hop);
+    }
+
+    #[test]
+    fn channels_stay_unannounced_without_announce_addr() {
+        let mut conf = LampoConf::default();
+        conf.ldk_conf
+            .channel_handshake_limits
+            .force_announced_channel_preference = false;
+        assert!(!conf.may_announce_channels());
+        let ldk = conf.ldk_conf_with_async_role();
+        assert!(!ldk.channel_handshake_config.announce_for_forwarding);
+        assert!(
+            ldk.channel_handshake_limits
+                .force_announced_channel_preference
+        );
+
+        conf.announce_addr = Some("127.0.0.1".to_owned());
+        assert!(!conf.may_announce_channels());
+
+        conf.announce_addr = Some("node.example.com".to_owned());
+        assert!(conf.may_announce_channels());
+        let ldk = conf.ldk_conf_with_async_role();
+        assert!(
+            !ldk.channel_handshake_limits
+                .force_announced_channel_preference
+        );
     }
 
     #[test]

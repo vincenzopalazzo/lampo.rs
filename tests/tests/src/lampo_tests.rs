@@ -733,7 +733,7 @@ pub async fn sweep_funds_after_channel_close() -> error::Result<()> {
 ///
 /// The server -> recipient channel is **private**: a recipient that appears
 /// in the network graph (via a public channel announcement) but announces no
-/// addresses builds self-introduced blinded paths, and `DefaultMessageRouter`
+/// addresses builds self-introduced blinded paths, and LDK's message router
 /// cannot route onion messages to announced nodes without addresses. Keeping
 /// the recipient out of the graph makes its paths introduction-point at the
 /// server, which every payer of its offers is connected to by construction.
@@ -776,6 +776,70 @@ async fn wait_node_in_graph(node: &LampoTesting, node_id: &str) {
         },
         5
     );
+}
+
+/// A node without `announce-addr` keeps its channels unannounced, like
+/// ldk-node, so it stays out of the network graph. LDK then introduces the
+/// blinded paths of its offers through its peers, which payers can reach,
+/// rather than through the node itself, which they could not connect to.
+#[tokio_test_shutdown_timeout::test(180)]
+pub async fn private_node_offer_is_introduced_by_peer() -> error::Result<()> {
+    init();
+    let node1 = Arc::new(LampoTesting::tmp_with(|conf| conf.announce_addr = None).await?);
+    let node2 = Arc::new(LampoTesting::new(node1.btc.clone()).await?);
+
+    let public_open: error::Result<json::Value> = node1
+        .lampod()
+        .call(
+            "fundchannel",
+            request::OpenChannel {
+                node_id: node2.info.node_id.clone(),
+                amount: 100_000,
+                public: true,
+                port: Some(node2.port),
+                addr: Some("127.0.0.1".to_owned()),
+                push_msat: None,
+                sat_per_vbyte: None,
+            },
+        )
+        .await;
+    let err = public_open.expect_err("a node without announce-addr can't open a public channel");
+    assert!(
+        err.to_string().contains("announce-addr"),
+        "unexpected error: {err}"
+    );
+
+    node1
+        .fund_channel_with_privacy(node2.clone(), 1_000_000, false)
+        .await?;
+
+    let offer: response::Offer = node1
+        .lampod()
+        .call(
+            "offer",
+            request::GenerateOffer {
+                description: None,
+                amount_msat: Some(100_000),
+                currency: None,
+                currency_amount: None,
+            },
+        )
+        .await?;
+    let offer = lampo_common::ldk::offers::offer::Offer::from_str(&offer.bolt12)
+        .map_err(|err| error::anyhow!("{err:?}"))?;
+    assert!(
+        !offer.paths().is_empty(),
+        "the offer must carry blinded paths"
+    );
+    let node2_id = lampo_common::bitcoin::secp256k1::PublicKey::from_str(&node2.info.node_id)?;
+    for path in offer.paths() {
+        assert_eq!(
+            path.introduction_node(),
+            &lampo_common::ldk::blinded_path::IntroductionNode::NodeId(node2_id),
+            "the offer must be introduced by the peer"
+        );
+    }
+    Ok(())
 }
 
 /// Mint server paths over RPC and install them on the recipient.
