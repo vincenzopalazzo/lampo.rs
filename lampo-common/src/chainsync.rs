@@ -10,7 +10,7 @@
 //! The coordinator is driven now: `mark_listeners_synced` is called from
 //! `lampo-chain` after `synchronize_listeners`, and `mark_running` is called
 //! from the wallet `sync()` once the on-chain scan is up to tip.
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tokio::sync::watch;
 
@@ -39,6 +39,10 @@ pub struct ChainSyncCoordinator {
     state: watch::Sender<SyncState>,
     /// Latest wallet scan height, or `NO_HEIGHT` when none has been reported.
     wallet_scan_height: AtomicU64,
+    /// Bitcoin Core (or another full backend) is still in initial block
+    /// download. Independent of lampo's own listener/wallet catch-up: a node
+    /// can be `Running` against a tip that is not the network tip.
+    backend_syncing: AtomicBool,
 }
 
 impl ChainSyncCoordinator {
@@ -47,6 +51,7 @@ impl ChainSyncCoordinator {
         Self {
             state,
             wallet_scan_height: AtomicU64::new(NO_HEIGHT),
+            backend_syncing: AtomicBool::new(false),
         }
     }
 
@@ -137,9 +142,29 @@ impl ChainSyncCoordinator {
         matches!(self.state(), SyncState::Running)
     }
 
-    /// Whether an initial sync is still in progress (not yet `Running`).
+    /// Whether an initial sync is still in progress (not yet `Running`), or
+    /// the chain backend itself is still downloading blocks.
+    ///
+    /// The second case is issue #111: after a long downtime Core can be in
+    /// IBD while lampo's listeners are already caught up to *that* tip.
+    /// Treating `get_best_block()` as the network tip then lets funding
+    /// proceed against a chain the rest of the network has already left.
     pub fn sync_in_progress(&self) -> bool {
-        !matches!(self.state(), SyncState::Running)
+        self.backend_syncing() || !matches!(self.state(), SyncState::Running)
+    }
+
+    /// Whether the chain backend reported that it is still syncing (Core IBD,
+    /// `headers > blocks`, or an explicit warning). `false` until a backend
+    /// publishes a status, so non-Core backends keep the previous behavior.
+    pub fn backend_syncing(&self) -> bool {
+        self.backend_syncing.load(Ordering::Relaxed)
+    }
+
+    /// Publish the backend's own sync flag. Safe to call from the chain poll
+    /// loop; a failed poll must not clear a previous `true` (callers skip the
+    /// update on RPC error).
+    pub fn set_backend_syncing(&self, syncing: bool) {
+        self.backend_syncing.store(syncing, Ordering::Relaxed);
     }
 
     /// Wallet scan progress toward `chain_tip`, 0-100.
@@ -149,6 +174,17 @@ impl ChainSyncCoordinator {
     /// keeps this percentage consistent with the checkpoint shown by
     /// `getinfo`.
     pub fn progress_percent(&self, chain_tip: u32, fallback_scan_height: u32) -> u8 {
+        // A caught-up lampo sitting on an IBD tip is not done. Keep the
+        // wallet percentage, but never advertise 100 while the backend is
+        // still downloading blocks the rest of the network already has.
+        if self.backend_syncing() {
+            if chain_tip == 0 {
+                return 0;
+            }
+            let scan = self.wallet_scan_height().unwrap_or(fallback_scan_height);
+            let pct = ((scan as u64 * 100) / chain_tip as u64) as u8;
+            return pct.min(99);
+        }
         if self.initial_sync_complete() {
             return 100;
         }
@@ -244,5 +280,25 @@ mod tests {
         coord.mark_listeners_synced();
         coord.mark_running();
         assert_eq!(coord.progress_percent(100, 25), 100);
+    }
+
+    #[test]
+    fn backend_ibd_keeps_sync_in_progress_after_lampo_is_running() {
+        let coord = ChainSyncCoordinator::new();
+        coord.mark_listeners_synced();
+        coord.mark_running();
+        assert!(!coord.sync_in_progress());
+        assert!(!coord.backend_syncing());
+
+        // Core still in IBD: listeners are at the backend tip, but that tip
+        // is not the network tip. Funding must still see a sync in progress.
+        coord.set_backend_syncing(true);
+        assert!(coord.backend_syncing());
+        assert!(coord.sync_in_progress());
+        assert_eq!(coord.progress_percent(100, 100), 99);
+
+        coord.set_backend_syncing(false);
+        assert!(!coord.sync_in_progress());
+        assert_eq!(coord.progress_percent(100, 100), 100);
     }
 }
